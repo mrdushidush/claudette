@@ -1,0 +1,64 @@
+[package]
+name = "claudette"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "Local-first AI personal secretary, powered by Ollama. Single-binary Rust."
+
+[[bin]]
+name = "claudette"
+path = "src/main.rs"
+
+[lib]
+name = "claudette"
+path = "src/lib.rs"
+
+[dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json", "multipart"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"
+anyhow = "1.0"
+dotenvy = "0.15"
+toml = "0.8"
+colored = "2"
+glob = "0.3"
+ratatui = "0.29"
+crossterm = "0.28"
+scopeguard = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_panics_doc = "allow"
+missing_errors_doc = "allow"
+too_many_lines = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+struct_excessive_bools = "allow"
+must_use_candidate = "allow"
+return_self_not_must_use = "allow"
+wildcard_imports = "allow"
+items_after_statements = "allow"
+unused_self = "allow"
+needless_pass_by_value = "allow"
+single_match_else = "allow"
+unreadable_literal = "allow"
+similar_names = "allow"
+if_not_else = "allow"
+match_same_arms = "allow"
+uninlined_format_args = "allow"
+# Upstream (forked-runtime) style:
+doc_markdown = "allow"
+too_many_arguments = "allow"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

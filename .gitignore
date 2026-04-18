@@ -1,0 +1,7 @@
+/target
+Cargo.lock.bak
+*.swp
+.DS_Store
+.env
+.env.local
+*.log
