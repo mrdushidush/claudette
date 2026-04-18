@@ -21,13 +21,17 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+// Per-group sub-modules. Each exports `schemas()` and `dispatch()`; see the
+// group-module contract at the top of `registry.rs`.
+mod registry;
+
 // ────────────────────────────────────────────────────────────────────────────
 // Tool registry — advertised to the model on every request
 // ────────────────────────────────────────────────────────────────────────────
 
 #[must_use]
 pub fn secretary_tools_json() -> Value {
-    json!([
+    let mut tools: Vec<Value> = json!([
         // ── Core ────────────────────────────────────────────────────────
         {
             "type": "function",
@@ -550,63 +554,8 @@ pub fn secretary_tools_json() -> Value {
                 }
             }
         },
-        // ── Sprint 9 Phase 0a — registry (crates.io + npmjs) ────────────
-        {
-            "type": "function",
-            "function": {
-                "name": "crate_info",
-                "description": "Get metadata for a Rust crate on crates.io: latest version, description, downloads, homepage.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "name": { "type": "string", "description": "Crate name (e.g. 'tokio')" }
-                    },
-                    "required": ["name"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "crate_search",
-                "description": "Search crates.io for Rust crates. Returns top 5 by downloads.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": { "type": "string", "description": "Search terms" }
-                    },
-                    "required": ["query"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "npm_info",
-                "description": "Get metadata for an npm package: latest version, description, homepage, weekly downloads.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "name": { "type": "string", "description": "Package name (e.g. 'react' or '@scope/pkg')" }
-                    },
-                    "required": ["name"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "npm_search",
-                "description": "Search npmjs.org for packages. Returns top 5 hits.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": { "type": "string", "description": "Search terms" }
-                    },
-                    "required": ["query"]
-                }
-            }
-        },
+        // Registry group (crate_info, crate_search, npm_info, npm_search)
+        // lives in src/tools/registry.rs and is appended to this array below.
         // ── Sprint 9 Phase 0a — GitHub (PAT via GITHUB_TOKEN env var) ───
         {
             "type": "function",
@@ -840,6 +789,11 @@ pub fn secretary_tools_json() -> Value {
             }
         }
     ])
+    .as_array()
+    .cloned()
+    .unwrap_or_default();
+    tools.extend(registry::schemas());
+    Value::Array(tools)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -847,6 +801,13 @@ pub fn secretary_tools_json() -> Value {
 // ────────────────────────────────────────────────────────────────────────────
 
 pub fn dispatch_tool(name: &str, input: &str) -> Result<String, String> {
+    // Per-group dispatchers get first crack; each returns Some(_) if it owns
+    // the tool, None otherwise. The `match` below handles everything that
+    // hasn't migrated to a sub-module yet.
+    if let Some(result) = registry::dispatch(name, input) {
+        return result;
+    }
+
     match name {
         "get_current_time" => Ok(run_get_current_time()),
         // add_numbers removed from registry (model can do arithmetic).
@@ -889,11 +850,8 @@ pub fn dispatch_tool(name: &str, input: &str) -> Result<String, String> {
         "wikipedia_summary" => run_wikipedia_summary(input),
         "weather_current" => run_weather_current(input),
         "weather_forecast" => run_weather_forecast(input),
-        // ── Sprint 9 Phase 0a — registry group ─────────────────────────
-        "crate_info" => run_crate_info(input),
-        "crate_search" => run_crate_search(input),
-        "npm_info" => run_npm_info(input),
-        "npm_search" => run_npm_search(input),
+        // Registry group (crate_info, crate_search, npm_info, npm_search)
+        // is handled by the early-return above via registry::dispatch.
         // ── Sprint 9 Phase 0a — github group ───────────────────────────
         "gh_list_my_prs" => run_gh_list_my_prs(),
         "gh_list_assigned_issues" => run_gh_list_assigned_issues(),
@@ -3259,7 +3217,7 @@ fn external_user_agent() -> String {
     )
 }
 
-fn external_http_client() -> Result<reqwest::blocking::Client, String> {
+pub(super) fn external_http_client() -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .user_agent(external_user_agent())
@@ -3282,13 +3240,13 @@ fn github_token() -> Result<String, String> {
 }
 
 /// Generic "extract `key` as str from a JSON object, or a named error".
-fn extract_str<'a>(v: &'a Value, key: &str, tool: &str) -> Result<&'a str, String> {
+pub(super) fn extract_str<'a>(v: &'a Value, key: &str, tool: &str) -> Result<&'a str, String> {
     v.get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| format!("{tool}: missing or non-string '{key}'"))
 }
 
-fn parse_json_input(input: &str, tool: &str) -> Result<Value, String> {
+pub(super) fn parse_json_input(input: &str, tool: &str) -> Result<Value, String> {
     serde_json::from_str(input).map_err(|e| format!("{tool}: invalid JSON input ({e}): {input}"))
 }
 
@@ -3671,209 +3629,6 @@ fn run_weather_forecast(input: &str) -> Result<String, String> {
         "latitude": lat,
         "longitude": lon,
         "days": days_out,
-    })
-    .to_string())
-}
-
-// ────── crates.io ────────────────────────────────────────────────────────
-
-fn run_crate_info(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "crate_info")?;
-    let name = extract_str(&v, "name", "crate_info")?;
-    let url = format!("https://crates.io/api/v1/crates/{name}");
-
-    let client = external_http_client()?;
-    let resp = client
-        .get(&url)
-        .send()
-        .map_err(|e| format!("crate_info: request failed: {e}"))?;
-
-    let status = resp.status();
-    if status == reqwest::StatusCode::NOT_FOUND {
-        return Err(format!("crate_info: no crate named '{name}'"));
-    }
-    if !status.is_success() {
-        return Err(format!("crate_info: HTTP {status}"));
-    }
-
-    let data: Value = resp
-        .json()
-        .map_err(|e| format!("crate_info: parse failed: {e}"))?;
-
-    let krate = data
-        .get("crate")
-        .ok_or("crate_info: response missing 'crate'")?;
-
-    Ok(json!({
-        "name": krate.get("name").and_then(Value::as_str).unwrap_or(name),
-        "description": krate.get("description").and_then(Value::as_str).unwrap_or(""),
-        "latest_version": krate.get("max_stable_version").and_then(Value::as_str)
-            .or_else(|| krate.get("max_version").and_then(Value::as_str))
-            .unwrap_or(""),
-        "downloads": krate.get("downloads").and_then(Value::as_u64).unwrap_or(0),
-        "recent_downloads": krate.get("recent_downloads").and_then(Value::as_u64).unwrap_or(0),
-        "homepage": krate.get("homepage").and_then(Value::as_str).unwrap_or(""),
-        "repository": krate.get("repository").and_then(Value::as_str).unwrap_or(""),
-        "documentation": krate.get("documentation").and_then(Value::as_str).unwrap_or(""),
-        "updated_at": krate.get("updated_at").and_then(Value::as_str).unwrap_or(""),
-    })
-    .to_string())
-}
-
-fn run_crate_search(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "crate_search")?;
-    let query = extract_str(&v, "query", "crate_search")?;
-
-    let client = external_http_client()?;
-    let resp = client
-        .get("https://crates.io/api/v1/crates")
-        .query(&[("q", query), ("per_page", "5"), ("sort", "downloads")])
-        .send()
-        .map_err(|e| format!("crate_search: request failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("crate_search: HTTP {}", resp.status()));
-    }
-
-    let data: Value = resp
-        .json()
-        .map_err(|e| format!("crate_search: parse failed: {e}"))?;
-
-    let results: Vec<Value> = data
-        .get("crates")
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .take(5)
-                .map(|c| {
-                    json!({
-                        "name": c.get("name").and_then(Value::as_str).unwrap_or(""),
-                        "description": c.get("description").and_then(Value::as_str).unwrap_or(""),
-                        "latest_version": c.get("max_stable_version").and_then(Value::as_str)
-                            .or_else(|| c.get("max_version").and_then(Value::as_str))
-                            .unwrap_or(""),
-                        "downloads": c.get("downloads").and_then(Value::as_u64).unwrap_or(0),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    Ok(json!({
-        "query": query,
-        "count": results.len(),
-        "results": results,
-    })
-    .to_string())
-}
-
-// ────── npmjs ────────────────────────────────────────────────────────────
-
-fn run_npm_info(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "npm_info")?;
-    let name = extract_str(&v, "name", "npm_info")?;
-
-    let client = external_http_client()?;
-
-    // Full package document — big, but the shape is stable.
-    let url = format!("https://registry.npmjs.org/{name}");
-    let resp = client
-        .get(&url)
-        .send()
-        .map_err(|e| format!("npm_info: request failed: {e}"))?;
-
-    let status = resp.status();
-    if status == reqwest::StatusCode::NOT_FOUND {
-        return Err(format!("npm_info: no package named '{name}'"));
-    }
-    if !status.is_success() {
-        return Err(format!("npm_info: HTTP {status}"));
-    }
-
-    let data: Value = resp
-        .json()
-        .map_err(|e| format!("npm_info: parse failed: {e}"))?;
-
-    let latest = data
-        .pointer("/dist-tags/latest")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let description = data
-        .get("description")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let homepage = data.get("homepage").and_then(Value::as_str).unwrap_or("");
-    let repo_url = data
-        .pointer("/repository/url")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let license = data.get("license").and_then(Value::as_str).unwrap_or("");
-
-    // Weekly downloads via a second call — optional, best-effort.
-    let downloads = client
-        .get(format!(
-            "https://api.npmjs.org/downloads/point/last-week/{name}"
-        ))
-        .send()
-        .ok()
-        .and_then(|r| r.json::<Value>().ok())
-        .and_then(|v| v.get("downloads").and_then(Value::as_u64))
-        .unwrap_or(0);
-
-    Ok(json!({
-        "name": name,
-        "description": description,
-        "latest_version": latest,
-        "homepage": homepage,
-        "repository": repo_url,
-        "license": license,
-        "weekly_downloads": downloads,
-    })
-    .to_string())
-}
-
-fn run_npm_search(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "npm_search")?;
-    let query = extract_str(&v, "query", "npm_search")?;
-
-    let client = external_http_client()?;
-    let resp = client
-        .get("https://registry.npmjs.org/-/v1/search")
-        .query(&[("text", query), ("size", "5")])
-        .send()
-        .map_err(|e| format!("npm_search: request failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("npm_search: HTTP {}", resp.status()));
-    }
-
-    let data: Value = resp
-        .json()
-        .map_err(|e| format!("npm_search: parse failed: {e}"))?;
-
-    let results: Vec<Value> = data
-        .get("objects")
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .take(5)
-                .map(|o| {
-                    let pkg = o.get("package").unwrap_or(&Value::Null);
-                    json!({
-                        "name": pkg.get("name").and_then(Value::as_str).unwrap_or(""),
-                        "description": pkg.get("description").and_then(Value::as_str).unwrap_or(""),
-                        "latest_version": pkg.get("version").and_then(Value::as_str).unwrap_or(""),
-                        "homepage": pkg.pointer("/links/homepage").and_then(Value::as_str).unwrap_or(""),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    Ok(json!({
-        "query": query,
-        "count": results.len(),
-        "results": results,
     })
     .to_string())
 }
@@ -5042,17 +4797,8 @@ mod tests {
         assert!(err.contains("missing"), "got: {err}");
     }
 
-    #[test]
-    fn crate_info_rejects_missing_name() {
-        let err = run_crate_info("{}").unwrap_err();
-        assert!(err.contains("missing"), "got: {err}");
-    }
-
-    #[test]
-    fn npm_info_rejects_missing_name() {
-        let err = run_npm_info("{}").unwrap_err();
-        assert!(err.contains("missing"), "got: {err}");
-    }
+    // Registry-group tests (crate_info_rejects_missing_name,
+    // npm_info_rejects_missing_name) live in src/tools/registry.rs.
 
     #[test]
     fn gh_get_issue_rejects_missing_fields() {
