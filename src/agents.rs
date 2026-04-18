@@ -43,9 +43,7 @@ impl AgentType {
         match s.to_lowercase().as_str() {
             "researcher" | "research" => Some(Self::Researcher),
             "gitops" | "git" => Some(Self::GitOps),
-            "code_reviewer" | "reviewer" | "review" | "code-review" => {
-                Some(Self::CodeReviewer)
-            }
+            "code_reviewer" | "reviewer" | "review" | "code-review" => Some(Self::CodeReviewer),
             _ => None,
         }
     }
@@ -54,20 +52,26 @@ impl AgentType {
     #[must_use]
     pub fn config(self) -> AgentConfig {
         let base_prompt = match self {
-            Self::Researcher => "You are a research agent. Investigate the given topic \
+            Self::Researcher => {
+                "You are a research agent. Investigate the given topic \
                 thoroughly. Use multiple web searches with different queries, \
                 fetch pages for detail, and cross-reference sources. \
                 Do NOT stop after one search — dig deeper, look for recent news, \
                 primary sources, and specific facts. \
-                Only write your final summary after at least 2-3 searches.",
-            Self::GitOps => "You are a git operations agent. Execute the requested \
+                Only write your final summary after at least 2-3 searches."
+            }
+            Self::GitOps => {
+                "You are a git operations agent. Execute the requested \
                 git workflow safely. Always check status before destructive \
-                operations.",
-            Self::CodeReviewer => "You are a code review agent. Read the specified code files \
+                operations."
+            }
+            Self::CodeReviewer => {
+                "You are a code review agent. Read the specified code files \
                 and provide a thorough review covering: bugs, logic errors, security \
                 vulnerabilities, performance issues, error handling gaps, code quality, \
                 and adherence to best practices. Be specific — cite line numbers and \
-                suggest concrete fixes. Rate severity: critical, warning, or suggestion.",
+                suggest concrete fixes. Rate severity: critical, warning, or suggestion."
+            }
         };
 
         let system_prompt = build_agent_prompt(base_prompt);
@@ -309,13 +313,7 @@ fn build_agent_permission_policy(allowed: &BTreeSet<String>) -> PermissionPolicy
     }
 
     // Dangerous tools — always prompt [y/N].
-    for name in [
-        "bash",
-        "git_add",
-        "git_commit",
-        "git_push",
-        "git_checkout",
-    ] {
+    for name in ["bash", "git_add", "git_commit", "git_push", "git_checkout"] {
         if allowed.contains(name) {
             policy = policy.with_tool_requirement(name, DangerFullAccess);
         }
@@ -353,8 +351,7 @@ pub fn spawn_agent(agent_type: AgentType, task: &str, auto_mode: bool) -> Result
     let tools_json = filter_tools_json(&full_tools, &config.allowed_tools);
 
     // Build API client — no streaming callback (agent runs silently).
-    let api_client = OllamaApiClient::new(config.model, tools_json)
-        .with_context(config.num_ctx);
+    let api_client = OllamaApiClient::new(config.model, tools_json).with_context(config.num_ctx);
 
     // Build filtered executor.
     let executor = FilteredToolExecutor::new(config.allowed_tools.clone());
@@ -397,9 +394,7 @@ pub fn spawn_agent(agent_type: AgentType, task: &str, auto_mode: bool) -> Result
         crate::theme::ok(&format!("{} agent done", config.agent_type)),
         crate::theme::dim(&format!(
             "(iter={}, in={}, out={})",
-            summary.iterations,
-            summary.usage.input_tokens,
-            summary.usage.output_tokens,
+            summary.iterations, summary.usage.input_tokens, summary.usage.output_tokens,
         ))
     );
 
@@ -449,10 +444,7 @@ mod tests {
 
     #[test]
     fn agent_type_from_str_code_reviewer() {
-        assert_eq!(
-            AgentType::parse("reviewer"),
-            Some(AgentType::CodeReviewer)
-        );
+        assert_eq!(AgentType::parse("reviewer"), Some(AgentType::CodeReviewer));
         assert_eq!(
             AgentType::parse("code_reviewer"),
             Some(AgentType::CodeReviewer)
@@ -542,8 +534,10 @@ mod tests {
             { "type": "function", "function": { "name": "bash" } },
             { "type": "function", "function": { "name": "web_search" } },
         ]);
-        let allowed: BTreeSet<String> =
-            ["read_file", "web_search"].into_iter().map(String::from).collect();
+        let allowed: BTreeSet<String> = ["read_file", "web_search"]
+            .into_iter()
+            .map(String::from)
+            .collect();
 
         let filtered = filter_tools_json(&full, &allowed);
         let arr = filtered.as_array().unwrap();

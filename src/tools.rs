@@ -1011,7 +1011,13 @@ fn ensure_dir(path: &Path) -> Result<(), String> {
 fn slugify(text: &str) -> String {
     let raw: String = text
         .chars()
-        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect();
     let collapsed: String = raw
         .split('-')
@@ -1043,10 +1049,7 @@ fn run_note_create(input: &str) -> Result<String, String> {
         .and_then(Value::as_str)
         .ok_or("note_create: missing 'body'")?
         .to_string();
-    let tags_str = v
-        .get("tags")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let tags_str = v.get("tags").and_then(Value::as_str).unwrap_or("");
     let tags: Vec<&str> = tags_str
         .split(',')
         .map(str::trim)
@@ -1116,13 +1119,10 @@ fn run_note_list(input: &str) -> Result<String, String> {
             .unwrap_or("?")
             .to_string();
         let content = fs::read_to_string(&path).unwrap_or_default();
-        let title = content
-            .lines()
-            .find(|l| l.starts_with("# "))
-            .map_or_else(
-                || filename.clone(),
-                |l| l.trim_start_matches("# ").to_string(),
-            );
+        let title = content.lines().find(|l| l.starts_with("# ")).map_or_else(
+            || filename.clone(),
+            |l| l.trim_start_matches("# ").to_string(),
+        );
         let tags: Vec<String> = content
             .lines()
             .find(|l| l.starts_with("Tags:"))
@@ -1216,13 +1216,12 @@ fn run_note_read(input: &str) -> Result<String, String> {
     if !path.exists() {
         return Err(format!("note_read: no note with id '{id}'"));
     }
-    let content = fs::read_to_string(&path)
-        .map_err(|e| format!("note_read: read failed: {e}"))?;
+    let content = fs::read_to_string(&path).map_err(|e| format!("note_read: read failed: {e}"))?;
 
-    let title = content
-        .lines()
-        .find(|l| l.starts_with("# "))
-        .map_or_else(|| id.to_string(), |l| l.trim_start_matches("# ").to_string());
+    let title = content.lines().find(|l| l.starts_with("# ")).map_or_else(
+        || id.to_string(),
+        |l| l.trim_start_matches("# ").to_string(),
+    );
     let created = content
         .lines()
         .find(|l| l.starts_with("Created:"))
@@ -1282,7 +1281,9 @@ fn run_note_delete(input: &str) -> Result<String, String> {
         .and_then(Value::as_str)
         .ok_or("note_delete: missing 'id' (filename from note_list)")?;
     if id.contains('/') || id.contains('\\') || id.contains("..") {
-        return Err(format!("note_delete: invalid id '{id}' (must be a filename)"));
+        return Err(format!(
+            "note_delete: invalid id '{id}' (must be a filename)"
+        ));
     }
     let path = notes_dir().join(id);
     if !path.exists() {
@@ -1455,10 +1456,7 @@ fn run_todo_delete(input: &str) -> Result<String, String> {
 
     let mut todos = load_todos()?;
     let before = todos.len();
-    let removed_text = todos
-        .iter()
-        .find(|t| t.id == id)
-        .map(|t| t.text.clone());
+    let removed_text = todos.iter().find(|t| t.id == id).map(|t| t.text.clone());
     todos.retain(|t| t.id != id);
     if todos.len() == before {
         return Err(format!("todo_delete: no todo with id '{id}'"));
@@ -1614,15 +1612,9 @@ fn run_web_search(input: &str) -> Result<String, String> {
                     });
                     // Extra snippets — Brave provides additional text fragments
                     // that often contain the direct answer.
-                    if let Some(extras) = r
-                        .get("extra_snippets")
-                        .and_then(Value::as_array)
-                    {
-                        let snippets: Vec<&str> = extras
-                            .iter()
-                            .filter_map(Value::as_str)
-                            .take(2)
-                            .collect();
+                    if let Some(extras) = r.get("extra_snippets").and_then(Value::as_array) {
+                        let snippets: Vec<&str> =
+                            extras.iter().filter_map(Value::as_str).take(2).collect();
                         if !snippets.is_empty() {
                             result["extra_snippets"] = json!(snippets);
                         }
@@ -1686,7 +1678,10 @@ const MAX_LIST_ENTRIES: usize = 200;
 /// alone (matching shell behaviour). `pub(crate)` so the `/validate` slash
 /// command can reuse the same tilde logic as the file-ops tools.
 pub(crate) fn expand_tilde(input: &str) -> PathBuf {
-    if let Some(rest) = input.strip_prefix("~/").or_else(|| input.strip_prefix("~\\")) {
+    if let Some(rest) = input
+        .strip_prefix("~/")
+        .or_else(|| input.strip_prefix("~\\"))
+    {
         user_home().join(rest)
     } else if input == "~" {
         user_home()
@@ -1706,10 +1701,8 @@ fn normalize_path(path: &Path) -> PathBuf {
             Component::ParentDir => {
                 // Pop only if the last component is a real directory name.
                 // Don't pop a Prefix, RootDir, or another ParentDir.
-                let popped = matches!(
-                    out.components().next_back(),
-                    Some(Component::Normal(_))
-                ) && out.pop();
+                let popped =
+                    matches!(out.components().next_back(), Some(Component::Normal(_))) && out.pop();
                 if !popped {
                     out.push("..");
                 }
@@ -1750,10 +1743,9 @@ fn resolve_input_path(input: &str) -> Result<PathBuf, String> {
 
 /// File extensions we'll include as reference context.
 const REF_EXTENSIONS: &[&str] = &[
-    "py", "rs", "js", "mjs", "cjs", "jsx", "ts", "tsx", "html", "htm", "css",
-    "json", "toml", "yaml", "yml", "md", "txt", "sh", "bash", "go", "java",
-    "c", "cpp", "cc", "cxx", "h", "hpp", "rb", "php", "sql", "xml", "ini",
-    "cfg", "conf",
+    "py", "rs", "js", "mjs", "cjs", "jsx", "ts", "tsx", "html", "htm", "css", "json", "toml",
+    "yaml", "yml", "md", "txt", "sh", "bash", "go", "java", "c", "cpp", "cc", "cxx", "h", "hpp",
+    "rb", "php", "sql", "xml", "ini", "cfg", "conf",
 ];
 
 /// Max files, per-file byte cap, and total byte cap. Keeps the coder prompt
@@ -1774,9 +1766,8 @@ const REF_MAX_BYTES_TOTAL: usize = 64 * 1024;
 /// coder + Codet validation entirely. Sprint 13.3 v3 task #55 collapsed to a
 /// 747-byte 2-function stub of a 12-function module via this exact path.
 const CODE_EXTENSIONS: &[&str] = &[
-    "py", "rs", "js", "mjs", "cjs", "jsx", "ts", "tsx", "html", "htm",
-    "css", "go", "java", "c", "cpp", "cc", "cxx", "h", "hpp", "rb",
-    "php", "sh", "bash", "sql",
+    "py", "rs", "js", "mjs", "cjs", "jsx", "ts", "tsx", "html", "htm", "css", "go", "java", "c",
+    "cpp", "cc", "cxx", "h", "hpp", "rb", "php", "sh", "bash", "sql",
 ];
 
 fn is_code_extension(filename: &str) -> bool {
@@ -1990,7 +1981,10 @@ fn resolve_reference(token: &str) -> Option<PathBuf> {
     if !has_code_extension(token) {
         return None;
     }
-    for dir in [files_dir(), std::env::current_dir().unwrap_or_else(|_| files_dir())] {
+    for dir in [
+        files_dir(),
+        std::env::current_dir().unwrap_or_else(|_| files_dir()),
+    ] {
         let candidate = dir.join(token);
         if candidate.is_file() {
             let as_string = candidate.to_string_lossy().to_string();
@@ -2180,10 +2174,7 @@ fn run_list_dir(input: &str) -> Result<String, String> {
     let metadata = fs::metadata(&path)
         .map_err(|e| format!("list_dir: stat {} failed: {e}", path.display()))?;
     if !metadata.is_dir() {
-        return Err(format!(
-            "list_dir: {} is not a directory",
-            path.display()
-        ));
+        return Err(format!("list_dir: {} is not a directory", path.display()));
     }
 
     let mut entries: Vec<(String, &'static str, u64)> = Vec::new();
@@ -2191,10 +2182,7 @@ fn run_list_dir(input: &str) -> Result<String, String> {
         .map_err(|e| format!("list_dir: read {} failed: {e}", path.display()))?;
     for entry in read {
         let entry = entry.map_err(|e| format!("list_dir: entry error: {e}"))?;
-        let name = entry
-            .file_name()
-            .to_string_lossy()
-            .into_owned();
+        let name = entry.file_name().to_string_lossy().into_owned();
         // Use file_type() (does NOT follow links) for classification, not
         // metadata() (which follows). Windows legacy junction points like
         // "My Documents" or "Application Data" are reparse points whose
@@ -2337,13 +2325,10 @@ fn run_open_url(input: &str) -> Result<String, String> {
     // Accept http(s), file:// URIs, and bare local paths (e.g. HTML files
     // generated by Codet). Windows `start` and Linux `xdg-open` handle all
     // three — the old http-only guard prevented opening local files.
-    let is_url = url.starts_with("http://")
-        || url.starts_with("https://")
-        || url.starts_with("file://");
+    let is_url =
+        url.starts_with("http://") || url.starts_with("https://") || url.starts_with("file://");
     if !is_url && !Path::new(url).exists() {
-        return Err(format!(
-            "open_url: not a URL or existing local file: {url}"
-        ));
+        return Err(format!("open_url: not a URL or existing local file: {url}"));
     }
     let target = url;
 
@@ -2395,10 +2380,7 @@ fn resolve_git_path() -> String {
             // 1. Try `where git` (works when git is in PATH).
             #[cfg(target_os = "windows")]
             {
-                if let Ok(out) = std::process::Command::new("where")
-                    .arg("git")
-                    .output()
-                {
+                if let Ok(out) = std::process::Command::new("where").arg("git").output() {
                     let stdout = String::from_utf8_lossy(&out.stdout);
                     if let Some(path) = stdout.lines().next().map(str::trim) {
                         if !path.is_empty() && std::path::Path::new(path).exists() {
@@ -2454,7 +2436,10 @@ fn run_git(args: &[&str]) -> Result<String, String> {
         );
     }
     if result.timed_out {
-        return Err(format!("git {}: timed out after 30s", args.first().unwrap_or(&"")));
+        return Err(format!(
+            "git {}: timed out after 30s",
+            args.first().unwrap_or(&"")
+        ));
     }
     if !result.success {
         let err = if result.stderr.is_empty() {
@@ -2477,9 +2462,12 @@ fn run_git(args: &[&str]) -> Result<String, String> {
 /// model accidentally force-push or hard-reset.
 fn reject_destructive(args: &[&str]) -> Result<(), String> {
     let banned = [
-        "--force", "-f", "--force-with-lease",
-        "--hard", "--mixed",  // reset --hard/--mixed
-        "-D",                 // branch -D (force delete)
+        "--force",
+        "-f",
+        "--force-with-lease",
+        "--hard",
+        "--mixed", // reset --hard/--mixed
+        "-D",      // branch -D (force delete)
         "--no-verify",
     ];
     for arg in args {
@@ -2527,10 +2515,7 @@ fn run_git_log(input: &str) -> Result<String, String> {
     let v: Value = serde_json::from_str(input).unwrap_or(json!({}));
     let count = v.get("count").and_then(Value::as_u64).unwrap_or(10);
     let path = v.get("path").and_then(Value::as_str);
-    let detail = v
-        .get("detail")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    let detail = v.get("detail").and_then(Value::as_bool).unwrap_or(false);
 
     let count_str = format!("-{count}");
     let format_str;
@@ -2560,8 +2545,8 @@ fn run_git_log(input: &str) -> Result<String, String> {
 }
 
 fn run_git_add(input: &str) -> Result<String, String> {
-    let v: Value = serde_json::from_str(input)
-        .map_err(|e| format!("git_add: invalid JSON ({e}): {input}"))?;
+    let v: Value =
+        serde_json::from_str(input).map_err(|e| format!("git_add: invalid JSON ({e}): {input}"))?;
     let paths_str = v
         .get("paths")
         .and_then(Value::as_str)
@@ -2706,8 +2691,8 @@ fn run_git_push() -> Result<String, String> {
 const BASH_OUTPUT_MAX_CHARS: usize = 8192;
 
 fn run_bash(input: &str) -> Result<String, String> {
-    let v: Value = serde_json::from_str(input)
-        .map_err(|e| format!("bash: invalid JSON ({e}): {input}"))?;
+    let v: Value =
+        serde_json::from_str(input).map_err(|e| format!("bash: invalid JSON ({e}): {input}"))?;
     let command = v
         .get("command")
         .and_then(Value::as_str)
@@ -2727,8 +2712,8 @@ fn run_bash(input: &str) -> Result<String, String> {
 
     let stdout: String = result.stdout.chars().take(BASH_OUTPUT_MAX_CHARS).collect();
     let stderr: String = result.stderr.chars().take(BASH_OUTPUT_MAX_CHARS).collect();
-    let truncated = result.stdout.len() > BASH_OUTPUT_MAX_CHARS
-        || result.stderr.len() > BASH_OUTPUT_MAX_CHARS;
+    let truncated =
+        result.stdout.len() > BASH_OUTPUT_MAX_CHARS || result.stderr.len() > BASH_OUTPUT_MAX_CHARS;
 
     Ok(json!({
         "exit_code": result.exit_code,
@@ -2917,8 +2902,9 @@ fn run_spawn_agent(input: &str) -> Result<String, String> {
         .get("agent_type")
         .and_then(Value::as_str)
         .ok_or("spawn_agent: missing 'agent_type'")?;
-    let agent_type = crate::agents::AgentType::parse(type_str)
-        .ok_or_else(|| format!("spawn_agent: unknown agent type '{type_str}'. Use 'researcher' or 'gitops'."))?;
+    let agent_type = crate::agents::AgentType::parse(type_str).ok_or_else(|| {
+        format!("spawn_agent: unknown agent type '{type_str}'. Use 'researcher' or 'gitops'.")
+    })?;
     let task = v
         .get("task")
         .and_then(Value::as_str)
@@ -2979,8 +2965,8 @@ fn run_glob_search(input: &str) -> Result<String, String> {
     }
 
     // Glob errors (bad pattern syntax) → user-facing error.
-    let walker = glob::glob(&resolved_pattern)
-        .map_err(|e| format!("glob_search: bad pattern: {e}"))?;
+    let walker =
+        glob::glob(&resolved_pattern).map_err(|e| format!("glob_search: bad pattern: {e}"))?;
 
     let mut paths: Vec<String> = Vec::new();
     let mut truncated = false;
@@ -3083,8 +3069,7 @@ fn run_grep_search(input: &str) -> Result<String, String> {
             };
             for (lineno, line) in content.lines().enumerate() {
                 if line.to_lowercase().contains(&needle) {
-                    let snippet: String =
-                        line.chars().take(MAX_GREP_LINE_CHARS).collect();
+                    let snippet: String = line.chars().take(MAX_GREP_LINE_CHARS).collect();
                     matches.push(json!({
                         "file": p.display().to_string(),
                         "line": lineno + 1,
@@ -3141,10 +3126,7 @@ fn run_web_fetch(input: &str) -> Result<String, String> {
 
     let resp = client
         .get(url)
-        .header(
-            "User-Agent",
-            "claudette/1.0 (Claudette personal secretary)",
-        )
+        .header("User-Agent", "claudette/1.0 (Claudette personal secretary)")
         .header("Accept", "text/html,application/xhtml+xml,text/plain")
         .send()
         .map_err(|e| format!("web_fetch: request failed: {e}"))?;
@@ -3414,7 +3396,9 @@ fn hebrew_city_alias(name: &str) -> Option<&'static str> {
     match trimmed {
         // Hebrew script
         "ירושלים" => Some("Jerusalem"),
-        "תל אביב" | "תל-אביב" | "תל אביב יפו" | "תל-אביב-יפו" => Some("Tel Aviv"),
+        "תל אביב" | "תל-אביב" | "תל אביב יפו" | "תל-אביב-יפו" => {
+            Some("Tel Aviv")
+        }
         "חיפה" => Some("Haifa"),
         "ראשון לציון" | "ראשון-לציון" => Some("Rishon LeZion"),
         "פתח תקווה" | "פתח-תקווה" | "פתח תקוה" => Some("Petah Tikva"),
@@ -3475,7 +3459,12 @@ fn resolve_location(location: &str) -> Result<(f64, f64, String), String> {
     let client = external_http_client()?;
     let resp = client
         .get("https://geocoding-api.open-meteo.com/v1/search")
-        .query(&[("name", lookup_name), ("count", "1"), ("language", "en"), ("format", "json")])
+        .query(&[
+            ("name", lookup_name),
+            ("count", "1"),
+            ("language", "en"),
+            ("format", "json"),
+        ])
         .send()
         .map_err(|e| format!("geocoding: request failed: {e}"))?;
 
@@ -4016,9 +4005,7 @@ fn run_gh_get_issue(input: &str) -> Result<String, String> {
 
     let status = resp.status();
     if status == reqwest::StatusCode::NOT_FOUND {
-        return Err(format!(
-            "gh_get_issue: {owner}/{repo}#{number} not found"
-        ));
+        return Err(format!("gh_get_issue: {owner}/{repo}#{number} not found"));
     }
     if !status.is_success() {
         return Err(format!("gh_get_issue: HTTP {status}"));
@@ -4379,7 +4366,15 @@ fn run_tv_get_quote(input: &str) -> Result<String, String> {
     let raw_symbol = extract_str(&v, "symbol", "tv_get_quote")?.to_string();
     let market = tv_market_path(v.get("market").and_then(Value::as_str));
 
-    let columns = json!(["close", "change", "change_abs", "volume", "high", "low", "open"]);
+    let columns = json!([
+        "close",
+        "change",
+        "change_abs",
+        "volume",
+        "high",
+        "low",
+        "open"
+    ]);
     let (symbol, rows) = resolve_tv_symbol(&raw_symbol, market, &columns)?;
     let row = rows
         .into_iter()
@@ -4410,10 +4405,7 @@ fn run_tv_get_quote(input: &str) -> Result<String, String> {
 fn run_tv_technical_rating(input: &str) -> Result<String, String> {
     let v = parse_json_input(input, "tv_technical_rating")?;
     let raw_symbol = extract_str(&v, "symbol", "tv_technical_rating")?.to_string();
-    let interval = v
-        .get("interval")
-        .and_then(Value::as_str)
-        .unwrap_or("1d");
+    let interval = v.get("interval").and_then(Value::as_str).unwrap_or("1d");
     let suffix = tv_interval_suffix(interval)?;
     let market = tv_market_path(v.get("market").and_then(Value::as_str));
 
@@ -4483,11 +4475,7 @@ fn run_tv_search_symbol(input: &str) -> Result<String, String> {
     let raw = data
         .as_array()
         .cloned()
-        .or_else(|| {
-            data.get("symbols")
-                .and_then(Value::as_array)
-                .cloned()
-        })
+        .or_else(|| data.get("symbols").and_then(Value::as_array).cloned())
         .unwrap_or_default();
 
     let results: Vec<Value> = raw
@@ -4616,8 +4604,7 @@ const VESTIGE_USDC_ASA_ID: i64 = 31566704;
 /// so the user can flip to a paid tier or alternate endpoint if the free
 /// base URL ever changes.
 fn vestige_base_url() -> String {
-    std::env::var("VESTIGE_API_BASE")
-        .unwrap_or_else(|_| "https://api.vestigelabs.org".to_string())
+    std::env::var("VESTIGE_API_BASE").unwrap_or_else(|_| "https://api.vestigelabs.org".to_string())
 }
 
 /// Extract the common `/assets/list` asset shape into the Claudette-facing
@@ -4983,10 +4970,7 @@ fn run_tg_send_photo(input: &str) -> Result<String, String> {
     let v = parse_json_input(input, "tg_send_photo")?;
     let chat_id = tg_extract_chat_id(&v, "tg_send_photo")?;
     let url = extract_str(&v, "url", "tg_send_photo")?;
-    let caption = v
-        .get("caption")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let caption = v.get("caption").and_then(Value::as_str).unwrap_or("");
 
     let token = telegram_token()?;
     let client = external_http_client()?;
@@ -5126,16 +5110,15 @@ mod tests {
 
     #[test]
     fn tv_technical_rating_rejects_bad_interval() {
-        let err = run_tv_technical_rating(r#"{"symbol":"NASDAQ:NVDA","interval":"nope"}"#)
-            .unwrap_err();
+        let err =
+            run_tv_technical_rating(r#"{"symbol":"NASDAQ:NVDA","interval":"nope"}"#).unwrap_err();
         assert!(err.contains("unknown interval"), "got: {err}");
     }
 
     #[test]
     fn resolve_tv_symbol_qualified_returns_as_is_on_failure() {
         // Qualified symbol (has colon) skips auto-resolution and gives a clear error.
-        let err = resolve_tv_symbol("FAKE:NOSUCH", "america", &json!(["close"]))
-            .unwrap_err();
+        let err = resolve_tv_symbol("FAKE:NOSUCH", "america", &json!(["close"])).unwrap_err();
         assert!(err.contains("FAKE:NOSUCH"), "got: {err}");
         assert!(err.contains("not found"), "got: {err}");
     }
@@ -5144,15 +5127,13 @@ mod tests {
     fn resolve_tv_symbol_bare_crypto_tries_binance() {
         // Bare crypto symbol should try BINANCE:BTCUSDT etc. Won't succeed
         // without network, but the error should mention the candidates.
-        let err = resolve_tv_symbol("FAKECOIN", "crypto", &json!(["close"]))
-            .unwrap_err();
+        let err = resolve_tv_symbol("FAKECOIN", "crypto", &json!(["close"])).unwrap_err();
         assert!(err.contains("BINANCE:FAKECOINUSDT"), "got: {err}");
     }
 
     #[test]
     fn resolve_tv_symbol_bare_stock_tries_nasdaq() {
-        let err = resolve_tv_symbol("FAKESTOCK", "america", &json!(["close"]))
-            .unwrap_err();
+        let err = resolve_tv_symbol("FAKESTOCK", "america", &json!(["close"])).unwrap_err();
         assert!(err.contains("NASDAQ:FAKESTOCK"), "got: {err}");
     }
 
@@ -5327,7 +5308,10 @@ mod tests {
     #[test]
     fn expand_tilde_leaves_other_paths_alone() {
         assert_eq!(expand_tilde("/abs/path"), PathBuf::from("/abs/path"));
-        assert_eq!(expand_tilde("relative/path"), PathBuf::from("relative/path"));
+        assert_eq!(
+            expand_tilde("relative/path"),
+            PathBuf::from("relative/path")
+        );
         // Tilde not at start: shells leave it alone, so do we.
         assert_eq!(expand_tilde("foo/~/bar"), PathBuf::from("foo/~/bar"));
     }
@@ -5431,7 +5415,10 @@ mod tests {
         let input = json!({ "path": "user.py", "content": "x = 1\n" }).to_string();
         let err = dispatch_tool("write_file", &input).unwrap_err();
         assert!(err.contains("refuses code"), "got: {err}");
-        assert!(err.contains("generate_code"), "must mention generate_code: {err}");
+        assert!(
+            err.contains("generate_code"),
+            "must mention generate_code: {err}"
+        );
         // File must NOT have been written.
         assert!(!files_dir().join("user.py").exists());
     }
@@ -5516,13 +5503,12 @@ mod tests {
             "content": "hello from a unit test",
         })
         .to_string();
-        let write_out = dispatch_tool("write_file", &write_input)
-            .expect("write_file should succeed");
+        let write_out =
+            dispatch_tool("write_file", &write_input).expect("write_file should succeed");
         assert!(write_out.contains("\"ok\":true"));
 
         let read_input = json!({ "path": path.to_str().unwrap() }).to_string();
-        let read_out = dispatch_tool("read_file", &read_input)
-            .expect("read_file should succeed");
+        let read_out = dispatch_tool("read_file", &read_input).expect("read_file should succeed");
         assert!(read_out.contains("hello from a unit test"));
 
         let _ = fs::remove_file(&path);
@@ -5669,8 +5655,7 @@ mod tests {
         );
         let pattern = format!("{}/**/*.txt", dir.display());
         let input = json!({ "pattern": pattern }).to_string();
-        let out =
-            dispatch_tool("glob_search", &input).expect("glob_search should succeed");
+        let out = dispatch_tool("glob_search", &input).expect("glob_search should succeed");
         let v: Value = serde_json::from_str(&out).unwrap();
         let count = v["count"].as_u64().unwrap();
         assert_eq!(count, 2, "expected 2 .txt matches, got {out}");
@@ -5704,8 +5689,7 @@ mod tests {
         // files/ directory we always create.
         let _ = ensure_dir(&files_dir());
         let input = json!({ "pattern": "~/.claudette/*" }).to_string();
-        let out =
-            dispatch_tool("glob_search", &input).expect("glob_search should succeed");
+        let out = dispatch_tool("glob_search", &input).expect("glob_search should succeed");
         assert!(out.contains(".claudette"));
     }
 
@@ -5725,8 +5709,7 @@ mod tests {
             "path": dir.to_str().unwrap()
         })
         .to_string();
-        let out =
-            dispatch_tool("grep_search", &input).expect("grep_search should succeed");
+        let out = dispatch_tool("grep_search", &input).expect("grep_search should succeed");
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["match_count"].as_u64().unwrap(), 1);
         let matches = v["matches"].as_array().unwrap();
@@ -5940,8 +5923,7 @@ mod tests {
 
     #[test]
     fn note_read_rejects_nonexistent_note() {
-        let err = run_note_read(r#"{"id":"9999-01-01T00-00-00-no-such-note.md"}"#)
-            .unwrap_err();
+        let err = run_note_read(r#"{"id":"9999-01-01T00-00-00-no-such-note.md"}"#).unwrap_err();
         assert!(err.contains("no note with id"), "got: {err}");
     }
 
@@ -5959,8 +5941,7 @@ mod tests {
 
     #[test]
     fn note_delete_rejects_nonexistent() {
-        let err = run_note_delete(r#"{"id":"9999-01-01T00-00-00-no-such.md"}"#)
-            .unwrap_err();
+        let err = run_note_delete(r#"{"id":"9999-01-01T00-00-00-no-such.md"}"#).unwrap_err();
         assert!(err.contains("no note with id"), "got: {err}");
     }
 
@@ -6009,12 +5990,7 @@ mod tests {
     #[test]
     fn core_tool_names_include_new_tools() {
         use crate::tool_groups::CORE_TOOL_NAMES;
-        for tool in &[
-            "note_read",
-            "note_delete",
-            "todo_uncomplete",
-            "todo_delete",
-        ] {
+        for tool in &["note_read", "note_delete", "todo_uncomplete", "todo_delete"] {
             assert!(
                 CORE_TOOL_NAMES.contains(tool),
                 "CORE_TOOL_NAMES missing {tool}"
@@ -6091,28 +6067,24 @@ mod tests {
         let note_id = created["id"].as_str().unwrap().to_string();
 
         // Read it back.
-        let read_out =
-            run_note_read(&json!({ "id": note_id }).to_string()).expect("note_read");
+        let read_out = run_note_read(&json!({ "id": note_id }).to_string()).expect("note_read");
         let read: Value = serde_json::from_str(&read_out).unwrap();
         assert_eq!(read["title"], Value::String(title.clone()));
         assert!(read["body"].as_str().unwrap().contains(&body));
         assert_eq!(read["tags"], json!(["test", "polish"]));
 
         // list with search finds it.
-        let list_out =
-            run_note_list(&json!({ "search": title }).to_string()).expect("note_list");
+        let list_out = run_note_list(&json!({ "search": title }).to_string()).expect("note_list");
         let list: Value = serde_json::from_str(&list_out).unwrap();
         assert!(list["count"].as_u64().unwrap() >= 1);
 
         // Delete it.
-        let del_out =
-            run_note_delete(&json!({ "id": note_id }).to_string()).expect("note_delete");
+        let del_out = run_note_delete(&json!({ "id": note_id }).to_string()).expect("note_delete");
         assert!(del_out.contains("\"deleted\":true"));
 
         // ── todos ─────────────────────────────────────────────────────────
         let todo_text = format!("__test_todo_{stamp}");
-        let add_out =
-            run_todo_add(&json!({ "text": todo_text }).to_string()).expect("todo_add");
+        let add_out = run_todo_add(&json!({ "text": todo_text }).to_string()).expect("todo_add");
         let added: Value = serde_json::from_str(&add_out).unwrap();
         let todo_id = added["id"].as_str().unwrap().to_string();
 
@@ -6122,8 +6094,8 @@ mod tests {
         assert!(comp_out.contains("\"done\":true"));
 
         // Uncomplete.
-        let uncomp_out = run_todo_uncomplete(&json!({ "id": todo_id }).to_string())
-            .expect("todo_uncomplete");
+        let uncomp_out =
+            run_todo_uncomplete(&json!({ "id": todo_id }).to_string()).expect("todo_uncomplete");
         assert!(uncomp_out.contains("\"done\":false"));
 
         // pending_only list should now include it.
@@ -6131,8 +6103,7 @@ mod tests {
         assert!(list_out.contains(&todo_id));
 
         // Delete.
-        let del_out =
-            run_todo_delete(&json!({ "id": todo_id }).to_string()).expect("todo_delete");
+        let del_out = run_todo_delete(&json!({ "id": todo_id }).to_string()).expect("todo_delete");
         assert!(del_out.contains("\"deleted\":true"));
 
         // Confirm gone — second delete errors.
@@ -6173,7 +6144,9 @@ mod tests {
         let text = "Read the file ~/.claudette/files/calculator.py — it's a module.";
         let cands = extract_path_candidates(text);
         assert!(
-            cands.iter().any(|t| t == "~/.claudette/files/calculator.py"),
+            cands
+                .iter()
+                .any(|t| t == "~/.claudette/files/calculator.py"),
             "missing tilde path, got: {cands:?}",
         );
     }
@@ -6206,7 +6179,7 @@ mod tests {
     fn collect_reference_files_reads_tilde_path() {
         let _g = lock_stash();
         set_current_turn_paths(vec![]); // start clean
-        // Write a fixture under the user's home so validate_read_path accepts it.
+                                        // Write a fixture under the user's home so validate_read_path accepts it.
         let dir = user_home().join(".claudette").join("files");
         fs::create_dir_all(&dir).unwrap();
         let fixture = dir.join("refsprint_fixture.py");
@@ -6336,7 +6309,9 @@ mod tests {
 
     fn lock_stash() -> std::sync::MutexGuard<'static, ()> {
         // Recover from poisoning — a panic in one test must not block the rest.
-        STASH_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        STASH_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     #[test]
@@ -6372,7 +6347,7 @@ mod tests {
 
         // Stash one path; pass empty explicit, irrelevant description.
         set_current_turn_paths(vec![
-            "~/.claudette/files/refsprint_stash_fixture.py".to_string(),
+            "~/.claudette/files/refsprint_stash_fixture.py".to_string()
         ]);
         let refs = collect_reference_files(&[], "Write tests for the helper.");
 
@@ -6421,6 +6396,11 @@ mod tests {
             let _ = fs::remove_file(f);
         }
 
-        assert_eq!(refs.len(), REF_MAX_FILES, "expected cap, got {}", refs.len());
+        assert_eq!(
+            refs.len(),
+            REF_MAX_FILES,
+            "expected cap, got {}",
+            refs.len()
+        );
     }
 }

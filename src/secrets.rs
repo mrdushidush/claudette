@@ -19,9 +19,7 @@ fn secrets_dir() -> PathBuf {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home)
-        .join(".claudette")
-        .join("secrets")
+    PathBuf::from(home).join(".claudette").join("secrets")
 }
 
 /// Read a secret by logical name (e.g. `"github"`, `"telegram"`).

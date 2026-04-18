@@ -11,26 +11,26 @@
 #![recursion_limit = "256"]
 
 // ── Embedded runtime kernel ──────────────────────────────────────────────
+#[path = "runtime/compact.rs"]
+pub mod compact;
+#[path = "runtime/config.rs"]
+pub mod config;
+#[path = "runtime/conversation.rs"]
+pub mod conversation;
+#[path = "runtime/hooks.rs"]
+pub mod hooks;
+#[path = "runtime/json.rs"]
+pub mod json;
+#[path = "runtime/permissions.rs"]
+pub mod permissions;
+#[path = "runtime/prompt.rs"]
+pub mod prompt_runtime;
+#[path = "runtime/sandbox.rs"]
+pub mod sandbox;
 #[path = "runtime/session.rs"]
 pub mod session;
 #[path = "runtime/usage.rs"]
 pub mod usage;
-#[path = "runtime/json.rs"]
-pub mod json;
-#[path = "runtime/sandbox.rs"]
-pub mod sandbox;
-#[path = "runtime/config.rs"]
-pub mod config;
-#[path = "runtime/hooks.rs"]
-pub mod hooks;
-#[path = "runtime/permissions.rs"]
-pub mod permissions;
-#[path = "runtime/compact.rs"]
-pub mod compact;
-#[path = "runtime/prompt.rs"]
-pub mod prompt_runtime;
-#[path = "runtime/conversation.rs"]
-pub mod conversation;
 
 // ── Claudette secretary layer ────────────────────────────────────────────
 pub mod agents;
@@ -47,14 +47,14 @@ pub mod secrets;
 pub mod telegram_mode;
 pub mod test_runner;
 pub mod theme;
+pub mod tool_groups;
+pub mod tools;
 pub mod tts;
 pub mod tui;
 pub mod tui_events;
 pub mod tui_executor;
 pub mod tui_worker;
 pub mod voice;
-pub mod tool_groups;
-pub mod tools;
 
 // ── Public re-exports ────────────────────────────────────────────────────
 pub use api::{probe_ollama, resolve_ollama_url, OllamaApiClient};

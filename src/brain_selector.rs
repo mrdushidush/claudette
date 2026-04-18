@@ -132,11 +132,8 @@ pub fn run_turn_with_fallback(
 
     let mut fallback_runtime =
         build_runtime_with_brain(pre_turn_session, &fallback_cfg, true, false);
-    let fallback_result = run_turn_with_retry(
-        &mut fallback_runtime,
-        input,
-        prompter_reborrow(prompter),
-    );
+    let fallback_result =
+        run_turn_with_retry(&mut fallback_runtime, input, prompter_reborrow(prompter));
 
     // Release the fallback model from Ollama's VRAM/RAM budget before
     // handing control back to the primary. Without this, Ollama keeps 9b
@@ -240,7 +237,6 @@ fn max_consecutive_tool_errors(msgs: &[crate::ConversationMessage]) -> usize {
     max_run
 }
 
-
 // ─── Fallback event logging ─────────────────────────────────────────────────
 
 struct FallbackEvent<'a> {
@@ -312,8 +308,8 @@ fn prompt_hash(s: &str) -> String {
 /// trick. Silently ignores failures — if Ollama is down the next chat
 /// turn will surface a clearer error than this helper could.
 fn unload_ollama_model(model: &str) {
-    let host = std::env::var("OLLAMA_HOST")
-        .unwrap_or_else(|_| "http://localhost:11434".to_string());
+    let host =
+        std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string());
     let _ = reqwest::blocking::Client::new()
         .post(format!("{host}/api/chat"))
         .json(&serde_json::json!({
@@ -470,7 +466,12 @@ mod tests {
             vec![ContentBlock::Text {
                 text: "okay".into(),
             }],
-            vec![tool_err(true), tool_err(true), tool_err(false), tool_err(true)],
+            vec![
+                tool_err(true),
+                tool_err(true),
+                tool_err(false),
+                tool_err(true),
+            ],
             4,
         );
         assert_eq!(diagnose(&Ok(summary)), None);

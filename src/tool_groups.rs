@@ -156,12 +156,19 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
             Some(ToolGroup::Facts)
         }
         "crate_info" | "crate_search" | "npm_info" | "npm_search" => Some(ToolGroup::Registry),
-        "gh_list_my_prs" | "gh_list_assigned_issues" | "gh_get_issue" | "gh_create_issue"
-        | "gh_comment_issue" | "gh_search_code" => Some(ToolGroup::Github),
-        "tv_get_quote" | "tv_technical_rating" | "tv_search_symbol" | "tv_economic_calendar"
-        | "vestige_asa_info" | "vestige_search_asa" | "vestige_top_movers" => {
-            Some(ToolGroup::Markets)
-        }
+        "gh_list_my_prs"
+        | "gh_list_assigned_issues"
+        | "gh_get_issue"
+        | "gh_create_issue"
+        | "gh_comment_issue"
+        | "gh_search_code" => Some(ToolGroup::Github),
+        "tv_get_quote"
+        | "tv_technical_rating"
+        | "tv_search_symbol"
+        | "tv_economic_calendar"
+        | "vestige_asa_info"
+        | "vestige_search_asa"
+        | "vestige_top_movers" => Some(ToolGroup::Markets),
         "tg_send" | "tg_get_updates" | "tg_send_photo" => Some(ToolGroup::Telegram),
         _ => None,
     }
@@ -433,7 +440,11 @@ mod tests {
     #[test]
     fn group_of_returns_none_for_core() {
         for &name in CORE_TOOL_NAMES {
-            assert_eq!(group_of(name), None, "core tool {name} should not map to a group");
+            assert_eq!(
+                group_of(name),
+                None,
+                "core tool {name} should not map to a group"
+            );
         }
     }
 

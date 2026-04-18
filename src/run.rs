@@ -4,12 +4,12 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result};
 use crate::{
     compact_session, estimate_session_tokens, CompactionConfig, ConversationRuntime,
     PermissionMode, PermissionPolicy, PermissionPromptDecision, PermissionPrompter,
     PermissionRequest, Session, TurnSummary,
 };
+use anyhow::{Context, Result};
 
 use crate::api::{stdout_text_callback, OllamaApiClient};
 use crate::commands::{dispatch_slash_command, parse_slash_command, ReplState, SlashOutcome};
@@ -155,8 +155,9 @@ pub fn save_session_at(session: &Session, path: &std::path::Path) -> Result<()> 
 /// With `opts.autosave = true`, writes the session back after the turn.
 pub fn run_secretary(user_input: &str, opts: SessionOptions) -> Result<TurnSummary> {
     let session = if opts.resume {
-        try_load_session()?
-            .ok_or_else(|| anyhow::anyhow!("no saved session at {}", default_session_path().display()))?
+        try_load_session()?.ok_or_else(|| {
+            anyhow::anyhow!("no saved session at {}", default_session_path().display())
+        })?
     } else {
         Session::default()
     };
@@ -171,12 +172,9 @@ pub fn run_secretary(user_input: &str, opts: SessionOptions) -> Result<TurnSumma
     // behaviour. On Fast / Smart presets (no fallback configured) this
     // reduces to the prior `run_turn` + empty-response retry.
     let mut no_prompter: Option<&mut dyn PermissionPrompter> = None;
-    let summary = crate::brain_selector::run_turn_with_fallback(
-        &mut runtime,
-        user_input,
-        &mut no_prompter,
-    )
-    .map_err(|e| anyhow::anyhow!("secretary turn failed: {e}"))?;
+    let summary =
+        crate::brain_selector::run_turn_with_fallback(&mut runtime, user_input, &mut no_prompter)
+            .map_err(|e| anyhow::anyhow!("secretary turn failed: {e}"))?;
 
     // Same session-size trigger as the REPL — fire after the turn so the
     // session we autosave (when --resume is set) is already trimmed.
@@ -248,10 +246,7 @@ pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
     eprintln!(
         "{} {}",
         theme::SAVE,
-        theme::dim(&format!(
-            "session: {}",
-            default_session_path().display()
-        ))
+        theme::dim(&format!("session: {}", default_session_path().display()))
     );
     eprintln!();
 
@@ -323,9 +318,7 @@ pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
                     theme::BOLT,
                     theme::info(&format!(
                         "turn iter={} in={} out={}",
-                        summary.iterations,
-                        summary.usage.input_tokens,
-                        summary.usage.output_tokens,
+                        summary.iterations, summary.usage.input_tokens, summary.usage.output_tokens,
                     ))
                 );
 
@@ -572,13 +565,7 @@ impl PermissionPrompter for CliPrompter {
             "  {} {} wants to run: {}",
             theme::warn(theme::WARN_GLYPH),
             theme::accent(&request.tool_name),
-            theme::dim(
-                &request
-                    .input
-                    .chars()
-                    .take(200)
-                    .collect::<String>()
-            )
+            theme::dim(&request.input.chars().take(200).collect::<String>())
         );
         let _ = write!(err, "  Allow? [y/N] ");
         let _ = err.flush();

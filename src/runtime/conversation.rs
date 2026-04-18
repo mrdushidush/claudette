@@ -640,7 +640,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(windows, ignore = "hook snippet uses printf; Windows cmd has no printf builtin")]
+    #[cfg_attr(
+        windows,
+        ignore = "hook snippet uses printf; Windows cmd has no printf builtin"
+    )]
     fn denies_tool_use_when_pre_tool_hook_blocks() {
         struct SingleCallApiClient;
         impl ApiClient for SingleCallApiClient {

@@ -295,7 +295,10 @@ mod tests {
     use crate::config::{RuntimeFeatureConfig, RuntimeHookConfig};
 
     #[test]
-    #[cfg_attr(windows, ignore = "hook snippet uses printf; Windows cmd has no printf builtin")]
+    #[cfg_attr(
+        windows,
+        ignore = "hook snippet uses printf; Windows cmd has no printf builtin"
+    )]
     fn allows_exit_code_zero_and_captures_stdout() {
         let runner = HookRunner::new(RuntimeHookConfig::new(
             vec![shell_snippet("printf 'pre ok'")],
@@ -308,7 +311,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(windows, ignore = "hook snippet uses printf; Windows cmd has no printf builtin")]
+    #[cfg_attr(
+        windows,
+        ignore = "hook snippet uses printf; Windows cmd has no printf builtin"
+    )]
     fn denies_exit_code_two() {
         let runner = HookRunner::new(RuntimeHookConfig::new(
             vec![shell_snippet("printf 'blocked by hook'; exit 2")],
@@ -322,7 +328,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(windows, ignore = "hook snippet uses printf; Windows cmd has no printf builtin")]
+    #[cfg_attr(
+        windows,
+        ignore = "hook snippet uses printf; Windows cmd has no printf builtin"
+    )]
     fn warns_for_other_non_zero_statuses() {
         let runner = HookRunner::from_feature_config(&RuntimeFeatureConfig::default().with_hooks(
             RuntimeHookConfig::new(

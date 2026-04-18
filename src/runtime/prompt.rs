@@ -530,8 +530,11 @@ mod tests {
             "apps nested instructions",
         )
         .expect("write apps nested instructions");
-        fs::write(nested.join(".claudette").join("CLAUDETTE.md"), "nested rules")
-            .expect("write nested rules");
+        fs::write(
+            nested.join(".claudette").join("CLAUDETTE.md"),
+            "nested rules",
+        )
+        .expect("write nested rules");
         fs::write(
             nested.join(".claudette").join("instructions.md"),
             "nested instructions",

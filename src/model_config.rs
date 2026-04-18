@@ -60,7 +60,9 @@ impl std::str::FromStr for Preset {
             "fast" => Ok(Preset::Fast),
             "auto" => Ok(Preset::Auto),
             "smart" => Ok(Preset::Smart),
-            other => Err(format!("unknown preset {other:?} — use fast, auto, or smart")),
+            other => Err(format!(
+                "unknown preset {other:?} — use fast, auto, or smart"
+            )),
         }
     }
 }
@@ -207,10 +209,9 @@ impl ModelConfig {
                 // Explicit empty = "turn off fallback" for this process.
                 self.fallback_brain = None;
             } else {
-                let base = self
-                    .fallback_brain
-                    .clone()
-                    .unwrap_or_else(|| RoleConfig::new(v.clone(), self.brain.num_ctx, self.brain.num_predict));
+                let base = self.fallback_brain.clone().unwrap_or_else(|| {
+                    RoleConfig::new(v.clone(), self.brain.num_ctx, self.brain.num_predict)
+                });
                 self.fallback_brain = Some(RoleConfig {
                     model: v,
                     num_ctx: base.num_ctx,

@@ -182,17 +182,17 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("unknown group"), "got: {err}");
-        assert!(err.contains("git"), "error should list available groups: {err}");
+        assert!(
+            err.contains("git"),
+            "error should list available groups: {err}"
+        );
     }
 
     #[test]
     fn wired_executor_missing_group_param_errors() {
         let registry = Arc::new(Mutex::new(ToolRegistry::new()));
         let mut exec = SecretaryToolExecutor::with_registry(registry);
-        let err = exec
-            .execute("enable_tools", "{}")
-            .unwrap_err()
-            .to_string();
+        let err = exec.execute("enable_tools", "{}").unwrap_err().to_string();
         assert!(err.contains("missing 'group'"), "got: {err}");
     }
 

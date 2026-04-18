@@ -19,8 +19,11 @@
 
 use std::process::ExitCode;
 
+use claudette::{
+    probe_ollama, run_secretary, run_secretary_repl, secrets, telegram_mode, theme,
+    try_load_session, SessionOptions,
+};
 use claudette::{ContentBlock, Session};
-use claudette::{probe_ollama, run_secretary, run_secretary_repl, secrets, telegram_mode, theme, try_load_session, SessionOptions};
 
 fn main() -> ExitCode {
     // Load env vars from .env files. Two locations, in this order so CWD
@@ -34,7 +37,9 @@ fn main() -> ExitCode {
     // that actually need an env var will report their own missing-key errors.
     let _ = dotenvy::dotenv();
     if let Ok(home) = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")) {
-        let path = std::path::PathBuf::from(home).join(".claudette").join(".env");
+        let path = std::path::PathBuf::from(home)
+            .join(".claudette")
+            .join(".env");
         let _ = dotenvy::from_path(&path);
     }
     theme::init();
@@ -46,11 +51,7 @@ fn main() -> ExitCode {
     // surfacing a raw reqwest connection error inside the first chat turn.
     // Bypass with CLAUDETTE_SKIP_OLLAMA_PROBE=1 for offline / CI scenarios.
     if let Err(msg) = probe_ollama() {
-        eprintln!(
-            "{} {}",
-            theme::error(theme::ERR_GLYPH),
-            theme::error(&msg)
-        );
+        eprintln!("{} {}", theme::error(theme::ERR_GLYPH), theme::error(&msg));
         return ExitCode::FAILURE;
     }
 
@@ -140,9 +141,7 @@ fn main() -> ExitCode {
                     theme::BOLT,
                     theme::info(&format!(
                         "iter={} in={} out={}",
-                        summary.iterations,
-                        summary.usage.input_tokens,
-                        summary.usage.output_tokens,
+                        summary.iterations, summary.usage.input_tokens, summary.usage.output_tokens,
                     ))
                 );
                 ExitCode::SUCCESS
@@ -234,16 +233,14 @@ mod tests {
 
     #[test]
     fn parse_args_resume_anywhere() {
-        let (resume, _, _, prompt, _) =
-            parse_args(&["go".into(), "-r".into(), "now".into()]);
+        let (resume, _, _, prompt, _) = parse_args(&["go".into(), "-r".into(), "now".into()]);
         assert!(resume);
         assert_eq!(prompt, vec!["go".to_string(), "now".to_string()]);
     }
 
     #[test]
     fn parse_args_telegram_mode() {
-        let (_, telegram, _, prompt, _) =
-            parse_args(&["--telegram".into()]);
+        let (_, telegram, _, prompt, _) = parse_args(&["--telegram".into()]);
         assert!(telegram);
         assert!(prompt.is_empty());
     }

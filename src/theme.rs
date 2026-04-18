@@ -128,8 +128,7 @@ mod tests {
     /// array to confirm the helpers all share the same signature.
     #[test]
     fn all_helpers_round_trip_text() {
-        let funcs: [fn(&str) -> ColoredString; 7] =
-            [accent, info, warn, error, dim, ok, brand];
+        let funcs: [fn(&str) -> ColoredString; 7] = [accent, info, warn, error, dim, ok, brand];
         for f in funcs {
             let s = f("hello");
             assert!(

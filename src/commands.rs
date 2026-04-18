@@ -137,15 +137,11 @@ pub fn parse_slash_command(line: &str) -> Option<SlashCommand> {
         "sessions" | "ls" => SlashCommand::Sessions,
         "save" => match arg.filter(|s| !s.is_empty()) {
             Some(name) => SlashCommand::Save(name),
-            None => {
-                SlashCommand::Invalid("/save requires a name. Try: /save my-work".to_string())
-            }
+            None => SlashCommand::Invalid("/save requires a name. Try: /save my-work".to_string()),
         },
         "load" => match arg.filter(|s| !s.is_empty()) {
             Some(name) => SlashCommand::Load(name),
-            None => {
-                SlashCommand::Invalid("/load requires a name. Try: /load my-work".to_string())
-            }
+            None => SlashCommand::Invalid("/load requires a name. Try: /load my-work".to_string()),
         },
         "status" | "st" => SlashCommand::Status,
         "cost" => SlashCommand::Cost,
@@ -167,15 +163,11 @@ pub fn parse_slash_command(line: &str) -> Option<SlashCommand> {
                 Ok(preset) => SlashCommand::PresetSwitch(preset),
                 Err(e) => SlashCommand::Invalid(e),
             },
-            None => SlashCommand::Invalid(
-                "/preset requires one of: fast, auto, smart".to_string(),
-            ),
+            None => SlashCommand::Invalid("/preset requires one of: fast, auto, smart".to_string()),
         },
         "brain" => match arg.filter(|s| !s.is_empty()) {
             Some(m) => SlashCommand::Brain(m),
-            None => {
-                SlashCommand::Invalid("/brain requires a model name or 'auto'".to_string())
-            }
+            None => SlashCommand::Invalid("/brain requires a model name or 'auto'".to_string()),
         },
         "coder" => match arg.filter(|s| !s.is_empty()) {
             Some(m) => SlashCommand::Coder(m),
@@ -305,9 +297,15 @@ pub fn dispatch_slash_command(
 fn print_help(out: &mut impl Write) {
     let lines: &[(&str, &str)] = &[
         ("/help (h, ?)", "Show this list"),
-        ("/clear (cl)", "Wipe in-memory session — saved files untouched"),
+        (
+            "/clear (cl)",
+            "Wipe in-memory session — saved files untouched",
+        ),
         ("/compact", "Force a context compaction now"),
-        ("/sessions (ls)", "List saved sessions in ~/.claudette/sessions/"),
+        (
+            "/sessions (ls)",
+            "List saved sessions in ~/.claudette/sessions/",
+        ),
         ("/save <name>", "Snapshot the current session under a name"),
         ("/load <name>", "Replace current session with a saved one"),
         ("/status (st)", "Turns, tokens, model, context window"),
@@ -317,10 +315,19 @@ fn print_help(out: &mut impl Write) {
         ("/memory (mem)", "Show CLAUDETTE.MD memory in use"),
         ("/reload", "Re-read CLAUDETTE.MD without losing history"),
         ("/capabilities (cap)", "Full configuration dump"),
-        ("/validate (val) <path>", "Run Codet code validator on a file"),
+        (
+            "/validate (val) <path>",
+            "Run Codet code validator on a file",
+        ),
         ("/agents", "List available agent types"),
-        ("/preset <fast|auto|smart>", "Switch brain preset (swap 4b/9b/fallback)"),
-        ("/brain <model|auto>", "Pin brain model (or 'auto' to restore preset fallback)"),
+        (
+            "/preset <fast|auto|smart>",
+            "Switch brain preset (swap 4b/9b/fallback)",
+        ),
+        (
+            "/brain <model|auto>",
+            "Pin brain model (or 'auto' to restore preset fallback)",
+        ),
         ("/coder <model>", "Pin coder model"),
         ("/models", "Show current model config"),
         ("/exit (quit, q, x)", "Leave the REPL"),
@@ -758,10 +765,7 @@ fn handle_agents(out: &mut impl Write) {
             "researcher",
             "web search, file reading, code search (max 10 iter)",
         ),
-        (
-            "gitops",
-            "git workflows, bash, file reading (max 8 iter)",
-        ),
+        ("gitops", "git workflows, bash, file reading (max 8 iter)"),
         (
             "reviewer",
             "code review: bugs, security, quality (max 5 iter, read-only)",
@@ -826,7 +830,10 @@ fn handle_brain(out: &mut impl Write, runtime: &mut SecretaryRuntime, model: &st
         out,
         "{} {}",
         theme::ROBOT,
-        theme::ok(&format!("brain pinned → {} (fallback disabled)", cfg.brain.model))
+        theme::ok(&format!(
+            "brain pinned → {} (fallback disabled)",
+            cfg.brain.model
+        ))
     );
 }
 
@@ -1025,8 +1032,7 @@ fn handle_validate(out: &mut impl Write, path_str: &str) {
                     );
                 }
                 crate::codet::CodetStatus::CouldNotFix { last_error } => {
-                    let short: String =
-                        last_error.lines().take(3).collect::<Vec<_>>().join(" | ");
+                    let short: String = last_error.lines().take(3).collect::<Vec<_>>().join(" | ");
                     let _ = writeln!(
                         out,
                         "  {} {}",
@@ -1035,11 +1041,7 @@ fn handle_validate(out: &mut impl Write, path_str: &str) {
                     );
                 }
                 crate::codet::CodetStatus::Skipped => {
-                    let _ = writeln!(
-                        out,
-                        "  {}",
-                        theme::dim("(validation skipped)")
-                    );
+                    let _ = writeln!(out, "  {}", theme::dim("(validation skipped)"));
                 }
             }
         }
@@ -1385,10 +1387,7 @@ mod tests {
             "with space",
             "with.dot",
         ] {
-            assert!(
-                sanitize_session_name(bad).is_err(),
-                "should reject {bad:?}"
-            );
+            assert!(sanitize_session_name(bad).is_err(), "should reject {bad:?}");
         }
     }
 

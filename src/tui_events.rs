@@ -14,10 +14,7 @@ pub enum TuiEvent {
         out_tok: u32,
     },
     /// A tool call started (before the tool runs).
-    ToolCallStart {
-        name: String,
-        input_preview: String,
-    },
+    ToolCallStart { name: String, input_preview: String },
     /// A tool call finished.
     ToolCallDone {
         name: String,

@@ -159,10 +159,7 @@ pub fn run_python_syntax_check(path: &Path) -> CommandResult {
 /// module-import approach finds all `TestCase` subclasses regardless.
 pub fn run_python_unittest(path: &Path) -> TestResult {
     let parent = path.parent().unwrap_or(Path::new("."));
-    let stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let result = run_command_with_timeout(
         "python",
         &["-m", "unittest", stem, "-v"],
@@ -233,11 +230,7 @@ pub fn parse_unittest_output(result: &CommandResult) -> TestResult {
         passed,
         failed,
         errors,
-        error_output: if all_passed {
-            String::new()
-        } else {
-            combined
-        },
+        error_output: if all_passed { String::new() } else { combined },
     }
 }
 
@@ -392,7 +385,10 @@ mod tests {
         let result = cmd_result(false, "", "");
         let tr = parse_unittest_output(&result);
         assert!(!tr.all_passed);
-        assert_eq!(tr.failed, 1, "should infer at least 1 failure from exit code");
+        assert_eq!(
+            tr.failed, 1,
+            "should infer at least 1 failure from exit code"
+        );
     }
 
     #[test]

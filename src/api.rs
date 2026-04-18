@@ -172,10 +172,7 @@ impl OllamaApiClient {
     /// between turns, the next `/api/chat` call will advertise the expanded
     /// tool set.
     #[must_use]
-    pub fn with_registry(
-        model: impl Into<String>,
-        registry: Arc<Mutex<ToolRegistry>>,
-    ) -> Self {
+    pub fn with_registry(model: impl Into<String>, registry: Arc<Mutex<ToolRegistry>>) -> Self {
         Self::build(model.into(), ToolsProvider::Dynamic(registry))
     }
 
@@ -353,14 +350,13 @@ impl OllamaApiClient {
         let mut output_tokens: u32 = 0;
 
         for line in reader.lines() {
-            let line = line
-                .map_err(|e| RuntimeError::new(format!("Ollama stream read failed: {e}")))?;
+            let line =
+                line.map_err(|e| RuntimeError::new(format!("Ollama stream read failed: {e}")))?;
             if line.trim().is_empty() {
                 continue;
             }
-            let chunk: Value = serde_json::from_str(&line).map_err(|e| {
-                RuntimeError::new(format!("Ollama stream parse failed: {e}"))
-            })?;
+            let chunk: Value = serde_json::from_str(&line)
+                .map_err(|e| RuntimeError::new(format!("Ollama stream parse failed: {e}")))?;
 
             if let Some(err) = chunk.get("error").and_then(Value::as_str) {
                 return Err(RuntimeError::new(format!("Ollama error: {err}")));
@@ -392,10 +388,7 @@ impl OllamaApiClient {
                     .get("prompt_eval_count")
                     .and_then(Value::as_u64)
                     .unwrap_or(0) as u32;
-                output_tokens = chunk
-                    .get("eval_count")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0) as u32;
+                output_tokens = chunk.get("eval_count").and_then(Value::as_u64).unwrap_or(0) as u32;
             }
         }
 
@@ -514,7 +507,8 @@ fn build_history_messages(msgs: &[crate::ConversationMessage]) -> Vec<Value> {
                     content_parts.push(text.clone());
                 }
                 ContentBlock::ToolUse { id, name, input } => {
-                    let arguments: Value = serde_json::from_str(input).unwrap_or_else(|_| json!({}));
+                    let arguments: Value =
+                        serde_json::from_str(input).unwrap_or_else(|_| json!({}));
                     tool_calls.push(json!({
                         "id": id,
                         "type": "function",
@@ -599,9 +593,7 @@ fn estimate_message_chars(msg: &Value) -> usize {
         .get("content")
         .and_then(Value::as_str)
         .map_or(0, str::len);
-    let tools = msg
-        .get("tool_calls")
-        .map_or(0, |v| v.to_string().len());
+    let tools = msg.get("tool_calls").map_or(0, |v| v.to_string().len());
     content + tools
 }
 
@@ -628,11 +620,17 @@ mod tests {
         // ran.
         let prev_host = std::env::var("OLLAMA_HOST").ok();
         let prev_skip = std::env::var("CLAUDETTE_SKIP_OLLAMA_PROBE").ok();
-        std::env::set_var("OLLAMA_HOST", "http://definitely-not-a-real-host.invalid:11434");
+        std::env::set_var(
+            "OLLAMA_HOST",
+            "http://definitely-not-a-real-host.invalid:11434",
+        );
         std::env::set_var("CLAUDETTE_SKIP_OLLAMA_PROBE", "1");
 
         let result = probe_ollama();
-        assert!(result.is_ok(), "skip env should bypass the probe; got {result:?}");
+        assert!(
+            result.is_ok(),
+            "skip env should bypass the probe; got {result:?}"
+        );
 
         match prev_host {
             Some(v) => std::env::set_var("OLLAMA_HOST", v),
@@ -651,7 +649,9 @@ mod tests {
     fn user_text(text: &str) -> ConversationMessage {
         ConversationMessage {
             role: MessageRole::User,
-            blocks: vec![ContentBlock::Text { text: text.to_string() }],
+            blocks: vec![ContentBlock::Text {
+                text: text.to_string(),
+            }],
             usage: None,
         }
     }
@@ -674,7 +674,7 @@ mod tests {
         // Each message ~10 chars; budget 25 should keep newest 2 (≈20 chars)
         // and drop the oldest.
         let messages = vec![
-            text_msg("user", "first-old0"),    // 10 chars
+            text_msg("user", "first-old0"),     // 10 chars
             text_msg("assistant", "second-mi"), // 9 chars
             text_msg("user", "third-new0"),     // 10 chars
         ];
@@ -720,9 +720,9 @@ mod tests {
         // even-older smaller messages can still survive. Previously a giant
         // tool result in the middle of a session wiped the entire history.
         let messages = vec![
-            text_msg("user", "tiny old"),                              // 8 chars
-            text_msg("assistant", &"X".repeat(500)),                    // 500 chars (oversized)
-            text_msg("user", "newest"),                                 // 6 chars
+            text_msg("user", "tiny old"),            // 8 chars
+            text_msg("assistant", &"X".repeat(500)), // 500 chars (oversized)
+            text_msg("user", "newest"),              // 6 chars
         ];
         // Budget 30: room for newest (6) + tiny old (8) = 14, well under.
         // But the oversized middle (500) doesn't fit and must be skipped.
@@ -775,7 +775,11 @@ mod tests {
         };
         // Budget large enough only for the last message (~6 chars).
         let result = build_messages(&request, 20);
-        assert_eq!(result.len(), 2, "expected system + 1 history, got {result:?}");
+        assert_eq!(
+            result.len(),
+            2,
+            "expected system + 1 history, got {result:?}"
+        );
         assert_eq!(result[0]["role"], "system");
         assert_eq!(result[1]["content"], "newest");
     }

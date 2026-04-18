@@ -131,9 +131,7 @@ fn strip_orphaned_tool_results(mut messages: Vec<ConversationMessage>) -> Vec<Co
     messages.retain(|msg| {
         if msg.role == MessageRole::Tool {
             return msg.blocks.iter().all(|block| match block {
-                ContentBlock::ToolResult { tool_use_id, .. } => {
-                    tool_use_ids.contains(tool_use_id)
-                }
+                ContentBlock::ToolResult { tool_use_id, .. } => tool_use_ids.contains(tool_use_id),
                 _ => true,
             });
         }
@@ -145,9 +143,7 @@ fn strip_orphaned_tool_results(mut messages: Vec<ConversationMessage>) -> Vec<Co
     for msg in &mut messages {
         if msg.role == MessageRole::Assistant {
             msg.blocks.retain(|block| match block {
-                ContentBlock::ToolResult { tool_use_id, .. } => {
-                    tool_use_ids.contains(tool_use_id)
-                }
+                ContentBlock::ToolResult { tool_use_id, .. } => tool_use_ids.contains(tool_use_id),
                 _ => true,
             });
         }

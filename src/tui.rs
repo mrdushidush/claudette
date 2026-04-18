@@ -17,8 +17,8 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
 use crate::Session;
+use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
@@ -60,8 +60,14 @@ const NOTES_CACHE_SECS: u64 = 2;
 
 /// A simplified tool entry for the Chat inline display.
 enum ToolEntry {
-    Start { name: String },
-    Done { name: String, ok: bool, elapsed_ms: u64 },
+    Start {
+        name: String,
+    },
+    Done {
+        name: String,
+        ok: bool,
+        elapsed_ms: u64,
+    },
 }
 
 /// A rich tool record for the Tools tab log.
@@ -270,12 +276,18 @@ impl App {
                 self.working = false;
             }
 
-            TuiEvent::TokensUpdate { estimated, threshold } => {
+            TuiEvent::TokensUpdate {
+                estimated,
+                threshold,
+            } => {
                 self.estimated_tokens = estimated;
                 self.threshold = threshold;
             }
 
-            TuiEvent::ToolCallStart { name, input_preview } => {
+            TuiEvent::ToolCallStart {
+                name,
+                input_preview,
+            } => {
                 self.current_turn_tools
                     .push(ToolEntry::Start { name: name.clone() });
                 self.all_tool_records.push(ToolRecord {
@@ -362,11 +374,7 @@ fn scan_notes(tag_filter: Option<&str>) -> Vec<NoteEntry> {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 let note = parse_note(&content);
                 if let Some(filter) = tag_filter {
-                    if !note
-                        .tags
-                        .iter()
-                        .any(|t| t.eq_ignore_ascii_case(filter))
-                    {
+                    if !note.tags.iter().any(|t| t.eq_ignore_ascii_case(filter)) {
                         continue;
                     }
                 }
@@ -517,8 +525,14 @@ fn poll_ollama(url: &str) -> Result<Vec<OllamaModel>, String> {
             arr.iter()
                 .filter_map(|m| {
                     let name = m.get("name")?.as_str()?.to_string();
-                    let size_vram = m.get("size_vram").and_then(serde_json::Value::as_u64).unwrap_or(0);
-                    let size_disk = m.get("size_disk").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                    let size_vram = m
+                        .get("size_vram")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0);
+                    let size_disk = m
+                        .get("size_disk")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0);
                     let total = size_vram + size_disk;
                     let gpu_percent = if total > 0 {
                         ((size_vram as f64 / total as f64) * 100.0) as u8
@@ -633,8 +647,7 @@ fn run_loop(
         // Refresh HW tab (poll Ollama) every 10s when visible.
         if app.active_tab == TAB_HW
             && (app.hw.needs_refresh
-                || now.duration_since(app.hw.last_refresh)
-                    >= Duration::from_secs(HW_REFRESH_SECS))
+                || now.duration_since(app.hw.last_refresh) >= Duration::from_secs(HW_REFRESH_SECS))
         {
             app.hw.needs_refresh = false;
             app.hw.last_refresh = now;
@@ -732,9 +745,7 @@ fn run_loop(
                 }
                 app.notes.body_scroll = 0;
             }
-            (KeyCode::Char('f'), _)
-                if app.active_tab == TAB_NOTES && app.input.is_empty() =>
-            {
+            (KeyCode::Char('f'), _) if app.active_tab == TAB_NOTES && app.input.is_empty() => {
                 app.notes.filter_editing = true;
                 app.notes.filter_input.clear();
             }
@@ -756,9 +767,7 @@ fn run_loop(
                     app.todos.selected += 1;
                 }
             }
-            (KeyCode::Char(' '), _)
-                if app.active_tab == TAB_TODOS && app.input.is_empty() =>
-            {
+            (KeyCode::Char(' '), _) if app.active_tab == TAB_TODOS && app.input.is_empty() => {
                 if let Some(item) = app.todos.items.get_mut(app.todos.selected) {
                     item.done = !item.done;
                     item.completed_at = if item.done {
@@ -770,9 +779,7 @@ fn run_loop(
                 }
             }
             (KeyCode::Enter, _)
-                if app.active_tab == TAB_TODOS
-                    && app.input.is_empty()
-                    && !app.working =>
+                if app.active_tab == TAB_TODOS && app.input.is_empty() && !app.working =>
             {
                 if let Some(item) = app.todos.items.get_mut(app.todos.selected) {
                     item.done = !item.done;
@@ -789,13 +796,17 @@ fn run_loop(
             (KeyCode::PageUp, _) => match app.active_tab {
                 TAB_CHAT => app.chat_scroll = app.chat_scroll.saturating_add(PAGE_LINES),
                 TAB_TOOLS => app.tools_scroll = app.tools_scroll.saturating_add(PAGE_LINES),
-                TAB_NOTES => app.notes.body_scroll = app.notes.body_scroll.saturating_add(PAGE_LINES),
+                TAB_NOTES => {
+                    app.notes.body_scroll = app.notes.body_scroll.saturating_add(PAGE_LINES);
+                }
                 _ => {}
             },
             (KeyCode::PageDown, _) => match app.active_tab {
                 TAB_CHAT => app.chat_scroll = app.chat_scroll.saturating_sub(PAGE_LINES),
                 TAB_TOOLS => app.tools_scroll = app.tools_scroll.saturating_sub(PAGE_LINES),
-                TAB_NOTES => app.notes.body_scroll = app.notes.body_scroll.saturating_sub(PAGE_LINES),
+                TAB_NOTES => {
+                    app.notes.body_scroll = app.notes.body_scroll.saturating_sub(PAGE_LINES);
+                }
                 _ => {}
             },
             (KeyCode::End, _) => match app.active_tab {
@@ -881,9 +892,7 @@ fn render_title(f: &mut Frame, area: Rect, app: &App) {
         .fg(Color::Black)
         .bg(Color::Yellow)
         .add_modifier(Modifier::BOLD);
-    let inactive_style = Style::default()
-        .fg(Color::White)
-        .bg(Color::DarkGray);
+    let inactive_style = Style::default().fg(Color::White).bg(Color::DarkGray);
     // Brand badge: inverse red block — visual anchor top-left.
     let brand_style = Style::default()
         .fg(Color::Black)
@@ -910,8 +919,7 @@ fn render_title(f: &mut Frame, area: Rect, app: &App) {
         ));
     }
 
-    let title = Paragraph::new(Line::from(spans))
-        .style(Style::default().bg(Color::DarkGray));
+    let title = Paragraph::new(Line::from(spans)).style(Style::default().bg(Color::DarkGray));
     f.render_widget(title, area);
 }
 
@@ -1021,11 +1029,7 @@ fn wrapped_row_count(lines: &[Line<'_>], inner_width: u16) -> u16 {
     let w = inner_width.max(1) as usize;
     let mut total: u32 = 0;
     for line in lines {
-        let visual: usize = line
-            .spans
-            .iter()
-            .map(|s| s.content.chars().count())
-            .sum();
+        let visual: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
         let rows = visual.div_ceil(w).max(1);
         total = total.saturating_add(rows as u32);
     }
@@ -1059,8 +1063,7 @@ fn render_tool_sidebar(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let para = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(" Tools "));
+    let para = Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" Tools "));
     f.render_widget(para, area);
 }
 
@@ -1334,8 +1337,16 @@ fn render_hw_tab(f: &mut Frame, app: &App, area: Rect) {
         ("●", Color::Red, "Offline")
     };
     lines.push(Line::from(vec![
-        Span::styled("  Ollama  ", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-        Span::styled(format!("{dot} {status_text}"), Style::default().fg(dot_color)),
+        Span::styled(
+            "  Ollama  ",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("{dot} {status_text}"),
+            Style::default().fg(dot_color),
+        ),
         Span::styled(
             format!("                       {}", hw.ollama_url),
             Style::default().fg(Color::DarkGray),
@@ -1375,13 +1386,14 @@ fn render_hw_tab(f: &mut Frame, app: &App, area: Rect) {
                 Color::Red
             };
             const MINI_BAR: usize = 8;
-            let mini_filled =
-                (m.gpu_percent as usize * MINI_BAR / 100).min(MINI_BAR);
+            let mini_filled = (m.gpu_percent as usize * MINI_BAR / 100).min(MINI_BAR);
             let mini_empty = MINI_BAR - mini_filled;
             lines.push(Line::from(vec![
                 Span::styled(
                     format!("    {:<24}", m.name),
-                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     format!("{} VRAM", format_bytes(m.size_vram)),
@@ -1433,11 +1445,7 @@ fn render_hw_tab(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("█".repeat(filled), Style::default().fg(bar_color)),
         Span::styled("░".repeat(empty), Style::default().fg(Color::DarkGray)),
         Span::styled(
-            format!(
-                "  {} / {:.1} GB",
-                format_bytes(used_vram),
-                hw.total_vram_gb,
-            ),
+            format!("  {} / {:.1} GB", format_bytes(used_vram), hw.total_vram_gb,),
             Style::default().fg(Color::White),
         ),
         Span::styled(
@@ -1448,17 +1456,15 @@ fn render_hw_tab(f: &mut Frame, app: &App, area: Rect) {
     lines.push(Line::from(Span::raw("")));
 
     // ── Refresh info ──────────────────────────────────────────────────────
-    let elapsed = Instant::now()
-        .duration_since(hw.last_refresh)
-        .as_secs();
+    let elapsed = Instant::now().duration_since(hw.last_refresh).as_secs();
     let next_in = HW_REFRESH_SECS.saturating_sub(elapsed);
     lines.push(Line::from(Span::styled(
         format!("  Auto-refresh: every {HW_REFRESH_SECS}s  │  Next in {next_in}s"),
         Style::default().fg(Color::DarkGray),
     )));
 
-    let para = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).title(" Hardware "));
+    let para =
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(" Hardware "));
     f.render_widget(para, area);
 }
 
@@ -1513,10 +1519,7 @@ fn render_status(f: &mut Frame, app: &App, area: Rect) {
 
     let bg = Style::default().bg(Color::DarkGray);
     // Separator: light-gray glyph on darkgray — visible without grabbing focus.
-    let sep = Span::styled(
-        " │ ",
-        Style::default().fg(Color::Gray).bg(Color::DarkGray),
-    );
+    let sep = Span::styled(" │ ", Style::default().fg(Color::Gray).bg(Color::DarkGray));
     // Hints: white on darkgray so they stay readable at terminal contrast.
     let hint = Style::default().fg(Color::White).bg(Color::DarkGray);
 
@@ -1655,11 +1658,7 @@ mod tests {
 
     #[test]
     fn wrapped_row_count_short_lines_one_row_each() {
-        let lines = vec![
-            Line::from("hi"),
-            Line::from("world"),
-            Line::from(""),
-        ];
+        let lines = vec![Line::from("hi"), Line::from("world"), Line::from("")];
         assert_eq!(wrapped_row_count(&lines, 80), 3);
     }
 
@@ -1688,10 +1687,7 @@ mod tests {
     fn wrapped_row_count_sums_multi_span_width() {
         // Line with two spans of 30 chars each = 60 chars visual.
         // At width 40 → ceil(60/40) = 2 rows.
-        let line = Line::from(vec![
-            Span::raw("a".repeat(30)),
-            Span::raw("b".repeat(30)),
-        ]);
+        let line = Line::from(vec![Span::raw("a".repeat(30)), Span::raw("b".repeat(30))]);
         assert_eq!(wrapped_row_count(&[line], 40), 2);
     }
 }

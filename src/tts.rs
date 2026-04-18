@@ -44,10 +44,14 @@ fn synthesize_to_mp3(text: &str, lang: &str, out_path: &Path) -> Result<(), Stri
 
     let output = Command::new("python")
         .args([
-            "-m", "edge_tts",
-            "--voice", &voice,
-            "--text", text,
-            "--write-media", &out_path.to_string_lossy(),
+            "-m",
+            "edge_tts",
+            "--voice",
+            &voice,
+            "--text",
+            text,
+            "--write-media",
+            &out_path.to_string_lossy(),
         ])
         .output()
         .map_err(|e| format!("tts: edge-tts failed to start: {e}"))?;
@@ -70,15 +74,17 @@ fn synthesize_to_mp3(text: &str, lang: &str, out_path: &Path) -> Result<(), Stri
 
 /// Convert an MP3 to OGG/OPUS for Telegram's `sendVoice` API.
 fn mp3_to_ogg(mp3_path: &Path, ogg_path: &Path) -> Result<(), String> {
-    let ffmpeg = std::env::var("CLAUDETTE_FFMPEG_BIN")
-        .unwrap_or_else(|_| "ffmpeg".to_string());
+    let ffmpeg = std::env::var("CLAUDETTE_FFMPEG_BIN").unwrap_or_else(|_| "ffmpeg".to_string());
 
     let output = Command::new(&ffmpeg)
         .args([
             "-y",
-            "-i", &mp3_path.to_string_lossy(),
-            "-c:a", "libopus",
-            "-b:a", "64k",
+            "-i",
+            &mp3_path.to_string_lossy(),
+            "-c:a",
+            "libopus",
+            "-b:a",
+            "64k",
             &ogg_path.to_string_lossy(),
         ])
         .output()
@@ -187,8 +193,8 @@ pub fn send_voice_message(
     chat_id: i64,
     ogg_path: &Path,
 ) -> Result<(), String> {
-    let file_bytes = std::fs::read(ogg_path)
-        .map_err(|e| format!("tts: reading ogg failed: {e}"))?;
+    let file_bytes =
+        std::fs::read(ogg_path).map_err(|e| format!("tts: reading ogg failed: {e}"))?;
 
     let form = reqwest::blocking::multipart::Form::new()
         .text("chat_id", chat_id.to_string())

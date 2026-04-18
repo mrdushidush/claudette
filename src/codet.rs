@@ -23,7 +23,9 @@
 
 use std::path::Path;
 
-use crate::{ApiClient, ApiRequest, AssistantEvent, ContentBlock, ConversationMessage, MessageRole};
+use crate::{
+    ApiClient, ApiRequest, AssistantEvent, ContentBlock, ConversationMessage, MessageRole,
+};
 use serde_json::json;
 
 use crate::api::OllamaApiClient;
@@ -305,7 +307,13 @@ fn validate_rust(path: &Path, references: &[ReferenceFile]) -> CodetResult {
     if !syntax.success {
         let content = std::fs::read_to_string(path).unwrap_or_default();
         let error_msg = format!("{}\n{}", syntax.stdout, syntax.stderr);
-        match try_fix_loop(path, &content, &error_msg, FixTarget::RustSyntax, references) {
+        match try_fix_loop(
+            path,
+            &content,
+            &error_msg,
+            FixTarget::RustSyntax,
+            references,
+        ) {
             FixLoopOutcome::Fixed { description } => {
                 fixes_applied += 1;
                 fix_descriptions.push(description);
@@ -551,8 +559,7 @@ fn try_fix_loop(
             FixTarget::Tests => {
                 let recheck = run_python_unittest(path);
                 recheck.all_passed
-                    || (recheck.failed + recheck.errors)
-                        < (count_failures_from_error(&last_error))
+                    || (recheck.failed + recheck.errors) < (count_failures_from_error(&last_error))
             }
         };
 
@@ -718,7 +725,10 @@ pub fn generate_code(
     eprintln!(
         "  {} {}",
         crate::theme::dim("▸"),
-        crate::theme::dim(&format!("codet: generated {} chars of {language}", code.len())),
+        crate::theme::dim(&format!(
+            "codet: generated {} chars of {language}",
+            code.len()
+        )),
     );
 
     let code = strip_code_blocks(&code);
@@ -1001,12 +1011,7 @@ fn find_unique(haystack: &str, needle: &str) -> Option<usize> {
 /// normalizing trailing whitespace on each line. Returns (start, end) byte
 /// offsets in the ORIGINAL haystack. Requires a unique match.
 fn fuzzy_find(haystack: &str, needle: &str) -> Option<(usize, usize)> {
-    let norm = |s: &str| -> String {
-        s.lines()
-            .map(str::trim_end)
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
+    let norm = |s: &str| -> String { s.lines().map(str::trim_end).collect::<Vec<_>>().join("\n") };
     let normalized_haystack = norm(haystack);
     let normalized_needle = norm(needle);
     if normalized_needle.is_empty() {
@@ -1129,10 +1134,7 @@ mod tests {
     #[test]
     fn strip_code_blocks_removes_python_fence() {
         let input = "```python\ndef greet():\n    return 'hi'\n```";
-        assert_eq!(
-            strip_code_blocks(input),
-            "def greet():\n    return 'hi'"
-        );
+        assert_eq!(strip_code_blocks(input), "def greet():\n    return 'hi'");
     }
 
     #[test]
@@ -1156,10 +1158,7 @@ mod tests {
     #[test]
     fn strip_code_blocks_extracts_from_text_before_fence() {
         let input = "Here's the corrected code:\n```python\ndef greet():\n    return 'hi'\n```\n";
-        assert_eq!(
-            strip_code_blocks(input),
-            "def greet():\n    return 'hi'"
-        );
+        assert_eq!(strip_code_blocks(input), "def greet():\n    return 'hi'");
     }
 
     #[test]
@@ -1168,7 +1167,8 @@ mod tests {
         // prose + fences are ignored. (The old concatenating behavior was
         // replaced by line-start-only matching to avoid eating code-internal
         // triple backticks.)
-        let input = "```bash\n#!/bin/bash\necho hello\n```\n\n# Test cases\n\n```bash\necho test\n```";
+        let input =
+            "```bash\n#!/bin/bash\necho hello\n```\n\n# Test cases\n\n```bash\necho test\n```";
         assert_eq!(strip_code_blocks(input), "#!/bin/bash\necho hello");
     }
 
@@ -1272,8 +1272,7 @@ mod tests {
 
     #[test]
     fn parse_tolerates_surrounding_prose() {
-        let input =
-            "Here is the fix:\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\nDone.";
+        let input = "Here is the fix:\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\nDone.";
         let patches = parse_search_replace_blocks(input);
         assert_eq!(patches.len(), 1);
         assert_eq!(patches[0].search, "old");

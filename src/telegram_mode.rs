@@ -10,14 +10,11 @@
 
 use std::time::Duration;
 
-use anyhow::{Context, Result};
 use crate::{ContentBlock, Session};
+use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
-use crate::run::{
-    build_runtime_streaming, maybe_compact_session, save_session,
-    try_load_session,
-};
+use crate::run::{build_runtime_streaming, maybe_compact_session, save_session, try_load_session};
 use crate::secrets::{read_secret, save_chat_id};
 use crate::theme;
 use crate::tts;
@@ -68,10 +65,7 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
         eprintln!(
             "{} {}",
             theme::SPARKLES,
-            theme::dim(&format!(
-                "serving chat IDs: {:?}",
-                allowed_chat_ids
-            ))
+            theme::dim(&format!("serving chat IDs: {:?}", allowed_chat_ids))
         );
     }
 
@@ -112,10 +106,7 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
                 eprintln!(
                     "{} {}",
                     theme::SAVE,
-                    theme::ok(&format!(
-                        "resumed session ({} messages)",
-                        s.messages.len()
-                    ))
+                    theme::ok(&format!("resumed session ({} messages)", s.messages.len()))
                 );
                 s
             }
@@ -150,10 +141,7 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
         match poll_updates(&http, &base_url, last_update_id + 1) {
             Ok(updates) => {
                 for update in updates {
-                    let update_id = update
-                        .get("update_id")
-                        .and_then(Value::as_i64)
-                        .unwrap_or(0);
+                    let update_id = update.get("update_id").and_then(Value::as_i64).unwrap_or(0);
                     if update_id > last_update_id {
                         last_update_id = update_id;
                     }
@@ -198,8 +186,12 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
                             theme::accent(from),
                             theme::dim("[voice message]")
                         );
-                        match voice::transcribe_telegram_voice(&http, &base_url, file_id, &voice_lang)
-                        {
+                        match voice::transcribe_telegram_voice(
+                            &http,
+                            &base_url,
+                            file_id,
+                            &voice_lang,
+                        ) {
                             Ok(transcript) => {
                                 eprintln!(
                                     "  {} {}",
@@ -256,24 +248,20 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
                                  Send me any message and I'll help you out."
                                     .to_string(),
                             ),
-                            "/compact" => {
-                                match maybe_compact_session(&mut runtime, true) {
-                                    Some(removed) => {
-                                        let _ = save_session(runtime.session());
-                                        Some(format!("Compacted {removed} older messages."))
-                                    }
-                                    None => Some("Nothing to compact yet.".to_string()),
+                            "/compact" => match maybe_compact_session(&mut runtime, true) {
+                                Some(removed) => {
+                                    let _ = save_session(runtime.session());
+                                    Some(format!("Compacted {removed} older messages."))
                                 }
-                            }
+                                None => Some("Nothing to compact yet.".to_string()),
+                            },
                             "/clear" => {
-                                runtime =
-                                    build_runtime_streaming(Session::default(), true);
+                                runtime = build_runtime_streaming(Session::default(), true);
                                 Some("Session cleared.".to_string())
                             }
                             "/status" => {
                                 let msgs = runtime.session().messages.len();
-                                let est =
-                                    crate::estimate_session_tokens(runtime.session());
+                                let est = crate::estimate_session_tokens(runtime.session());
                                 Some(format!(
                                     "Messages: {msgs}\nEstimated tokens: {est}\n\
                                      Compact threshold: {}",
@@ -282,11 +270,17 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
                             }
                             "/voice" => {
                                 if !tts_available {
-                                    Some("Voice output unavailable — run: pip install edge-tts".to_string())
+                                    Some(
+                                        "Voice output unavailable — run: pip install edge-tts"
+                                            .to_string(),
+                                    )
                                 } else {
                                     tts_enabled = !tts_enabled;
                                     if tts_enabled {
-                                        Some(format!("Voice output ON ({})", tts::voice_for_lang(&voice_lang)))
+                                        Some(format!(
+                                            "Voice output ON ({})",
+                                            tts::voice_for_lang(&voice_lang)
+                                        ))
                                     } else {
                                         Some("Voice output OFF.".to_string())
                                     }
@@ -345,16 +339,12 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
                                     summary.usage.input_tokens,
                                     summary.usage.output_tokens,
                                 )),
-                                theme::dim(
-                                    &response.chars().take(80).collect::<String>()
-                                )
+                                theme::dim(&response.chars().take(80).collect::<String>())
                             );
 
                             // Send text response (split if too long).
                             for chunk in split_message(&response, TG_MAX_MESSAGE_LEN) {
-                                if let Err(e) =
-                                    send_message(&http, &base_url, chat_id, chunk)
-                                {
+                                if let Err(e) = send_message(&http, &base_url, chat_id, chunk) {
                                     eprintln!(
                                         "  {} {}",
                                         theme::error(theme::ERR_GLYPH),
@@ -523,9 +513,7 @@ fn split_message(text: &str, max_len: usize) -> Vec<&str> {
             break;
         }
         // Try to split at a newline boundary.
-        let split_at = remaining[..max_len]
-            .rfind('\n')
-            .unwrap_or(max_len);
+        let split_at = remaining[..max_len].rfind('\n').unwrap_or(max_len);
         let (chunk, rest) = remaining.split_at(split_at);
         chunks.push(chunk);
         remaining = rest.trim_start_matches('\n');

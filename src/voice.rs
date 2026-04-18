@@ -40,11 +40,7 @@ pub fn download_telegram_voice(
     // Step 2: download the actual file.
     // Telegram file URL: https://api.telegram.org/file/bot<token>/<file_path>
     // base_url is already "https://api.telegram.org/bot<token>"
-    let download_url = format!(
-        "{}/{}",
-        base_url.replace("/bot", "/file/bot"),
-        file_path
-    );
+    let download_url = format!("{}/{}", base_url.replace("/bot", "/file/bot"), file_path);
 
     let bytes = http
         .get(&download_url)
@@ -78,12 +74,15 @@ pub fn ogg_to_wav(ogg_path: &Path) -> Result<PathBuf, String> {
 
     let output = Command::new(&bin)
         .args([
-            "-y",              // overwrite
+            "-y", // overwrite
             "-i",
             &ogg_path.to_string_lossy(),
-            "-ar", "16000",    // 16 kHz sample rate
-            "-ac", "1",        // mono
-            "-c:a", "pcm_s16le",
+            "-ar",
+            "16000", // 16 kHz sample rate
+            "-ac",
+            "1", // mono
+            "-c:a",
+            "pcm_s16le",
             &wav_path.to_string_lossy(),
         ])
         .output()
@@ -150,8 +149,10 @@ pub fn transcribe_wav(wav_path: &Path, lang: &str) -> Result<String, String> {
     // English mode: detect source, translate to English.
     // Other modes: tell whisper what language to expect/output.
     let mut args: Vec<String> = vec![
-        "-m".into(), model.to_string_lossy().into_owned(),
-        "-f".into(), wav_path.to_string_lossy().into_owned(),
+        "-m".into(),
+        model.to_string_lossy().into_owned(),
+        "-f".into(),
+        wav_path.to_string_lossy().into_owned(),
         "--no-timestamps".into(),
         "--output-txt".into(),
     ];
@@ -164,15 +165,12 @@ pub fn transcribe_wav(wav_path: &Path, lang: &str) -> Result<String, String> {
         args.push(lang.to_string());
     }
 
-    let output = Command::new(&bin)
-        .args(&args)
-        .output()
-        .map_err(|e| {
-            format!(
-                "voice: whisper binary '{bin}' not found or failed to start: {e}. \
+    let output = Command::new(&bin).args(&args).output().map_err(|e| {
+        format!(
+            "voice: whisper binary '{bin}' not found or failed to start: {e}. \
                  Install whisper.cpp and set CLAUDETTE_WHISPER_BIN if not on PATH."
-            )
-        })?;
+        )
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -206,10 +204,9 @@ pub fn transcribe_wav(wav_path: &Path, lang: &str) -> Result<String, String> {
 /// Ollama auto-reloads on the next chat request, so this is safe. The
 /// cold-swap cost (~5-10s) is worth the 7x speedup from GPU whisper.
 fn unload_ollama_model() {
-    let host = std::env::var("OLLAMA_HOST")
-        .unwrap_or_else(|_| "http://localhost:11434".to_string());
-    let model = std::env::var("CLAUDETTE_MODEL")
-        .unwrap_or_else(|_| "qwen3:8b".to_string());
+    let host =
+        std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string());
+    let model = std::env::var("CLAUDETTE_MODEL").unwrap_or_else(|_| "qwen3:8b".to_string());
 
     // Best-effort: if Ollama isn't running or the request fails, whisper
     // will just run slower (CPU fallback).
@@ -350,10 +347,7 @@ mod tests {
     #[test]
     fn transcribe_wav_fails_without_model() {
         let prev = std::env::var("CLAUDETTE_WHISPER_MODEL").ok();
-        std::env::set_var(
-            "CLAUDETTE_WHISPER_MODEL",
-            "/nonexistent/path/model.bin",
-        );
+        std::env::set_var("CLAUDETTE_WHISPER_MODEL", "/nonexistent/path/model.bin");
 
         let result = transcribe_wav(Path::new("/tmp/test.wav"), "en");
         assert!(result.is_err());

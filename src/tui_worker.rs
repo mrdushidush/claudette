@@ -11,8 +11,8 @@ use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    compact_session, estimate_session_tokens, CompactionConfig, ContentBlock,
-    ConversationRuntime, Session,
+    compact_session, estimate_session_tokens, CompactionConfig, ContentBlock, ConversationRuntime,
+    Session,
 };
 
 use crate::api::{tui_text_callback, OllamaApiClient};
@@ -102,36 +102,34 @@ pub fn spawn_worker(
             match input {
                 UserInput::Quit => break,
 
-                UserInput::SlashCommand(cmd) => {
-                    match cmd.trim() {
-                        "clear" => {
-                            runtime = build_tui_runtime(Session::default(), tui_tx.clone());
-                            let _ = tui_tx.send(TuiEvent::SessionReset);
-                        }
-                        "compact" => {
-                            if let Some(removed) = maybe_compact(&mut runtime, &tui_tx) {
-                                let _ = tui_tx.send(TuiEvent::Compacted { removed });
-                            } else {
-                                let _ = tui_tx.send(TuiEvent::TurnError(
-                                    "Session is below compaction threshold — nothing to compact."
-                                        .to_string(),
-                                ));
-                            }
-                        }
-                        other => {
-                            let _ = tui_tx.send(TuiEvent::TurnError(format!(
-                                "Unknown command: /{other}  (available: /clear, /compact)"
-                            )));
+                UserInput::SlashCommand(cmd) => match cmd.trim() {
+                    "clear" => {
+                        runtime = build_tui_runtime(Session::default(), tui_tx.clone());
+                        let _ = tui_tx.send(TuiEvent::SessionReset);
+                    }
+                    "compact" => {
+                        if let Some(removed) = maybe_compact(&mut runtime, &tui_tx) {
+                            let _ = tui_tx.send(TuiEvent::Compacted { removed });
+                        } else {
+                            let _ = tui_tx.send(TuiEvent::TurnError(
+                                "Session is below compaction threshold — nothing to compact."
+                                    .to_string(),
+                            ));
                         }
                     }
-                }
+                    other => {
+                        let _ = tui_tx.send(TuiEvent::TurnError(format!(
+                            "Unknown command: /{other}  (available: /clear, /compact)"
+                        )));
+                    }
+                },
 
                 UserInput::Message(text) => {
                     let _ = tui_tx.send(TuiEvent::Working(true));
 
-                    crate::tools::set_current_turn_paths(
-                        crate::tools::extract_user_prompt_paths(&text),
-                    );
+                    crate::tools::set_current_turn_paths(crate::tools::extract_user_prompt_paths(
+                        &text,
+                    ));
                     match runtime.run_turn(&text, None) {
                         Ok(summary) => {
                             // Extract the last assistant text block.
