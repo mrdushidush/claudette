@@ -1,0 +1,18 @@
+# Enforce LF line endings for text files inside the repo; Git will keep
+# per-OS line endings in working directories (autocrlf behaviour).
+* text=auto eol=lf
+
+*.rs      text eol=lf diff=rust
+*.toml    text eol=lf
+*.md      text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.sh      text eol=lf
+*.json    text eol=lf
+
+# Binary-ish — don't touch
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.gguf binary
+*.bin  binary
