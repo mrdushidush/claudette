@@ -206,14 +206,19 @@ OLLAMA_KV_CACHE_TYPE=q8_0     # quantised KV cache
 /compact             Force context compaction now.
 /clear               Reset to a fresh session.
 /capabilities        Full configuration dump.
-/voice               Toggle voice output in Telegram mode.
-/lang he|en          Switch voice transcription / TTS language.
 /exit                Leave the REPL.
 ```
 
 ### Telegram-mode slash commands
 
-The subset `/help`, `/status`, `/compact`, `/clear`, `/voice`, `/lang`, `/save`, `/load` works identically inside Telegram chats. `/exit` and the destructive DangerFullAccess commands are blocked.
+A subset of the REPL commands works identically inside Telegram chats: `/help`, `/status`, `/compact`, `/clear`, `/save`, `/load`. `/exit` and the destructive DangerFullAccess commands are blocked.
+
+Two additional commands are **Telegram-only** (they have no effect in the REPL or TUI):
+
+```
+/voice               Toggle voice output (edge-tts on / off).
+/lang he|en          Switch voice transcription + TTS language.
+```
 
 ---
 
