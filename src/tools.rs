@@ -2107,8 +2107,9 @@ fn run_write_file(input: &str) -> Result<String, String> {
                 "{} {}",
                 crate::theme::warn(crate::theme::WARN_GLYPH),
                 crate::theme::warn(&format!(
-                    "codet: {} failed validation after {} fix attempt(s) — {}",
+                    "codet: {} failed validation after {} attempt(s), {} landed — {}",
                     path.display(),
+                    validation.attempts_made,
                     validation.fixes_applied,
                     short_err,
                 ))
@@ -2732,8 +2733,9 @@ fn run_edit_file(input: &str) -> Result<String, String> {
                 "{} {}",
                 crate::theme::warn(crate::theme::WARN_GLYPH),
                 crate::theme::warn(&format!(
-                    "codet: {} failed validation after {} fix attempt(s) — {}",
+                    "codet: {} failed validation after {} attempt(s), {} landed — {}",
                     path.display(),
+                    validation.attempts_made,
                     validation.fixes_applied,
                     short_err,
                 ))
@@ -2837,8 +2839,9 @@ fn run_generate_code(input: &str) -> Result<String, String> {
                 "{} {}",
                 crate::theme::warn(crate::theme::WARN_GLYPH),
                 crate::theme::warn(&format!(
-                    "codet: {} failed validation after {} fix attempt(s) — {}",
+                    "codet: {} failed validation after {} attempt(s), {} landed — {}",
                     path.display(),
+                    validation.attempts_made,
                     validation.fixes_applied,
                     short_err,
                 ))

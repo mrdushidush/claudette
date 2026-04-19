@@ -30,8 +30,8 @@ use serde_json::json;
 
 use crate::api::OllamaApiClient;
 use crate::test_runner::{
-    has_python_tests, has_rust_tests, run_js_syntax_check, run_python_syntax_check,
-    run_python_unittest, run_rust_syntax_check, run_ts_syntax_check,
+    check_python_imports, has_python_tests, has_rust_tests, run_js_syntax_check,
+    run_python_syntax_check, run_python_unittest, run_rust_syntax_check, run_ts_syntax_check,
 };
 
 // Coder defaults now live in `model_config::ModelConfig::from_preset`.
@@ -50,7 +50,7 @@ fn coder_num_predict() -> u32 {
 
 /// Maximum fix iterations before Codet gives up and reports
 /// `CodetStatus::CouldNotFix`.
-const MAX_FIX_ATTEMPTS: usize = 3;
+const MAX_FIX_ATTEMPTS: u32 = 3;
 
 /// Resolve the coder model name. Sprint 14: reads from
 /// `model_config::active().coder.model`, which itself merges the
@@ -84,7 +84,13 @@ pub struct CodetResult {
     pub tests_passed: u32,
     pub tests_failed: u32,
     pub tests_errors: u32,
+    /// Number of fix attempts that actually **landed** — i.e. produced an
+    /// improved re-check. Always ≤ `attempts_made`.
     pub fixes_applied: u32,
+    /// Number of fix attempts **tried**, whether or not they landed.
+    /// Useful for diagnosing a `CouldNotFix` outcome: "0 landed after 3
+    /// attempts" reads very differently from "0 landed after 0 attempts."
+    pub attempts_made: u32,
     pub fix_summary: String,
     pub status: CodetStatus,
 }
@@ -147,6 +153,7 @@ impl CodetResult {
             "tests_passed": self.tests_passed,
             "tests_failed": self.tests_failed,
             "fixes_applied": self.fixes_applied,
+            "attempts_made": self.attempts_made,
             "fix_summary": self.fix_summary,
             "status": match &self.status {
                 CodetStatus::AllPassed => "all_passed".to_string(),
@@ -186,6 +193,7 @@ pub fn validate_code_file(path: &Path, references: &[ReferenceFile]) -> Option<C
 
 fn validate_python(path: &Path, references: &[ReferenceFile]) -> CodetResult {
     let mut fixes_applied: u32 = 0;
+    let mut attempts_made: u32 = 0;
     let mut fix_descriptions: Vec<String> = Vec::new();
 
     // ── Step 1: Syntax check ────────────────────────────────────────────
@@ -195,11 +203,19 @@ fn validate_python(path: &Path, references: &[ReferenceFile]) -> CodetResult {
         let content = std::fs::read_to_string(path).unwrap_or_default();
         let error_msg = format!("{}\n{}", syntax.stdout, syntax.stderr);
         match try_fix_loop(path, &content, &error_msg, FixTarget::Syntax, references) {
-            FixLoopOutcome::Fixed { description } => {
+            FixLoopOutcome::Fixed {
+                description,
+                attempts_tried,
+            } => {
                 fixes_applied += 1;
+                attempts_made += attempts_tried;
                 fix_descriptions.push(description);
             }
-            FixLoopOutcome::GaveUp { last_error } => {
+            FixLoopOutcome::GaveUp {
+                last_error,
+                attempts_tried,
+            } => {
+                attempts_made += attempts_tried;
                 return CodetResult {
                     syntax_ok: false,
                     tests_found: false,
@@ -207,6 +223,7 @@ fn validate_python(path: &Path, references: &[ReferenceFile]) -> CodetResult {
                     tests_failed: 0,
                     tests_errors: 0,
                     fixes_applied,
+                    attempts_made,
                     fix_summary: fix_descriptions.join("; "),
                     status: CodetStatus::CouldNotFix { last_error },
                 };
@@ -224,11 +241,40 @@ fn validate_python(path: &Path, references: &[ReferenceFile]) -> CodetResult {
             tests_failed: 0,
             tests_errors: 0,
             fixes_applied,
+            attempts_made,
             fix_summary: fix_descriptions.join("; "),
             status: if fixes_applied > 0 {
                 CodetStatus::FixedAll
             } else {
                 CodetStatus::AllPassed
+            },
+        };
+    }
+
+    // ── Step 2.5: Import pre-flight ─────────────────────────────────────
+    // `python -m unittest` wraps ImportError-at-load as a `_FailedTest`,
+    // which looks like a test failure but is actually an environment
+    // problem (missing package). The fix loop cannot repair it — the
+    // coder keeps returning near-identical code because the code isn't
+    // wrong. Detect missing packages up front and bail out with a clean
+    // message instead of burning 3 regen attempts.
+    let imports = check_python_imports(path);
+    if !imports.missing.is_empty() {
+        return CodetResult {
+            syntax_ok: true,
+            tests_found: true,
+            tests_passed: 0,
+            tests_failed: 0,
+            tests_errors: 0,
+            fixes_applied,
+            attempts_made,
+            fix_summary: fix_descriptions.join("; "),
+            status: CodetStatus::CouldNotFix {
+                last_error: format!(
+                    "cannot validate tests — Python package(s) not importable: {}. \
+                     Install them in the active Python environment and retry with /validate.",
+                    imports.missing.join(", "),
+                ),
             },
         };
     }
@@ -243,6 +289,7 @@ fn validate_python(path: &Path, references: &[ReferenceFile]) -> CodetResult {
             tests_failed: 0,
             tests_errors: 0,
             fixes_applied,
+            attempts_made,
             fix_summary: fix_descriptions.join("; "),
             status: if fixes_applied > 0 {
                 CodetStatus::FixedAll
@@ -260,8 +307,12 @@ fn validate_python(path: &Path, references: &[ReferenceFile]) -> CodetResult {
         FixTarget::Tests,
         references,
     ) {
-        FixLoopOutcome::Fixed { description } => {
+        FixLoopOutcome::Fixed {
+            description,
+            attempts_tried,
+        } => {
             fixes_applied += 1;
+            attempts_made += attempts_tried;
             fix_descriptions.push(description);
             // Re-read final test counts after the fix.
             let final_tests = run_python_unittest(path);
@@ -272,6 +323,7 @@ fn validate_python(path: &Path, references: &[ReferenceFile]) -> CodetResult {
                 tests_failed: final_tests.failed,
                 tests_errors: final_tests.errors,
                 fixes_applied,
+                attempts_made,
                 fix_summary: fix_descriptions.join("; "),
                 status: if final_tests.all_passed {
                     CodetStatus::FixedAll
@@ -282,16 +334,23 @@ fn validate_python(path: &Path, references: &[ReferenceFile]) -> CodetResult {
                 },
             }
         }
-        FixLoopOutcome::GaveUp { last_error } => CodetResult {
-            syntax_ok: true,
-            tests_found: true,
-            tests_passed: test_result.passed,
-            tests_failed: test_result.failed,
-            tests_errors: test_result.errors,
-            fixes_applied,
-            fix_summary: fix_descriptions.join("; "),
-            status: CodetStatus::CouldNotFix { last_error },
-        },
+        FixLoopOutcome::GaveUp {
+            last_error,
+            attempts_tried,
+        } => {
+            attempts_made += attempts_tried;
+            CodetResult {
+                syntax_ok: true,
+                tests_found: true,
+                tests_passed: test_result.passed,
+                tests_failed: test_result.failed,
+                tests_errors: test_result.errors,
+                fixes_applied,
+                attempts_made,
+                fix_summary: fix_descriptions.join("; "),
+                status: CodetStatus::CouldNotFix { last_error },
+            }
+        }
     }
 }
 
@@ -301,6 +360,7 @@ fn validate_python(path: &Path, references: &[ReferenceFile]) -> CodetResult {
 
 fn validate_rust(path: &Path, references: &[ReferenceFile]) -> CodetResult {
     let mut fixes_applied: u32 = 0;
+    let mut attempts_made: u32 = 0;
     let mut fix_descriptions: Vec<String> = Vec::new();
 
     let syntax = run_rust_syntax_check(path);
@@ -314,11 +374,19 @@ fn validate_rust(path: &Path, references: &[ReferenceFile]) -> CodetResult {
             FixTarget::RustSyntax,
             references,
         ) {
-            FixLoopOutcome::Fixed { description } => {
+            FixLoopOutcome::Fixed {
+                description,
+                attempts_tried,
+            } => {
                 fixes_applied += 1;
+                attempts_made += attempts_tried;
                 fix_descriptions.push(description);
             }
-            FixLoopOutcome::GaveUp { last_error } => {
+            FixLoopOutcome::GaveUp {
+                last_error,
+                attempts_tried,
+            } => {
+                attempts_made += attempts_tried;
                 return CodetResult {
                     syntax_ok: false,
                     tests_found: false,
@@ -326,6 +394,7 @@ fn validate_rust(path: &Path, references: &[ReferenceFile]) -> CodetResult {
                     tests_failed: 0,
                     tests_errors: 0,
                     fixes_applied,
+                    attempts_made,
                     fix_summary: fix_descriptions.join("; "),
                     status: CodetStatus::CouldNotFix { last_error },
                 };
@@ -341,6 +410,7 @@ fn validate_rust(path: &Path, references: &[ReferenceFile]) -> CodetResult {
         tests_failed: 0,
         tests_errors: 0,
         fixes_applied,
+        attempts_made,
         fix_summary: fix_descriptions.join("; "),
         status: if fixes_applied > 0 {
             CodetStatus::FixedAll
@@ -356,6 +426,7 @@ fn validate_rust(path: &Path, references: &[ReferenceFile]) -> CodetResult {
 
 fn validate_js(path: &Path, references: &[ReferenceFile]) -> CodetResult {
     let mut fixes_applied: u32 = 0;
+    let mut attempts_made: u32 = 0;
     let mut fix_descriptions: Vec<String> = Vec::new();
 
     let syntax = run_js_syntax_check(path);
@@ -363,11 +434,19 @@ fn validate_js(path: &Path, references: &[ReferenceFile]) -> CodetResult {
         let content = std::fs::read_to_string(path).unwrap_or_default();
         let error_msg = format!("{}\n{}", syntax.stdout, syntax.stderr);
         match try_fix_loop(path, &content, &error_msg, FixTarget::JsSyntax, references) {
-            FixLoopOutcome::Fixed { description } => {
+            FixLoopOutcome::Fixed {
+                description,
+                attempts_tried,
+            } => {
                 fixes_applied += 1;
+                attempts_made += attempts_tried;
                 fix_descriptions.push(description);
             }
-            FixLoopOutcome::GaveUp { last_error } => {
+            FixLoopOutcome::GaveUp {
+                last_error,
+                attempts_tried,
+            } => {
+                attempts_made += attempts_tried;
                 return CodetResult {
                     syntax_ok: false,
                     tests_found: false,
@@ -375,6 +454,7 @@ fn validate_js(path: &Path, references: &[ReferenceFile]) -> CodetResult {
                     tests_failed: 0,
                     tests_errors: 0,
                     fixes_applied,
+                    attempts_made,
                     fix_summary: fix_descriptions.join("; "),
                     status: CodetStatus::CouldNotFix { last_error },
                 };
@@ -389,6 +469,7 @@ fn validate_js(path: &Path, references: &[ReferenceFile]) -> CodetResult {
         tests_failed: 0,
         tests_errors: 0,
         fixes_applied,
+        attempts_made,
         fix_summary: fix_descriptions.join("; "),
         status: if fixes_applied > 0 {
             CodetStatus::FixedAll
@@ -404,6 +485,7 @@ fn validate_js(path: &Path, references: &[ReferenceFile]) -> CodetResult {
 
 fn validate_ts(path: &Path, references: &[ReferenceFile]) -> CodetResult {
     let mut fixes_applied: u32 = 0;
+    let mut attempts_made: u32 = 0;
     let mut fix_descriptions: Vec<String> = Vec::new();
 
     let syntax = run_ts_syntax_check(path);
@@ -421,6 +503,7 @@ fn validate_ts(path: &Path, references: &[ReferenceFile]) -> CodetResult {
                 tests_failed: 0,
                 tests_errors: 0,
                 fixes_applied: 0,
+                attempts_made: 0,
                 fix_summary: "tsc not available, syntax check skipped".to_string(),
                 status: CodetStatus::Skipped,
             };
@@ -429,11 +512,19 @@ fn validate_ts(path: &Path, references: &[ReferenceFile]) -> CodetResult {
         let content = std::fs::read_to_string(path).unwrap_or_default();
         let error_msg = format!("{}\n{}", syntax.stdout, syntax.stderr);
         match try_fix_loop(path, &content, &error_msg, FixTarget::TsSyntax, references) {
-            FixLoopOutcome::Fixed { description } => {
+            FixLoopOutcome::Fixed {
+                description,
+                attempts_tried,
+            } => {
                 fixes_applied += 1;
+                attempts_made += attempts_tried;
                 fix_descriptions.push(description);
             }
-            FixLoopOutcome::GaveUp { last_error } => {
+            FixLoopOutcome::GaveUp {
+                last_error,
+                attempts_tried,
+            } => {
+                attempts_made += attempts_tried;
                 return CodetResult {
                     syntax_ok: false,
                     tests_found: false,
@@ -441,6 +532,7 @@ fn validate_ts(path: &Path, references: &[ReferenceFile]) -> CodetResult {
                     tests_failed: 0,
                     tests_errors: 0,
                     fixes_applied,
+                    attempts_made,
                     fix_summary: fix_descriptions.join("; "),
                     status: CodetStatus::CouldNotFix { last_error },
                 };
@@ -455,6 +547,7 @@ fn validate_ts(path: &Path, references: &[ReferenceFile]) -> CodetResult {
         tests_failed: 0,
         tests_errors: 0,
         fixes_applied,
+        attempts_made,
         fix_summary: fix_descriptions.join("; "),
         status: if fixes_applied > 0 {
             CodetStatus::FixedAll
@@ -478,8 +571,14 @@ enum FixTarget {
 }
 
 enum FixLoopOutcome {
-    Fixed { description: String },
-    GaveUp { last_error: String },
+    Fixed {
+        description: String,
+        attempts_tried: u32,
+    },
+    GaveUp {
+        last_error: String,
+        attempts_tried: u32,
+    },
 }
 
 /// A surgical search-replace patch: locate `search` verbatim in the file and
@@ -576,7 +675,10 @@ fn try_fix_loop(
                 crate::theme::ok(crate::theme::OK_GLYPH),
                 crate::theme::ok(&format!("codet: {desc}")),
             );
-            return FixLoopOutcome::Fixed { description: desc };
+            return FixLoopOutcome::Fixed {
+                description: desc,
+                attempts_tried: attempt + 1,
+            };
         }
         eprintln!(
             "  {} {}",
@@ -618,7 +720,10 @@ fn try_fix_loop(
 
     // Restore the original content — never leave a bad fix on disk.
     let _ = std::fs::write(path, original_content);
-    FixLoopOutcome::GaveUp { last_error }
+    FixLoopOutcome::GaveUp {
+        last_error,
+        attempts_tried: MAX_FIX_ATTEMPTS,
+    }
 }
 
 /// Quick heuristic to count how many failure lines exist in an error
@@ -1239,6 +1344,7 @@ mod tests {
             tests_failed: 1,
             tests_errors: 0,
             fixes_applied: 1,
+            attempts_made: 2,
             fix_summary: "fixed test_get_age".to_string(),
             status: CodetStatus::FixedAll,
         };
@@ -1247,6 +1353,7 @@ mod tests {
         assert_eq!(j["tests_passed"], 10);
         assert_eq!(j["tests_failed"], 1);
         assert_eq!(j["fixes_applied"], 1);
+        assert_eq!(j["attempts_made"], 2);
         assert!(j["status"].as_str().unwrap().contains("fixed_all"));
     }
 

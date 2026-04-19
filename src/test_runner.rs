@@ -247,6 +247,105 @@ pub fn has_python_tests(content: &str) -> bool {
         || content.contains("from unittest")
 }
 
+/// Outcome of a Python import pre-flight check. See [`check_python_imports`].
+#[derive(Debug, Clone)]
+pub struct ImportCheckResult {
+    /// Top-level module names referenced by the file that aren't importable.
+    /// Empty means either everything is importable or the check itself
+    /// couldn't run (see `check_error`).
+    pub missing: Vec<String>,
+    /// Non-empty when the check itself failed (no `python` on PATH, AST
+    /// parse error, etc.). Callers should treat this as "don't know —
+    /// fall through to the existing unittest path."
+    pub check_error: String,
+}
+
+/// Walk the AST of a Python file and try `__import__` on every top-level
+/// module it names. Returns modules that raise `ImportError`.
+///
+/// Used as a pre-flight before `run_python_unittest` so Codet can surface
+/// a clean "missing package X" message instead of burning a regen loop on
+/// a `unittest.loader._FailedTest` — which looks like a test failure but
+/// is actually an environment issue the coder cannot repair.
+///
+/// Skips relative imports (`from . import x`) and treats non-ImportError
+/// exceptions during `__import__` as "proceed anyway" — the goal is to
+/// catch the obvious "pip install missing" case, not every possible
+/// import-time problem.
+pub fn check_python_imports(path: &Path) -> ImportCheckResult {
+    const SCRIPT: &str = "\
+import sys, ast\n\
+if len(sys.argv) < 2:\n\
+    sys.exit(0)\n\
+try:\n\
+    with open(sys.argv[1], 'r', encoding='utf-8') as f:\n\
+        tree = ast.parse(f.read())\n\
+except Exception:\n\
+    sys.exit(0)\n\
+missing = []\n\
+seen = set()\n\
+def try_mod(mod):\n\
+    if mod in seen:\n\
+        return\n\
+    seen.add(mod)\n\
+    try:\n\
+        __import__(mod)\n\
+    except ImportError:\n\
+        missing.append(mod)\n\
+    except Exception:\n\
+        pass\n\
+for node in ast.walk(tree):\n\
+    if isinstance(node, ast.Import):\n\
+        for alias in node.names:\n\
+            try_mod(alias.name.split('.')[0])\n\
+    elif isinstance(node, ast.ImportFrom):\n\
+        if node.level == 0 and node.module:\n\
+            try_mod(node.module.split('.')[0])\n\
+if missing:\n\
+    print(','.join(missing))\n\
+    sys.exit(1)\n\
+sys.exit(0)\n";
+
+    let path_str = path.to_string_lossy();
+    let result = run_command_with_timeout(
+        "python",
+        &["-c", SCRIPT, &path_str],
+        DEFAULT_TIMEOUT_SECS,
+        None,
+    );
+
+    // Exit 0 — all imports resolve. Exit 1 with stdout — list of misses.
+    // Anything else (None exit code from spawn failure, non-zero without
+    // stdout, timeout) is "check failed, don't block unittest."
+    if result.success {
+        return ImportCheckResult {
+            missing: Vec::new(),
+            check_error: String::new(),
+        };
+    }
+    if result.exit_code == Some(1) && !result.stdout.trim().is_empty() {
+        let missing = result
+            .stdout
+            .trim()
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+        return ImportCheckResult {
+            missing,
+            check_error: String::new(),
+        };
+    }
+    ImportCheckResult {
+        missing: Vec::new(),
+        check_error: if result.timed_out {
+            "import check timed out".to_string()
+        } else {
+            format!("import check failed: {}", result.stderr.trim())
+        },
+    }
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Rust validation (Sprint 10)
 // ────────────────────────────────────────────────────────────────────────────
@@ -414,5 +513,66 @@ mod tests {
         assert!(!has_python_tests("def greet(): pass"));
         assert!(!has_python_tests("class User:\n    pass"));
         assert!(!has_python_tests("x = 42"));
+    }
+
+    // Import pre-flight.
+    // These tests spawn a real `python` process, so they're only meaningful
+    // when python is installed. If it isn't, `check_python_imports` returns
+    // a non-empty `check_error` and the tests assert only the fallback
+    // behavior (empty `missing` list, no crash).
+
+    fn write_temp_py(tag: &str, body: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("claudette-import-check-{tag}.py"));
+        std::fs::write(&path, body).expect("write temp file");
+        path
+    }
+
+    #[test]
+    fn check_python_imports_allows_stdlib_only() {
+        let path = write_temp_py(
+            "stdlib",
+            "import os\nimport sys\nfrom pathlib import Path\n",
+        );
+        let result = check_python_imports(&path);
+        let _ = std::fs::remove_file(&path);
+        if result.check_error.is_empty() {
+            assert!(
+                result.missing.is_empty(),
+                "stdlib imports should resolve, got missing: {:?}",
+                result.missing
+            );
+        }
+    }
+
+    #[test]
+    fn check_python_imports_flags_obvious_miss() {
+        let path = write_temp_py("miss", "import claudette_definitely_not_a_real_module\n");
+        let result = check_python_imports(&path);
+        let _ = std::fs::remove_file(&path);
+        if result.check_error.is_empty() {
+            assert_eq!(
+                result.missing,
+                vec!["claudette_definitely_not_a_real_module".to_string()],
+                "expected the bogus module name, got missing={:?}",
+                result.missing,
+            );
+        }
+    }
+
+    #[test]
+    fn check_python_imports_skips_relative_imports() {
+        // `from . import foo` must not be reported as missing — those are
+        // resolved by Python's package system at test time, not by
+        // __import__(name).
+        let path = write_temp_py("relative", "from . import sibling\nimport os\n");
+        let result = check_python_imports(&path);
+        let _ = std::fs::remove_file(&path);
+        if result.check_error.is_empty() {
+            assert!(
+                result.missing.is_empty(),
+                "relative imports should be skipped, got missing: {:?}",
+                result.missing,
+            );
+        }
     }
 }
