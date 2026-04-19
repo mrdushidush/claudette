@@ -18,7 +18,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::test_runner::run_command_with_timeout;
@@ -35,6 +34,7 @@ mod notes;
 mod registry;
 mod search;
 mod telegram;
+mod todos;
 mod web_search;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -55,76 +55,8 @@ pub fn secretary_tools_json() -> Value {
         },
         // Notes group (note_create, note_list, note_read, note_delete)
         // lives in src/tools/notes.rs and is appended to this array below.
-        {
-            "type": "function",
-            "function": {
-                "name": "todo_add",
-                "description": "Add a task to the todo list.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "text": { "type": "string", "description": "Task description" }
-                    },
-                    "required": ["text"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "todo_list",
-                "description": "List todos with their status and IDs. By default lists all; pass pending_only to hide completed.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "pending_only": { "type": "boolean", "description": "If true, hide completed todos (default false)" }
-                    },
-                    "required": []
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "todo_complete",
-                "description": "Mark a todo as done by its ID.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string", "description": "Todo ID from todo_list" }
-                    },
-                    "required": ["id"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "todo_uncomplete",
-                "description": "Un-mark a completed todo (set done back to false) by its ID.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string", "description": "Todo ID from todo_list" }
-                    },
-                    "required": ["id"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "todo_delete",
-                "description": "Delete a todo by its ID. This is irreversible.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string", "description": "Todo ID from todo_list" }
-                    },
-                    "required": ["id"]
-                }
-            }
-        },
+        // Todos group (todo_add, todo_list, todo_complete, todo_uncomplete,
+        // todo_delete) lives in src/tools/todos.rs and is appended below.
         // File ops group (read_file, write_file, list_dir) lives in
         // src/tools/file_ops.rs and is appended to this array below.
         {
@@ -236,6 +168,7 @@ pub fn secretary_tools_json() -> Value {
     tools.extend(registry::schemas());
     tools.extend(search::schemas());
     tools.extend(telegram::schemas());
+    tools.extend(todos::schemas());
     tools.extend(web_search::schemas());
     Value::Array(tools)
 }
@@ -278,6 +211,9 @@ pub fn dispatch_tool(name: &str, input: &str) -> Result<String, String> {
     if let Some(result) = telegram::dispatch(name, input) {
         return result;
     }
+    if let Some(result) = todos::dispatch(name, input) {
+        return result;
+    }
     if let Some(result) = web_search::dispatch(name, input) {
         return result;
     }
@@ -289,11 +225,8 @@ pub fn dispatch_tool(name: &str, input: &str) -> Result<String, String> {
         "add_numbers" => run_add_numbers(input),
         // Notes group (note_*) handled by the early-return above via
         // notes::dispatch.
-        "todo_add" => run_todo_add(input),
-        "todo_list" => run_todo_list(input),
-        "todo_complete" => run_todo_complete(input),
-        "todo_uncomplete" => run_todo_uncomplete(input),
-        "todo_delete" => run_todo_delete(input),
+        // Todos group (todo_*) handled by the early-return above via
+        // todos::dispatch.
         // File ops group (read_file, write_file, list_dir) handled by
         // the early-return above via file_ops::dispatch.
         "get_capabilities" => Ok(run_get_capabilities()),
@@ -391,10 +324,6 @@ pub(super) fn claudette_home() -> PathBuf {
     user_home().join(".claudette")
 }
 
-fn todos_path() -> PathBuf {
-    claudette_home().join("todos.json")
-}
-
 /// Scratch directory the secretary is allowed to write into.
 /// Sits next to notes/ and todos.json so it's clearly within the
 /// claudette data home and easy for the user to inspect or wipe.
@@ -407,185 +336,8 @@ pub(super) fn ensure_dir(path: &Path) -> Result<(), String> {
 }
 
 // Notes group (note_*) + the slugify helper live in src/tools/notes.rs.
-
-// ────────────────────────────────────────────────────────────────────────────
-// Todos (single todos.json file)
-// ────────────────────────────────────────────────────────────────────────────
-
-#[derive(Serialize, Deserialize, Clone)]
-struct Todo {
-    id: String,
-    text: String,
-    done: bool,
-    created_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    completed_at: Option<String>,
-}
-
-fn load_todos() -> Result<Vec<Todo>, String> {
-    let path = todos_path();
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let s = fs::read_to_string(&path).map_err(|e| format!("read todos: {e}"))?;
-    if s.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-    serde_json::from_str(&s).map_err(|e| format!("parse todos.json: {e}"))
-}
-
-fn save_todos(todos: &[Todo]) -> Result<(), String> {
-    ensure_dir(&claudette_home())?;
-    let s = serde_json::to_string_pretty(todos).map_err(|e| format!("serialize todos: {e}"))?;
-    fs::write(todos_path(), s).map_err(|e| format!("write todos: {e}"))
-}
-
-fn run_todo_add(input: &str) -> Result<String, String> {
-    let v: Value = serde_json::from_str(input)
-        .map_err(|e| format!("todo_add: invalid JSON ({e}): {input}"))?;
-    // Prefer "text"; accept "content" as a fallback for older prompts.
-    let text = v
-        .get("text")
-        .or_else(|| v.get("content"))
-        .and_then(Value::as_str)
-        .ok_or("todo_add: missing 'text'")?
-        .trim()
-        .to_string();
-    if text.is_empty() {
-        return Err("todo_add: 'text' cannot be empty".to_string());
-    }
-
-    let mut todos = load_todos()?;
-    let now = chrono::Local::now();
-    let id = format!("t_{}", now.timestamp_millis());
-    todos.push(Todo {
-        id: id.clone(),
-        text: text.clone(),
-        done: false,
-        created_at: now.to_rfc3339(),
-        completed_at: None,
-    });
-    save_todos(&todos)?;
-
-    Ok(json!({ "ok": true, "id": id, "text": text }).to_string())
-}
-
-fn run_todo_list(input: &str) -> Result<String, String> {
-    let v: Value = serde_json::from_str(input).unwrap_or(json!({}));
-    let pending_only = v
-        .get("pending_only")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-
-    let todos = load_todos()?;
-    let total = todos.len();
-    let pending = todos.iter().filter(|t| !t.done).count();
-    let view: Vec<Value> = todos
-        .iter()
-        .enumerate()
-        .filter(|(_, t)| !pending_only || !t.done)
-        .map(|(i, t)| {
-            let mut obj = json!({
-                "index": i + 1,
-                "id": t.id,
-                "text": t.text,
-                "done": t.done,
-                "created_at": t.created_at,
-            });
-            if let Some(ref c) = t.completed_at {
-                obj["completed_at"] = json!(c);
-            }
-            obj
-        })
-        .collect();
-    let mut result = json!({
-        "count": view.len(),
-        "total": total,
-        "pending": pending,
-        "todos": view,
-    });
-    if pending_only {
-        result["pending_only"] = json!(true);
-    }
-    Ok(result.to_string())
-}
-
-fn run_todo_complete(input: &str) -> Result<String, String> {
-    let v: Value = serde_json::from_str(input)
-        .map_err(|e| format!("todo_complete: invalid JSON ({e}): {input}"))?;
-    let id = v
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or("todo_complete: missing 'id'")?
-        .to_string();
-
-    let mut todos = load_todos()?;
-    let mut updated = None;
-    for t in &mut todos {
-        if t.id == id {
-            t.done = true;
-            t.completed_at = Some(chrono::Local::now().to_rfc3339());
-            updated = Some(t.text.clone());
-            break;
-        }
-    }
-    let text = updated.ok_or_else(|| format!("todo_complete: no todo with id '{id}'"))?;
-    save_todos(&todos)?;
-
-    Ok(json!({ "ok": true, "id": id, "text": text, "done": true }).to_string())
-}
-
-fn run_todo_uncomplete(input: &str) -> Result<String, String> {
-    let v: Value = serde_json::from_str(input)
-        .map_err(|e| format!("todo_uncomplete: invalid JSON ({e}): {input}"))?;
-    let id = v
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or("todo_uncomplete: missing 'id'")?
-        .to_string();
-
-    let mut todos = load_todos()?;
-    let mut updated = None;
-    for t in &mut todos {
-        if t.id == id {
-            t.done = false;
-            t.completed_at = None;
-            updated = Some(t.text.clone());
-            break;
-        }
-    }
-    let text = updated.ok_or_else(|| format!("todo_uncomplete: no todo with id '{id}'"))?;
-    save_todos(&todos)?;
-
-    Ok(json!({ "ok": true, "id": id, "text": text, "done": false }).to_string())
-}
-
-fn run_todo_delete(input: &str) -> Result<String, String> {
-    let v: Value = serde_json::from_str(input)
-        .map_err(|e| format!("todo_delete: invalid JSON ({e}): {input}"))?;
-    let id = v
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or("todo_delete: missing 'id'")?
-        .to_string();
-
-    let mut todos = load_todos()?;
-    let before = todos.len();
-    let removed_text = todos.iter().find(|t| t.id == id).map(|t| t.text.clone());
-    todos.retain(|t| t.id != id);
-    if todos.len() == before {
-        return Err(format!("todo_delete: no todo with id '{id}'"));
-    }
-    save_todos(&todos)?;
-
-    Ok(json!({
-        "ok": true,
-        "id": id,
-        "text": removed_text.unwrap_or_default(),
-        "deleted": true,
-    })
-    .to_string())
-}
+// Todos group (todo_*) + Todo struct + load/save_todos + todos_path
+// live in src/tools/todos.rs.
 
 // ────────────────────────────────────────────────────────────────────────────
 // Self-introspection (get_capabilities)
@@ -646,7 +398,7 @@ fn run_get_capabilities() -> String {
         },
         "storage": {
             "notes": notes::notes_dir().display().to_string(),
-            "todos": todos_path().display().to_string(),
+            "todos": todos::todos_path().display().to_string(),
             "scratch_files": files_dir().display().to_string(),
             "session": crate::run::default_session_path().display().to_string(),
         },
@@ -1841,47 +1593,9 @@ mod tests {
     // Note-handler tests (note_read_rejects_*, note_delete_rejects_*,
     // note_list_*) live in src/tools/notes.rs alongside their handlers.
 
-    #[test]
-    fn todo_add_rejects_empty_text() {
-        let err = run_todo_add(r#"{"text":""}"#).unwrap_err();
-        assert!(err.contains("empty"), "got: {err}");
-    }
-
-    #[test]
-    fn todo_add_rejects_whitespace_only_text() {
-        let err = run_todo_add(r#"{"text":"   "}"#).unwrap_err();
-        assert!(err.contains("empty"), "got: {err}");
-    }
-
-    #[test]
-    fn todo_add_rejects_missing_text() {
-        let err = run_todo_add("{}").unwrap_err();
-        assert!(err.contains("missing 'text'"), "got: {err}");
-    }
-
-    #[test]
-    fn todo_uncomplete_rejects_missing_id() {
-        let err = run_todo_uncomplete("{}").unwrap_err();
-        assert!(err.contains("missing 'id'"), "got: {err}");
-    }
-
-    #[test]
-    fn todo_uncomplete_rejects_unknown_id() {
-        let err = run_todo_uncomplete(r#"{"id":"t_does_not_exist_99999"}"#).unwrap_err();
-        assert!(err.contains("no todo with id"), "got: {err}");
-    }
-
-    #[test]
-    fn todo_delete_rejects_missing_id() {
-        let err = run_todo_delete("{}").unwrap_err();
-        assert!(err.contains("missing 'id'"), "got: {err}");
-    }
-
-    #[test]
-    fn todo_delete_rejects_unknown_id() {
-        let err = run_todo_delete(r#"{"id":"t_does_not_exist_99999"}"#).unwrap_err();
-        assert!(err.contains("no todo with id"), "got: {err}");
-    }
+    // Todo-handler tests (todo_add_rejects_*, todo_uncomplete_rejects_*,
+    // todo_delete_rejects_*, todo_list_pending_only_flag_passes_through)
+    // live in src/tools/todos.rs alongside their handlers.
 
     #[test]
     fn core_tool_names_include_new_tools() {
@@ -1892,16 +1606,6 @@ mod tests {
                 "CORE_TOOL_NAMES missing {tool}"
             );
         }
-    }
-
-    #[test]
-    fn todo_list_pending_only_flag_passes_through() {
-        // Schema accepts pending_only: bool; result reflects it.
-        let out = run_todo_list(r#"{"pending_only":true}"#).expect("ok");
-        let v: Value = serde_json::from_str(&out).unwrap();
-        assert!(v["total"].is_number());
-        assert!(v["pending"].is_number());
-        assert_eq!(v["pending_only"], Value::Bool(true));
     }
 
     #[test]
@@ -1945,31 +1649,35 @@ mod tests {
         assert!(del_out.contains("\"deleted\":true"));
 
         // ── todos ─────────────────────────────────────────────────────────
+        // Todos handlers live in src/tools/todos.rs — go through dispatch_tool
+        // for the same reason as the notes side.
         let todo_text = format!("__test_todo_{stamp}");
-        let add_out = run_todo_add(&json!({ "text": todo_text }).to_string()).expect("todo_add");
+        let add_out =
+            dispatch_tool("todo_add", &json!({ "text": todo_text }).to_string()).expect("todo_add");
         let added: Value = serde_json::from_str(&add_out).unwrap();
         let todo_id = added["id"].as_str().unwrap().to_string();
 
         // Complete.
-        let comp_out =
-            run_todo_complete(&json!({ "id": todo_id }).to_string()).expect("todo_complete");
+        let comp_out = dispatch_tool("todo_complete", &json!({ "id": todo_id }).to_string())
+            .expect("todo_complete");
         assert!(comp_out.contains("\"done\":true"));
 
         // Uncomplete.
-        let uncomp_out =
-            run_todo_uncomplete(&json!({ "id": todo_id }).to_string()).expect("todo_uncomplete");
+        let uncomp_out = dispatch_tool("todo_uncomplete", &json!({ "id": todo_id }).to_string())
+            .expect("todo_uncomplete");
         assert!(uncomp_out.contains("\"done\":false"));
 
         // pending_only list should now include it.
-        let list_out = run_todo_list(r#"{"pending_only":true}"#).expect("todo_list");
+        let list_out = dispatch_tool("todo_list", r#"{"pending_only":true}"#).expect("todo_list");
         assert!(list_out.contains(&todo_id));
 
         // Delete.
-        let del_out = run_todo_delete(&json!({ "id": todo_id }).to_string()).expect("todo_delete");
+        let del_out = dispatch_tool("todo_delete", &json!({ "id": todo_id }).to_string())
+            .expect("todo_delete");
         assert!(del_out.contains("\"deleted\":true"));
 
         // Confirm gone — second delete errors.
-        let err = run_todo_delete(&json!({ "id": todo_id }).to_string()).unwrap_err();
+        let err = dispatch_tool("todo_delete", &json!({ "id": todo_id }).to_string()).unwrap_err();
         assert!(err.contains("no todo with id"), "got: {err}");
     }
 
