@@ -24,6 +24,7 @@ use serde_json::{json, Value};
 // Per-group sub-modules. Each exports `schemas()` and `dispatch()`; see the
 // group-module contract at the top of `registry.rs`.
 mod facts;
+mod github;
 mod ide;
 mod registry;
 mod search;
@@ -419,87 +420,9 @@ pub fn secretary_tools_json() -> Value {
         // weather_forecast) lives in src/tools/facts.rs and is appended below.
         // Registry group (crate_info, crate_search, npm_info, npm_search)
         // lives in src/tools/registry.rs and is appended to this array below.
-        // ── Sprint 9 Phase 0a — GitHub (PAT via GITHUB_TOKEN env var) ───
-        {
-            "type": "function",
-            "function": {
-                "name": "gh_list_my_prs",
-                "description": "List open pull requests I authored. Requires GITHUB_TOKEN in env.",
-                "parameters": { "type": "object", "properties": {}, "required": [] }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "gh_list_assigned_issues",
-                "description": "List open issues assigned to me. Requires GITHUB_TOKEN in env.",
-                "parameters": { "type": "object", "properties": {}, "required": [] }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "gh_get_issue",
-                "description": "Get a GitHub issue or PR by owner/repo/number.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "owner":  { "type": "string", "description": "Repo owner (user or org)" },
-                        "repo":   { "type": "string", "description": "Repo name" },
-                        "number": { "type": "number", "description": "Issue or PR number" }
-                    },
-                    "required": ["owner", "repo", "number"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "gh_create_issue",
-                "description": "Create a new GitHub issue in a repo.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "owner": { "type": "string", "description": "Repo owner" },
-                        "repo":  { "type": "string", "description": "Repo name" },
-                        "title": { "type": "string", "description": "Issue title" },
-                        "body":  { "type": "string", "description": "Issue body (Markdown, optional)" }
-                    },
-                    "required": ["owner", "repo", "title"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "gh_comment_issue",
-                "description": "Post a comment on a GitHub issue or PR.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "owner":  { "type": "string", "description": "Repo owner" },
-                        "repo":   { "type": "string", "description": "Repo name" },
-                        "number": { "type": "number", "description": "Issue or PR number" },
-                        "body":   { "type": "string", "description": "Comment body (Markdown)" }
-                    },
-                    "required": ["owner", "repo", "number", "body"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "gh_search_code",
-                "description": "Search code across GitHub. Returns top 5 file matches.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": { "type": "string", "description": "GitHub code search query (see docs)" }
-                    },
-                    "required": ["query"]
-                }
-            }
-        },
+        // GitHub group (gh_list_my_prs, gh_list_assigned_issues, gh_get_issue,
+        // gh_create_issue, gh_comment_issue, gh_search_code) lives in
+        // src/tools/github.rs and is appended to this array below.
         // ── Sprint 9 Phase 0b — markets (TradingView + vestige.fi) ──────
         {
             "type": "function",
@@ -656,6 +579,7 @@ pub fn secretary_tools_json() -> Value {
     .cloned()
     .unwrap_or_default();
     tools.extend(facts::schemas());
+    tools.extend(github::schemas());
     tools.extend(ide::schemas());
     tools.extend(registry::schemas());
     tools.extend(search::schemas());
@@ -671,6 +595,9 @@ pub fn dispatch_tool(name: &str, input: &str) -> Result<String, String> {
     // the tool, None otherwise. The `match` below handles everything that
     // hasn't migrated to a sub-module yet.
     if let Some(result) = facts::dispatch(name, input) {
+        return result;
+    }
+    if let Some(result) = github::dispatch(name, input) {
         return result;
     }
     if let Some(result) = ide::dispatch(name, input) {
@@ -720,13 +647,8 @@ pub fn dispatch_tool(name: &str, input: &str) -> Result<String, String> {
         // above via facts::dispatch.
         // Registry group (crate_info, crate_search, npm_info, npm_search)
         // is handled by the early-return above via registry::dispatch.
-        // ── Sprint 9 Phase 0a — github group ───────────────────────────
-        "gh_list_my_prs" => run_gh_list_my_prs(),
-        "gh_list_assigned_issues" => run_gh_list_assigned_issues(),
-        "gh_get_issue" => run_gh_get_issue(input),
-        "gh_create_issue" => run_gh_create_issue(input),
-        "gh_comment_issue" => run_gh_comment_issue(input),
-        "gh_search_code" => run_gh_search_code(input),
+        // GitHub group (gh_*) handled by the early-return above via
+        // github::dispatch.
         // ── Sprint 9 Phase 0b — markets group ──────────────────────────
         "tv_get_quote" => run_tv_get_quote(input),
         "tv_technical_rating" => run_tv_technical_rating(input),
@@ -2735,20 +2657,6 @@ pub(super) fn external_http_client() -> Result<reqwest::blocking::Client, String
         .map_err(|e| format!("external http: build client failed: {e}"))
 }
 
-/// Resolve the GitHub token via the unified secret store. Checks
-/// `CLAUDETTE_GITHUB_TOKEN`, then `GITHUB_TOKEN`, then
-/// `~/.claudette/secrets/github.token`.
-fn github_token() -> Result<String, String> {
-    crate::secrets::read_secret("github").map_err(|_| {
-        format!(
-            "github: token not found. Create a fine-grained PAT at \
-             https://github.com/settings/tokens and either export GITHUB_TOKEN \
-             or save it to {}",
-            crate::secrets::secret_file_path("github").display()
-        )
-    })
-}
-
 /// Generic "extract `key` as str from a JSON object, or a named error".
 pub(super) fn extract_str<'a>(v: &'a Value, key: &str, tool: &str) -> Result<&'a str, String> {
     v.get(key)
@@ -2760,293 +2668,7 @@ pub(super) fn parse_json_input(input: &str, tool: &str) -> Result<Value, String>
     serde_json::from_str(input).map_err(|e| format!("{tool}: invalid JSON input ({e}): {input}"))
 }
 
-// ────── GitHub ───────────────────────────────────────────────────────────
-
-/// Build a GET request with GitHub auth headers already attached.
-fn github_get(
-    client: &reqwest::blocking::Client,
-    url: &str,
-    token: &str,
-) -> reqwest::blocking::RequestBuilder {
-    client
-        .get(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-}
-
-fn github_post(
-    client: &reqwest::blocking::Client,
-    url: &str,
-    token: &str,
-) -> reqwest::blocking::RequestBuilder {
-    client
-        .post(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-}
-
-/// Fetch the authenticated user's `login`. Each call is one REST hit —
-/// callers that need it multiple times in a turn should cache it, but for
-/// single-tool-call paths this is fine.
-fn github_me(client: &reqwest::blocking::Client, token: &str) -> Result<String, String> {
-    let resp = github_get(client, "https://api.github.com/user", token)
-        .send()
-        .map_err(|e| format!("gh_me: request failed: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(format!("gh_me: HTTP {}", resp.status()));
-    }
-    let data: Value = resp
-        .json()
-        .map_err(|e| format!("gh_me: parse failed: {e}"))?;
-    data.get("login")
-        .and_then(Value::as_str)
-        .map(String::from)
-        .ok_or_else(|| "gh_me: response missing 'login'".to_string())
-}
-
-/// Shared helper for `gh_list_my_prs` and `gh_list_assigned_issues`.
-fn github_search_issues(q: &str) -> Result<String, String> {
-    let token = github_token()?;
-    let client = external_http_client()?;
-    let resp = github_get(&client, "https://api.github.com/search/issues", &token)
-        .query(&[("q", q), ("per_page", "10"), ("sort", "updated")])
-        .send()
-        .map_err(|e| format!("gh_search_issues: request failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("gh_search_issues: HTTP {}", resp.status()));
-    }
-
-    let data: Value = resp
-        .json()
-        .map_err(|e| format!("gh_search_issues: parse failed: {e}"))?;
-
-    let items: Vec<Value> = data
-        .get("items")
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .take(10)
-                .map(|i| {
-                    json!({
-                        "title": i.get("title").and_then(Value::as_str).unwrap_or(""),
-                        "number": i.get("number").and_then(Value::as_i64).unwrap_or(0),
-                        "state": i.get("state").and_then(Value::as_str).unwrap_or(""),
-                        "url": i.get("html_url").and_then(Value::as_str).unwrap_or(""),
-                        "repo": i.pointer("/repository_url").and_then(Value::as_str)
-                            .and_then(|u| u.rsplit("/repos/").next())
-                            .unwrap_or(""),
-                        "updated_at": i.get("updated_at").and_then(Value::as_str).unwrap_or(""),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    Ok(json!({
-        "query": q,
-        "count": items.len(),
-        "items": items,
-    })
-    .to_string())
-}
-
-fn run_gh_list_my_prs() -> Result<String, String> {
-    let token = github_token()?;
-    let client = external_http_client()?;
-    let me = github_me(&client, &token)?;
-    let q = format!("is:pr author:{me} state:open");
-    github_search_issues(&q)
-}
-
-fn run_gh_list_assigned_issues() -> Result<String, String> {
-    let token = github_token()?;
-    let client = external_http_client()?;
-    let me = github_me(&client, &token)?;
-    let q = format!("is:issue assignee:{me} state:open");
-    github_search_issues(&q)
-}
-
-fn run_gh_get_issue(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "gh_get_issue")?;
-    let owner = extract_str(&v, "owner", "gh_get_issue")?;
-    let repo = extract_str(&v, "repo", "gh_get_issue")?;
-    let number = v
-        .get("number")
-        .and_then(Value::as_i64)
-        .ok_or("gh_get_issue: missing 'number'")?;
-
-    let token = github_token()?;
-    let client = external_http_client()?;
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/issues/{number}");
-    let resp = github_get(&client, &url, &token)
-        .send()
-        .map_err(|e| format!("gh_get_issue: request failed: {e}"))?;
-
-    let status = resp.status();
-    if status == reqwest::StatusCode::NOT_FOUND {
-        return Err(format!("gh_get_issue: {owner}/{repo}#{number} not found"));
-    }
-    if !status.is_success() {
-        return Err(format!("gh_get_issue: HTTP {status}"));
-    }
-
-    let data: Value = resp
-        .json()
-        .map_err(|e| format!("gh_get_issue: parse failed: {e}"))?;
-
-    let body = data
-        .get("body")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .chars()
-        .take(2000)
-        .collect::<String>();
-
-    Ok(json!({
-        "owner": owner,
-        "repo": repo,
-        "number": number,
-        "title": data.get("title").and_then(Value::as_str).unwrap_or(""),
-        "state": data.get("state").and_then(Value::as_str).unwrap_or(""),
-        "author": data.pointer("/user/login").and_then(Value::as_str).unwrap_or(""),
-        "body": body,
-        "url": data.get("html_url").and_then(Value::as_str).unwrap_or(""),
-        "is_pr": data.get("pull_request").is_some(),
-        "labels": data.get("labels").and_then(Value::as_array).map(|arr| {
-            arr.iter()
-                .filter_map(|l| l.get("name").and_then(Value::as_str).map(String::from))
-                .collect::<Vec<_>>()
-        }).unwrap_or_default(),
-        "comments": data.get("comments").and_then(Value::as_i64).unwrap_or(0),
-    })
-    .to_string())
-}
-
-fn run_gh_create_issue(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "gh_create_issue")?;
-    let owner = extract_str(&v, "owner", "gh_create_issue")?;
-    let repo = extract_str(&v, "repo", "gh_create_issue")?;
-    let title = extract_str(&v, "title", "gh_create_issue")?;
-    let body = v.get("body").and_then(Value::as_str).unwrap_or("");
-
-    let token = github_token()?;
-    let client = external_http_client()?;
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/issues");
-    let payload = json!({ "title": title, "body": body });
-
-    let resp = github_post(&client, &url, &token)
-        .json(&payload)
-        .send()
-        .map_err(|e| format!("gh_create_issue: request failed: {e}"))?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let text = resp.text().unwrap_or_default();
-        return Err(format!(
-            "gh_create_issue: HTTP {status}: {}",
-            text.chars().take(300).collect::<String>()
-        ));
-    }
-
-    let data: Value = resp
-        .json()
-        .map_err(|e| format!("gh_create_issue: parse failed: {e}"))?;
-
-    Ok(json!({
-        "ok": true,
-        "number": data.get("number").and_then(Value::as_i64).unwrap_or(0),
-        "url": data.get("html_url").and_then(Value::as_str).unwrap_or(""),
-    })
-    .to_string())
-}
-
-fn run_gh_comment_issue(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "gh_comment_issue")?;
-    let owner = extract_str(&v, "owner", "gh_comment_issue")?;
-    let repo = extract_str(&v, "repo", "gh_comment_issue")?;
-    let number = v
-        .get("number")
-        .and_then(Value::as_i64)
-        .ok_or("gh_comment_issue: missing 'number'")?;
-    let body = extract_str(&v, "body", "gh_comment_issue")?;
-
-    let token = github_token()?;
-    let client = external_http_client()?;
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments");
-    let payload = json!({ "body": body });
-
-    let resp = github_post(&client, &url, &token)
-        .json(&payload)
-        .send()
-        .map_err(|e| format!("gh_comment_issue: request failed: {e}"))?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let text = resp.text().unwrap_or_default();
-        return Err(format!(
-            "gh_comment_issue: HTTP {status}: {}",
-            text.chars().take(300).collect::<String>()
-        ));
-    }
-
-    let data: Value = resp
-        .json()
-        .map_err(|e| format!("gh_comment_issue: parse failed: {e}"))?;
-
-    Ok(json!({
-        "ok": true,
-        "comment_url": data.get("html_url").and_then(Value::as_str).unwrap_or(""),
-    })
-    .to_string())
-}
-
-fn run_gh_search_code(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "gh_search_code")?;
-    let query = extract_str(&v, "query", "gh_search_code")?;
-
-    let token = github_token()?;
-    let client = external_http_client()?;
-    let resp = github_get(&client, "https://api.github.com/search/code", &token)
-        .query(&[("q", query), ("per_page", "5")])
-        .send()
-        .map_err(|e| format!("gh_search_code: request failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("gh_search_code: HTTP {}", resp.status()));
-    }
-
-    let data: Value = resp
-        .json()
-        .map_err(|e| format!("gh_search_code: parse failed: {e}"))?;
-
-    let items: Vec<Value> = data
-        .get("items")
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .take(5)
-                .map(|i| {
-                    json!({
-                        "name": i.get("name").and_then(Value::as_str).unwrap_or(""),
-                        "path": i.get("path").and_then(Value::as_str).unwrap_or(""),
-                        "repo": i.pointer("/repository/full_name").and_then(Value::as_str).unwrap_or(""),
-                        "url": i.get("html_url").and_then(Value::as_str).unwrap_or(""),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    Ok(json!({
-        "query": query,
-        "count": items.len(),
-        "results": items,
-    })
-    .to_string())
-}
+// GitHub group (gh_*) lives in src/tools/github.rs.
 
 // ────────────────────────────────────────────────────────────────────────────
 // Sprint 9 Phase 0b — markets group (TradingView + vestige.fi)
@@ -3909,11 +3531,7 @@ mod tests {
     // Registry-group tests (crate_info_rejects_missing_name,
     // npm_info_rejects_missing_name) live in src/tools/registry.rs.
 
-    #[test]
-    fn gh_get_issue_rejects_missing_fields() {
-        let err = run_gh_get_issue(r#"{"owner":"example-org"}"#).unwrap_err();
-        assert!(err.contains("missing"), "got: {err}");
-    }
+    // GitHub-group tests (gh_*, github_token) live in src/tools/github.rs.
 
     // ─── Sprint 9 Phase 0b — markets group ─────────────────────────
 
@@ -4042,24 +3660,6 @@ mod tests {
         let base = vestige_base_url();
         assert!(base.starts_with("http"));
         assert!(base.contains("vestige"));
-    }
-
-    #[test]
-    fn github_token_env_lookup() {
-        // Verify the error message mentions GITHUB_TOKEN and the file path
-        // when the token is not set. If the user has GITHUB_TOKEN set in
-        // their real env, the result is Ok and we skip the assertion.
-        let result = github_token();
-        if let Err(msg) = result {
-            assert!(
-                msg.contains("GITHUB_TOKEN"),
-                "error should mention GITHUB_TOKEN: {msg}"
-            );
-            assert!(
-                msg.contains("github.token"),
-                "error should mention file path: {msg}"
-            );
-        }
     }
 
     // wmo_label, resolve_location, hebrew_city_alias tests live in
