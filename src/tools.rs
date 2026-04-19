@@ -26,6 +26,7 @@ use serde_json::{json, Value};
 mod facts;
 mod ide;
 mod registry;
+mod search;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Tool registry — advertised to the model on every request
@@ -241,50 +242,8 @@ pub fn secretary_tools_json() -> Value {
                 }
             }
         },
-        {
-            "type": "function",
-            "function": {
-                "name": "web_fetch",
-                "description": "Fetch a URL and return cleaned visible text (HTML stripped, max 8 KB).",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "url": { "type": "string", "description": "URL to fetch (http/https)" }
-                    },
-                    "required": ["url"]
-                }
-            }
-        },
-        // ── Search ──────────────────────────────────────────────────────
-        {
-            "type": "function",
-            "function": {
-                "name": "glob_search",
-                "description": "Find files by glob pattern under the user's home (e.g. **/*.py).",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "pattern": { "type": "string", "description": "Glob pattern (e.g. '**/*.py', 'Downloads/*.pdf')" }
-                    },
-                    "required": ["pattern"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "grep_search",
-                "description": "Search file contents for a substring (case-insensitive) under a directory.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "pattern": { "type": "string", "description": "Text to search for" },
-                        "path":    { "type": "string", "description": "Directory to search (default: home)" }
-                    },
-                    "required": ["pattern"]
-                }
-            }
-        },
+        // Search group (web_fetch, glob_search, grep_search) lives in
+        // src/tools/search.rs and is appended to this array below.
         // IDE group (open_in_editor, reveal_in_explorer, open_url) lives
         // in src/tools/ide.rs and is appended to this array below.
         // ── Git ─────────────────────────────────────────────────────────
@@ -699,6 +658,7 @@ pub fn secretary_tools_json() -> Value {
     tools.extend(facts::schemas());
     tools.extend(ide::schemas());
     tools.extend(registry::schemas());
+    tools.extend(search::schemas());
     Value::Array(tools)
 }
 
@@ -717,6 +677,9 @@ pub fn dispatch_tool(name: &str, input: &str) -> Result<String, String> {
         return result;
     }
     if let Some(result) = registry::dispatch(name, input) {
+        return result;
+    }
+    if let Some(result) = search::dispatch(name, input) {
         return result;
     }
 
@@ -739,9 +702,8 @@ pub fn dispatch_tool(name: &str, input: &str) -> Result<String, String> {
         "list_dir" => run_list_dir(input),
         "get_capabilities" => Ok(run_get_capabilities()),
         "web_search" => run_web_search(input),
-        "glob_search" => run_glob_search(input),
-        "grep_search" => run_grep_search(input),
-        "web_fetch" => run_web_fetch(input),
+        // Search group (glob_search, grep_search, web_fetch) is handled by
+        // the early-return above via search::dispatch.
         "git_status" => run_git_status(),
         "git_diff" => run_git_diff(input),
         "git_log" => run_git_log(input),
@@ -840,7 +802,7 @@ fn run_add_numbers(input: &str) -> Result<String, String> {
 // Storage helpers — ~/.claudette layout
 // ────────────────────────────────────────────────────────────────────────────
 
-fn user_home() -> PathBuf {
+pub(super) fn user_home() -> PathBuf {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_else(|_| ".".to_string());
@@ -1535,7 +1497,7 @@ fn run_web_search(input: &str) -> Result<String, String> {
 // threat model for a local secretary running on the user's own machine.
 // ────────────────────────────────────────────────────────────────────────────
 
-const MAX_FILE_BYTES: usize = 100 * 1024; // 100 KB
+pub(super) const MAX_FILE_BYTES: usize = 100 * 1024; // 100 KB
 const MAX_LIST_ENTRIES: usize = 200;
 
 /// Expand a leading `~` to the user's home directory. Other tildes are left
@@ -1557,7 +1519,7 @@ pub(crate) fn expand_tilde(input: &str) -> PathBuf {
 /// Resolve `.` and `..` components without touching the filesystem.
 /// Absolute paths stay absolute; relative paths stay relative (joined to
 /// CWD by the caller if needed). Leading `..` on a relative path is kept.
-fn normalize_path(path: &Path) -> PathBuf {
+pub(super) fn normalize_path(path: &Path) -> PathBuf {
     use std::path::Component;
     let mut out = PathBuf::new();
     for comp in path.components() {
@@ -2658,247 +2620,9 @@ fn run_spawn_agent(input: &str) -> Result<String, String> {
     crate::agents::spawn_agent(agent_type, task, auto_mode)
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Search tools — glob_search, grep_search
-//
-// Both walk the filesystem under the user's $HOME (same gate as read_file /
-// list_dir). Caps are intentionally tight so a curious model can't sink a
-// REPL turn into a 10-minute scan of every file the user has ever owned.
-// ────────────────────────────────────────────────────────────────────────────
-
-const MAX_GLOB_RESULTS: usize = 200;
-const MAX_GREP_MATCHES: usize = 50;
-const MAX_GREP_FILES: usize = 200;
-const MAX_GREP_LINE_CHARS: usize = 200;
-
-fn run_glob_search(input: &str) -> Result<String, String> {
-    let v: Value = serde_json::from_str(input)
-        .map_err(|e| format!("glob_search: invalid JSON ({e}): {input}"))?;
-    let raw_pattern = v
-        .get("pattern")
-        .and_then(Value::as_str)
-        .ok_or("glob_search: missing 'pattern'")?;
-
-    // Resolve pattern to an absolute filesystem path. Three cases:
-    //   - Absolute path → use as-is, then validate it stays under $HOME.
-    //   - Tilde-prefixed → expand_tilde.
-    //   - Bare relative pattern → join under $HOME.
-    let resolved_pattern = if raw_pattern.starts_with("~/") || raw_pattern.starts_with("~\\") {
-        expand_tilde(raw_pattern).display().to_string()
-    } else if Path::new(raw_pattern).is_absolute() {
-        raw_pattern.to_string()
-    } else {
-        user_home().join(raw_pattern).display().to_string()
-    };
-
-    // Sandbox check on the literal prefix (everything before the first glob
-    // metachar). The literal prefix is the part of the path glob will
-    // actually walk into; if THAT escapes $HOME we reject. Without this
-    // check the user could pass `../etc/**/*` and walk outside $HOME.
-    let prefix_end = resolved_pattern
-        .find(['*', '?', '['])
-        .unwrap_or(resolved_pattern.len());
-    let literal_prefix = &resolved_pattern[..prefix_end];
-    let literal_path = normalize_path(Path::new(literal_prefix));
-    let home = normalize_path(&user_home());
-    if !literal_path.starts_with(&home) {
-        return Err(format!(
-            "glob_search: pattern resolves outside $HOME ({}); searches are restricted for safety",
-            home.display()
-        ));
-    }
-
-    // Glob errors (bad pattern syntax) → user-facing error.
-    let walker =
-        glob::glob(&resolved_pattern).map_err(|e| format!("glob_search: bad pattern: {e}"))?;
-
-    let mut paths: Vec<String> = Vec::new();
-    let mut truncated = false;
-    for entry in walker {
-        if paths.len() >= MAX_GLOB_RESULTS {
-            truncated = true;
-            break;
-        }
-        // Permission errors and unreachable paths come back as Err — skip
-        // them silently rather than failing the whole search.
-        if let Ok(path) = entry {
-            paths.push(path.display().to_string());
-        }
-    }
-    paths.sort();
-
-    Ok(json!({
-        "pattern": resolved_pattern,
-        "count": paths.len(),
-        "truncated": truncated,
-        "paths": paths,
-    })
-    .to_string())
-}
-
-fn run_grep_search(input: &str) -> Result<String, String> {
-    let v: Value = serde_json::from_str(input)
-        .map_err(|e| format!("grep_search: invalid JSON ({e}): {input}"))?;
-    let pattern = v
-        .get("pattern")
-        .and_then(Value::as_str)
-        .ok_or("grep_search: missing 'pattern'")?;
-    if pattern.is_empty() {
-        return Err("grep_search: pattern is empty".to_string());
-    }
-    let path_str = v.get("path").and_then(Value::as_str).unwrap_or("~");
-
-    let root = validate_read_path(path_str)?;
-    let metadata = fs::metadata(&root)
-        .map_err(|e| format!("grep_search: stat {} failed: {e}", root.display()))?;
-    if !metadata.is_dir() {
-        return Err(format!(
-            "grep_search: {} is not a directory",
-            root.display()
-        ));
-    }
-
-    let needle = pattern.to_lowercase();
-    let mut matches: Vec<Value> = Vec::new();
-    let mut files_scanned: usize = 0;
-    let mut truncated = false;
-
-    // Iterative DFS over the directory tree. Skips hidden directories
-    // (`.cache`, `.git`, etc.) so a personal-secretary grep doesn't drown
-    // in dotfile noise. The MAX_GREP_FILES + MAX_GREP_MATCHES caps are the
-    // belt-and-braces against runaway walks.
-    let mut stack: Vec<PathBuf> = vec![root.clone()];
-    'walk: while let Some(dir) = stack.pop() {
-        let Ok(read) = fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in read {
-            let Ok(entry) = entry else { continue };
-            let p = entry.path();
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            // Skip hidden entries (Unix dot-prefix; we don't try to detect
-            // Windows hidden attribute, that needs a separate API call).
-            if name_str.starts_with('.') {
-                continue;
-            }
-            let Ok(ft) = entry.file_type() else { continue };
-            if ft.is_symlink() {
-                // Don't follow symlinks — could loop or escape sandbox.
-                continue;
-            }
-            if ft.is_dir() {
-                stack.push(p);
-                continue;
-            }
-            if !ft.is_file() {
-                continue;
-            }
-            // Bail-out conditions checked per-file so we always finish the
-            // current entry's matches before stopping.
-            if files_scanned >= MAX_GREP_FILES {
-                truncated = true;
-                break 'walk;
-            }
-            files_scanned += 1;
-
-            // Skip oversized files — same 100 KB cap as read_file.
-            let Ok(meta) = entry.metadata() else { continue };
-            if meta.len() > MAX_FILE_BYTES as u64 {
-                continue;
-            }
-            // Read as text; binary files fail UTF-8 and get skipped.
-            let Ok(content) = fs::read_to_string(&p) else {
-                continue;
-            };
-            for (lineno, line) in content.lines().enumerate() {
-                if line.to_lowercase().contains(&needle) {
-                    let snippet: String = line.chars().take(MAX_GREP_LINE_CHARS).collect();
-                    matches.push(json!({
-                        "file": p.display().to_string(),
-                        "line": lineno + 1,
-                        "text": snippet,
-                    }));
-                    if matches.len() >= MAX_GREP_MATCHES {
-                        truncated = true;
-                        break 'walk;
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(json!({
-        "pattern": pattern,
-        "root": root.display().to_string(),
-        "files_scanned": files_scanned,
-        "match_count": matches.len(),
-        "truncated": truncated,
-        "matches": matches,
-    })
-    .to_string())
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// web_fetch — pull a single URL, strip HTML, return cleaned text
-//
-// MVP: no scheme allowlist beyond http/https, no SSRF guard (the threat
-// model is a local secretary on the user's own machine), no JS rendering.
-// 8 KB cap on output keeps the context window safe even on giant pages.
-// ────────────────────────────────────────────────────────────────────────────
-
-const WEB_FETCH_MAX_CHARS: usize = 8192;
-const WEB_FETCH_TIMEOUT_SECS: u64 = 15;
-
-fn run_web_fetch(input: &str) -> Result<String, String> {
-    let v: Value = serde_json::from_str(input)
-        .map_err(|e| format!("web_fetch: invalid JSON ({e}): {input}"))?;
-    let url = v
-        .get("url")
-        .and_then(Value::as_str)
-        .ok_or("web_fetch: missing 'url'")?;
-    if !(url.starts_with("http://") || url.starts_with("https://")) {
-        return Err(format!(
-            "web_fetch: only http:// and https:// URLs are allowed, got: {url}"
-        ));
-    }
-
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(WEB_FETCH_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| format!("web_fetch: build http client: {e}"))?;
-
-    let resp = client
-        .get(url)
-        .header("User-Agent", "claudette/1.0 (Claudette personal secretary)")
-        .header("Accept", "text/html,application/xhtml+xml,text/plain")
-        .send()
-        .map_err(|e| format!("web_fetch: request failed: {e}"))?;
-
-    let status = resp.status();
-    let final_url = resp.url().to_string();
-    if !status.is_success() {
-        return Err(format!("web_fetch: HTTP {status} for {final_url}"));
-    }
-    let body = resp
-        .text()
-        .map_err(|e| format!("web_fetch: read body: {e}"))?;
-
-    let cleaned = strip_html(&body);
-    let total_chars = cleaned.chars().count();
-    let truncated = total_chars > WEB_FETCH_MAX_CHARS;
-    let visible: String = cleaned.chars().take(WEB_FETCH_MAX_CHARS).collect();
-
-    Ok(json!({
-        "url": final_url,
-        "status": status.as_u16(),
-        "chars": visible.chars().count(),
-        "total_chars": total_chars,
-        "truncated": truncated,
-        "text": visible,
-    })
-    .to_string())
-}
+// Search group (glob_search, grep_search, web_fetch) lives in
+// src/tools/search.rs. `strip_html` and `strip_tag_block` stay here because
+// `strip_html` is pub(super) shared with the facts group's web snippets.
 
 /// Strip HTML to plain text. Two-step pipeline:
 ///   1. Drop the contents of `<script>` and `<style>` blocks (they're
