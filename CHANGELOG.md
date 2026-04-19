@@ -10,6 +10,28 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Changed
+
+- **`src/tools.rs` split into 14 per-group sub-modules** under
+  `src/tools/`: codegen, facts, file_ops, git, github, ide, markets,
+  notes, registry, search, shell, telegram, todos, web_search. Each
+  sub-module exports a thin `schemas()` / `dispatch()` pair; the parent
+  `tools.rs` keeps only the registry entry point, the top-level
+  dispatcher, shared path-policy helpers (`validate_read_path`,
+  `validate_write_path`, `files_dir`, `ensure_dir`, `claudette_home`,
+  `user_home`, `normalize_path`, `expand_tilde`), the shared
+  `strip_html` + HTTP client + `parse_json_input` / `extract_str`
+  primitives, and the three core tools (`get_current_time`,
+  `add_numbers`, `get_capabilities`). `tools.rs` shrank from 4,821 →
+  1,184 lines (−75%). No behavioural change — test suite grew 371 → 408
+  as each extraction added schema-pin / input-validation coverage.
+- The public API for per-turn path pre-extraction
+  (`tools::set_current_turn_paths`, `tools::extract_user_prompt_paths`)
+  is preserved: the implementations moved into `tools/codegen.rs`
+  alongside the reference-file infrastructure they feed, but the parent
+  module re-exports them so REPL / single-shot / Telegram / TUI call
+  sites keep working unchanged.
+
 ## [0.1.0] - 2026-04-18
 
 Initial public release of Claudette as a standalone repository.
