@@ -7,3 +7,4 @@ Cargo.lock.bak
 *.log
 # Claude Code local settings (per-user IDE state, not part of the project).
 .claude/
+tests/results_brain100/
