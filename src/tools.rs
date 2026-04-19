@@ -34,6 +34,7 @@ mod markets;
 mod registry;
 mod search;
 mod telegram;
+mod web_search;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Tool registry — advertised to the model on every request
@@ -191,22 +192,8 @@ pub fn secretary_tools_json() -> Value {
                 "parameters": { "type": "object", "properties": {}, "required": [] }
             }
         },
-        // ── Web ─────────────────────────────────────────────────────────
-        {
-            "type": "function",
-            "function": {
-                "name": "web_search",
-                "description": "Search the web via Brave Search. Returns results with title, URL, snippet, and extra context. Use for any current-information question.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": { "type": "string", "description": "Search query" },
-                        "count": { "type": "number", "description": "Number of results (default 5, max 20)" }
-                    },
-                    "required": ["query"]
-                }
-            }
-        },
+        // Web-search group (web_search — Brave API) lives in
+        // src/tools/web_search.rs and is appended to this array below.
         // Search group (web_fetch, glob_search, grep_search) lives in
         // src/tools/search.rs and is appended to this array below.
         // IDE group (open_in_editor, reveal_in_explorer, open_url) lives
@@ -305,6 +292,7 @@ pub fn secretary_tools_json() -> Value {
     tools.extend(registry::schemas());
     tools.extend(search::schemas());
     tools.extend(telegram::schemas());
+    tools.extend(web_search::schemas());
     Value::Array(tools)
 }
 
@@ -343,6 +331,9 @@ pub fn dispatch_tool(name: &str, input: &str) -> Result<String, String> {
     if let Some(result) = telegram::dispatch(name, input) {
         return result;
     }
+    if let Some(result) = web_search::dispatch(name, input) {
+        return result;
+    }
 
     match name {
         "get_current_time" => Ok(run_get_current_time()),
@@ -361,7 +352,8 @@ pub fn dispatch_tool(name: &str, input: &str) -> Result<String, String> {
         // File ops group (read_file, write_file, list_dir) handled by
         // the early-return above via file_ops::dispatch.
         "get_capabilities" => Ok(run_get_capabilities()),
-        "web_search" => run_web_search(input),
+        // Web-search group (web_search) handled by the early-return above
+        // via web_search::dispatch.
         // Search group (glob_search, grep_search, web_fetch) is handled by
         // the early-return above via search::dispatch.
         // Git group (git_*) handled by the early-return above via
@@ -1007,118 +999,8 @@ fn run_get_capabilities() -> String {
     .to_string()
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Web search (Brave Search API)
-// ────────────────────────────────────────────────────────────────────────────
-
-fn run_web_search(input: &str) -> Result<String, String> {
-    let v: Value = serde_json::from_str(input)
-        .map_err(|e| format!("web_search: invalid JSON ({e}): {input}"))?;
-    let query = v
-        .get("query")
-        .and_then(Value::as_str)
-        .ok_or("web_search: missing 'query'")?
-        .to_string();
-    let count = v
-        .get("count")
-        .and_then(Value::as_i64)
-        .unwrap_or(5)
-        .clamp(1, 20) as usize;
-
-    // Legacy: the original env var was BRAVE_API_KEY (not BRAVE_TOKEN).
-    // Check both the unified secret store AND the legacy name.
-    let api_key = crate::secrets::read_secret("brave")
-        .or_else(|_| {
-            std::env::var("BRAVE_API_KEY")
-                .map(|v| v.trim().to_string())
-                .map_err(|_| String::new())
-        })
-        .map_err(|_| {
-            format!(
-                "web_search: Brave API key not found. Get one at https://brave.com/search/api/ \
-                 and either export BRAVE_API_KEY or save it to {}",
-                crate::secrets::secret_file_path("brave").display()
-            )
-        })?;
-
-    let count_str = count.to_string();
-    let client = external_http_client()?;
-    let resp = client
-        .get("https://api.search.brave.com/res/v1/web/search")
-        .query(&[("q", query.as_str()), ("count", count_str.as_str())])
-        .header("Accept", "application/json")
-        .header("X-Subscription-Token", &api_key)
-        .send()
-        .map_err(|e| format!("web_search: request failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().unwrap_or_default();
-        return Err(format!(
-            "web_search: HTTP {status}: {}",
-            text.chars().take(300).collect::<String>()
-        ));
-    }
-
-    let data: Value = resp
-        .json()
-        .map_err(|e| format!("web_search: parse failed: {e}"))?;
-
-    // Main web results — richer extraction.
-    let results: Vec<Value> = data
-        .pointer("/web/results")
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .take(count)
-                .map(|r| {
-                    let mut result = json!({
-                        "title": r.get("title").and_then(Value::as_str).unwrap_or(""),
-                        "url": r.get("url").and_then(Value::as_str).unwrap_or(""),
-                        "description": r.get("description").and_then(Value::as_str).unwrap_or(""),
-                    });
-                    // Extra snippets — Brave provides additional text fragments
-                    // that often contain the direct answer.
-                    if let Some(extras) = r.get("extra_snippets").and_then(Value::as_array) {
-                        let snippets: Vec<&str> =
-                            extras.iter().filter_map(Value::as_str).take(2).collect();
-                        if !snippets.is_empty() {
-                            result["extra_snippets"] = json!(snippets);
-                        }
-                    }
-                    // Age of the result (e.g. "2 days ago").
-                    if let Some(age) = r.get("age").and_then(Value::as_str) {
-                        result["age"] = json!(age);
-                    }
-                    result
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let mut response = json!({
-        "query": query,
-        "count": results.len(),
-        "results": results,
-    });
-
-    // Infobox — Brave sometimes provides a Wikipedia-style summary card.
-    if let Some(infobox) = data.pointer("/infobox") {
-        if let Some(title) = infobox.pointer("/results/0/title").and_then(Value::as_str) {
-            let desc = infobox
-                .pointer("/results/0/long_desc")
-                .or_else(|| infobox.pointer("/results/0/description"))
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            response["infobox"] = json!({
-                "title": title,
-                "description": desc,
-            });
-        }
-    }
-
-    Ok(response.to_string())
-}
+// Web-search group (web_search — Brave API) lives in
+// src/tools/web_search.rs.
 
 // ────────────────────────────────────────────────────────────────────────────
 // File ops (read_file, write_file, list_dir)
