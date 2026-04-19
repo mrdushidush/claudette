@@ -5,3 +5,5 @@ Cargo.lock.bak
 .env
 .env.local
 *.log
+# Claude Code local settings (per-user IDE state, not part of the project).
+.claude/
