@@ -9,18 +9,41 @@
 //! `--chat <id>` flag or `CLAUDETTE_TELEGRAM_CHAT` env var.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 use crate::{ContentBlock, Session};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
+use crate::clock::SystemClock;
 use crate::run::{build_runtime_streaming, maybe_compact_session, save_session, try_load_session};
+use crate::scheduler::{self, Firing, Scheduler};
 use crate::secrets::{read_secret, save_chat_id};
 use crate::theme;
 use crate::tts;
 use crate::voice;
+
+/// One event the single-consumer main loop processes. AD-1: two producer
+/// threads (Telegram getUpdates poller + scheduler tick) feed this channel,
+/// so the consumer has exclusive `&mut` ownership of the runtime and a
+/// mid-turn user message never races with a scheduled firing.
+enum Event {
+    /// A raw `message` object from Telegram's getUpdates (not the wrapping
+    /// update record — the update_id is stripped by the poller).
+    TgUpdate(Value),
+    /// A scheduled entry came due. Treated by the consumer as if the user
+    /// had just typed `prompt` in `chat_id`.
+    Scheduled {
+        prompt: String,
+        chat_id: i64,
+        entry_id: String,
+        scheduled_for: chrono::DateTime<chrono::Utc>,
+    },
+}
+
+/// How often the scheduler tick thread wakes to check for due firings.
+const SCHEDULER_TICK: Duration = Duration::from_secs(1);
 
 /// Telegram message size limit. Messages longer than this are split.
 const TG_MAX_MESSAGE_LEN: usize = 4000;
@@ -154,12 +177,137 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
     };
 
     let mut runtime = build_runtime_streaming(session, true);
-    let mut last_update_id: i64 = 0;
     // Current transcription/response language. "en" = English (default),
     // "he" = Hebrew. Switch with /lang he or /lang en.
     let mut voice_lang = "en".to_string();
     // TTS enabled — only if edge-tts is available. Toggle with /voice.
     let mut tts_enabled = tts_available;
+
+    // ── Scheduler bootstrap (AD-1 / AD-4) ─────────────────────────────
+    // Load persisted schedule, apply catch-up policy. Immediate firings
+    // (entries we missed while offline) are queued into the channel
+    // before the Telegram poller even starts, so they dispatch on the
+    // consumer's first pass.
+    let default_scheduled_chat = allowed_chat_ids.first().copied();
+    let scheduler_path = scheduler::default_path();
+    let clock: Arc<dyn crate::clock::Clock> = Arc::new(SystemClock);
+    let catch_up_firings: Vec<Firing> =
+        match Scheduler::load(scheduler_path.clone(), clock.clone()) {
+            Ok((loaded, firings)) => {
+                eprintln!(
+                    "{} {}",
+                    theme::SAVE,
+                    theme::ok(&format!(
+                        "scheduler loaded ({} active, {} catch-up)",
+                        loaded.list().len(),
+                        firings.len(),
+                    ))
+                );
+                scheduler::install(loaded);
+                firings
+            }
+            Err(e) => {
+                eprintln!(
+                    "{} {}",
+                    theme::warn(theme::WARN_GLYPH),
+                    theme::warn(&format!("scheduler load failed: {e} — starting empty"))
+                );
+                scheduler::install(Scheduler::new(scheduler_path, clock));
+                Vec::new()
+            }
+        };
+
+    // ── mpsc channel: one consumer, two producers ──────────────────────
+    let (tx, rx) = mpsc::channel::<Event>();
+
+    // Queue catch-up firings before the producers start so they land
+    // first in FIFO order.
+    for firing in catch_up_firings {
+        let chat_id = firing.chat_id.or(default_scheduled_chat);
+        if let Some(chat_id) = chat_id {
+            let _ = tx.send(Event::Scheduled {
+                prompt: firing.prompt,
+                chat_id,
+                entry_id: firing.entry_id,
+                scheduled_for: firing.scheduled_for,
+            });
+        }
+    }
+
+    // Producer 1: Telegram getUpdates poller. Owns `last_update_id` and
+    // forwards `message` objects (not updates) into the channel.
+    let tx_tg = tx.clone();
+    let http_tg = http.clone();
+    let base_tg = base_url.clone();
+    std::thread::spawn(move || {
+        let mut last_update_id: i64 = 0;
+        loop {
+            match poll_updates(&http_tg, &base_tg, last_update_id + 1) {
+                Ok(updates) => {
+                    for update in updates {
+                        let update_id =
+                            update.get("update_id").and_then(Value::as_i64).unwrap_or(0);
+                        if update_id > last_update_id {
+                            last_update_id = update_id;
+                        }
+                        if let Some(message) = update.get("message").cloned() {
+                            if tx_tg.send(Event::TgUpdate(message)).is_err() {
+                                return; // consumer gone
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "  {} {}",
+                        theme::warn(theme::WARN_GLYPH),
+                        theme::warn(&format!("poll error: {e} — retrying..."))
+                    );
+                }
+            }
+            std::thread::sleep(POLL_INTERVAL);
+        }
+    });
+
+    // Producer 2: scheduler tick. Every SCHEDULER_TICK, locks the global
+    // scheduler, drains due firings, sends them as Events. Firings with
+    // no chat_id fall back to the first allowed chat so a scheduled
+    // briefing goes somewhere rather than silently dropping.
+    let tx_sch = tx.clone();
+    std::thread::spawn(move || loop {
+        let firings: Vec<Firing> = match scheduler::global().lock() {
+            Ok(mut g) => g.fire_due().unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+        for firing in firings {
+            let chat_id = firing.chat_id.or(default_scheduled_chat);
+            let Some(chat_id) = chat_id else {
+                eprintln!(
+                    "  {} {}",
+                    theme::warn(theme::WARN_GLYPH),
+                    theme::warn(&format!(
+                        "scheduled firing '{}' has no chat_id and no default; dropping",
+                        firing.entry_id
+                    ))
+                );
+                continue;
+            };
+            if tx_sch
+                .send(Event::Scheduled {
+                    prompt: firing.prompt,
+                    chat_id,
+                    entry_id: firing.entry_id,
+                    scheduled_for: firing.scheduled_for,
+                })
+                .is_err()
+            {
+                return;
+            }
+        }
+        std::thread::sleep(SCHEDULER_TICK);
+    });
+
+    drop(tx); // so channel closes iff every producer thread exits
 
     eprintln!(
         "{} {}",
@@ -167,22 +315,58 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
         theme::ok("polling for messages... (Ctrl-C to stop)")
     );
 
-    loop {
-        match poll_updates(&http, &base_url, last_update_id + 1) {
-            Ok(updates) => {
-                for update in updates {
-                    let update_id = update.get("update_id").and_then(Value::as_i64).unwrap_or(0);
-                    if update_id > last_update_id {
-                        last_update_id = update_id;
-                    }
-
-                    let Some(message) = update.get("message") else {
-                        continue;
-                    };
-                    let chat_id = message
-                        .pointer("/chat/id")
-                        .and_then(Value::as_i64)
-                        .unwrap_or(0);
+    // ── Consumer: single-owner of `runtime`. Events serialise through
+    //    the channel so a scheduled firing can never interleave with a
+    //    mid-turn user message.
+    while let Ok(event) = rx.recv() {
+        match event {
+            Event::Scheduled {
+                prompt,
+                chat_id,
+                entry_id,
+                scheduled_for,
+            } => {
+                if !allowed_chat_ids.is_empty() && !allowed_chat_ids.contains(&chat_id) {
+                    eprintln!(
+                        "  {} {}",
+                        theme::dim("○"),
+                        theme::dim(&format!(
+                            "dropping scheduled firing to unauthorized chat {chat_id}"
+                        ))
+                    );
+                    continue;
+                }
+                eprintln!(
+                    "\n  {} {} {}",
+                    theme::accent("⏰"),
+                    theme::accent(&entry_id),
+                    theme::dim(&format!(
+                        "scheduled_for={} prompt={}",
+                        scheduled_for.to_rfc3339(),
+                        prompt.chars().take(60).collect::<String>()
+                    ))
+                );
+                run_synthetic_turn(
+                    &http,
+                    &base_url,
+                    &mut runtime,
+                    chat_id,
+                    &prompt,
+                    &voice_lang,
+                );
+                if let Err(e) = save_session(runtime.session()) {
+                    eprintln!(
+                        "  {} {}",
+                        theme::warn(theme::WARN_GLYPH),
+                        theme::warn(&format!("session save failed: {e:#}"))
+                    );
+                }
+            }
+            Event::TgUpdate(message) => {
+                let chat_id = message
+                    .pointer("/chat/id")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
                     let from = message
                         .pointer("/from/first_name")
                         .and_then(Value::as_str)
@@ -496,18 +680,77 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
                             );
                         }
                     }
+                } // end Event::TgUpdate arm
+            } // end match event
+    } // end while let Ok(event)
+    Ok(())
+}
+
+/// Run a synthetic turn on behalf of the scheduler — feed `prompt` into the
+/// runtime as if the user had typed it, then stream the response to
+/// `chat_id` with the same paragraph-pacing poller the live path uses.
+/// Scheduled turns never play TTS (they're proactive pings, not voice
+/// conversations) and don't apply the permission prompter (scheduled
+/// entries are pre-approved by virtue of the user having created them).
+fn run_synthetic_turn(
+    http: &reqwest::blocking::Client,
+    base_url: &str,
+    runtime: &mut crate::ConversationRuntime<crate::OllamaApiClient, crate::SecretaryToolExecutor>,
+    chat_id: i64,
+    prompt: &str,
+    _voice_lang: &str,
+) {
+    let session_snapshot = runtime.session().clone();
+
+    send_typing(http, base_url, chat_id);
+
+    // Same streaming-poller contract as the Telegram path.
+    crate::api::telegram_stream_reset();
+    let active = Arc::new(AtomicBool::new(true));
+    let poller_http = http.clone();
+    let poller_base = base_url.to_string();
+    let poller_active = active.clone();
+    let poller = std::thread::spawn(move || {
+        run_streaming_poller(poller_http, poller_base, chat_id, poller_active)
+    });
+
+    let mut no_prompter: Option<&mut dyn crate::PermissionPrompter> = None;
+    let turn_result = crate::brain_selector::run_turn_with_fallback(runtime, prompt, &mut no_prompter);
+
+    active.store(false, Ordering::SeqCst);
+    let streamed_bytes = poller.join().unwrap_or(0);
+
+    match turn_result {
+        Ok(summary) => {
+            let response = extract_response_text(&summary);
+            if streamed_bytes == 0 && !response.trim().is_empty() {
+                for chunk in split_into_paragraphs(&response, TG_MAX_MESSAGE_LEN) {
+                    send_typing(http, base_url, chat_id);
+                    std::thread::sleep(paragraph_pacing(&chunk));
+                    if let Err(e) = send_message(http, base_url, chat_id, &chunk) {
+                        eprintln!(
+                            "  {} {}",
+                            theme::error(theme::ERR_GLYPH),
+                            theme::error(&format!("scheduled send failed: {e}"))
+                        );
+                    }
                 }
             }
-            Err(e) => {
-                eprintln!(
-                    "  {} {}",
-                    theme::warn(theme::WARN_GLYPH),
-                    theme::warn(&format!("poll error: {e} — retrying..."))
-                );
-            }
         }
-
-        std::thread::sleep(POLL_INTERVAL);
+        Err(e) => {
+            eprintln!(
+                "  {} {}",
+                theme::error(theme::ERR_GLYPH),
+                theme::error(&format!("scheduled turn failed: {e}"))
+            );
+            *runtime = build_runtime_streaming(session_snapshot, true);
+            let _ = send_message(
+                http,
+                base_url,
+                chat_id,
+                &format!("Sorry, a scheduled reminder ran into an error: {e}"),
+            );
+        }
     }
 }
 
