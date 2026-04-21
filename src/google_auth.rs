@@ -1,17 +1,21 @@
 //! Google OAuth 2.0 for installed / desktop apps — loopback flow.
 //!
-//! `claudette auth-google` runs [`run_auth_flow`]. It opens the user's browser
-//! to Google's authorize endpoint with `redirect_uri=http://127.0.0.1:<port>/callback`,
-//! spins up a single-use HTTP server that captures the `code` param, exchanges
-//! it for tokens, and persists them to `~/.claudette/secrets/google_oauth.json`.
+//! `claudette --auth-google [scope]` runs [`run_auth_flow`]. It opens the
+//! user's browser to Google's authorize endpoint with
+//! `redirect_uri=http://127.0.0.1:<port>/callback`, spins up a single-use
+//! HTTP server that captures the `code` param, exchanges it for tokens,
+//! and persists them to a **per-context** file under `~/.claudette/secrets/`.
 //!
-//! Calendar / Gmail tool handlers call [`access_token`] to get a fresh bearer
-//! token; refresh happens transparently when the stored access token is
-//! within 60 s of expiry.
+//! Per AD-6 we keep **separate token files** for each scope bundle so a
+//! hostile email read with the Gmail-read token can't pivot into Calendar
+//! writes. Calendar tools load only the calendar token; Gmail read tools
+//! load only the gmail-read token; phase 5's Gmail write tools will use
+//! a third.
 //!
 //! Storage:
-//!   ~/.claudette/secrets/google_oauth_client.json  → { client_id, client_secret }
-//!   ~/.claudette/secrets/google_oauth.json         → { access_token, refresh_token, ... }
+//!   ~/.claudette/secrets/google_oauth_client.json        → { client_id, client_secret }
+//!   ~/.claudette/secrets/google_oauth.json               → Calendar tokens
+//!   ~/.claudette/secrets/google_oauth_gmail_read.json    → Gmail read-only tokens
 //!
 //! Env overrides (same shape as `secrets.rs`):
 //!   CLAUDETTE_GOOGLE_CLIENT_ID  / GOOGLE_CLIENT_ID
@@ -34,9 +38,53 @@ const AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
 
-/// Scopes requested during Phase 1. Phase 4/5 will split Gmail into its own
-/// token file with narrower scopes per AD-6.
-const PHASE1_SCOPES: &[&str] = &["https://www.googleapis.com/auth/calendar"];
+/// Scope bundles we request at the OAuth consent screen. Each has its own
+/// on-disk token file so a compromise of one context can't pivot to the
+/// other (AD-6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthContext {
+    /// Read/write access to Calendar — used by `calendar_*` tools.
+    Calendar,
+    /// Read-only Gmail — used by `gmail_list`, `gmail_read`,
+    /// `gmail_list_labels`, `gmail_search`. Never granted send/modify.
+    GmailRead,
+}
+
+impl AuthContext {
+    /// OAuth scope strings that go into the `scope=` query param.
+    const fn scopes(self) -> &'static [&'static str] {
+        match self {
+            Self::Calendar => &["https://www.googleapis.com/auth/calendar"],
+            Self::GmailRead => &["https://www.googleapis.com/auth/gmail.readonly"],
+        }
+    }
+
+    /// Basename of the token file under `~/.claudette/secrets/`.
+    const fn token_filename(self) -> &'static str {
+        match self {
+            Self::Calendar => "google_oauth.json",
+            Self::GmailRead => "google_oauth_gmail_read.json",
+        }
+    }
+
+    /// Human-readable label for CLI messages / errors.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Calendar => "calendar",
+            Self::GmailRead => "gmail-read",
+        }
+    }
+
+    /// Parse from a CLI keyword (case-insensitive). Accepts the canonical
+    /// label plus common aliases.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().as_str() {
+            "calendar" | "cal" | "gcal" => Some(Self::Calendar),
+            "gmail" | "gmail-read" | "gmail_read" | "mail" => Some(Self::GmailRead),
+            _ => None,
+        }
+    }
+}
 
 /// On-disk token record. Shape mirrors Google's `/token` response plus a
 /// computed absolute `expires_at` so we don't need to remember when we
@@ -65,8 +113,8 @@ fn secrets_dir() -> PathBuf {
     PathBuf::from(home).join(".claudette").join("secrets")
 }
 
-fn tokens_path() -> PathBuf {
-    secrets_dir().join("google_oauth.json")
+fn tokens_path(ctx: AuthContext) -> PathBuf {
+    secrets_dir().join(ctx.token_filename())
 }
 
 fn client_path() -> PathBuf {
@@ -123,8 +171,8 @@ fn lookup_env_or_file(suffix: &str) -> Result<String, ()> {
     Err(())
 }
 
-fn save_tokens(tokens: &GoogleTokens) -> Result<(), String> {
-    let path = tokens_path();
+fn save_tokens(ctx: AuthContext, tokens: &GoogleTokens) -> Result<(), String> {
+    let path = tokens_path(ctx);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("google_auth: create {}: {e}", parent.display()))?;
@@ -142,12 +190,14 @@ fn save_tokens(tokens: &GoogleTokens) -> Result<(), String> {
     Ok(())
 }
 
-fn load_tokens() -> Result<GoogleTokens, String> {
-    let path = tokens_path();
+fn load_tokens(ctx: AuthContext) -> Result<GoogleTokens, String> {
+    let path = tokens_path(ctx);
     if !path.exists() {
         return Err(format!(
-            "google_auth: not authenticated. Run `claudette --auth-google` first. \
+            "google_auth: not authenticated for {}. Run `claudette --auth-google {}` first. \
              (Expected tokens at {}.)",
+            ctx.label(),
+            ctx.label(),
             path.display()
         ));
     }
@@ -168,14 +218,15 @@ fn http_client() -> Result<reqwest::blocking::Client, String> {
         .map_err(|e| format!("google_auth: build http client: {e}"))
 }
 
-/// Entry point for tool handlers — returns a bearer token ready to drop into
-/// `Authorization: Bearer <token>`. Refreshes automatically when close to
-/// expiry.
-pub fn access_token() -> Result<String, String> {
-    let mut tokens = load_tokens()?;
+/// Entry point for tool handlers — returns a bearer token for the given
+/// context, ready to drop into `Authorization: Bearer <token>`. Refreshes
+/// automatically when close to expiry and persists the refreshed access
+/// token to the per-context file.
+pub fn access_token(ctx: AuthContext) -> Result<String, String> {
+    let mut tokens = load_tokens(ctx)?;
     if tokens.expires_at - now_unix() < 60 {
         refresh_tokens(&mut tokens)?;
-        save_tokens(&tokens)?;
+        save_tokens(ctx, &tokens)?;
     }
     Ok(tokens.access_token)
 }
@@ -223,10 +274,10 @@ fn refresh_tokens(tokens: &mut GoogleTokens) -> Result<(), String> {
     Ok(())
 }
 
-/// Revoke the stored refresh token with Google and delete the local file.
-/// Used by `claudette --auth-google --revoke`.
-pub fn revoke() -> Result<(), String> {
-    let tokens = load_tokens()?;
+/// Revoke the stored refresh token for `ctx` with Google and delete the
+/// corresponding local file. Used by `claudette --auth-google [scope] --revoke`.
+pub fn revoke(ctx: AuthContext) -> Result<(), String> {
+    let tokens = load_tokens(ctx)?;
     let client = http_client()?;
     let resp = client
         .post(REVOKE_URL)
@@ -240,7 +291,7 @@ pub fn revoke() -> Result<(), String> {
             resp.status()
         );
     }
-    let path = tokens_path();
+    let path = tokens_path(ctx);
     if path.exists() {
         std::fs::remove_file(&path)
             .map_err(|e| format!("google_auth: delete {}: {e}", path.display()))?;
@@ -248,9 +299,10 @@ pub fn revoke() -> Result<(), String> {
     Ok(())
 }
 
-/// Interactive `claudette --auth-google` flow. Binds a loopback listener,
-/// opens the browser, captures the `code`, exchanges it for tokens, saves.
-pub fn run_auth_flow() -> Result<(), String> {
+/// Interactive `claudette --auth-google [scope]` flow. Binds a loopback
+/// listener, opens the browser, captures the `code`, exchanges it for
+/// tokens, saves to the context-specific file.
+pub fn run_auth_flow(ctx: AuthContext) -> Result<(), String> {
     let creds = load_client_creds()?;
 
     // Bind first so we know which port to put in the redirect URI.
@@ -263,7 +315,7 @@ pub fn run_auth_flow() -> Result<(), String> {
     let redirect_uri = format!("http://127.0.0.1:{port}/callback");
 
     let state = random_state();
-    let scopes = PHASE1_SCOPES.join(" ");
+    let scopes = ctx.scopes().join(" ");
     let authorize = format!(
         "{AUTHORIZE_URL}?client_id={cid}&redirect_uri={redir}&response_type=code\
          &scope={scope}&access_type=offline&prompt=consent&state={state}",
@@ -272,7 +324,10 @@ pub fn run_auth_flow() -> Result<(), String> {
         scope = url_encode(&scopes),
     );
 
-    eprintln!("Opening browser to authorize Claudette with Google…");
+    eprintln!(
+        "Opening browser to authorize Claudette with Google ({scope})…",
+        scope = ctx.label()
+    );
     eprintln!("If it doesn't open, paste this URL manually:\n  {authorize}\n");
     let _ = open_browser(&authorize);
 
@@ -285,8 +340,12 @@ pub fn run_auth_flow() -> Result<(), String> {
     }
 
     let tokens = exchange_code(&creds, &code, &redirect_uri)?;
-    save_tokens(&tokens)?;
-    eprintln!("✔ Saved Google tokens to {}", tokens_path().display());
+    save_tokens(ctx, &tokens)?;
+    eprintln!(
+        "✔ Saved {} tokens to {}",
+        ctx.label(),
+        tokens_path(ctx).display()
+    );
     Ok(())
 }
 
@@ -578,15 +637,51 @@ mod tests {
 
     #[test]
     fn tokens_path_under_secrets() {
-        let p = tokens_path();
+        let p = tokens_path(AuthContext::Calendar);
         assert!(p.ends_with("google_oauth.json"));
         assert!(p.parent().unwrap().ends_with("secrets"));
+    }
+
+    #[test]
+    fn gmail_tokens_path_differs_from_calendar() {
+        let cal = tokens_path(AuthContext::Calendar);
+        let gmail = tokens_path(AuthContext::GmailRead);
+        assert_ne!(cal, gmail);
+        assert!(gmail.ends_with("google_oauth_gmail_read.json"));
     }
 
     #[test]
     fn client_path_under_secrets() {
         let p = client_path();
         assert!(p.ends_with("google_oauth_client.json"));
+    }
+
+    #[test]
+    fn auth_context_parse_accepts_canonical_and_aliases() {
+        assert_eq!(AuthContext::parse("calendar"), Some(AuthContext::Calendar));
+        assert_eq!(AuthContext::parse("cal"), Some(AuthContext::Calendar));
+        assert_eq!(AuthContext::parse("gcal"), Some(AuthContext::Calendar));
+        assert_eq!(AuthContext::parse("gmail"), Some(AuthContext::GmailRead));
+        assert_eq!(AuthContext::parse("gmail-read"), Some(AuthContext::GmailRead));
+        assert_eq!(AuthContext::parse("GMAIL"), Some(AuthContext::GmailRead));
+        assert_eq!(AuthContext::parse("unknown"), None);
+        assert_eq!(AuthContext::parse(""), None);
+    }
+
+    #[test]
+    fn auth_context_scopes_are_distinct() {
+        let cal = AuthContext::Calendar.scopes();
+        let gmail = AuthContext::GmailRead.scopes();
+        assert!(!cal.is_empty());
+        assert!(!gmail.is_empty());
+        assert_ne!(cal, gmail);
+        // Defence in depth: phase 4 must NOT request gmail.send.
+        for s in gmail {
+            assert!(
+                !s.contains("gmail.send") && !s.contains("gmail.modify"),
+                "gmail-read scope leaked a write permission: {s}"
+            );
+        }
     }
 
     #[test]
@@ -609,10 +704,10 @@ mod tests {
     #[test]
     fn access_token_errors_without_tokens() {
         // If the user happens to have a real token file, skip.
-        if tokens_path().exists() {
+        if tokens_path(AuthContext::Calendar).exists() {
             return;
         }
-        let err = access_token().unwrap_err();
+        let err = access_token(AuthContext::Calendar).unwrap_err();
         assert!(err.contains("not authenticated"), "got: {err}");
         assert!(err.contains("--auth-google"), "got: {err}");
     }

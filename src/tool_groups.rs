@@ -52,6 +52,10 @@ pub enum ToolGroup {
     /// Proactive scheduler: one-shot + recurring reminders the agent can
     /// send itself later. Backed by `~/.claudette/schedule.jsonl`.
     Schedule,
+    /// Gmail (read-only): list, search, read, list_labels. Requires
+    /// `claudette --auth-google gmail` one-time setup. Scope separated from
+    /// Calendar per AD-6; no send/modify in this group.
+    Gmail,
 }
 
 impl ToolGroup {
@@ -70,6 +74,7 @@ impl ToolGroup {
             Self::Telegram => "telegram",
             Self::Calendar => "calendar",
             Self::Schedule => "schedule",
+            Self::Gmail => "gmail",
         }
     }
 
@@ -89,12 +94,13 @@ impl ToolGroup {
             Self::Telegram => "telegram bot: send messages, poll updates, send photos (requires TELEGRAM_BOT_TOKEN)",
             Self::Calendar => "google calendar: list/create/update/delete events, RSVP (requires claudette --auth-google)",
             Self::Schedule => "proactive reminders: one-shot + recurring schedules that fire prompts back at you",
+            Self::Gmail => "gmail (read-only): list/search/read messages, list labels (requires claudette --auth-google gmail)",
         }
     }
 
     /// All groups in a stable order, for schema generation and tests.
     #[must_use]
-    pub fn all() -> [ToolGroup; 11] {
+    pub fn all() -> [ToolGroup; 12] {
         [
             Self::Git,
             Self::Ide,
@@ -107,6 +113,7 @@ impl ToolGroup {
             Self::Telegram,
             Self::Calendar,
             Self::Schedule,
+            Self::Gmail,
         ]
     }
 
@@ -127,6 +134,7 @@ impl ToolGroup {
             "telegram" | "tg" | "tg_bot" => Some(Self::Telegram),
             "calendar" | "gcal" | "google-calendar" | "google_calendar" => Some(Self::Calendar),
             "schedule" | "scheduler" | "reminders" | "reminder" => Some(Self::Schedule),
+            "gmail" | "mail" | "email" | "inbox" => Some(Self::Gmail),
             _ => None,
         }
     }
@@ -191,6 +199,9 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         | "calendar_respond_to_event" => Some(ToolGroup::Calendar),
         "schedule_once" | "schedule_recurring" | "schedule_list" | "schedule_cancel" => {
             Some(ToolGroup::Schedule)
+        }
+        "gmail_list" | "gmail_search" | "gmail_read" | "gmail_list_labels" => {
+            Some(ToolGroup::Gmail)
         }
         _ => None,
     }

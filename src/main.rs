@@ -37,6 +37,10 @@ struct CliArgs {
     tui: bool,
     auth_google: bool,
     auth_google_revoke: bool,
+    /// Which scope bundle to request during `--auth-google`. None means
+    /// "use the default" (Calendar) for backwards compatibility with
+    /// phase-1 invocations.
+    auth_google_scope: Option<String>,
     /// `--briefing`: create (or replace) the scheduled morning-briefing
     /// entry using the default BRIEFING_PROMPT plus the --time / --days
     /// modifiers, then exit.
@@ -74,6 +78,7 @@ fn main() -> ExitCode {
         tui: tui_mode,
         auth_google,
         auth_google_revoke,
+        auth_google_scope,
         briefing,
         briefing_time,
         briefing_days,
@@ -83,10 +88,26 @@ fn main() -> ExitCode {
     // Runs before the Ollama probe because it's a one-shot setup command —
     // the user doesn't need the brain running to grant OAuth consent.
     if auth_google {
+        let ctx = match auth_google_scope.as_deref() {
+            None => google_auth::AuthContext::Calendar, // backwards compat
+            Some(s) => match google_auth::AuthContext::parse(s) {
+                Some(c) => c,
+                None => {
+                    eprintln!(
+                        "{} {}",
+                        theme::error(theme::ERR_GLYPH),
+                        theme::error(&format!(
+                            "unknown --auth-google scope '{s}'. Try 'calendar' or 'gmail'."
+                        ))
+                    );
+                    return ExitCode::FAILURE;
+                }
+            },
+        };
         let result = if auth_google_revoke {
-            google_auth::revoke()
+            google_auth::revoke(ctx)
         } else {
-            google_auth::run_auth_flow()
+            google_auth::run_auth_flow(ctx)
         };
         return match result {
             Ok(()) => ExitCode::SUCCESS,
@@ -263,6 +284,18 @@ fn parse_args(args: &[String]) -> CliArgs {
                 expect = ExpectNext::Nothing;
                 continue;
             }
+            ExpectNext::AuthGoogleScope => {
+                // Peek: if the token looks like a known scope keyword,
+                // capture it as the scope. Otherwise treat it as a
+                // regular prompt word so `--auth-google somebody typed
+                // more words` still parses the way the user expected.
+                expect = ExpectNext::Nothing;
+                if claudette::google_auth::AuthContext::parse(arg).is_some() {
+                    out.auth_google_scope = Some(arg.clone());
+                    continue;
+                }
+                // Fall through to the normal arg-matching below.
+            }
             ExpectNext::Nothing => {}
         }
         match arg.as_str() {
@@ -270,7 +303,10 @@ fn parse_args(args: &[String]) -> CliArgs {
             "--telegram" | "-t" => out.telegram = true,
             "--tui" => out.tui = true,
             "--chat" => expect = ExpectNext::ChatId,
-            "--auth-google" => out.auth_google = true,
+            "--auth-google" => {
+                out.auth_google = true;
+                expect = ExpectNext::AuthGoogleScope;
+            }
             "--revoke" => out.auth_google_revoke = true,
             "--briefing" => out.briefing = true,
             "--time" => expect = ExpectNext::Time,
@@ -286,6 +322,10 @@ enum ExpectNext {
     ChatId,
     Time,
     Days,
+    /// Optional scope keyword immediately after `--auth-google`. If the
+    /// next token isn't a recognised scope we fall back to normal arg
+    /// matching rather than consuming it.
+    AuthGoogleScope,
 }
 
 /// Create (or replace) the scheduled morning-briefing entry. Used by the
@@ -489,6 +529,7 @@ mod tests {
         let a = parse_args(&["--auth-google".into()]);
         assert!(a.auth_google);
         assert!(!a.auth_google_revoke);
+        assert_eq!(a.auth_google_scope, None);
         assert!(a.prompt_words.is_empty());
     }
 
@@ -497,6 +538,39 @@ mod tests {
         let a = parse_args(&["--auth-google".into(), "--revoke".into()]);
         assert!(a.auth_google);
         assert!(a.auth_google_revoke);
+        assert_eq!(a.auth_google_scope, None);
+    }
+
+    #[test]
+    fn parse_args_auth_google_with_gmail_scope() {
+        let a = parse_args(&["--auth-google".into(), "gmail".into()]);
+        assert!(a.auth_google);
+        assert_eq!(a.auth_google_scope.as_deref(), Some("gmail"));
+        assert!(a.prompt_words.is_empty());
+    }
+
+    #[test]
+    fn parse_args_auth_google_with_calendar_scope_then_revoke() {
+        let a = parse_args(&[
+            "--auth-google".into(),
+            "calendar".into(),
+            "--revoke".into(),
+        ]);
+        assert!(a.auth_google);
+        assert_eq!(a.auth_google_scope.as_deref(), Some("calendar"));
+        assert!(a.auth_google_revoke);
+    }
+
+    #[test]
+    fn parse_args_auth_google_unknown_next_treated_as_prompt() {
+        // If the next token isn't a known scope keyword we shouldn't eat
+        // it — leave it for the prompt-words bucket so the rest of the
+        // parser still gets to see other flags.
+        let a = parse_args(&["--auth-google".into(), "nonsense".into(), "-r".into()]);
+        assert!(a.auth_google);
+        assert_eq!(a.auth_google_scope, None);
+        assert!(a.resume, "resume flag after unknown scope should still register");
+        assert!(a.prompt_words.contains(&"nonsense".to_string()));
     }
 
     #[test]

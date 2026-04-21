@@ -15,9 +15,11 @@ claudette                       # interactive REPL
 
 ## What Claudette does
 
-Claudette is a conversational agent that runs in four modes — REPL, fullscreen TUI, one-shot CLI, and Telegram bot — and calls 58 local tools across 9 on-demand groups. It has three specialised sub-agents, a dedicated code-generation sidecar called **Codet** that auto-validates generated code, a file-backed session store with auto-compaction, and a three-tier permission system for destructive actions.
+Claudette is a conversational agent that runs in four modes — REPL, fullscreen TUI, one-shot CLI, and Telegram bot — and calls 70+ local tools across 12 on-demand groups. It has three specialised sub-agents, a dedicated code-generation sidecar called **Codet** that auto-validates generated code, a file-backed session store with auto-compaction, and a three-tier permission system for destructive actions.
 
 The tagline: *a general-purpose AI assistant that your laptop can actually run*.
+
+> **v0.2.0 in progress — the Life Agent.** Claudette is growing from a reactive chatbot into a proactive personal life agent: Google Calendar and Gmail (read-only) tool groups, a persistent scheduler that fires prompts back at you, and a `/briefing` Telegram command (or `claudette --briefing` for a recurring 07:00 weekday briefing) that covers the day's calendar, weather, and unread email. See [`docs/sprint_life_agent.md`](docs/sprint_life_agent.md) for the full plan and [`docs/google_setup.md`](docs/google_setup.md) for the one-time OAuth setup.
 
 ---
 
@@ -50,6 +52,9 @@ To keep the model's context window small, Claudette advertises only ~17 "core" t
 | `github` | 6 | List PRs/issues, get/create/comment issues, code search |
 | `markets` | 7 | TradingView quotes/ratings/calendar, Algorand ASA stats via vestige.fi |
 | `telegram` | 3 | Bot messaging: send messages, poll updates, send photos |
+| `calendar` | 5 | Google Calendar: list / create / update / delete events, RSVP |
+| `schedule` | 4 | Proactive reminders: one-shot + recurring schedules that fire prompts back at you |
+| `gmail` | 4 | Gmail (read-only): list, search, read, list labels — with `<email>` provenance wrapping |
 
 Schema cost: **~4.7 KB (core) vs ~18.2 KB (all)** — loading groups on demand saves roughly 72 % of the context per turn.
 

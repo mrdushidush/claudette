@@ -21,9 +21,9 @@ charge for this; you're using your own quota.
 
 Navigation → **APIs & Services → Library**. Search and enable:
 
-- **Google Calendar API** — required for phase 1 (Calendar tool group).
-- **Gmail API** — only needed when you reach Gmail phases (4-5) of the
-  sprint. Skip for phase 1.
+- **Google Calendar API** — required for the `calendar` tool group.
+- **Gmail API** — required for the `gmail` tool group (phase 4 onward).
+  Read-only access only in v0.2.0; compose/send arrives in a later release.
 
 ## 3. Configure the OAuth consent screen
 
@@ -87,23 +87,42 @@ same for this one: `chmod 0600 ~/.claudette/secrets/google_oauth_client.json`.
 
 ## 6. Run the auth flow
 
+You run the flow **once per scope bundle**. Claudette keeps Calendar and
+Gmail tokens in separate files (AD-6: a hostile email read can't pivot
+to Calendar writes), so you authorise each one individually.
+
+**Calendar** (required for the `calendar` tool group and the morning briefing):
+
 ```sh
-claudette --auth-google
+claudette --auth-google           # scope defaults to calendar
+# or, explicitly:
+claudette --auth-google calendar
 ```
 
-This:
+**Gmail read-only** (required for the `gmail` tool group and the briefing's
+email summary):
+
+```sh
+claudette --auth-google gmail
+```
+
+Either command:
 
 1. Binds a loopback HTTP server on `127.0.0.1:<random-port>`.
-2. Opens your default browser to Google's consent screen.
+2. Opens your default browser to Google's consent screen for that scope.
 3. You sign in and approve the scopes.
 4. Google redirects to `http://127.0.0.1:<port>/callback?code=...`.
 5. Claudette captures the code, exchanges it for an access + refresh token,
-   writes `~/.claudette/secrets/google_oauth.json`, and closes the server.
+   writes the context-specific file under `~/.claudette/secrets/`
+   (`google_oauth.json` for calendar, `google_oauth_gmail_read.json` for
+   gmail), and closes the server.
 
 If the browser doesn't open automatically, copy the URL Claudette prints and
 paste it into your browser yourself — the flow still completes.
 
-You only run this once. The refresh token stays valid until you revoke it.
+Refresh tokens stay valid until you revoke them. You only rerun
+`--auth-google <scope>` if Google invalidates the token (rare) or you
+change which Google account the scope is bound to.
 
 ## 7. Verify it works
 
@@ -118,12 +137,15 @@ token file is missing — rerun `claudette --auth-google`.
 ## Revoking access
 
 ```sh
-claudette --auth-google --revoke
+claudette --auth-google --revoke            # calendar (default)
+claudette --auth-google calendar --revoke   # explicit
+claudette --auth-google gmail --revoke      # gmail-read only
 ```
 
-This calls Google's revoke endpoint and deletes the local token file. Your
-OAuth client in Cloud Console stays in place; only the granted consent is
-removed. To re-authorize, run `claudette --auth-google` again.
+Each invocation calls Google's revoke endpoint for the specified scope
+and deletes the matching local token file. Your OAuth client in Cloud
+Console stays in place; only the granted consent is removed. To
+re-authorize, run `claudette --auth-google <scope>` again.
 
 You can also revoke from Google's side at
 <https://myaccount.google.com/permissions>.

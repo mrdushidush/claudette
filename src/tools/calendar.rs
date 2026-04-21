@@ -178,7 +178,7 @@ fn run_list_events(input: &str) -> Result<String, String> {
         .unwrap_or(25)
         .to_string();
 
-    let token = crate::google_auth::access_token()?;
+    let token = crate::google_auth::access_token(crate::google_auth::AuthContext::Calendar)?;
     let client = external_http_client()?;
     let url = format!(
         "{API_BASE}/calendars/{cal}/events",
@@ -291,7 +291,7 @@ fn run_create_event(input: &str) -> Result<String, String> {
         }
     }
 
-    let token = crate::google_auth::access_token()?;
+    let token = crate::google_auth::access_token(crate::google_auth::AuthContext::Calendar)?;
     let client = external_http_client()?;
     let url = format!(
         "{API_BASE}/calendars/{cal}/events",
@@ -349,7 +349,7 @@ fn run_update_event(input: &str) -> Result<String, String> {
         );
     }
 
-    let token = crate::google_auth::access_token()?;
+    let token = crate::google_auth::access_token(crate::google_auth::AuthContext::Calendar)?;
     let client = external_http_client()?;
     let url = format!(
         "{API_BASE}/calendars/{cal}/events/{eid}",
@@ -385,7 +385,7 @@ fn run_delete_event(input: &str) -> Result<String, String> {
     let event_id = extract_str(&v, "event_id", "calendar_delete_event")?;
     let calendar_id = default_calendar_id(&v);
 
-    let token = crate::google_auth::access_token()?;
+    let token = crate::google_auth::access_token(crate::google_auth::AuthContext::Calendar)?;
     let client = external_http_client()?;
     let url = format!(
         "{API_BASE}/calendars/{cal}/events/{eid}",
@@ -432,7 +432,7 @@ fn run_respond_to_event(input: &str) -> Result<String, String> {
         ));
     }
 
-    let token = crate::google_auth::access_token()?;
+    let token = crate::google_auth::access_token(crate::google_auth::AuthContext::Calendar)?;
     let client = external_http_client()?;
 
     // Two-step dance: GET event to find the attendee list, PATCH with our
@@ -553,7 +553,7 @@ mod tests {
         // pass event_id but no fields. The module checks payload BEFORE
         // calling access_token only when event_id passes, so we need to
         // intercept. Skip if user happens to be authenticated.
-        if crate::google_auth::access_token().is_ok() {
+        if crate::google_auth::access_token(crate::google_auth::AuthContext::Calendar).is_ok() {
             return;
         }
         let err = run_update_event(r#"{"event_id":"abc"}"#).unwrap_err();

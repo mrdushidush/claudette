@@ -28,6 +28,7 @@ mod facts;
 mod file_ops;
 mod git;
 mod github;
+mod gmail;
 mod ide;
 mod markets;
 mod notes;
@@ -114,6 +115,7 @@ pub fn secretary_tools_json() -> Value {
     tools.extend(file_ops::schemas());
     tools.extend(git::schemas());
     tools.extend(github::schemas());
+    tools.extend(gmail::schemas());
     tools.extend(ide::schemas());
     tools.extend(markets::schemas());
     tools.extend(notes::schemas());
@@ -151,6 +153,9 @@ pub fn dispatch_tool(name: &str, input: &str) -> Result<String, String> {
         return result;
     }
     if let Some(result) = github::dispatch(name, input) {
+        return result;
+    }
+    if let Some(result) = gmail::dispatch(name, input) {
         return result;
     }
     if let Some(result) = ide::dispatch(name, input) {
