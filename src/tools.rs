@@ -22,6 +22,7 @@ use serde_json::{json, Value};
 
 // Per-group sub-modules. Each exports `schemas()` and `dispatch()`; see the
 // group-module contract at the top of `registry.rs`.
+mod calendar;
 mod codegen;
 mod facts;
 mod file_ops;
@@ -106,6 +107,7 @@ pub fn secretary_tools_json() -> Value {
     .as_array()
     .cloned()
     .unwrap_or_default();
+    tools.extend(calendar::schemas());
     tools.extend(codegen::schemas());
     tools.extend(facts::schemas());
     tools.extend(file_ops::schemas());
@@ -131,6 +133,9 @@ pub fn dispatch_tool(name: &str, input: &str) -> Result<String, String> {
     // Per-group dispatchers get first crack; each returns Some(_) if it owns
     // the tool, None otherwise. The `match` below handles everything that
     // hasn't migrated to a sub-module yet.
+    if let Some(result) = calendar::dispatch(name, input) {
+        return result;
+    }
     if let Some(result) = codegen::dispatch(name, input) {
         return result;
     }

@@ -46,6 +46,9 @@ pub enum ToolGroup {
     Markets,
     /// Telegram bot: send messages, poll updates, send photos.
     Telegram,
+    /// Google Calendar: list / create / update / delete events, RSVP.
+    /// Requires `claudette --auth-google` one-time setup.
+    Calendar,
 }
 
 impl ToolGroup {
@@ -62,6 +65,7 @@ impl ToolGroup {
             Self::Github => "github",
             Self::Markets => "markets",
             Self::Telegram => "telegram",
+            Self::Calendar => "calendar",
         }
     }
 
@@ -79,12 +83,13 @@ impl ToolGroup {
             Self::Github => "github PRs/issues/code search (requires GITHUB_TOKEN)",
             Self::Markets => "market data: TradingView quotes/ratings/economic calendar, vestige.fi Algorand ASAs",
             Self::Telegram => "telegram bot: send messages, poll updates, send photos (requires TELEGRAM_BOT_TOKEN)",
+            Self::Calendar => "google calendar: list/create/update/delete events, RSVP (requires claudette --auth-google)",
         }
     }
 
     /// All groups in a stable order, for schema generation and tests.
     #[must_use]
-    pub fn all() -> [ToolGroup; 9] {
+    pub fn all() -> [ToolGroup; 10] {
         [
             Self::Git,
             Self::Ide,
@@ -95,6 +100,7 @@ impl ToolGroup {
             Self::Github,
             Self::Markets,
             Self::Telegram,
+            Self::Calendar,
         ]
     }
 
@@ -113,6 +119,7 @@ impl ToolGroup {
                 Some(Self::Markets)
             }
             "telegram" | "tg" | "tg_bot" => Some(Self::Telegram),
+            "calendar" | "gcal" | "google-calendar" | "google_calendar" => Some(Self::Calendar),
             _ => None,
         }
     }
@@ -170,6 +177,11 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         | "vestige_search_asa"
         | "vestige_top_movers" => Some(ToolGroup::Markets),
         "tg_send" | "tg_get_updates" | "tg_send_photo" => Some(ToolGroup::Telegram),
+        "calendar_list_events"
+        | "calendar_create_event"
+        | "calendar_update_event"
+        | "calendar_delete_event"
+        | "calendar_respond_to_event" => Some(ToolGroup::Calendar),
         _ => None,
     }
 }

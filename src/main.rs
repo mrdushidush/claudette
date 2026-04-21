@@ -20,7 +20,7 @@
 use std::process::ExitCode;
 
 use claudette::{
-    probe_ollama, run_secretary, run_secretary_repl, secrets, telegram_mode, theme,
+    google_auth, probe_ollama, run_secretary, run_secretary_repl, secrets, telegram_mode, theme,
     try_load_session, SessionOptions,
 };
 use claudette::{ContentBlock, Session};
@@ -45,7 +45,26 @@ fn main() -> ExitCode {
     theme::init();
 
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
-    let (resume, telegram, mut chat_ids, prompt_args, tui_mode) = parse_args(&raw_args);
+    let (resume, telegram, mut chat_ids, prompt_args, tui_mode, auth_google, auth_google_revoke) =
+        parse_args(&raw_args);
+
+    // ── Google OAuth flow ─────────────────────────────────────────────
+    // Runs before the Ollama probe because it's a one-shot setup command —
+    // the user doesn't need the brain running to grant OAuth consent.
+    if auth_google {
+        let result = if auth_google_revoke {
+            google_auth::revoke()
+        } else {
+            google_auth::run_auth_flow()
+        };
+        return match result {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("{} {}", theme::error(theme::ERR_GLYPH), theme::error(&e));
+                ExitCode::FAILURE
+            }
+        };
+    }
 
     // Fail fast with a readable message if Ollama isn't running, instead of
     // surfacing a raw reqwest connection error inside the first chat turn.
@@ -158,17 +177,23 @@ fn main() -> ExitCode {
     }
 }
 
-/// Bare-bones flag parser. Returns `(resume, telegram, chat_ids, prompt_words, tui)`.
+/// Bare-bones flag parser. Returns
+/// `(resume, telegram, chat_ids, prompt_words, tui, auth_google, auth_google_revoke)`.
 ///
 /// Supported flags:
 /// - `--resume` / `-r` — resume saved session
 /// - `--telegram` / `-t` — run as Telegram bot
 /// - `--tui` — launch the ratatui TUI
 /// - `--chat <id>` — restrict to this chat ID (repeatable)
-fn parse_args(args: &[String]) -> (bool, bool, Vec<i64>, Vec<String>, bool) {
+/// - `--auth-google` — run the Google OAuth loopback flow and save tokens
+/// - `--revoke` — paired with `--auth-google`, revokes tokens with Google
+///   and deletes the local file
+fn parse_args(args: &[String]) -> (bool, bool, Vec<i64>, Vec<String>, bool, bool, bool) {
     let mut resume = false;
     let mut telegram = false;
     let mut tui = false;
+    let mut auth_google = false;
+    let mut auth_google_revoke = false;
     let mut chat_ids: Vec<i64> = Vec::new();
     let mut prompt = Vec::with_capacity(args.len());
     let mut expect_chat_id = false;
@@ -195,10 +220,20 @@ fn parse_args(args: &[String]) -> (bool, bool, Vec<i64>, Vec<String>, bool) {
             "--telegram" | "-t" => telegram = true,
             "--tui" => tui = true,
             "--chat" => expect_chat_id = true,
+            "--auth-google" => auth_google = true,
+            "--revoke" => auth_google_revoke = true,
             _ => prompt.push(arg.clone()),
         }
     }
-    (resume, telegram, chat_ids, prompt, tui)
+    (
+        resume,
+        telegram,
+        chat_ids,
+        prompt,
+        tui,
+        auth_google,
+        auth_google_revoke,
+    )
 }
 
 #[cfg(test)]
@@ -207,18 +242,20 @@ mod tests {
 
     #[test]
     fn parse_args_no_flags() {
-        let (resume, telegram, chat_ids, prompt, tui) =
+        let (resume, telegram, chat_ids, prompt, tui, auth_google, auth_revoke) =
             parse_args(&["hello".into(), "world".into()]);
         assert!(!resume);
         assert!(!telegram);
         assert!(!tui);
+        assert!(!auth_google);
+        assert!(!auth_revoke);
         assert!(chat_ids.is_empty() || !chat_ids.is_empty()); // env var may set some
         assert_eq!(prompt, vec!["hello".to_string(), "world".to_string()]);
     }
 
     #[test]
     fn parse_args_resume_long() {
-        let (resume, _, _, prompt, _) =
+        let (resume, _, _, prompt, _, _, _) =
             parse_args(&["--resume".into(), "what".into(), "time".into()]);
         assert!(resume);
         assert_eq!(prompt, vec!["what".to_string(), "time".to_string()]);
@@ -226,28 +263,29 @@ mod tests {
 
     #[test]
     fn parse_args_resume_short() {
-        let (resume, _, _, prompt, _) = parse_args(&["-r".into()]);
+        let (resume, _, _, prompt, _, _, _) = parse_args(&["-r".into()]);
         assert!(resume);
         assert!(prompt.is_empty());
     }
 
     #[test]
     fn parse_args_resume_anywhere() {
-        let (resume, _, _, prompt, _) = parse_args(&["go".into(), "-r".into(), "now".into()]);
+        let (resume, _, _, prompt, _, _, _) =
+            parse_args(&["go".into(), "-r".into(), "now".into()]);
         assert!(resume);
         assert_eq!(prompt, vec!["go".to_string(), "now".to_string()]);
     }
 
     #[test]
     fn parse_args_telegram_mode() {
-        let (_, telegram, _, prompt, _) = parse_args(&["--telegram".into()]);
+        let (_, telegram, _, prompt, _, _, _) = parse_args(&["--telegram".into()]);
         assert!(telegram);
         assert!(prompt.is_empty());
     }
 
     #[test]
     fn parse_args_telegram_with_chat() {
-        let (resume, telegram, chat_ids, _, _) = parse_args(&[
+        let (resume, telegram, chat_ids, _, _, _, _) = parse_args(&[
             "--telegram".into(),
             "--resume".into(),
             "--chat".into(),
@@ -260,20 +298,36 @@ mod tests {
 
     #[test]
     fn parse_args_telegram_short() {
-        let (_, telegram, _, _, _) = parse_args(&["-t".into()]);
+        let (_, telegram, _, _, _, _, _) = parse_args(&["-t".into()]);
         assert!(telegram);
     }
 
     #[test]
     fn parse_args_tui_flag() {
-        let (_, _, _, _, tui) = parse_args(&["--tui".into()]);
+        let (_, _, _, _, tui, _, _) = parse_args(&["--tui".into()]);
         assert!(tui);
     }
 
     #[test]
     fn parse_args_tui_with_resume() {
-        let (resume, _, _, _, tui) = parse_args(&["--tui".into(), "--resume".into()]);
+        let (resume, _, _, _, tui, _, _) = parse_args(&["--tui".into(), "--resume".into()]);
         assert!(tui);
         assert!(resume);
+    }
+
+    #[test]
+    fn parse_args_auth_google_flag() {
+        let (_, _, _, prompt, _, auth, revoke) = parse_args(&["--auth-google".into()]);
+        assert!(auth);
+        assert!(!revoke);
+        assert!(prompt.is_empty());
+    }
+
+    #[test]
+    fn parse_args_auth_google_revoke() {
+        let (_, _, _, _, _, auth, revoke) =
+            parse_args(&["--auth-google".into(), "--revoke".into()]);
+        assert!(auth);
+        assert!(revoke);
     }
 }

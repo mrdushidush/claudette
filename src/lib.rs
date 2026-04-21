@@ -39,6 +39,7 @@ pub mod brain_selector;
 pub mod codet;
 pub mod commands;
 pub mod executor;
+pub mod google_auth;
 pub mod memory;
 pub mod model_config;
 pub mod prompt;
