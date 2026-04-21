@@ -387,8 +387,8 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
                     // Extract text from message — either typed text or voice
                     // transcription. Track which one it was so the reply
                     // mode (text-only vs text+voice) can match the input.
-                    let input_was_voice = message.get("voice").is_some();
-                    let text: String = if let Some(voice_obj) = message.get("voice") {
+                    let mut input_was_voice = message.get("voice").is_some();
+                    let mut text: String = if let Some(voice_obj) = message.get("voice") {
                         // Voice message — download and transcribe via Whisper.
                         let file_id = voice_obj
                             .get("file_id")
@@ -457,8 +457,15 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
                         t
                     };
 
-                    // Handle bot slash commands directly (not sent to model).
-                    if text.starts_with('/') {
+                    // /briefing is a slash command that runs a turn (rather
+                    // than sending a canned reply). Rewrite text into the
+                    // briefing prompt and let the normal pipeline handle
+                    // streaming + tool calls. Never echo a briefing as
+                    // voice — it's a ping, not a conversation.
+                    if text == "/briefing" {
+                        input_was_voice = false;
+                        text = crate::briefing::BRIEFING_PROMPT.to_string();
+                    } else if text.starts_with('/') {
                         let reply = match text.as_str() {
                             "/start" => Some(
                                 "Hello! I'm Claudette, your AI personal secretary. \

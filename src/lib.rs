@@ -36,6 +36,7 @@ pub mod usage;
 pub mod agents;
 pub mod api;
 pub mod brain_selector;
+pub mod briefing;
 pub mod clock;
 pub mod codet;
 pub mod commands;
