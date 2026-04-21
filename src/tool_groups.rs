@@ -49,6 +49,9 @@ pub enum ToolGroup {
     /// Google Calendar: list / create / update / delete events, RSVP.
     /// Requires `claudette --auth-google` one-time setup.
     Calendar,
+    /// Proactive scheduler: one-shot + recurring reminders the agent can
+    /// send itself later. Backed by `~/.claudette/schedule.jsonl`.
+    Schedule,
 }
 
 impl ToolGroup {
@@ -66,6 +69,7 @@ impl ToolGroup {
             Self::Markets => "markets",
             Self::Telegram => "telegram",
             Self::Calendar => "calendar",
+            Self::Schedule => "schedule",
         }
     }
 
@@ -84,12 +88,13 @@ impl ToolGroup {
             Self::Markets => "market data: TradingView quotes/ratings/economic calendar, vestige.fi Algorand ASAs",
             Self::Telegram => "telegram bot: send messages, poll updates, send photos (requires TELEGRAM_BOT_TOKEN)",
             Self::Calendar => "google calendar: list/create/update/delete events, RSVP (requires claudette --auth-google)",
+            Self::Schedule => "proactive reminders: one-shot + recurring schedules that fire prompts back at you",
         }
     }
 
     /// All groups in a stable order, for schema generation and tests.
     #[must_use]
-    pub fn all() -> [ToolGroup; 10] {
+    pub fn all() -> [ToolGroup; 11] {
         [
             Self::Git,
             Self::Ide,
@@ -101,6 +106,7 @@ impl ToolGroup {
             Self::Markets,
             Self::Telegram,
             Self::Calendar,
+            Self::Schedule,
         ]
     }
 
@@ -120,6 +126,7 @@ impl ToolGroup {
             }
             "telegram" | "tg" | "tg_bot" => Some(Self::Telegram),
             "calendar" | "gcal" | "google-calendar" | "google_calendar" => Some(Self::Calendar),
+            "schedule" | "scheduler" | "reminders" | "reminder" => Some(Self::Schedule),
             _ => None,
         }
     }
@@ -182,6 +189,9 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         | "calendar_update_event"
         | "calendar_delete_event"
         | "calendar_respond_to_event" => Some(ToolGroup::Calendar),
+        "schedule_once" | "schedule_recurring" | "schedule_list" | "schedule_cancel" => {
+            Some(ToolGroup::Schedule)
+        }
         _ => None,
     }
 }
