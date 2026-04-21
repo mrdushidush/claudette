@@ -36,7 +36,7 @@ The tagline: *a general-purpose AI assistant that your laptop can actually run*.
 
 Each mode reuses the same conversation runtime, the same tool set, and the same session format. Switching modes is just a different entry point.
 
-### 58 tools across 9 on-demand groups
+### 70+ tools across 12 on-demand groups
 
 To keep the model's context window small, Claudette advertises only ~17 "core" tools by default. The rest load when the model calls `enable_tools(group)`. Each group is a self-contained capability:
 
@@ -56,7 +56,7 @@ To keep the model's context window small, Claudette advertises only ~17 "core" t
 | `schedule` | 4 | Proactive reminders: one-shot + recurring schedules that fire prompts back at you |
 | `gmail` | 4 | Gmail (read-only): list, search, read, list labels — with `<email>` provenance wrapping |
 
-Schema cost: **~4.7 KB (core) vs ~18.2 KB (all)** — loading groups on demand saves roughly 72 % of the context per turn.
+Schema cost: the core advertises only ~4.7 KB of tool schema on every turn; enabling all 12 groups at once is roughly 5× that. Loading on demand keeps typical conversations well under the full schema cost.
 
 ### Three specialised sub-agents
 
@@ -330,8 +330,8 @@ src/
 ├── api.rs            — OllamaApiClient: /api/chat streamer, truncation, budget math, probe
 ├── run.rs            — Runtime builder, REPL loop, autosave, session compaction
 ├── executor.rs       — SecretaryToolExecutor: enable_tools meta-tool + dispatch
-├── tools.rs          — 58 tool schemas + all run_* handlers
-├── tool_groups.rs    — ToolRegistry + the 9 on-demand tool-group definitions
+├── tools.rs          — 70+ tool schemas + all run_* handlers
+├── tool_groups.rs    — ToolRegistry + the 12 on-demand tool-group definitions
 ├── agents.rs         — AgentType, FilteredToolExecutor, spawn_agent orchestrator
 ├── codet.rs          — Code-generation sidecar (syntax check, surgical fix loop, tests)
 ├── test_runner.rs    — Python/Rust/JS/TS syntax + test runners
