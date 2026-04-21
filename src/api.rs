@@ -53,6 +53,44 @@ pub fn tui_text_callback(
     })
 }
 
+/// Shared streaming buffer used by Telegram mode. The brain's text-delta
+/// callback appends to this buffer as tokens arrive; a poller thread in
+/// `telegram_mode` scans the buffer for completed paragraphs and sends
+/// them to the chat, so responses arrive progressively during generation
+/// instead of after the turn finishes.
+static TELEGRAM_STREAM_BUFFER: std::sync::OnceLock<Mutex<String>> = std::sync::OnceLock::new();
+
+/// Accessor for the Telegram stream buffer. Lazily initialised on first call.
+#[must_use]
+pub fn telegram_stream_buffer() -> &'static Mutex<String> {
+    TELEGRAM_STREAM_BUFFER.get_or_init(|| Mutex::new(String::new()))
+}
+
+/// Reset the Telegram stream buffer. Called at the start of each turn so
+/// leftover bytes from the previous turn don't leak.
+pub fn telegram_stream_reset() {
+    if let Ok(mut buf) = telegram_stream_buffer().lock() {
+        buf.clear();
+    }
+}
+
+/// Callback for Telegram mode: appends deltas to the shared stream buffer
+/// and also mirrors them to stdout so the server terminal still shows the
+/// model's output as it streams.
+#[must_use]
+pub fn telegram_text_callback() -> TextCallback {
+    Box::new(|delta: &str| {
+        use std::io::Write;
+        if let Ok(mut buf) = telegram_stream_buffer().lock() {
+            buf.push_str(delta);
+        }
+        let stdout = std::io::stdout();
+        let mut out = stdout.lock();
+        let _ = out.write_all(delta.as_bytes());
+        let _ = out.flush();
+    })
+}
+
 const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 /// Default Ollama context window.
 ///

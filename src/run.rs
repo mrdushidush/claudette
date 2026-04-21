@@ -11,7 +11,7 @@ use crate::{
 };
 use anyhow::{Context, Result};
 
-use crate::api::{stdout_text_callback, OllamaApiClient};
+use crate::api::{stdout_text_callback, telegram_text_callback, OllamaApiClient};
 use crate::commands::{dispatch_slash_command, parse_slash_command, ReplState, SlashOutcome};
 use crate::executor::SecretaryToolExecutor;
 use crate::memory::try_load_memory;
@@ -443,7 +443,12 @@ pub(crate) fn build_runtime_with_brain(
         .with_context(brain.num_ctx)
         .with_max_predict(brain.num_predict);
     if streaming {
-        api_client = api_client.with_text_callback(stdout_text_callback());
+        let cb = if telegram {
+            telegram_text_callback()
+        } else {
+            stdout_text_callback()
+        };
+        api_client = api_client.with_text_callback(cb);
     }
     let executor = SecretaryToolExecutor::with_registry(registry);
     let policy = build_permission_policy();
