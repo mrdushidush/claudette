@@ -35,7 +35,7 @@ use crate::tool_groups::ToolRegistry;
 /// fixed threshold within ~3 turns and then NEVER falls back below it,
 /// because the usage tracker doesn't subtract removed-message tokens after
 /// a compact. Result: every subsequent turn fired auto-compaction even
-/// though the session itself was small. a user's transcript on 2026-04-09
+/// though the session itself was small. A real transcript on 2026-04-09
 /// caught this — six consecutive turns each removing 5 messages.
 ///
 /// The fix: bypass the runtime's trigger (set its threshold to

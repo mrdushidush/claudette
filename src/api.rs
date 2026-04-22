@@ -592,7 +592,7 @@ fn build_history_messages(msgs: &[crate::ConversationMessage]) -> Vec<Value> {
 /// **Skips oversized older messages instead of aborting** the walk: if
 /// message N is too big to add but message N-1 (older) would still fit,
 /// we keep N-1. Previously a `break` here meant a single huge tool result
-/// (e.g. `list_dir` on `C:\Users\<user>`) wiped out *every* prior turn.
+/// (e.g. `list_dir` on a deep home directory) wiped out *every* prior turn.
 ///
 /// **Why a free function and not inside `build_messages`:** keeps it pure and
 /// directly testable (no `ApiRequest` ceremony to construct in tests).
