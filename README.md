@@ -118,7 +118,7 @@ Telegram voice messages are transcribed end-to-end locally via [Whisper](https:/
 
 The `enable_tools(group)` meta-tool lets the model pull in capability groups when it realises it needs them. This is Sprint 8's flagship architectural decision: adding 100 tools to Claudette costs zero context until the model actually calls one.
 
-The model can also be told to pre-load groups in Telegram mode where the user can't confirm permissions turn-by-turn — `markets`, `facts`, `search`, `ide`, and `git` are pre-loaded when `--telegram` is passed.
+The model can also be told to pre-load groups in Telegram mode where the user can't confirm permissions turn-by-turn — `markets`, `facts`, `search`, `advanced`, and `git` are pre-loaded when `--telegram` is passed.
 
 ---
 

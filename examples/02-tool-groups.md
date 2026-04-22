@@ -82,7 +82,7 @@ second weather question in the same session is a direct
 
 In Telegram mode the user can't confirm permissions turn-by-turn, so
 Claudette auto-enables the "safe" groups at startup:
-`markets`, `facts`, `search`, `ide`, `git`. See
+`markets`, `facts`, `search`, `advanced`, `git`. See
 `src/telegram_mode.rs` for the exact list — any changes there flow
 through the codebase automatically.
 
