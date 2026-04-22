@@ -10,6 +10,65 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING — `--telegram` default-denies.** Starting the bot with no
+  `--chat <id>` allowlist and no `CLAUDETTE_TELEGRAM_CHAT` env var now
+  exits immediately with a "refusing to start: no chat allowlist" error
+  instead of silently serving every incoming chat. Pass `--chat any` to
+  explicitly accept everyone (prints a loud warning banner). Closes the
+  "ran it to test and anyone who guesses the bot name gets a full
+  assistant" footgun.
+
+### Added
+
+- **Real `--help` / `--version` handlers.** Expanded flag table covers
+  every long-form option. Previously both fell through to the generic
+  `parse_args` error path.
+
+### Fixed
+
+- **Remote-Ollama warning.** Startup prints a loud stderr banner when
+  `OLLAMA_HOST` points at a non-loopback address; silence with
+  `CLAUDETTE_ALLOW_REMOTE_OLLAMA=1` after reading it once. Claudette's
+  default posture is local-only — a surprise remote host is worth
+  surfacing.
+- **`is_local_ollama_url` userinfo + scheme case.** The loopback check
+  was fooled by `http://localhost:pass@evil.com:11434` (host parsed as
+  `localhost` because the `:` split ran before the `@` separator) and
+  by uppercase schemes like `HTTP://localhost:...`. Both cases now
+  parse correctly.
+- **`enable_tools` schema and error both list all 12 groups.** Two
+  spots hardcoded a 4-of-12 subset (`git, ide, search, or advanced`) —
+  both now enumerate from `ToolGroup::all()` with guardrail tests so a
+  future 13th group flows through automatically.
+- **Gmail email-provenance defang.** Closing-tag detection now catches
+  additional injection variants surfaced by round-1 audit.
+
+### Security
+
+- **OAuth CSRF state derived from `getrandom`.** The previous `rand`
+  default RNG is weaker than a dedicated OS-RNG call. If the OS RNG
+  fails, Claudette now refuses to fall back to weaker entropy instead
+  of silently downgrading.
+
+### Docs
+
+- README env-var table gained `CLAUDETTE_MEMORY`, `CLAUDETTE_ALLOW_REMOTE_OLLAMA`,
+  `CLAUDETTE_LIVE_GOOGLE`, `CLAUDETTE_GOOGLE_CLIENT_ID`, and
+  `CLAUDETTE_GOOGLE_CLIENT_SECRET` rows (previously only documented in
+  source comments or sprint docs).
+- README Architecture section synced with the post-split `src/tools/`
+  layout and CONTRIBUTING's "adding a new tool" walkthrough.
+- `examples/03-telegram-setup.md` refreshed to reflect the default-deny
+  posture (sample command + startup banner).
+- Pre-loaded Telegram group list fixed in README + examples (`ide` →
+  `advanced`); `cargo install` path harmonized between Quick Start and
+  Install sections; `qwen2.5-coder:7b` called out as a lightweight
+  coder option; `docs/comparison.md` post-v0.1.0 commit count refreshed.
+- Test counts updated to 515 lib + 24 bin (new guardrail test on the
+  `enable_tools` schema).
+
 ## [0.2.0] - 2026-04-22
 
 ### Added — Life Agent sprint, phases 1-4 (2026-04-21)
