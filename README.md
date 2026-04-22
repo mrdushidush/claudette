@@ -465,4 +465,4 @@ Be kind — [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) has the short version.
 
 Apache License 2.0 — see [LICENSE](LICENSE). You can use, modify, and redistribute Claudette commercially or personally. No trademark grant; don't imply endorsement.
 
-Copyright © 2026 [mrdushidush](https://github.com/mrdushidush)).
+Copyright © 2026 [mrdushidush](https://github.com/mrdushidush).
