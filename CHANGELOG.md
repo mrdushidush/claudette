@@ -10,6 +10,8 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-22
+
 ### Added — Life Agent sprint, phases 1-4 (2026-04-21)
 
 Claudette is growing from a reactive chatbot into a proactive personal
@@ -227,5 +229,6 @@ Initial public release of Claudette as a standalone repository.
 
 ---
 
-[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/mrdushidush/claudette/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mrdushidush/claudette/releases/tag/v0.1.0
