@@ -63,7 +63,7 @@ Distribution simplicity: Claudette ≈ opencode >> Aider > Cline / Continue > Op
 - **Model breadth**: opencode's 75+ model selector is more flexible than Claudette's "Ollama-only"
   default (though Claudette can be pointed at any Ollama-compatible endpoint).
 - **Ecosystem size**: Aider's 39K GitHub stars and 4.1M installs dwarfs everything else here.
-  Claudette is 60 commits past v0.1.0 and newly public — no user base yet.
+  Claudette is 70+ commits past v0.1.0 and newly public — no user base yet.
 
 ## Honest positioning
 

