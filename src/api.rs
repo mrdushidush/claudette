@@ -286,13 +286,23 @@ pub fn resolve_ollama_url() -> String {
 /// shell snippet copied from a tutorial) is worth surfacing loudly.
 #[must_use]
 pub fn is_local_ollama_url(url: &str) -> bool {
-    // Strip scheme if present. We only need the host portion.
-    let rest = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-        .unwrap_or(url);
+    // Strip scheme if present, case-insensitively. We only need the host.
+    let rest = if url.len() >= 8 && url[..8].eq_ignore_ascii_case("https://") {
+        &url[8..]
+    } else if url.len() >= 7 && url[..7].eq_ignore_ascii_case("http://") {
+        &url[7..]
+    } else {
+        url
+    };
     // Drop any path suffix (not expected for the probe URL but be safe).
-    let host_and_port = rest.split('/').next().unwrap_or(rest);
+    let rest = rest.split('/').next().unwrap_or(rest);
+    // Drop userinfo (user[:pass]@). Without this, `localhost:fake@evil.com`
+    // would parse host as `localhost` instead of `evil.com`. RFC 3986
+    // requires the last `@` to be the userinfo/host boundary.
+    let host_and_port = match rest.rfind('@') {
+        Some(idx) => &rest[idx + 1..],
+        None => rest,
+    };
     // Drop the port. IPv6 bracket form `[::1]:11434` — take inside brackets.
     let host = if let Some(inside) = host_and_port
         .strip_prefix('[')
@@ -722,6 +732,9 @@ mod tests {
             "http://localhost:11434",
             "https://localhost:11434",
             "http://LOCALHOST:11434",
+            "HTTP://localhost:11434",
+            "HTTPS://localhost:11434",
+            "http://user:pass@localhost:11434",
             "http://127.0.0.1:11434",
             "http://127.0.0.2:11434",
             "http://127.255.255.255:11434",
@@ -747,6 +760,10 @@ mod tests {
             "http://10.0.0.1:11434",     // private but not loopback
             "http://1.2.3.4:11434",
             "http://[2001:db8::1]:11434",
+            // Userinfo smuggling — without stripping last `@` the host
+            // would parse as `localhost` and bypass the remote warning.
+            "http://localhost:fakepass@evil.com:11434",
+            "http://localhost@evil.com:11434",
         ] {
             assert!(
                 !is_local_ollama_url(url),
