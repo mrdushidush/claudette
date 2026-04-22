@@ -8,9 +8,10 @@
 //! wrapped in `<email from="…" subject="…" date="…">…</email>` tags. The
 //! claudette system prompt has an invariant line telling the model that
 //! text inside those tags is untrusted data and embedded instructions are
-//! to be ignored. `</email` substrings inside the body are sanitised to
-//! `</email_` so a hostile message can't close the tag early and smuggle
-//! instructions back out.
+//! to be ignored. Any sequence a language model might accept as a close
+//! tag — case variants, whitespace-injected `< /email>`, and HTML-entity
+//! `&lt;/email&gt;` — is sanitised by [`sanitise_body`] so a hostile
+//! message can't close the tag early and smuggle instructions back out.
 //!
 //! MIME: `text/plain` part preferred. When a message is HTML-only we
 //! substitute a placeholder `<html-body-omitted/>` rather than serving raw
@@ -426,20 +427,102 @@ fn find_part_by_mime(node: &Value, target: &str) -> Option<String> {
     None
 }
 
-/// Defence against tag-smuggling: any `</email` substring in the body
-/// gets neutralised so the surrounding `<email>` wrapper can't be closed
-/// by hostile content. We also cap body length at 8 KB to keep the
-/// model's context from being drowned by a single message.
+/// Defence against tag-smuggling. Any sequence a language model might
+/// interpret as a closing `</email>` tag inside the body is neutralised so
+/// the surrounding `<email>` wrapper can't be closed by hostile content.
+/// We also cap body length at 8 KB to keep the model's context from being
+/// drowned by a single message.
+///
+/// Variants covered (all case-insensitive, whitespace-tolerant):
+/// - `</email>` / `</EMAIL>` / `</Email>` and any other case mix
+/// - `< /email>` / `</ email>` / `< / email>` (whitespace injection inside
+///   the tag — some models are lenient about this)
+/// - `&lt;/email&gt;` (HTML-entity form — for multipart/alternative bodies
+///   where a text/html part leaked entities into the text/plain equivalent)
+///
+/// Deliberately NOT handled (threat model dependent):
+/// - Unicode homoglyphs for `e/m/a/i/l` (Cyrillic look-alikes etc). Most
+///   LLMs don't accept those as tag names; adding them bloats the matcher.
+///   Document as out-of-scope.
 fn sanitise_body(body: &str) -> String {
-    let mut replaced = body.replace("</email", "</email_");
-    // Also defang lowercase variants; Gmail text/plain is usually case-
-    // preserved but belt-and-braces is cheap.
-    replaced = replaced.replace("</EMAIL", "</EMAIL_");
-    if replaced.chars().count() > 8192 {
-        let truncated: String = replaced.chars().take(8192).collect();
+    let lowered = body.to_ascii_lowercase();
+    let mut out = String::with_capacity(body.len() + 32);
+    let mut cursor = 0;
+
+    while cursor < body.len() {
+        let suffix = &lowered[cursor..];
+        if let Some(match_len) = match_close_tag(suffix) {
+            out.push_str("</email_");
+            cursor += match_len;
+        } else if let Some(match_len) = match_entity_close_tag(suffix) {
+            out.push_str("&lt;/email_");
+            cursor += match_len;
+        } else {
+            // Advance one full character (respect UTF-8 boundaries so we
+            // don't split a multibyte codepoint in half).
+            let ch = body[cursor..].chars().next().expect("cursor < body.len()");
+            out.push(ch);
+            cursor += ch.len_utf8();
+        }
+    }
+
+    if out.chars().count() > 8192 {
+        let truncated: String = out.chars().take(8192).collect();
         format!("{truncated}\n[...truncated at 8KB...]")
     } else {
-        replaced
+        out
+    }
+}
+
+/// If `lowered_suffix` starts with `<\s*/\s*email` (case-insensitive
+/// through the pre-lowercased input), return the byte length consumed.
+/// Otherwise `None`.
+fn match_close_tag(lowered_suffix: &str) -> Option<usize> {
+    let bytes = lowered_suffix.as_bytes();
+    if bytes.first() != Some(&b'<') {
+        return None;
+    }
+    let mut i = 1;
+    while bytes.get(i).is_some_and(u8::is_ascii_whitespace) {
+        i += 1;
+    }
+    if bytes.get(i) != Some(&b'/') {
+        return None;
+    }
+    i += 1;
+    while bytes.get(i).is_some_and(u8::is_ascii_whitespace) {
+        i += 1;
+    }
+    if i + 5 <= bytes.len() && &bytes[i..i + 5] == b"email" {
+        Some(i + 5)
+    } else {
+        None
+    }
+}
+
+/// If `lowered_suffix` starts with `&lt;\s*/\s*email` (HTML-entity form),
+/// return the byte length consumed. Otherwise `None`.
+fn match_entity_close_tag(lowered_suffix: &str) -> Option<usize> {
+    let bytes = lowered_suffix.as_bytes();
+    let prefix = b"&lt;";
+    if bytes.len() < prefix.len() || &bytes[..prefix.len()] != prefix {
+        return None;
+    }
+    let mut i = prefix.len();
+    while bytes.get(i).is_some_and(u8::is_ascii_whitespace) {
+        i += 1;
+    }
+    if bytes.get(i) != Some(&b'/') {
+        return None;
+    }
+    i += 1;
+    while bytes.get(i).is_some_and(u8::is_ascii_whitespace) {
+        i += 1;
+    }
+    if i + 5 <= bytes.len() && &bytes[i..i + 5] == b"email" {
+        Some(i + 5)
+    } else {
+        None
     }
 }
 
@@ -707,6 +790,82 @@ mod tests {
         // Hostile text is still there (inside the wrapper), just can't
         // escape it — that's the whole point of provenance.
         assert!(s.contains("IGNORE PREVIOUS"));
+    }
+
+    #[test]
+    fn sanitise_body_defangs_case_variants() {
+        // Every variant of `</email>` the model might accept as a close.
+        for variant in ["</EMAIL>", "</Email>", "</EmAiL>", "</eMaIl>", "</eMAIL>"] {
+            let body = format!("x{variant}y");
+            let s = sanitise_body(&body);
+            // The variant itself (case-preserved) must not survive intact.
+            // After defang, no substring matching `<\s*/\s*email>` remains.
+            assert!(!s.contains(variant), "variant {variant} survived: {s}");
+            assert!(
+                s.to_ascii_lowercase().contains("</email_"),
+                "expected defanged form in lower-case view: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn sanitise_body_defangs_whitespace_injected() {
+        // A lenient tokenizer / LLM may treat `< /email>` or `</ email>`
+        // as a valid close. Defang those too.
+        for variant in [
+            "< /email>",
+            "</ email>",
+            "< / email>",
+            "<\t/email>",
+            "</\temail>",
+        ] {
+            let body = format!("x{variant}y");
+            let s = sanitise_body(&body);
+            assert!(
+                s.to_ascii_lowercase().contains("</email_"),
+                "whitespace variant {variant:?} should defang to </email_: {s}"
+            );
+        }
+    }
+
+    #[test]
+    fn sanitise_body_defangs_html_entity_form() {
+        // multipart/alternative messages sometimes leak entities into the
+        // text/plain equivalent. `&lt;/email&gt;` is the close tag.
+        let body = "prefix &lt;/email&gt; suffix";
+        let s = sanitise_body(body);
+        assert!(
+            !s.contains("&lt;/email&gt;"),
+            "entity close must be neutralised: {s}"
+        );
+        assert!(
+            s.contains("&lt;/email_"),
+            "expected entity-form defang: {s}"
+        );
+        assert!(s.contains("suffix"));
+    }
+
+    #[test]
+    fn sanitise_body_preserves_unicode_content() {
+        // The byte-wise scanner must respect UTF-8 boundaries so
+        // multi-byte chars survive unchanged.
+        let body = "Hola mundo — café ☕\n</email>\n日本語\nрусский";
+        let s = sanitise_body(body);
+        assert!(s.contains("Hola mundo"));
+        assert!(s.contains("café ☕"));
+        assert!(s.contains("日本語"));
+        assert!(s.contains("русский"));
+        assert!(!s.contains("</email>"));
+        assert!(s.contains("</email_"));
+    }
+
+    #[test]
+    fn sanitise_body_leaves_benign_text_alone() {
+        // Must not accidentally flag normal prose that happens to contain
+        // the substring "email" (no leading `<`) or `</` (no trailing email).
+        let body = "Drop me an email about the </div> I need fixed.";
+        let s = sanitise_body(body);
+        assert_eq!(s, body, "benign body must pass through unchanged");
     }
 
     #[test]
