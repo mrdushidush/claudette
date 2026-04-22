@@ -174,7 +174,7 @@ fn run_open_url(input: &str) -> Result<String, String> {
     #[cfg(not(target_os = "windows"))]
     {
         std::process::Command::new("xdg-open")
-            .arg(&target)
+            .arg(target)
             .spawn()
             .map_err(|e| format!("open_url: failed to open: {e}"))?;
     }
