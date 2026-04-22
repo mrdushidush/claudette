@@ -395,8 +395,9 @@ fn run_get_capabilities() -> String {
 //
 // Path normalization is manual (no canonicalize) so it works for paths
 // that don't yet exist (write_file targets) and avoids Windows UNC noise
-// (\\?\C:\...). This does NOT defend against symlink escape — acceptable
-// threat model for a local secretary running on the user's own machine.
+// (\\?\C:\...). For `validate_read_path` specifically, we also canonicalize
+// the target if it exists to defeat symlink escapes — see that function's
+// doc comment and `path_is_allowed`.
 // ────────────────────────────────────────────────────────────────────────────
 
 pub(super) const MAX_FILE_BYTES: usize = 100 * 1024; // 100 KB
@@ -474,35 +475,67 @@ fn resolve_input_path(input: &str) -> Result<PathBuf, String> {
 /// 2. The current working directory, but only if CWD is itself under `$HOME`
 ///    (typical dev layout: `~/projects/foo`, `C:\Users\me\workspace\bar`).
 ///    Running Claudette from a system dir like `/etc` or `C:\Windows` does
-///    NOT open those dirs to reads — the old rule did.
+///    NOT open those dirs to reads.
 /// 3. Any path in `CLAUDETTE_WORKSPACE` (colon-separated on Unix,
 ///    semicolon-separated on Windows) — the explicit escape hatch for
 ///    out-of-HOME workspaces like `D:\dev\…`.
+///
+/// Two checks run: a fast lexical check on the normalised path (also works
+/// for not-yet-existing files), and — if the file exists — a canonical
+/// check on `fs::canonicalize` output that defeats symlink escapes
+/// (`~/.claudette/files/trap -> /etc/shadow`).
 pub(super) fn validate_read_path(input: &str) -> Result<PathBuf, String> {
     let resolved = resolve_input_path(input)?;
     let home = normalize_path(&user_home());
-    if resolved.starts_with(&home) {
-        return Ok(resolved);
+
+    if !path_is_allowed(&resolved, &home, false) {
+        return Err(format!(
+            "path is outside $HOME ({}), the working directory (if under $HOME), \
+             and CLAUDETTE_WORKSPACE; reads are restricted for safety",
+            home.display()
+        ));
     }
-    if let Ok(cwd) = std::env::current_dir() {
-        let cwd_norm = normalize_path(&cwd);
-        if cwd_norm.starts_with(&home) && resolved.starts_with(&cwd_norm) {
-            return Ok(resolved);
+
+    // Symlink-escape defence: if the target exists, canonicalise it and
+    // re-check against canonicalised allowed roots. Skipped for paths that
+    // don't exist yet (there's no symlink to follow).
+    if let Ok(canonical) = std::fs::canonicalize(&resolved) {
+        if !path_is_allowed(&canonical, &home, true) {
+            return Err(format!(
+                "path resolves via symlink outside allowed roots: {} → {}",
+                resolved.display(),
+                canonical.display()
+            ));
         }
     }
-    if workspace_allows(&resolved) {
-        return Ok(resolved);
-    }
-    Err(format!(
-        "path is outside $HOME ({}), the working directory (if under $HOME), \
-         and CLAUDETTE_WORKSPACE; reads are restricted for safety",
-        home.display()
-    ))
+
+    Ok(resolved)
 }
 
-/// True if `resolved` is under any path in `CLAUDETTE_WORKSPACE`. Empty /
-/// unset env var → always false.
-fn workspace_allows(resolved: &Path) -> bool {
+/// Check whether `path` is under any allowed root.
+/// `canonical = true` canonicalises each root before comparing so a symlinked
+/// `path` already resolved through `fs::canonicalize` matches correctly.
+fn path_is_allowed(path: &Path, home: &Path, canonical: bool) -> bool {
+    let home_canonical = if canonical {
+        std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf())
+    } else {
+        home.to_path_buf()
+    };
+    if path.starts_with(&home_canonical) {
+        return true;
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        let cwd_check = if canonical {
+            std::fs::canonicalize(&cwd).unwrap_or_else(|_| normalize_path(&cwd))
+        } else {
+            normalize_path(&cwd)
+        };
+        if cwd_check.starts_with(&home_canonical) && path.starts_with(&cwd_check) {
+            return true;
+        }
+    }
+
     let Ok(ws) = std::env::var("CLAUDETTE_WORKSPACE") else {
         return false;
     };
@@ -514,8 +547,12 @@ fn workspace_allows(resolved: &Path) -> bool {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .any(|root| {
-            let root_norm = normalize_path(Path::new(root));
-            resolved.starts_with(&root_norm)
+            let root_check = if canonical {
+                std::fs::canonicalize(root).unwrap_or_else(|_| PathBuf::from(root))
+            } else {
+                normalize_path(Path::new(root))
+            };
+            path.starts_with(&root_check)
         })
 }
 
@@ -978,6 +1015,29 @@ mod tests {
         assert!(
             allowed.is_ok(),
             "workspace set, expected ok, got {allowed:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_read_path_rejects_symlink_escape() {
+        // ~/.claudette/trap_symlink → /etc passes lexically (starts_with $HOME)
+        // but canonicalizes outside $HOME → must be rejected.
+        use std::os::unix::fs::symlink;
+        let link_path = user_home().join(".claudette").join("trap_symlink_test");
+        std::fs::create_dir_all(link_path.parent().unwrap()).expect("create .claudette dir");
+        let _ = std::fs::remove_file(&link_path);
+        symlink("/etc", &link_path).expect("create symlink");
+
+        let result = validate_read_path(link_path.to_str().unwrap());
+
+        // Cleanup before asserting.
+        let _ = std::fs::remove_file(&link_path);
+
+        assert!(result.is_err(), "expected reject, got {result:?}");
+        assert!(
+            result.unwrap_err().contains("via symlink"),
+            "wrong error: expected 'via symlink'"
         );
     }
 
