@@ -565,13 +565,26 @@ impl PermissionPrompter for CliPrompter {
         let stderr = io::stderr();
         let mut err = stderr.lock();
         let _ = writeln!(err);
+        let input_chars = request.input.chars().count();
         let _ = writeln!(
             err,
-            "  {} {} wants to run: {}",
+            "  {} {} wants to run ({} chars):",
             theme::warn(theme::WARN_GLYPH),
             theme::accent(&request.tool_name),
-            theme::dim(&request.input.chars().take(200).collect::<String>())
+            input_chars
         );
+        // Show the full command. The old code truncated at 200 chars, which
+        // let an adversary-crafted payload hide past the preview edge while
+        // bash ran the complete input. Split on newlines so multi-line
+        // commands stay readable. `str::lines()` handles a trailing-newline-
+        // less single-line case correctly — yields the one line.
+        if request.input.is_empty() {
+            let _ = writeln!(err, "    {}", theme::dim("(empty input)"));
+        } else {
+            for line in request.input.lines() {
+                let _ = writeln!(err, "    {}", theme::dim(line));
+            }
+        }
         let _ = write!(err, "  Allow? [y/N] ");
         let _ = err.flush();
 
