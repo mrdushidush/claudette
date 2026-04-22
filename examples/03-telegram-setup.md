@@ -51,16 +51,24 @@ chmod 600 ~/.claudette/secrets/telegram.token
 ## 3. Start the bot
 
 ```bash
-claudette --telegram
+claudette --telegram --chat 123456789
 ```
 
 Claudette prints:
 
 ```
-✓ Telegram bot started as @your-bot-username_bot
-  Chat allowlist: none (all chats accepted)
-  Polling every 2s...
+🤖 telegram bot mode @your-bot-username_bot
+✨ serving chat IDs: [123456789]
+✨ voice transcription ready (ffmpeg + whisper)
+✨ voice output ready (edge-tts)
 ```
+
+Replace `123456789` with your own Telegram chat ID (see §5 below for
+how to find it). A bare `claudette --telegram` with no allowlist exits
+immediately with a "refusing to start: no chat allowlist" error — this
+is the shipped default-deny posture. To explicitly accept every
+incoming chat instead, pass `--chat any` (the bot prints a loud
+warning on startup).
 
 ## 4. First message
 
