@@ -43,6 +43,18 @@ getrandom = "0.2"
 [lints.rust]
 unsafe_code = "forbid"
 
+# Clippy groups: `all` and `pedantic` both at `warn`. Per-lint
+# allows below are for lints that either (a) fire across the whole
+# crate on stylistic preference and would bloat the diff to silence
+# at every call site, or (b) have a known project-wide reason they
+# are permitted. The default policy is still "clippy::pedantic — warn,
+# fix what fires"; these are the exceptions, each of which a reviewer
+# would otherwise spend time asking about.
+#
+# `cast_*`, `struct_excessive_bools`, `missing_panics_doc`,
+# `missing_errors_doc` are the category (b) exceptions that could
+# plausibly be removed in a future refactor — if you're tackling them,
+# remove the allow and fix the fires in the same PR.
 [lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
