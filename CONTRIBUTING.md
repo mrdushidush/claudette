@@ -36,18 +36,18 @@ requirements.
 
 ## Before you open a PR
 
-Run these three checks. They're the same three the CI workflow runs,
-so if they're green locally, CI will be green too:
+Run these checks. They're the same ones CI runs, so if they're green
+locally, CI will be green too:
 
 ```bash
 cargo fmt --all --check
 cargo clippy --all-targets --no-deps -- -D warnings
-cargo test --lib
+cargo test --lib --bins
 ```
 
-All three must pass. Tests currently sit at **521 passing, 4 ignored
-on Windows** (hook tests that use POSIX `printf`) — a PR that drops
-the pass count needs a justification in the description.
+All must pass. Tests currently sit at **521 lib + 24 bin passing, 4
+ignored on Windows** (hook tests that use POSIX `printf`) — a PR that
+drops the pass count needs a justification in the description.
 
 ## Commit style
 
