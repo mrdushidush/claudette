@@ -12,7 +12,37 @@
 //! The `read_secret` helper is the single entry point — every tool that
 //! needs a PAT calls it instead of `std::env::var` directly.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Atomically create a secret-holding file with 0600 permissions on Unix.
+/// On Windows falls back to plain `fs::write` (POSIX mode bits do not apply).
+///
+/// This avoids the write-then-chmod race that the older pattern had: if a
+/// reader raced between the `fs::write` (which uses the inherited umask, often
+/// 0644) and the follow-up `set_permissions(0o600)`, refresh tokens or
+/// session-state files would briefly be world-readable. Using `OpenOptions::
+/// mode(0o600)` creates the file with the restrictive mode from the syscall.
+pub(crate) fn write_secret_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        f.write_all(contents)?;
+        f.flush()?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, contents)
+    }
+}
 
 /// Resolve the secrets directory: `~/.claudette/secrets/`.
 fn secrets_dir() -> PathBuf {
@@ -128,7 +158,19 @@ pub fn save_chat_id(id: i64) {
     }
     contents.push_str(&id.to_string());
     contents.push('\n');
-    let _ = std::fs::write(&path, contents);
+    // 0600 on Unix via OpenOptions::mode; plain write on Windows. Log on
+    // failure rather than silently discarding so an operational issue
+    // (disk full, permission drift) is visible.
+    if let Err(e) = write_secret_file(&path, contents.as_bytes()) {
+        eprintln!(
+            "{} {}",
+            crate::theme::warn(crate::theme::WARN_GLYPH),
+            crate::theme::warn(&format!(
+                "save_chat_id: failed to persist {}: {e}",
+                path.display()
+            ))
+        );
+    }
 }
 
 #[cfg(test)]

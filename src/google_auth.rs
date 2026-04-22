@@ -179,14 +179,13 @@ fn save_tokens(ctx: AuthContext, tokens: &GoogleTokens) -> Result<(), String> {
     }
     let body = serde_json::to_string_pretty(tokens)
         .map_err(|e| format!("google_auth: serialize tokens: {e}"))?;
-    std::fs::write(&path, body)
+
+    // Atomic create-with-0600 on Unix (no write-then-chmod race); plain write
+    // on Windows. Errors propagate through the normal Result chain so a
+    // failed chmod is visible instead of being silently swallowed.
+    crate::secrets::write_secret_file(&path, body.as_bytes())
         .map_err(|e| format!("google_auth: write {}: {e}", path.display()))?;
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    }
     Ok(())
 }
 
