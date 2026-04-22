@@ -15,13 +15,13 @@ claudette                       # interactive REPL
 
 ## What Claudette does
 
-Claudette is a conversational agent that runs in four modes — REPL, fullscreen TUI, one-shot CLI, and Telegram bot — and calls 70+ local tools across 12 on-demand groups. It has three specialised sub-agents, a dedicated code-generation sidecar called **Codet** that auto-validates generated code, a file-backed session store with auto-compaction, and a three-tier permission system for destructive actions.
+Claudette is a conversational agent built around **messaging-app access to a local LLM**. Four interfaces — REPL, fullscreen TUI, one-shot CLI, and a Telegram bot — all drive the same Ollama backend, so you can voice-note your own laptop from a bus stop and get a reply back. 70+ tools cover calendar, email, code generation, web research, and shell + git workflows, loaded on demand so the schema stays small.
 
-The tagline: *a general-purpose AI assistant that your laptop can actually run*.
+**What it's not:** a coding assistant competing with Cline or Aider on IDE integration, nor a general-purpose agent framework. Claudette is intentionally single-binary, single-machine, single-user — see [`docs/comparison.md`](docs/comparison.md) for an honest side-by-side against OpenHands, Aider, opencode, Cline, and Continue (Claudette isn't the winner in most of them).
 
-> **v0.2.0 — the Life Agent.** Claudette grew from a reactive chatbot into a proactive personal life agent: Google Calendar and Gmail (read-only) tool groups, a persistent scheduler that fires prompts back at you, and a `/briefing` Telegram command (or `claudette --briefing` for a recurring 07:00 weekday briefing) that covers the day's calendar, weather, and unread email. See [`docs/sprint_life_agent.md`](docs/sprint_life_agent.md) for the full plan and [`docs/google_setup.md`](docs/google_setup.md) for the one-time OAuth setup.
+> **v0.2.0 — the Life Agent.** Google Calendar and Gmail (read-only) tool groups, a persistent scheduler that fires prompts back at you, and a `/briefing` Telegram command (or `claudette --briefing` for a recurring 07:00 weekday briefing) that covers the day's calendar, weather, and unread email. See [`docs/sprint_life_agent.md`](docs/sprint_life_agent.md) and [`docs/google_setup.md`](docs/google_setup.md).
 
-Short walkthroughs of common scenarios (quick tour, Telegram setup, morning briefing, code generation, the brain100 harness) live in [`examples/`](examples/).
+Short walkthroughs (quick tour, Telegram setup, morning briefing, code generation, the brain100 harness) live in [`examples/`](examples/).
 
 ---
 
@@ -116,7 +116,7 @@ Telegram voice messages are transcribed end-to-end locally via [Whisper](https:/
 
 ### On-demand tool enablement
 
-The `enable_tools(group)` meta-tool lets the model pull in capability groups when it realises it needs them. This is Sprint 8's flagship architectural decision: adding 100 tools to Claudette costs zero context until the model actually calls one.
+The `enable_tools(group)` meta-tool lets the model pull in capability groups when it realises it needs them. Adding a new group to Claudette costs zero context until the model actually calls one — the trick that lets a 70-tool surface fit a 16K context window.
 
 The model can also be told to pre-load groups in Telegram and TUI modes where the user can't confirm permissions turn-by-turn — `markets`, `facts`, `search`, `advanced`, and `git` are pre-loaded when `--telegram` or `--tui` is passed.
 
