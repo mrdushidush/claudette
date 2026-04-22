@@ -135,8 +135,11 @@ ollama pull qwen2.5-coder:14b    # Codet fallback (~9 GB)
 ollama pull qwen2.5-coder:7b     # lightweight coder (~4.5 GB); fine for
                                  # routine Python/Rust/TS generation
 
-# 2. Build Claudette.
-cargo build --release
+# 2. Install Claudette onto your PATH.
+cargo install --path .
+# (Or, if you'd rather keep the binary local: `cargo build --release`
+# produces ./target/release/claudette — use that path everywhere
+# below in place of the bare `claudette` command.)
 
 # 3. (Optional) Set secrets for tool groups that need them.
 export BRAVE_API_KEY=...         # web_search
@@ -144,11 +147,11 @@ export GITHUB_TOKEN=ghp_...      # github group
 export TELEGRAM_BOT_TOKEN=...    # telegram bot mode
 
 # 4. Run.
-./target/release/claudette                 # REPL
-./target/release/claudette --tui           # fullscreen TUI
-./target/release/claudette "what time is it?"   # one-shot
-./target/release/claudette --resume        # resume last session
-./target/release/claudette --telegram      # Telegram bot
+claudette                        # REPL
+claudette --tui                  # fullscreen TUI
+claudette "what time is it?"     # one-shot
+claudette --resume               # resume last session
+claudette --telegram             # Telegram bot
 ```
 
 On first launch Claudette auto-creates `~/.claudette/` and probes `http://localhost:11434` for Ollama. If Ollama isn't running it prints a friendly error and exits. Bypass the probe with `CLAUDETTE_SKIP_OLLAMA_PROBE=1` for offline sessions that only hit saved state.
