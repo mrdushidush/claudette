@@ -53,12 +53,12 @@ const POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Minimum dwell before a paragraph lands. Also the time the "typing…"
 /// bubble is visible for very short paragraphs (one-liners, confirmations).
-const PARAGRAPH_PACING_MIN: Duration = Duration::from_millis(2000);
+const PARAGRAPH_PACING_MIN: Duration = Duration::from_secs(2);
 
 /// Upper bound on adaptive pacing. A single paragraph should never stall
 /// longer than this — if someone wanted that much delay they'd just stop
 /// reading.
-const PARAGRAPH_PACING_MAX: Duration = Duration::from_millis(8000);
+const PARAGRAPH_PACING_MAX: Duration = Duration::from_secs(8);
 
 /// Extra delay per character in the upcoming paragraph. 15ms/char works out
 /// to roughly real reading speed (~250 wpm ≈ 8ms/char) plus enough cushion

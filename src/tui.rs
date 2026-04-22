@@ -749,23 +749,22 @@ fn run_loop(
                 app.notes.filter_editing = true;
                 app.notes.filter_input.clear();
             }
-            (KeyCode::Esc, _) if app.active_tab == TAB_NOTES => {
-                if app.notes.tag_filter.is_some() {
-                    app.notes.tag_filter = None;
-                    app.notes.needs_refresh = true;
-                    app.notes.selected = 0;
-                    app.notes.body_scroll = 0;
-                }
+            (KeyCode::Esc, _) if app.active_tab == TAB_NOTES && app.notes.tag_filter.is_some() => {
+                app.notes.tag_filter = None;
+                app.notes.needs_refresh = true;
+                app.notes.selected = 0;
+                app.notes.body_scroll = 0;
             }
 
             // ── Todos tab: Up/Down selection, Space/Enter toggle ──────
             (KeyCode::Up, _) if app.active_tab == TAB_TODOS => {
                 app.todos.selected = app.todos.selected.saturating_sub(1);
             }
-            (KeyCode::Down, _) if app.active_tab == TAB_TODOS => {
-                if app.todos.selected + 1 < app.todos.items.len() {
-                    app.todos.selected += 1;
-                }
+            (KeyCode::Down, _)
+                if app.active_tab == TAB_TODOS
+                    && app.todos.selected + 1 < app.todos.items.len() =>
+            {
+                app.todos.selected += 1;
             }
             (KeyCode::Char(' '), _) if app.active_tab == TAB_TODOS && app.input.is_empty() => {
                 if let Some(item) = app.todos.items.get_mut(app.todos.selected) {
@@ -817,28 +816,26 @@ fn run_loop(
             },
 
             // Submit input.
-            (KeyCode::Enter, _) if !app.working => {
-                if !app.input.is_empty() {
-                    let text = std::mem::take(&mut app.input);
-                    app.chat_scroll = 0;
-                    if let Some(cmd) = text.strip_prefix('/') {
-                        let _ = user_tx.send(UserInput::SlashCommand(cmd.to_string()));
-                    } else {
-                        app.history.push(Message {
-                            role: "You".to_string(),
-                            text: text.clone(),
-                        });
-                        app.active_tab = TAB_CHAT;
-                        let _ = user_tx.send(UserInput::Message(text));
-                    }
+            (KeyCode::Enter, _) if !app.working && !app.input.is_empty() => {
+                let text = std::mem::take(&mut app.input);
+                app.chat_scroll = 0;
+                if let Some(cmd) = text.strip_prefix('/') {
+                    let _ = user_tx.send(UserInput::SlashCommand(cmd.to_string()));
+                } else {
+                    app.history.push(Message {
+                        role: "You".to_string(),
+                        text: text.clone(),
+                    });
+                    app.active_tab = TAB_CHAT;
+                    let _ = user_tx.send(UserInput::Message(text));
                 }
             }
 
             // Typing.
-            (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) if !app.working => {
-                if !app.input.is_empty() || !c.is_ascii_digit() {
-                    app.input.push(c);
-                }
+            (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT)
+                if !app.working && (!app.input.is_empty() || !c.is_ascii_digit()) =>
+            {
+                app.input.push(c);
             }
             (KeyCode::Backspace, _) if !app.working => {
                 app.input.pop();
@@ -1445,7 +1442,7 @@ fn render_hw_tab(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("█".repeat(filled), Style::default().fg(bar_color)),
         Span::styled("░".repeat(empty), Style::default().fg(Color::DarkGray)),
         Span::styled(
-            format!("  {} / {:.1} GB", format_bytes(used_vram), hw.total_vram_gb,),
+            format!("  {} / {:.1} GB", format_bytes(used_vram), hw.total_vram_gb),
             Style::default().fg(Color::White),
         ),
         Span::styled(

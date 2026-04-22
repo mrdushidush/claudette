@@ -165,8 +165,7 @@ pub fn synthesize(text: &str, lang: &str) -> Option<PathBuf> {
 
     let id = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_millis());
 
     let mp3_path = tmp_dir.join(format!("{id}.mp3"));
     let ogg_path = tmp_dir.join(format!("{id}.ogg"));

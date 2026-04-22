@@ -270,7 +270,7 @@ fn run_list_dir(input: &str) -> Result<String, String> {
             Ok(ft) if ft.is_file() => {
                 // Only stat real files for size — metadata() can be
                 // expensive (or fail with permission errors) on Windows.
-                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                let size = entry.metadata().map_or(0, |m| m.len());
                 ("file", size)
             }
             Ok(_) => ("other", 0),

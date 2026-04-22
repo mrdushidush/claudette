@@ -66,9 +66,9 @@ pub fn coder_model() -> String {
 /// or when the coder model isn't pulled yet).
 #[must_use]
 pub fn validation_enabled() -> bool {
-    std::env::var("CLAUDETTE_VALIDATE_CODE")
-        .map(|v| !matches!(v.to_lowercase().as_str(), "false" | "0" | "no" | "off"))
-        .unwrap_or(true)
+    std::env::var("CLAUDETTE_VALIDATE_CODE").map_or(true, |v| {
+        !matches!(v.to_lowercase().as_str(), "false" | "0" | "no" | "off")
+    })
 }
 
 // ────────────────────────────────────────────────────────────────────────────
