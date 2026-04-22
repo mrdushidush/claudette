@@ -1125,11 +1125,13 @@ mod tests {
 
     #[test]
     fn list_dir_classifies_file_and_subdir_correctly() {
-        // Regression for the Windows reparse-point bug: build a temp dir
+        // Regression for the Windows reparse-point bug: build a fresh dir
         // containing one real file and one real subdirectory, then verify
         // list_dir returns them with the correct `type` (not "unknown" or
-        // mis-classified as "file").
-        let tmp = std::env::temp_dir().join(format!(
+        // mis-classified as "file"). Anchored under $HOME so it's inside
+        // validate_read_path's allow-list on every platform; `/tmp` on
+        // Linux is outside $HOME and would trip the CWD-tightened policy.
+        let tmp = user_home().join(format!(
             "claudette-test-list-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
