@@ -13,7 +13,7 @@
 //! consumer up when `next_due_at()` passes. See AD-1.
 
 use std::collections::BinaryHeap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -688,10 +688,10 @@ impl Scheduler {
 
     /// Collect every entry whose `next_fire_at <= clock.now()`. Recurring
     /// entries advance to their next occurrence; one-shots are removed.
-    /// Persists the new state to disk.
+    /// Persists the new state to disk before committing it to memory, so a
+    /// save failure leaves `self` untouched and the next tick retries cleanly.
     pub fn fire_due(&mut self) -> Result<Vec<Firing>, String> {
         let now = self.clock.now();
-        let mut firings: Vec<Firing> = Vec::new();
 
         // Find due entries by scanning (cheap at our scale).
         let due_ids: Vec<String> = self
@@ -702,44 +702,53 @@ impl Scheduler {
             .collect();
 
         if due_ids.is_empty() {
-            return Ok(firings);
+            return Ok(Vec::new());
         }
 
+        // Build the post-fire state on a clone; commit to `self` only after
+        // save succeeds. Previous ordering mutated memory first and persisted
+        // second — a save failure silently dropped firings from memory while
+        // leaving them on disk, so the caller lost them and they'd replay on
+        // the next restart.
+        let mut next_entries = self.entries.clone();
+        let mut firings: Vec<Firing> = Vec::new();
+
         for id in &due_ids {
-            // Collect the firing + decide the follow-up state.
-            let Some(idx) = self.entries.iter().position(|e| &e.id == id) else {
+            let Some(idx) = next_entries.iter().position(|e| &e.id == id) else {
                 continue;
             };
-            let fired_for = self.entries[idx].next_fire_at;
+            let fired_for = next_entries[idx].next_fire_at;
             firings.push(Firing {
                 entry_id: id.clone(),
-                prompt: self.entries[idx].prompt.clone(),
-                chat_id: self.entries[idx].chat_id,
+                prompt: next_entries[idx].prompt.clone(),
+                chat_id: next_entries[idx].chat_id,
                 scheduled_for: fired_for,
             });
 
-            match self.entries[idx].kind.clone() {
+            match next_entries[idx].kind.clone() {
                 ScheduleKind::OneShot => {
-                    self.entries.remove(idx);
+                    next_entries.remove(idx);
                 }
                 ScheduleKind::Recurring => {
-                    if let Some(cron) = self.entries[idx].recurrence.clone() {
+                    if let Some(cron) = next_entries[idx].recurrence.clone() {
                         match next_cron_fire(&cron, &*self.clock) {
-                            Ok(next) => self.entries[idx].next_fire_at = next,
+                            Ok(next) => next_entries[idx].next_fire_at = next,
                             Err(_) => {
                                 // Malformed recurrence — drop the entry so we
                                 // don't hot-loop over it.
-                                self.entries.remove(idx);
+                                next_entries.remove(idx);
                             }
                         }
                     } else {
-                        self.entries.remove(idx);
+                        next_entries.remove(idx);
                     }
                 }
             }
         }
 
-        // Rebuild the heap from the post-fire state.
+        Self::save_entries(&self.path, &next_entries)?;
+
+        self.entries = next_entries;
         self.heap = self
             .entries
             .iter()
@@ -749,31 +758,37 @@ impl Scheduler {
             })
             .collect();
 
-        self.save()?;
         Ok(firings)
     }
 
     /// Write the current entries to jsonl atomically via write-and-rename.
     fn save(&self) -> Result<(), String> {
-        if let Some(parent) = self.path.parent() {
+        Self::save_entries(&self.path, &self.entries)
+    }
+
+    /// Serialise `entries` to `path` atomically. `fire_due` calls this on a
+    /// clone of `self.entries` so a save failure doesn't leave memory and
+    /// disk out of sync; `save()` is the thin wrapper stable mutations use.
+    fn save_entries(path: &Path, entries: &[ScheduleEntry]) -> Result<(), String> {
+        if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("scheduler: create {}: {e}", parent.display()))?;
         }
         let mut body = String::new();
-        for entry in &self.entries {
+        for entry in entries {
             let line = serde_json::to_string(entry)
                 .map_err(|e| format!("scheduler: serialize entry {}: {e}", entry.id))?;
             body.push_str(&line);
             body.push('\n');
         }
-        let tmp = self.path.with_extension("jsonl.tmp");
+        let tmp = path.with_extension("jsonl.tmp");
         std::fs::write(&tmp, &body)
             .map_err(|e| format!("scheduler: write {}: {e}", tmp.display()))?;
-        std::fs::rename(&tmp, &self.path).map_err(|e| {
+        std::fs::rename(&tmp, path).map_err(|e| {
             format!(
                 "scheduler: rename {} -> {}: {e}",
                 tmp.display(),
-                self.path.display()
+                path.display()
             )
         })?;
         Ok(())
@@ -1074,6 +1089,44 @@ mod tests {
             "next_fire_at should advance (was {first_fire_at}, now {new_fire})"
         );
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn fire_due_preserves_memory_on_save_failure() {
+        // Build a path whose parent slot is occupied by a regular file, so
+        // `save_entries` fails at the `create_dir_all(parent)` step. The
+        // invariant under test: if save fails, in-memory entries are
+        // untouched and the caller can retry on the next tick.
+        let parent_as_file = tmp_path("save-fail-parent");
+        std::fs::write(&parent_as_file, b"not a directory").unwrap();
+        let bad_path = parent_as_file.join("schedule.jsonl");
+
+        let c = fixed_clock(2026, 4, 21, 10, 0);
+        let mut s = Scheduler::new(bad_path, c.clone());
+        // Seed a due entry directly — `add` would also hit the broken save.
+        let fire_at = c.now() - Duration::minutes(5);
+        s.entries.push(ScheduleEntry {
+            id: "test-1".into(),
+            kind: ScheduleKind::OneShot,
+            original_expr: "in -5 minutes".into(),
+            next_fire_at: fire_at,
+            recurrence: None,
+            prompt: "p".into(),
+            chat_id: None,
+            catch_up: CatchUp::Once,
+            created_at: c.now(),
+        });
+        s.heap.push(HeapItem {
+            fire_at,
+            entry_id: "test-1".into(),
+        });
+
+        let result = s.fire_due();
+        assert!(result.is_err(), "expected save failure to propagate");
+        assert_eq!(s.entries.len(), 1, "entry must survive save failure");
+        assert_eq!(s.entries[0].id, "test-1");
+
+        let _ = std::fs::remove_file(&parent_as_file);
     }
 
     #[test]
