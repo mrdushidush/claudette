@@ -78,13 +78,13 @@ Groups stay enabled until the session ends or `/clear` is called. A
 second weather question in the same session is a direct
 `get_weather_current` call — no re-enable needed.
 
-## Pre-loading for Telegram
+## Pre-loading for Telegram and TUI
 
-In Telegram mode the user can't confirm permissions turn-by-turn, so
-Claudette auto-enables the "safe" groups at startup:
-`markets`, `facts`, `search`, `advanced`, `git`. See
-`src/telegram_mode.rs` for the exact list — any changes there flow
-through the codebase automatically.
+In `--telegram` and `--tui` modes the user can't confirm permissions
+turn-by-turn, so Claudette auto-enables the "safe" groups at startup:
+`markets`, `facts`, `search`, `advanced`, `git`. See `src/run.rs`
+(Telegram) and `src/tui_worker.rs` (TUI) for the exact lists — both
+call the same `ToolRegistry::enable` path.
 
 ## Disabling a group
 
