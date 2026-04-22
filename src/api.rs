@@ -278,6 +278,49 @@ pub fn resolve_ollama_url() -> String {
     }
 }
 
+/// Returns true when the given URL's host is a loopback / localhost
+/// address. Used to warn users when `OLLAMA_HOST` points at a remote
+/// endpoint — the README tagline is "runs entirely on your hardware,"
+/// so a `OLLAMA_HOST=https://someone-elses-server:11434` (accidentally
+/// inherited from a `.env` file, a malicious `.env` in CWD, or a
+/// shell snippet copied from a tutorial) is worth surfacing loudly.
+#[must_use]
+pub fn is_local_ollama_url(url: &str) -> bool {
+    // Strip scheme if present. We only need the host portion.
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url);
+    // Drop any path suffix (not expected for the probe URL but be safe).
+    let host_and_port = rest.split('/').next().unwrap_or(rest);
+    // Drop the port. IPv6 bracket form `[::1]:11434` — take inside brackets.
+    let host = if let Some(inside) = host_and_port
+        .strip_prefix('[')
+        .and_then(|s| s.split(']').next())
+    {
+        inside
+    } else {
+        host_and_port.split(':').next().unwrap_or(host_and_port)
+    };
+    let host_lower = host.to_ascii_lowercase();
+
+    if host_lower == "localhost"
+        || host_lower == "0.0.0.0"
+        || host_lower == "::1"
+        || host_lower == "::"
+    {
+        return true;
+    }
+    // 127.0.0.0/8 — any loopback IPv4.
+    if let Some(rest) = host_lower.strip_prefix("127.") {
+        return rest.split('.').count() == 3
+            && rest
+                .split('.')
+                .all(|s| !s.is_empty() && s.parse::<u8>().is_ok());
+    }
+    false
+}
+
 /// Short-timeout GET on the resolved Ollama base URL to verify the daemon
 /// is reachable before we drop into any interactive mode. Ollama answers
 /// its root path with "Ollama is running" and a 200; we only care that the
@@ -288,14 +331,38 @@ pub fn resolve_ollama_url() -> String {
 ///
 /// Set `CLAUDETTE_SKIP_OLLAMA_PROBE=1` to bypass (CI / offline sessions
 /// that will only hit saved state).
+///
+/// Prints a loud stderr warning when the resolved URL is not a loopback
+/// address, unless `CLAUDETTE_ALLOW_REMOTE_OLLAMA=1` is set. Claudette's
+/// marketing story is local-first; a surprise remote host is a footgun
+/// worth surfacing at startup.
 pub fn probe_ollama() -> Result<String, String> {
+    let url = resolve_ollama_url();
+
+    // Warn on non-loopback hosts. Runs regardless of the skip-probe flag
+    // because "I skipped the probe" doesn't imply "I consented to a
+    // remote brain" — both apply independently.
+    if !is_local_ollama_url(&url)
+        && std::env::var("CLAUDETTE_ALLOW_REMOTE_OLLAMA")
+            .ok()
+            .map_or(true, |v| v.is_empty() || v == "0")
+    {
+        eprintln!(
+            "⚠  OLLAMA_HOST points at a non-loopback address: {url}\n\
+             Every prompt, tool call, and piece of memory/email/calendar\n\
+             data will be sent to that host. Claudette's default posture\n\
+             is local-only; a remote endpoint turns it into a cloud client.\n\
+             If this is intentional, set CLAUDETTE_ALLOW_REMOTE_OLLAMA=1\n\
+             to silence this warning."
+        );
+    }
+
     if std::env::var("CLAUDETTE_SKIP_OLLAMA_PROBE")
         .ok()
         .is_some_and(|v| !v.is_empty() && v != "0")
     {
-        return Ok(resolve_ollama_url());
+        return Ok(url);
     }
-    let url = resolve_ollama_url();
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(3))
         .build()
@@ -648,6 +715,45 @@ fn role_str(role: MessageRole) -> &'static str {
 mod tests {
     use super::*;
     use crate::{ConversationMessage, MessageRole};
+
+    #[test]
+    fn is_local_ollama_url_recognises_loopback() {
+        for url in [
+            "http://localhost:11434",
+            "https://localhost:11434",
+            "http://LOCALHOST:11434",
+            "http://127.0.0.1:11434",
+            "http://127.0.0.2:11434",
+            "http://127.255.255.255:11434",
+            "http://0.0.0.0:11434",
+            "http://[::1]:11434",
+            "http://[::]:11434",
+            "localhost:11434",
+            "127.0.0.1",
+        ] {
+            assert!(
+                is_local_ollama_url(url),
+                "expected local, but {url} was flagged remote"
+            );
+        }
+    }
+
+    #[test]
+    fn is_local_ollama_url_rejects_remote() {
+        for url in [
+            "http://ollama.example.com:11434",
+            "https://attacker.evil:11434",
+            "http://192.168.1.10:11434", // LAN but not loopback — still warrants warning
+            "http://10.0.0.1:11434",     // private but not loopback
+            "http://1.2.3.4:11434",
+            "http://[2001:db8::1]:11434",
+        ] {
+            assert!(
+                !is_local_ollama_url(url),
+                "expected remote, but {url} was flagged local"
+            );
+        }
+    }
 
     #[test]
     fn probe_ollama_skip_env_short_circuits() {
