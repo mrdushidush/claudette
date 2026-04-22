@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/mrdushidush/claudette/security/advisories/new
+    about: Please report security issues privately via GitHub's security advisory, not a public issue. See SECURITY.md.
