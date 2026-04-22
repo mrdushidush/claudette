@@ -1,6 +1,6 @@
 # Claudette
 
-**Local-first AI personal secretary.** Runs entirely on your hardware — no cloud, no subscription, no telemetry. Powered by [Ollama](https://ollama.com) and a Rust agent loop. Works on a single 8 GB GPU.
+**Local-first AI personal secretary.** Runs entirely on your own hardware — no cloud brain, no subscription, no telemetry from Claudette itself. Powered by [Ollama](https://ollama.com) and a Rust agent loop. The default brain (`qwen3.5:4b`) fits comfortably on an 8 GB GPU; the optional Codet code-generation sidecar wants 32 GB RAM + a bigger coder model (see [Hardware requirements](#hardware-requirements) below). TTS voice replies use Microsoft's public edge-tts endpoint when `/voice` is enabled — everything else stays on-device.
 
 ```bash
 cargo install --path .          # build the binary
@@ -8,6 +8,7 @@ ollama serve &                  # in another shell
 claudette                       # interactive REPL
 ```
 
+[![CI](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml/badge.svg)](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 
@@ -443,7 +444,6 @@ Longer-term vision:
 
 - A vision sidecar (`analyze_screenshot`) once a multimodal model with strong tool calling fits 8 GB VRAM.
 - Continuous ambient mode (watch-and-interrupt).
-- Optional, opt-in phone-home for anonymous usage telemetry — only if the community asks for it. Today everything is local.
 
 ---
 
