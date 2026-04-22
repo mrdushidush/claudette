@@ -3,11 +3,12 @@
 **Local-first AI personal secretary.** Runs entirely on your own hardware — no cloud brain, no subscription, no telemetry from Claudette itself. Powered by [Ollama](https://ollama.com) and a Rust agent loop. The default brain (`qwen3.5:4b`) fits comfortably on an 8 GB GPU; the optional Codet code-generation sidecar wants 32 GB RAM + a bigger coder model (see [Hardware requirements](#hardware-requirements) below). TTS voice replies use Microsoft's public edge-tts endpoint when `/voice` is enabled — everything else stays on-device.
 
 ```bash
-cargo install --path .          # build the binary
+cargo install claudette         # from crates.io
 ollama serve &                  # in another shell
 claudette                       # interactive REPL
 ```
 
+[![Crates.io](https://img.shields.io/crates/v/claudette.svg)](https://crates.io/crates/claudette)
 [![CI](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml/badge.svg)](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
@@ -137,10 +138,9 @@ ollama pull qwen2.5-coder:7b     # lightweight coder (~4.5 GB); fine for
                                  # routine Python/Rust/TS generation
 
 # 2. Install Claudette onto your PATH.
-cargo install --path .
-# (Or, if you'd rather keep the binary local: `cargo build --release`
-# produces ./target/release/claudette — use that path everywhere
-# below in place of the bare `claudette` command.)
+cargo install claudette
+# (Or build from source: `cargo install --path .` inside a clone, or
+# `cargo build --release` for a local binary at ./target/release/claudette.)
 
 # 3. (Optional) Set secrets for tool groups that need them.
 export BRAVE_API_KEY=...         # web_search
