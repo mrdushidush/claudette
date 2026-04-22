@@ -371,6 +371,10 @@ src/
 ├── brain_selector.rs — Tiered-brain fallback + stuck diagnostics
 ├── memory.rs         — CLAUDETTE.MD loader
 ├── secrets.rs        — File-backed token storage + Telegram chat-ID persistence
+├── google_auth.rs    — Google OAuth loopback flow (per-scope token files under ~/.claudette/secrets/)
+├── clock.rs          — Clock trait (SystemClock in prod, MockClock for deterministic scheduler tests)
+├── scheduler.rs      — Persistent jsonl scheduler with catch-up policies + natural-language expression parsing
+├── briefing.rs       — Morning-briefing prompt (shared by /briefing command and the --briefing scheduled entry)
 ├── telegram_mode.rs  — Telegram bot loop (polling, voice, slash commands)
 ├── voice.rs          — Whisper transcription pipeline
 ├── tts.rs            — edge-tts TTS integration

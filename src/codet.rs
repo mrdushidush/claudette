@@ -3,7 +3,8 @@
 //! Every time Claudette writes a code file (via `write_file`), Codet validates
 //! it by running syntax checks and unit tests, then attempts to fix any bugs
 //! via a secondary LLM (the coder model, default `qwen3-coder:30b` `MoE`;
-//! falls back to `qwen2.5-coder:14b` on RAM pressure). The fix-loop
+//! set `CLAUDETTE_CODER_MODEL=qwen2.5-coder:14b` on RAM-constrained hosts,
+//! or use the `/coder` slash command to change the active config). The fix-loop
 //! conversation lives entirely inside Codet — Claudette's main context only
 //! sees a one-line summary in the tool result, so there's zero context
 //! pollution.

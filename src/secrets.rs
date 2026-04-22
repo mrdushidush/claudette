@@ -1,8 +1,12 @@
 //! File-backed secret storage with env-var override.
 //!
 //! Tokens persist across terminal sessions in plain-text files at
-//! `~/.claudette/secrets/<name>.token` (mode 0600 on Unix). Env vars
-//! take precedence so `export GITHUB_TOKEN=...` still overrides the file.
+//! `~/.claudette/secrets/<name>.token`. New files written via this
+//! module's `write_secret_file` helper are created with mode 0600 on
+//! Unix (plain `std::fs::write` on Windows, where POSIX mode bits do
+//! not apply); reads use `fs::read_to_string` and do not re-enforce
+//! the mode on pre-existing files. Env vars take precedence so
+//! `export GITHUB_TOKEN=...` still overrides a file-backed token.
 //!
 //! Lookup order:
 //! 1. `CLAUDETTE_{NAME}_TOKEN` env var (fully qualified)
