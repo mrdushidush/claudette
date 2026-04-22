@@ -21,6 +21,8 @@ The tagline: *a general-purpose AI assistant that your laptop can actually run*.
 
 > **v0.2.0 — the Life Agent.** Claudette grew from a reactive chatbot into a proactive personal life agent: Google Calendar and Gmail (read-only) tool groups, a persistent scheduler that fires prompts back at you, and a `/briefing` Telegram command (or `claudette --briefing` for a recurring 07:00 weekday briefing) that covers the day's calendar, weather, and unread email. See [`docs/sprint_life_agent.md`](docs/sprint_life_agent.md) for the full plan and [`docs/google_setup.md`](docs/google_setup.md) for the one-time OAuth setup.
 
+Short walkthroughs of common scenarios (quick tour, Telegram setup, morning briefing, code generation, the brain100 harness) live in [`examples/`](examples/).
+
 ---
 
 ## Feature tour
