@@ -398,7 +398,7 @@ cargo clippy --all-targets --no-deps -- -D warnings
 cargo test --lib
 ```
 
-Tests: **506 passing, 4 ignored on Windows** (hook tests that use POSIX `printf`). Run `cargo fmt --all --check` before committing.
+Tests: **514 passing, 4 ignored on Windows** (hook tests that use POSIX `printf`). Run `cargo fmt --all --check` before committing.
 
 ### Project layout rules
 
