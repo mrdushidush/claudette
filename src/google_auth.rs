@@ -508,20 +508,36 @@ fn open_browser(url: &str) -> std::io::Result<()> {
     }
 }
 
-/// 128-bit random hex from system entropy via `/dev/urandom` or Windows
-/// RtlGenRandom. We don't need cryptographic strength here — the `state`
-/// value only needs to be unpredictable to a network-local attacker during
-/// the ~30-second window between issue and redemption. Using wall-clock +
-/// process-id xor is deliberately simple; if this ever feels thin, swap in
-/// `getrandom` without touching callers.
+/// 128-bit random hex from OS entropy (`/dev/urandom` on Unix,
+/// `BCryptGenRandom` on Windows, `getentropy` on macOS/BSDs — all via
+/// the `getrandom` crate).
+///
+/// The `state` parameter guards the OAuth loopback flow against CSRF:
+/// an attacker on the same host who can predict `state` can race a
+/// forged `code=…&state=<predicted>` to the loopback listener and
+/// hijack the token exchange. Predictability matters for the full
+/// lifetime of the consent window (minutes).
+///
+/// A previous version derived `state` from `SystemTime::now()` XOR'd
+/// with `(pid × golden_ratio)`. Any co-tenant process could observe
+/// the claudette PID + process start time to microsecond precision
+/// (`/proc/<pid>/stat` on Linux, `QueryProcessCycleTime` on Windows)
+/// and brute-force the resulting `state` in constant-time. Switching
+/// to `getrandom` removes the attack.
+///
+/// On the (very rare) failure path — `getrandom` returning an error
+/// means the kernel RNG is genuinely unavailable, not just slow — we
+/// panic. Falling back to weaker entropy silently would reintroduce
+/// the exact weakness this function was rewritten to fix.
 fn random_state() -> String {
-    let t = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let pid = u128::from(std::process::id());
-    let mixed = t ^ (pid.wrapping_mul(0x9E37_79B9_7F4A_7C15));
-    format!("{mixed:032x}")
+    let mut buf = [0u8; 16];
+    getrandom::getrandom(&mut buf).expect("OS RNG failed — refusing to use weaker entropy");
+    let mut out = String::with_capacity(32);
+    for b in buf {
+        use std::fmt::Write;
+        write!(out, "{b:02x}").expect("writing to String never fails");
+    }
+    out
 }
 
 /// Percent-encode the subset of chars we actually emit in query strings.
@@ -624,13 +640,34 @@ mod tests {
 
     #[test]
     fn random_state_changes_between_calls() {
+        // Two OS-RNG draws in rapid succession must not collide. Previously
+        // this needed a SystemTime::now nudge; with getrandom the distinct-
+        // output guarantee is statistical (1 in 2^128).
         let a = random_state();
-        // Sleep one nanosecond's worth to guarantee the wall-clock component
-        // moves on fast machines. In practice `SystemTime::now()` already
-        // advances monotonically across two calls.
-        std::thread::sleep(Duration::from_nanos(1));
         let b = random_state();
         assert_ne!(a, b, "two state values should differ");
+    }
+
+    #[test]
+    fn random_state_has_spread_across_many_calls() {
+        // Sanity-check that we're not returning a near-constant value:
+        // 100 draws should all be distinct and should cover >= 50 unique
+        // first-byte values (256 possible, 100 draws → expectation is
+        // ~99 unique first bytes by the birthday bound).
+        let mut draws = std::collections::HashSet::new();
+        let mut first_bytes = std::collections::HashSet::new();
+        for _ in 0..100 {
+            let s = random_state();
+            assert_eq!(s.len(), 32);
+            first_bytes.insert(s[..2].to_string());
+            draws.insert(s);
+        }
+        assert_eq!(draws.len(), 100, "100 draws should all be distinct");
+        assert!(
+            first_bytes.len() >= 50,
+            "first-byte spread should be ≥50 unique, got {}",
+            first_bytes.len()
+        );
     }
 
     #[test]
