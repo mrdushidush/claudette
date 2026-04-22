@@ -123,16 +123,51 @@ fn run_edit_file(input: &str) -> Result<String, String> {
     let content = fs::read_to_string(&path)
         .map_err(|e| format!("edit_file: read {} failed: {e}", path.display()))?;
 
-    if !content.contains(old_text) {
-        return Err(format!(
-            "edit_file: old_text not found in {}. The text to replace must match exactly.",
-            path.display()
-        ));
+    // Count occurrences: 0 → clear error, 1 → replace, >1 → refuse instead
+    // of silently taking the first match. An ambiguous edit against a
+    // large file is the easy way to corrupt it quietly.
+    let match_count = content.matches(old_text).count();
+    match match_count {
+        0 => {
+            return Err(format!(
+                "edit_file: old_text not found in {}. The text to replace must match exactly.",
+                path.display()
+            ));
+        }
+        1 => {}
+        n => {
+            return Err(format!(
+                "edit_file: old_text appears {n} times in {}. Supply a longer, unique old_text (include surrounding context) so the target is unambiguous.",
+                path.display()
+            ));
+        }
     }
 
     let new_content = content.replacen(old_text, new_text, 1);
-    fs::write(&path, &new_content)
-        .map_err(|e| format!("edit_file: write {} failed: {e}", path.display()))?;
+
+    // Atomic write: serialise to a sibling tmp file, preserve the original
+    // file's permissions, then rename. A mid-write crash leaves either the
+    // original file intact or the tmp behind for manual recovery — never a
+    // truncated target.
+    let tmp = path.with_extension("claudette-edit.tmp");
+    fs::write(&tmp, &new_content)
+        .map_err(|e| format!("edit_file: write {} failed: {e}", tmp.display()))?;
+    let perms = fs::metadata(&path).map(|m| m.permissions()).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        format!("edit_file: stat {} failed: {e}", path.display())
+    })?;
+    fs::set_permissions(&tmp, perms).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        format!("edit_file: chmod {} failed: {e}", tmp.display())
+    })?;
+    fs::rename(&tmp, &path).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        format!(
+            "edit_file: rename {} -> {} failed: {e}",
+            tmp.display(),
+            path.display()
+        )
+    })?;
 
     let mut result = json!({
         "ok": true,
@@ -201,6 +236,72 @@ mod tests {
     fn edit_file_rejects_missing_new_text() {
         let err = run_edit_file(r#"{"path":"~/x.txt","old_text":"a"}"#).unwrap_err();
         assert!(err.contains("missing 'new_text'"), "got: {err}");
+    }
+
+    fn home_join(label: &str) -> String {
+        // $HOME-rooted so validate_read_path accepts it; unique suffix avoids
+        // races between parallel tests.
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".into());
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        format!("{home}/claudette-edit-{label}-{nanos}.txt")
+    }
+
+    #[test]
+    fn edit_file_errors_on_ambiguous_match() {
+        let path = home_join("ambig");
+        let original = "alpha\nalpha\nbeta\n";
+        fs::write(&path, original).unwrap();
+
+        let input = json!({"path": &path, "old_text": "alpha", "new_text": "X"}).to_string();
+        let result = run_edit_file(&input);
+        let after = fs::read_to_string(&path).ok();
+        let _ = fs::remove_file(&path);
+
+        let err = result.expect_err("expected ambiguity error");
+        assert!(
+            err.contains("appears") && err.contains("times"),
+            "expected ambiguity error, got: {err}"
+        );
+        assert_eq!(
+            after.as_deref(),
+            Some(original),
+            "file must not change on ambiguous match"
+        );
+    }
+
+    #[test]
+    fn edit_file_replaces_unique_match() {
+        let path = home_join("unique");
+        fs::write(&path, "one\ntwo\nthree\n").unwrap();
+
+        let input = json!({"path": &path, "old_text": "two", "new_text": "TWO"}).to_string();
+        let result = run_edit_file(&input);
+        let after = fs::read_to_string(&path).ok();
+        let _ = fs::remove_file(&path);
+
+        assert!(result.is_ok(), "expected ok, got {result:?}");
+        assert_eq!(after.as_deref(), Some("one\nTWO\nthree\n"));
+    }
+
+    #[test]
+    fn edit_file_errors_on_zero_matches() {
+        let path = home_join("zero");
+        let original = "one\ntwo\n";
+        fs::write(&path, original).unwrap();
+
+        let input = json!({"path": &path, "old_text": "nonexistent", "new_text": "X"}).to_string();
+        let result = run_edit_file(&input);
+        let after = fs::read_to_string(&path).ok();
+        let _ = fs::remove_file(&path);
+
+        let err = result.expect_err("expected not-found error");
+        assert!(err.contains("not found"), "got: {err}");
+        assert_eq!(after.as_deref(), Some(original));
     }
 
     #[test]
