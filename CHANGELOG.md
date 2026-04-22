@@ -10,9 +10,20 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-23
+
+Security-hardening patch. Collects the post-ship roast's Tier 1 findings
+(prompt-injection provenance, path-validation tightening, secret-file
+permission races, loopback allow-list fixes, permission-prompt
+truncation, dotenv CWD hijack, `--telegram` default-deny footgun) plus
+Tier 2 README polish, Tier 3 contributor-experience pieces, and a small
+post-roast cleanup of the scheduler fire-due ordering and `edit_file`
+match-safety. No new features; every change below hardens existing
+behaviour or documents it more accurately.
+
 ### Changed
 
-- **BREAKING — `--telegram` default-denies.** Starting the bot with no
+- **Security hardening — `--telegram` default-denies.** Starting the bot with no
   `--chat <id>` allowlist and no `CLAUDETTE_TELEGRAM_CHAT` env var now
   exits immediately with a "refusing to start: no chat allowlist" error
   instead of silently serving every incoming chat. Pass `--chat any` to
@@ -95,6 +106,21 @@ bumps are non-breaking bugfixes only.
   are bind-addresses, not valid dialling destinations. Treating them
   as "local" masked a real misconfiguration. Loopback now matches
   only `localhost`, `::1`, and `127.0.0.0/8`.
+- **Scheduler `fire_due` saves before committing.** The old ordering
+  mutated in-memory entries first and persisted second, so if the
+  jsonl save failed (disk full, permission drift) the firings were
+  dropped from memory while surviving on disk — the caller lost them
+  within the process, and they'd replay on restart. New ordering
+  computes the post-fire state on a clone, persists it, and commits to
+  `self` only on success; a save failure leaves memory and disk in
+  sync and the next tick retries cleanly.
+- **`edit_file` refuses ambiguous matches and writes atomically.**
+  `old_text` appearing more than once now returns a clear error asking
+  for a longer unique string (previously the first match was silently
+  picked — an easy way to corrupt a large file). Writes go through a
+  sibling tmp file + permission copy + rename, so a mid-write crash
+  leaves either the original intact or the tmp file behind for manual
+  recovery — never a truncated target.
 
 ### Added
 
@@ -141,10 +167,13 @@ bumps are non-breaking bugfixes only.
 - `examples/03-telegram-setup.md` "Two commands are Telegram-only" →
   "Three" (the bullet list already covered `/voice`, `/lang`,
   `/briefing`).
-- Test counts updated to 521 lib + 24 bin (new guardrail test on the
+- Test counts updated to 525 lib + 24 bin (new guardrail test on the
   `enable_tools` schema parameter description, UTF-8 boundary test for
   the Telegram message splitter, four tests for the `<untrusted>`
-  wrapper, and the `validate_read_path` workspace-env-var test).
+  wrapper, the `validate_read_path` workspace-env-var test, a scheduler
+  save-failure-preserves-memory invariant test, and three `edit_file`
+  tests covering the happy path, the ambiguous-match refusal, and the
+  zero-match error).
 - **README opener rewritten** to lead with Claudette's actual pitch
   (messaging-app + voice + local Ollama on commodity hardware) instead
   of a feature list. Four-of-five post-ship roast agents flagged the
@@ -158,6 +187,18 @@ bumps are non-breaking bugfixes only.
 - Comment block above `[lints.clippy]` in `Cargo.toml` explains which
   allow-lines are stylistic-preference vs plausibly fixable (the
   `cast_*` / `struct_excessive_bools` / `missing_*_doc` family).
+- **`src/codet.rs` module docstring** no longer claims an automatic
+  `qwen3-coder:30b → qwen2.5-coder:14b` fallback on RAM pressure (the
+  mechanism was removed when coder defaults moved to
+  `model_config::ModelConfig::from_preset`). Reworded to point at
+  `CLAUDETTE_CODER_MODEL` and the `/coder` slash command.
+- **`src/secrets.rs` module docstring** clarifies that mode 0600 on
+  Unix applies to newly-created token files written through
+  `write_secret_file`; reads use `fs::read_to_string` and do not
+  re-enforce the mode on pre-existing files.
+- **README `src/` tree** picked up four Life Agent sprint files that
+  had been omitted from the architecture block: `google_auth.rs`,
+  `clock.rs`, `scheduler.rs`, `briefing.rs`.
 
 ## [0.2.0] - 2026-04-22
 
@@ -396,6 +437,7 @@ Initial public release of Claudette as a standalone repository.
 
 ---
 
-[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/mrdushidush/claudette/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/mrdushidush/claudette/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mrdushidush/claudette/releases/tag/v0.1.0
