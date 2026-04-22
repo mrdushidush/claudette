@@ -95,11 +95,18 @@ The file parses cleanly.
 
 On an 8 GB VRAM card the default coder (`qwen3-coder:30b`) needs the
 brain model evicted before it loads. Codet does this automatically —
-the swap cost is ~5-10s on a 3060 Ti. If that's too slow:
+the swap cost is ~5-10s on a 3060 Ti. If that's too slow, pick a
+smaller coder:
 
 ```bash
-export CLAUDETTE_CODER_MODEL=qwen2.5-coder:14b   # smaller, fits alongside brain
-export OLLAMA_MAX_LOADED_MODELS=1                # forces strict swap
+# Option A — fits alongside the 4b brain, ~9 GB on disk, ~8 t/s:
+export CLAUDETTE_CODER_MODEL=qwen2.5-coder:14b
+export OLLAMA_MAX_LOADED_MODELS=1
+
+# Option B — smallest viable coder, ~4.5 GB on disk, ~30 t/s.
+# Fine for routine Python/Rust/TS generation; falls behind the 30b on
+# complex multi-file refactors but otherwise holds up in practice.
+export CLAUDETTE_CODER_MODEL=qwen2.5-coder:7b
 ```
 
 Or pin the coder for a session:

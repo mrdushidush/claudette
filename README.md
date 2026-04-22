@@ -128,9 +128,12 @@ The model can also be told to pre-load groups in Telegram mode where the user ca
 # 1. Pull the required models with Ollama.
 ollama pull qwen3.5:4b           # brain (default Auto preset)
 ollama pull qwen3.5:9b           # fallback brain (optional but recommended)
-ollama pull qwen3-coder:30b      # Codet coder (recommended; needs 32 GB RAM)
-# or a smaller coder if you're RAM-constrained:
-ollama pull qwen2.5-coder:14b    # Codet fallback
+ollama pull qwen3-coder:30b      # Codet coder (best quality; needs 32 GB RAM)
+
+# Or smaller coders if you're disk/RAM-constrained:
+ollama pull qwen2.5-coder:14b    # Codet fallback (~9 GB)
+ollama pull qwen2.5-coder:7b     # lightweight coder (~4.5 GB); fine for
+                                 # routine Python/Rust/TS generation
 
 # 2. Build Claudette.
 cargo build --release
@@ -158,7 +161,7 @@ On first launch Claudette auto-creates `~/.claudette/` and probes `http://localh
 |-----------|---------|-------------|-----------|
 | GPU | 6 GB VRAM (CUDA or Metal) | 8 GB VRAM | RTX 3060 Ti 8 GB |
 | RAM | 16 GB | 32 GB | 32 GB DDR4 |
-| Disk | ~3 GB (brain only) | ~27 GB (brain + fallback + coder) | NVMe SSD |
+| Disk | ~3 GB (brain only) — or ~8 GB with the lightweight 7b coder | ~27 GB (brain + fallback + 30b coder) | NVMe SSD |
 | OS | Windows 10+, Linux, macOS | Windows 11 / Ubuntu 24.04 / macOS 14+ | Windows 11 Pro |
 
 ### Model footprint summary
@@ -169,6 +172,9 @@ On first launch Claudette auto-creates `~/.claudette/` and probes `http://localh
 | `qwen3.5:9b` | Fallback brain | ~5.5 GB | ~30 t/s |
 | `qwen3-coder:30b` | Codet coder (quality) | ~19 GB total (MoE, partial RAM spill) | ~20 t/s effective |
 | `qwen2.5-coder:14b` | Codet coder (fallback) | ~9 GB | ~8 t/s with partial spill |
+| `qwen2.5-coder:7b` | Codet coder (lightweight) | ~4.5 GB | ~30 t/s |
+
+The 4b brain alone is viable as a standalone setup — it handles tool-calling, note-taking, calendar, and conversation perfectly fine on its own. Add the 9b only when you want better multi-step reasoning. Add a coder only when you use `generate_code`; the 7b fits happily alongside the 4b on 8 GB VRAM.
 
 **For the 30b coder on 8 GB VRAM / 32 GB RAM,** set these Ollama env vars:
 
