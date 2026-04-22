@@ -352,7 +352,8 @@ src/
 ├── api.rs            — OllamaApiClient: /api/chat streamer, truncation, budget math, probe
 ├── run.rs            — Runtime builder, REPL loop, autosave, session compaction
 ├── executor.rs       — SecretaryToolExecutor: enable_tools meta-tool + dispatch
-├── tools.rs          — 70+ tool schemas + all run_* handlers
+├── tools.rs          — Aggregates per-group schemas into secretary_tools_json() and routes dispatch_tool() through each sub-module's dispatch()
+├── tools/            — One module per tool cluster (calendar, codegen, facts, file_ops, git, github, gmail, ide, markets, notes, registry, schedule, search, shell, telegram, todos, web_search); each exports schemas() + dispatch()
 ├── tool_groups.rs    — ToolRegistry + the 12 on-demand tool-group definitions
 ├── agents.rs         — AgentType, FilteredToolExecutor, spawn_agent orchestrator
 ├── codet.rs          — Code-generation sidecar (syntax check, surgical fix loop, tests)
@@ -408,10 +409,10 @@ Tests: **515 passing, 4 ignored on Windows** (hook tests that use POSIX `printf`
 
 ### Adding a new tool
 
-1. Add a JSON schema entry to `src/tools.rs` inside `secretary_tools_json!`.
-2. Add a `run_my_tool(input: &str) -> Result<String, String>` handler in the same file.
-3. Wire it into `dispatch_tool` (the big match at the bottom of `tools.rs`).
-4. If it needs a new capability group, add a `ToolGroup` variant in `tool_groups.rs` and extend `ToolRegistry`.
+1. Add a JSON schema entry to the relevant `src/tools/<group>.rs` (or create a new group module if none fits).
+2. Add a `run_my_tool(input: &str) -> Result<String, String>` handler in the same module.
+3. Wire it into the `dispatch` match at the top of the module.
+4. For a new group: add a `ToolGroup` variant in `src/tool_groups.rs`, then register the group's `schemas()` and `dispatch()` in `src/tools.rs` (follow the existing groups as templates).
 5. Add at least one unit test for the happy path and one for a known failure mode.
 
 ### Coding standards
