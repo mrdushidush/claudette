@@ -47,7 +47,79 @@ struct CliArgs {
     briefing: bool,
     briefing_time: Option<String>,
     briefing_days: Option<String>,
+    /// `--help` / `-h`: print the flag reference and exit before touching
+    /// the Ollama probe or any subsystem. Short-circuits in `main()`.
+    help: bool,
+    /// `--version` / `-V`: print `claudette <semver>` and exit. Uses the
+    /// `CARGO_PKG_VERSION` stamped at compile time.
+    version: bool,
 }
+
+/// Help text printed on `--help` / `-h`. One source of truth; the README
+/// CLI flag table is synced to this block. Keep lines under 80 columns so
+/// it fits an 80-wide terminal without wrapping awkwardly.
+const HELP_TEXT: &str = "\
+claudette — a local-first AI personal secretary, powered by Ollama.
+
+USAGE:
+    claudette [FLAGS] [PROMPT...]
+
+MODES (pick one; default is interactive REPL):
+    (none)               Start the interactive REPL. Type /help once inside
+                         to see the slash-command list.
+    \"<prompt>\"            Single-shot: print one reply and exit.
+    --resume, -r         Continue the most recent saved session. Works in
+                         REPL and single-shot.
+    --telegram, -t       Run as a Telegram bot. Requires TELEGRAM_BOT_TOKEN.
+    --tui                Launch the fullscreen ratatui TUI (Chat / Tools /
+                         Notes / Todos / HW tabs).
+
+TELEGRAM OPTIONS:
+    --chat <id>          Restrict the Telegram bot to chat ID <id>.
+                         Repeatable; can also be set via CLAUDETTE_TELEGRAM_CHAT
+                         (comma-separated list).
+
+ONE-SHOT SETUP COMMANDS (each exits after doing its one job):
+    --auth-google [scope]
+                         Run the loopback OAuth flow for Google APIs. <scope>
+                         is 'calendar' (default) or 'gmail'. Stores tokens
+                         under ~/.claudette/secrets/.
+    --revoke             Pair with --auth-google to revoke consent + delete
+                         the local token file for that scope.
+    --briefing           Write a recurring morning-briefing entry to
+                         ~/.claudette/schedule.jsonl and exit. The Telegram
+                         bot picks it up next time it starts.
+    --time HH:MM         Modifier for --briefing. Default: 07:00.
+    --days <spec>        Modifier for --briefing. One of 'weekdays' (default),
+                         'daily', or a single weekday name ('monday', etc).
+
+MISC:
+    --help, -h           Show this help and exit.
+    --version, -V        Show the claudette version and exit.
+
+ENVIRONMENT:
+    See README.md for the full env-var reference. Frequently used:
+      OLLAMA_HOST              Ollama API endpoint (default localhost:11434).
+      CLAUDETTE_MODEL          Override the brain model.
+      CLAUDETTE_CODER_MODEL    Override the Codet coder model.
+      CLAUDETTE_SESSION        Override the session-file path.
+      TELEGRAM_BOT_TOKEN       Required for --telegram.
+
+EXAMPLES:
+    claudette                            # start the REPL
+    claudette \"what time is it?\"         # one-shot
+    claudette -r                         # resume last session
+    claudette --tui                      # fullscreen TUI
+    claudette --auth-google calendar     # OAuth once
+    claudette --briefing --time 08:30    # weekday briefings at 08:30
+    claudette --telegram --chat 12345    # bot restricted to one chat
+
+DOCS:
+    README.md              Full feature / configuration reference
+    examples/              Scenario walkthroughs
+    CONTRIBUTING.md        How to contribute
+    SECURITY.md            Vulnerability reporting
+";
 
 fn main() -> ExitCode {
     // Load env vars from .env files. Two locations, in this order so CWD
@@ -70,6 +142,20 @@ fn main() -> ExitCode {
 
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
     let args = parse_args(&raw_args);
+
+    // ── --help / --version short-circuit ──────────────────────────────
+    // These exit before the Ollama probe runs so `claudette --help` works
+    // on a machine that has never pulled a model. They're also before
+    // dotenv reload effects anything observable — pure printf and exit.
+    if args.help {
+        print!("{HELP_TEXT}");
+        return ExitCode::SUCCESS;
+    }
+    if args.version {
+        println!("claudette {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
+
     let CliArgs {
         resume,
         telegram,
@@ -82,6 +168,8 @@ fn main() -> ExitCode {
         briefing,
         briefing_time,
         briefing_days,
+        help: _,
+        version: _,
     } = args;
 
     // ── Google OAuth flow ─────────────────────────────────────────────
@@ -299,6 +387,8 @@ fn parse_args(args: &[String]) -> CliArgs {
             ExpectNext::Nothing => {}
         }
         match arg.as_str() {
+            "--help" | "-h" => out.help = true,
+            "--version" | "-V" => out.version = true,
             "--resume" | "-r" => out.resume = true,
             "--telegram" | "-t" => out.telegram = true,
             "--tui" => out.tui = true,
@@ -592,5 +682,56 @@ mod tests {
         assert!(a.briefing);
         assert_eq!(a.briefing_time.as_deref(), Some("07:30"));
         assert_eq!(a.briefing_days.as_deref(), Some("weekdays"));
+    }
+
+    #[test]
+    fn parse_args_help_long() {
+        let a = parse_args(&["--help".into()]);
+        assert!(a.help);
+        assert!(!a.version);
+        assert!(a.prompt_words.is_empty());
+    }
+
+    #[test]
+    fn parse_args_help_short() {
+        let a = parse_args(&["-h".into()]);
+        assert!(a.help);
+    }
+
+    #[test]
+    fn parse_args_version_long() {
+        let a = parse_args(&["--version".into()]);
+        assert!(a.version);
+        assert!(!a.help);
+    }
+
+    #[test]
+    fn parse_args_version_short() {
+        let a = parse_args(&["-V".into()]);
+        assert!(a.version);
+    }
+
+    #[test]
+    fn help_text_mentions_every_flag() {
+        // Guardrail: if someone adds a new flag to parse_args they'll break
+        // this test until HELP_TEXT documents it. Keeps the two in sync.
+        for flag in [
+            "--resume",
+            "--telegram",
+            "--tui",
+            "--chat",
+            "--auth-google",
+            "--revoke",
+            "--briefing",
+            "--time",
+            "--days",
+            "--help",
+            "--version",
+        ] {
+            assert!(
+                HELP_TEXT.contains(flag),
+                "HELP_TEXT missing documentation for {flag}"
+            );
+        }
     }
 }

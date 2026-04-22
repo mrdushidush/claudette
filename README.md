@@ -190,12 +190,21 @@ OLLAMA_KV_CACHE_TYPE=q8_0     # quantised KV cache
 
 ### CLI flags
 
+Run `claudette --help` for the authoritative reference. Summary:
+
 | Flag | Effect |
 |------|--------|
 | `--resume`, `-r` | Continue the most recent saved session. |
 | `--telegram`, `-t` | Run as a Telegram bot (needs `TELEGRAM_BOT_TOKEN`). |
 | `--tui` | Launch the fullscreen TUI. |
-| `--chat <id>` | Restrict Telegram bot to a specific chat ID. Repeatable. |
+| `--chat <id>` | Restrict Telegram bot to a specific chat ID. Repeatable, or set `CLAUDETTE_TELEGRAM_CHAT` to a comma-separated list. |
+| `--auth-google [scope]` | Run the loopback OAuth flow. Scope is `calendar` (default) or `gmail`. Stores tokens under `~/.claudette/secrets/`. |
+| `--revoke` | Pair with `--auth-google` to revoke consent and delete the local token file. |
+| `--briefing` | Write a recurring morning-briefing schedule entry and exit. See [examples/04-morning-briefing.md](examples/04-morning-briefing.md). |
+| `--time HH:MM` | Modifier for `--briefing`. Default `07:00`. |
+| `--days <spec>` | Modifier for `--briefing`. One of `weekdays` (default), `daily`, or a single weekday name. |
+| `--help`, `-h` | Show the flag reference and exit. |
+| `--version`, `-V` | Show the claudette version and exit. |
 
 ### Slash commands (REPL + TUI)
 
