@@ -49,30 +49,40 @@ Three iterations: (1) model calls `enable_tools("facts")`, (2)
 receives the expanded schema and calls `get_weather_current`, (3)
 summarizes the JSON response.
 
-## Inspecting what's currently enabled
+## Listing available tools
 
-Inside the REPL or TUI, the `/tools` slash command lists every tool
-grouped by capability:
+Inside the REPL or TUI, the `/tools` slash command lists every
+advertisable tool — core plus every optional group with the
+`enable_tools` invocation to turn it on:
 
 ```
 > /tools
+✨ secretary tools (core 17 + 12 optional groups)
+  ⚡ core (always loaded)
+    • get_current_time: Returns the current date, time, weekday, and timezone.
+    • get_capabilities: Show the secretary's config, available tools, and limits.
+    • note_create, note_list, note_read, note_delete
+    • todo_add, todo_list, todo_complete, todo_uncomplete, todo_delete
+    • read_file, write_file, list_dir
+    • web_search, generate_code, spawn_agent
 
-CORE (always enabled)
-  add_numbers, get_current_time, get_capabilities, enable_tools, ...
+  ⚡ git — 8 tool(s), enable with enable_tools({group: "git"})
+    • git_status, git_diff, git_log, git_add, git_commit, git_branch, git_checkout, git_push
 
-git                  8 tools    DISABLED
-ide                  3 tools    DISABLED
-search               3 tools    DISABLED
-advanced             3 tools    DISABLED
-facts                4 tools    ENABLED
-registry             4 tools    DISABLED
-github               6 tools    DISABLED
-markets              7 tools    DISABLED
-telegram             3 tools    DISABLED
-calendar             5 tools    DISABLED
-schedule             4 tools    DISABLED
-gmail                4 tools    DISABLED
+  ⚡ facts — 4 tool(s), enable with enable_tools({group: "facts"})
+    • wikipedia_search, wikipedia_summary, weather_current, weather_forecast
+
+  [… 10 more groups: ide, search, advanced, registry, github, markets,
+     telegram, calendar, schedule, gmail …]
+
+  core schema: 4711 chars — enabling a group grows this temporarily
 ```
+
+Output is the **advertisable** surface, not the live registry state
+— `/tools` builds a fresh `ToolRegistry` for display because the live
+registry is behind the conversation loop's borrow. To check what's
+currently enabled in the session, call `get_capabilities` through
+the model (or just ask "what tools do you have right now?").
 
 Groups stay enabled until the session ends or `/clear` is called. A
 second weather question in the same session is a direct
