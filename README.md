@@ -220,11 +220,12 @@ OLLAMA_KV_CACHE_TYPE=q8_0     # quantised KV cache
 
 A subset of the REPL commands works identically inside Telegram chats: `/help`, `/status`, `/compact`, `/clear`, `/save`, `/load`. `/exit` and the destructive DangerFullAccess commands are blocked.
 
-Two additional commands are **Telegram-only** (they have no effect in the REPL or TUI):
+Three additional commands are **Telegram-only** (they have no effect in the REPL or TUI):
 
 ```
 /voice               Toggle voice output (edge-tts on / off).
 /lang he|en          Switch voice transcription + TTS language.
+/briefing            Run the morning briefing now (calendar + weather + VIP unread).
 ```
 
 ---
@@ -378,7 +379,7 @@ cargo clippy --all-targets --no-deps -- -D warnings
 cargo test --lib
 ```
 
-Tests: **371 passing, 4 ignored on Windows** (hook tests that use POSIX `printf`). Run `cargo fmt --check` before committing.
+Tests: **506 passing, 4 ignored on Windows** (hook tests that use POSIX `printf`). Run `cargo fmt --all --check` before committing.
 
 ### Project layout rules
 
@@ -410,7 +411,6 @@ Short-term (things being actively evaluated):
 
 - Threshold tuning for the tiered-brain fallback, using real `fallback.jsonl` data from the field.
 - A runnable brownfield correctness check (not just syntax smoke-testing) for the `generate_code` pipeline.
-- Split `src/tools.rs` (currently ~6.4 K lines) into `tools/git.rs`, `tools/web.rs`, etc.
 - Module-level quality polish for the speculative tool groups (markets, github).
 
 Longer-term vision:

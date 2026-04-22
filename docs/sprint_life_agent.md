@@ -26,7 +26,7 @@ difference between "a nice chatbot" and "the thing that reminds me to call my mo
 4. "Reply to the email from Alice saying I'll be late" → composes and sends a real email.
 5. Zero cloud LLM calls. All brain inference stays on the local Ollama. Only network traffic is
    Google APIs + Telegram + Brave search.
-6. Setup for a new user: `claudette auth-google` → browser opens → authorize → done.
+6. Setup for a new user: `claudette --auth-google` → browser opens → authorize → done.
 
 ---
 
@@ -68,7 +68,7 @@ OAuth refresh tokens live in `~/.claudette/secrets/google_oauth.json`, `0600`, p
 threat model as the Telegram token and GitHub PAT already in that dir. OS keyring is a portability
 tax (Windows / macOS / Linux / WSL), not a meaningful security gain against an attacker who already
 has read access to the user's home. Mitigations: loud README warning, `.gitignore` hardened,
-`claudette auth-google --revoke` command that both deletes local and calls Google's revoke endpoint.
+`claudette --auth-google --revoke` command that both deletes local and calls Google's revoke endpoint.
 
 ### AD-4. Schedule parsing in Rust, not via the LLM
 
@@ -140,7 +140,7 @@ Validates the whole Google auth pipeline. Immediately useful on its own.
 
 Deliverables:
 
-- [x] `claudette auth-google` CLI subcommand — runs the loopback OAuth flow, writes
+- [x] `claudette --auth-google` CLI subcommand — runs the loopback OAuth flow, writes
       `~/.claudette/secrets/google_oauth.json`
 - [x] `src/google_auth.rs` — token exchange, refresh-on-expiry, revoke
 - [x] `src/tools/calendar.rs` following the existing group pattern:
@@ -302,7 +302,7 @@ Concrete tasks in order to start work tomorrow:
 
 1. Register a new Google Cloud project, enable Calendar API, create OAuth client (desktop app).
    Document the exact click path in `docs/google_setup.md` as we go.
-2. Add `google_auth` module + `claudette auth-google` CLI subcommand. Verify the loopback flow
+2. Add `google_auth` module + `claudette --auth-google` CLI subcommand. Verify the loopback flow
    works end-to-end by printing the access token.
 3. Implement `calendar_list_events` as the single first tool. Call it from a scratch test binary
    before wiring the tool-group registration.

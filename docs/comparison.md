@@ -20,10 +20,13 @@ we're honest about what Claudette is, what it isn't, and where it has room to gr
 ## Where Claudette differs
 
 ### 1. It's a secretary, not a coding tool
-opencode, Aider, Cline, Continue — all framed as coding agents. Claudette's 9 tool groups include
-`notes`, `todos`, `markets` (TradingView), `facts` (Wikipedia / weather), `telegram`, voice I/O.
-The code-generation side exists (`codegen` group + Code Reviewer sub-agent) but it's one of nine
-equals, not the whole point.
+opencode, Aider, Cline, Continue — all framed as coding agents. Claudette's 12 tool groups cover
+`calendar` (Google Calendar CRUD + RSVP), `schedule` (proactive reminders + recurring briefings),
+`gmail` (read-only with `<email>` provenance wrapping), `markets` (TradingView + Algorand),
+`facts` (Wikipedia / Open-Meteo weather), `telegram` (voice-capable bot interface), plus
+`git`/`ide`/`search`/`advanced`/`registry`/`github` — alongside `core` (notes, todos, time, files).
+Code-generation exists (Codet sidecar + Code Reviewer sub-agent) but is one capability among
+many, not the whole point.
 
 ### 2. Four interfaces, including a Telegram bot
 None of the comparison tools ship a messaging-app interface. Send a voice note while walking, get a
