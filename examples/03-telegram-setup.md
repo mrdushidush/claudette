@@ -86,15 +86,48 @@ Bot:    You have 3 events scheduled this week:
 
 ## 5. Restricting to specific chats
 
-By default every chat that messages the bot is accepted. To restrict:
+Claudette's Telegram bot **default-denies.** Starting `claudette
+--telegram` with no `--chat <id>` allowlist and no
+`CLAUDETTE_TELEGRAM_CHAT` env var exits immediately with an error —
+prevents the "I ran the bot to test it and now anyone who guesses the
+username gets a full assistant" footgun.
+
+The allowlist:
 
 ```bash
 claudette --telegram --chat 123456789 --chat 987654321
 ```
 
 Or set the `CLAUDETTE_TELEGRAM_CHAT` env var to a comma-separated
-allowlist. Either way, messages from chats not in the list are
+list of IDs. Either way, messages from chats not in the list are
 silently dropped.
+
+### Finding your own chat ID
+
+Send `/start` to the bot once from your account. The bot's logs print
+the incoming chat's ID and name; copy that into `--chat <id>`.
+
+Alternatively, inside the REPL:
+
+```
+> enable the telegram group, then poll for updates and tell me what chat IDs you see
+  ▸ enable_tools({"group": "telegram"})
+  ▸ tg_get_updates({})
+I see one chat ID: 123456789 (Alice).
+```
+
+### Opt-in accept-all mode
+
+If you really want the bot to serve every incoming chat (for a public
+support-bot use case, say):
+
+```bash
+claudette --telegram --chat any
+```
+
+The bot prints a loud warning on startup and runs with no allowlist.
+`--chat any` in this mode does NOT permanently persist incoming
+strangers to the trust set — it's a per-run flag, not a one-way door.
 
 ## 6. Voice
 

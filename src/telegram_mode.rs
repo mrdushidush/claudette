@@ -80,7 +80,33 @@ fn paragraph_pacing(text: &str) -> Duration {
 const PARAGRAPH_MERGE_THRESHOLD: usize = 80;
 
 /// Run Claudette as a Telegram bot. Blocks forever (until Ctrl-C).
-pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> {
+///
+/// `allowed_chat_ids` is the explicit allowlist (merged from `--chat <id>`
+/// flags, the `CLAUDETTE_TELEGRAM_CHAT` env var, and
+/// `~/.claudette/secrets/telegram_chat.id` persisted from previous runs).
+/// `allow_any_chat` is the `--chat any` accept-all opt-in. At least one
+/// of `!allowed_chat_ids.is_empty()` or `allow_any_chat` must hold; this
+/// function returns `Err` early otherwise — **default-deny** prevents a
+/// "ran the bot without thinking and exposed it to every username-guesser"
+/// footgun.
+pub fn run_telegram_bot(
+    allowed_chat_ids: Vec<i64>,
+    allow_any_chat: bool,
+    resume: bool,
+) -> Result<()> {
+    // Default-deny. Require explicit allowlist or accept-all sentinel.
+    if allowed_chat_ids.is_empty() && !allow_any_chat {
+        return Err(anyhow::anyhow!(
+            "telegram bot refusing to start: no chat allowlist.\n\
+             Pass `--chat <your-chat-id>` to restrict incoming messages \
+             (repeat for multiple IDs), or `--chat any` to explicitly \
+             accept every chat that messages the bot.\n\
+             Your own chat ID comes back in `tg_get_updates` once you /start \
+             the bot once from the account you want to allow. This can also \
+             be set via CLAUDETTE_TELEGRAM_CHAT (comma-separated)."
+        ));
+    }
+
     let token = read_secret("telegram").map_err(|e| anyhow::anyhow!(e))?;
     let base_url = format!("https://api.telegram.org/bot{token}");
 
@@ -105,20 +131,21 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
         theme::dim(&format!("@{bot_name}"))
     );
 
-    if allowed_chat_ids.is_empty() {
+    if allow_any_chat {
         eprintln!(
             "{} {}",
             theme::warn(theme::WARN_GLYPH),
             theme::warn(
-                "no --chat filter set — will serve ALL incoming chats. \
-                 Use --chat <id> to restrict."
+                "--chat any: accepting EVERY incoming chat. Anyone who \
+                 guesses the bot username can DM and get a full assistant. \
+                 Prefer `--chat <id>` for production use."
             )
         );
     } else {
         eprintln!(
             "{} {}",
             theme::SPARKLES,
-            theme::dim(&format!("serving chat IDs: {:?}", allowed_chat_ids))
+            theme::dim(&format!("serving chat IDs: {allowed_chat_ids:?}"))
         );
     }
 
@@ -326,7 +353,7 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
                 entry_id,
                 scheduled_for,
             } => {
-                if !allowed_chat_ids.is_empty() && !allowed_chat_ids.contains(&chat_id) {
+                if !allow_any_chat && !allowed_chat_ids.contains(&chat_id) {
                     eprintln!(
                         "  {} {}",
                         theme::dim("○"),
@@ -372,8 +399,10 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
                     .and_then(Value::as_str)
                     .unwrap_or("unknown");
 
-                // Security: skip unauthorized chats.
-                if !allowed_chat_ids.is_empty() && !allowed_chat_ids.contains(&chat_id) {
+                // Security: skip unauthorized chats. With default-deny in
+                // effect, this fires whenever `allow_any_chat` is false and
+                // the incoming chat isn't explicitly allowed.
+                if !allow_any_chat && !allowed_chat_ids.contains(&chat_id) {
                     eprintln!(
                         "  {} {}",
                         theme::dim("○"),
@@ -647,8 +676,15 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
                             );
                         }
 
-                        // Persist chat ID for future runs.
-                        save_chat_id(chat_id);
+                        // Persist chat ID for future runs — only if the
+                        // chat is already in the explicit allowlist. With
+                        // `--chat any`, we deliberately do NOT grow the
+                        // persisted allowlist on each new chat; the user
+                        // asked for open access this run, not a permanent
+                        // trust bump for every stranger that DMs the bot.
+                        if allowed_chat_ids.contains(&chat_id) {
+                            save_chat_id(chat_id);
+                        }
                     }
                     Err(e) => {
                         eprintln!(

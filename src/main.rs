@@ -53,6 +53,12 @@ struct CliArgs {
     /// `--version` / `-V`: print `claudette <semver>` and exit. Uses the
     /// `CARGO_PKG_VERSION` stamped at compile time.
     version: bool,
+    /// `--chat any` sentinel: explicit opt-in to serving every incoming
+    /// Telegram chat (no allowlist). Required now that bot mode
+    /// default-denies when the chat_ids list is empty — prevents the
+    /// previous "run --telegram and accidentally expose the bot to
+    /// anyone who guesses the username" footgun.
+    allow_any_chat: bool,
 }
 
 /// Help text printed on `--help` / `-h`. One source of truth; the README
@@ -77,7 +83,12 @@ MODES (pick one; default is interactive REPL):
 TELEGRAM OPTIONS:
     --chat <id>          Restrict the Telegram bot to chat ID <id>.
                          Repeatable; can also be set via CLAUDETTE_TELEGRAM_CHAT
-                         (comma-separated list).
+                         (comma-separated list). The bot default-denies when
+                         no allowlist is provided.
+    --chat any           Explicit accept-all: serve every incoming chat.
+                         Required to start the bot with no allowlist. Prints
+                         a loud warning since anyone who guesses the bot
+                         username can DM and get a full assistant.
 
 ONE-SHOT SETUP COMMANDS (each exits after doing its one job):
     --auth-google [scope]
@@ -170,6 +181,7 @@ fn main() -> ExitCode {
         briefing_days,
         help: _,
         version: _,
+        allow_any_chat,
     } = args;
 
     // ── Google OAuth flow ─────────────────────────────────────────────
@@ -258,7 +270,7 @@ fn main() -> ExitCode {
                 chat_ids.push(id);
             }
         }
-        match telegram_mode::run_telegram_bot(chat_ids, resume) {
+        match telegram_mode::run_telegram_bot(chat_ids, allow_any_chat, resume) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!(
@@ -344,10 +356,14 @@ fn parse_args(args: &[String]) -> CliArgs {
     let mut out = CliArgs::default();
     let mut expect = ExpectNext::Nothing;
 
-    // Also check env var for chat IDs.
+    // Also check env var for chat IDs. The literal string "any" (any
+    // casing) sets the accept-all sentinel, identical to `--chat any`.
     if let Ok(val) = std::env::var("CLAUDETTE_TELEGRAM_CHAT") {
         for part in val.split(',') {
-            if let Ok(id) = part.trim().parse::<i64>() {
+            let trimmed = part.trim();
+            if trimmed.eq_ignore_ascii_case("any") {
+                out.allow_any_chat = true;
+            } else if let Ok(id) = trimmed.parse::<i64>() {
                 out.chat_ids.push(id);
             }
         }
@@ -356,7 +372,11 @@ fn parse_args(args: &[String]) -> CliArgs {
     for arg in args {
         match expect {
             ExpectNext::ChatId => {
-                if let Ok(id) = arg.parse::<i64>() {
+                if arg.eq_ignore_ascii_case("any") {
+                    // Explicit accept-all sentinel. Bypasses the
+                    // allowlist without silently default-allowing.
+                    out.allow_any_chat = true;
+                } else if let Ok(id) = arg.parse::<i64>() {
                     out.chat_ids.push(id);
                 }
                 expect = ExpectNext::Nothing;
@@ -593,6 +613,41 @@ mod tests {
         assert!(a.telegram);
         assert!(a.resume);
         assert!(a.chat_ids.contains(&123456789));
+        assert!(!a.allow_any_chat);
+    }
+
+    #[test]
+    fn parse_args_chat_any_sets_accept_all() {
+        // `--chat any` opts in to accept-all mode without consuming a
+        // numeric chat ID. Bot refuses to start without either an
+        // explicit allowlist or this flag, so the default-deny posture
+        // depends on `any` being parsed correctly.
+        let a = parse_args(&["--telegram".into(), "--chat".into(), "any".into()]);
+        assert!(a.telegram);
+        assert!(a.allow_any_chat);
+        assert!(a.chat_ids.is_empty());
+    }
+
+    #[test]
+    fn parse_args_chat_any_case_insensitive() {
+        let a = parse_args(&["--telegram".into(), "--chat".into(), "ANY".into()]);
+        assert!(a.allow_any_chat);
+    }
+
+    #[test]
+    fn parse_args_chat_env_any_sets_accept_all() {
+        // CLAUDETTE_TELEGRAM_CHAT also accepts the "any" sentinel. Set
+        // and restore around the test to stay polite with parallel runs
+        // (other tests don't touch this var).
+        let prev = std::env::var("CLAUDETTE_TELEGRAM_CHAT").ok();
+        std::env::set_var("CLAUDETTE_TELEGRAM_CHAT", "ANY");
+        let a = parse_args(&["--telegram".into()]);
+        assert!(a.allow_any_chat);
+        assert!(a.chat_ids.is_empty());
+        match prev {
+            Some(v) => std::env::set_var("CLAUDETTE_TELEGRAM_CHAT", v),
+            None => std::env::remove_var("CLAUDETTE_TELEGRAM_CHAT"),
+        }
     }
 
     #[test]
