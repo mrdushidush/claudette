@@ -92,8 +92,14 @@ fn run_enable_tools(
         .and_then(Value::as_str)
         .ok_or("enable_tools: missing 'group' parameter")?;
     let group = ToolGroup::parse(group_name).ok_or_else(|| {
+        // Dynamically enumerate all groups so adding a new one in
+        // `tool_groups.rs` doesn't silently leave this error message
+        // pointing at a stale list. A hard-coded subset was wrong
+        // for months; never again.
+        let available: Vec<&str> = ToolGroup::all().iter().map(|g| g.name()).collect();
         format!(
-            "enable_tools: unknown group '{group_name}' — available: git, ide, search, advanced"
+            "enable_tools: unknown group '{group_name}' — available: {}",
+            available.join(", ")
         )
     })?;
 
@@ -182,10 +188,16 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("unknown group"), "got: {err}");
-        assert!(
-            err.contains("git"),
-            "error should list available groups: {err}"
-        );
+        // Every registered group must appear in the "available" list — guards
+        // against the hardcoded-subset regression the dynamic formatter was
+        // added to fix.
+        for group in ToolGroup::all() {
+            assert!(
+                err.contains(group.name()),
+                "error should list group '{}': {err}",
+                group.name()
+            );
+        }
     }
 
     #[test]
