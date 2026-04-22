@@ -251,7 +251,7 @@ Three additional commands are **Telegram-only** (they have no effect in the REPL
 
 ## Environment variables
 
-All variables are optional; defaults are shown. Set them in the shell, in a `.env` file at the current directory, or at `~/.claudette/.env` (the recommended persistent location).
+All variables are optional; defaults are shown. Set them in your shell environment, or at `~/.claudette/.env` (the canonical persistent location). Claudette intentionally does **not** auto-load `.env` from the current working directory or its parents — that would let a shared project smuggle `OLLAMA_HOST`, `GITHUB_TOKEN`, etc. into the agent without the user noticing. For per-project overrides, use `direnv` or `source path/to/.env` before invoking.
 
 ### Core
 

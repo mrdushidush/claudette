@@ -133,16 +133,17 @@ DOCS:
 ";
 
 fn main() -> ExitCode {
-    // Load env vars from .env files. Two locations, in this order so CWD
-    // wins on conflict:
-    //   1. CWD/.env (or any parent) — for project-local overrides
-    //   2. ~/.claudette/.env — the canonical user data home, so the same
-    //      config applies regardless of which directory the binary is run
-    //      from. This is where CLAUDETTE_MODEL, _NUM_CTX, _COMPACT_THRESHOLD,
-    //      and tokens like BRAVE_API_KEY / GITHUB_TOKEN belong.
-    // Both calls are best-effort; missing files are silently ignored — tools
-    // that actually need an env var will report their own missing-key errors.
-    let _ = dotenvy::dotenv();
+    // Load env vars from .env files. ONLY the canonical ~/.claudette/.env
+    // is auto-loaded — we explicitly do NOT walk CWD or its parents, because
+    // that lets any shared project directory smuggle CLAUDETTE_*, OLLAMA_HOST,
+    // GITHUB_TOKEN, or TELEGRAM_BOT_TOKEN into the agent without the user
+    // knowing. Per-project overrides should use shell `export`, direnv, or
+    // an explicit `dotenvy::from_path(…)` call from a trusted wrapper.
+    //
+    // ~/.claudette/.env is where CLAUDETTE_MODEL, _NUM_CTX, _COMPACT_THRESHOLD,
+    // and tokens like BRAVE_API_KEY / GITHUB_TOKEN belong. Missing file is
+    // silently ignored — tools that actually need an env var will report
+    // their own missing-key errors.
     if let Ok(home) = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")) {
         let path = std::path::PathBuf::from(home)
             .join(".claudette")

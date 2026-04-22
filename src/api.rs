@@ -282,8 +282,9 @@ pub fn resolve_ollama_url() -> String {
 /// address. Used to warn users when `OLLAMA_HOST` points at a remote
 /// endpoint — the README tagline is "runs entirely on your hardware,"
 /// so a `OLLAMA_HOST=https://someone-elses-server:11434` (accidentally
-/// inherited from a `.env` file, a malicious `.env` in CWD, or a
-/// shell snippet copied from a tutorial) is worth surfacing loudly.
+/// inherited from `~/.claudette/.env` or a shell snippet copied from
+/// a tutorial) is worth surfacing loudly. As of the dotenv-CWD fix,
+/// arbitrary project `.env` files no longer feed into this path.
 #[must_use]
 pub fn is_local_ollama_url(url: &str) -> bool {
     // Strip scheme if present, case-insensitively. We only need the host.
