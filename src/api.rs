@@ -315,11 +315,14 @@ pub fn is_local_ollama_url(url: &str) -> bool {
     };
     let host_lower = host.to_ascii_lowercase();
 
-    if host_lower == "localhost"
-        || host_lower == "0.0.0.0"
-        || host_lower == "::1"
-        || host_lower == "::"
-    {
+    // `0.0.0.0` and `::` are valid BIND addresses (Ollama listens on all
+    // interfaces) but not valid DESTINATION addresses — a TCP connect to
+    // 0.0.0.0 usually routes to the default local interface on Unix and
+    // errors on Windows. Treating them as loopback suppresses the warning
+    // even though OLLAMA_HOST=http://0.0.0.0:11434 does not mean "stay
+    // local". Drop them from the loopback list; a user who really wants
+    // that config can set CLAUDETTE_ALLOW_REMOTE_OLLAMA=1.
+    if host_lower == "localhost" || host_lower == "::1" {
         return true;
     }
     // 127.0.0.0/8 — any loopback IPv4.
@@ -739,9 +742,7 @@ mod tests {
             "http://127.0.0.1:11434",
             "http://127.0.0.2:11434",
             "http://127.255.255.255:11434",
-            "http://0.0.0.0:11434",
             "http://[::1]:11434",
-            "http://[::]:11434",
             "localhost:11434",
             "127.0.0.1",
         ] {
@@ -761,6 +762,10 @@ mod tests {
             "http://10.0.0.1:11434",     // private but not loopback
             "http://1.2.3.4:11434",
             "http://[2001:db8::1]:11434",
+            // 0.0.0.0 and :: are bind addresses, not valid destinations;
+            // treating them as "local" masks a real misconfiguration.
+            "http://0.0.0.0:11434",
+            "http://[::]:11434",
             // Userinfo smuggling — without stripping last `@` the host
             // would parse as `localhost` and bypass the remote warning.
             "http://localhost:fakepass@evil.com:11434",
