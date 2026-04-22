@@ -25,15 +25,14 @@ That's the default: 07:00 weekdays, canonical briefing prompt, no
 voice echo. Output:
 
 ```
-Briefing schedule installed:
-  id: sch_01H...
-  recurrence: 0 7 * * 1-5   (every weekday at 07:00)
-  catch_up: skip
-  prompt: (canonical morning briefing prompt)
+✨ scheduled briefing 'sch_dhzwrcjigjh0' — every weekday at 07:00
+  ▸ next fire: 2026-04-23T07:00:00+03:00
 ```
 
-The entry lives in `~/.claudette/schedule.jsonl`; the bot picks it up
-the next time it starts the scheduler producer.
+The schedule ID is random; the time zone tracks your system local.
+Under the hood this is a `catch_up: skip` recurring entry with the
+canonical briefing prompt, persisted to `~/.claudette/schedule.jsonl`;
+the bot picks it up the next time it starts the scheduler producer.
 
 ## 2. Customising time and days
 
