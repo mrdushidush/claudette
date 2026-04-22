@@ -559,7 +559,10 @@ mod tests {
                 "nested instructions"
             ]
         );
-        fs::remove_dir_all(root).expect("cleanup temp dir");
+        // Best-effort cleanup: Windows CI occasionally holds a transient
+        // handle on the temp tree (antivirus / indexer), which would make
+        // `.expect()` panic after the real assertions have already passed.
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -576,7 +579,10 @@ mod tests {
             normalize_instruction_content(&context.instruction_files[0].content),
             "same rules"
         );
-        fs::remove_dir_all(root).expect("cleanup temp dir");
+        // Best-effort cleanup: Windows CI occasionally holds a transient
+        // handle on the temp tree (antivirus / indexer), which would make
+        // `.expect()` panic after the real assertions have already passed.
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -622,7 +628,10 @@ mod tests {
         assert!(status.contains("?? tracked.txt"));
         assert!(context.git_diff.is_none());
 
-        fs::remove_dir_all(root).expect("cleanup temp dir");
+        // Best-effort cleanup: Windows CI occasionally holds a transient
+        // handle on the temp tree (antivirus / indexer), which would make
+        // `.expect()` panic after the real assertions have already passed.
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -664,7 +673,10 @@ mod tests {
         assert!(diff.contains("Unstaged changes:"));
         assert!(diff.contains("tracked.txt"));
 
-        fs::remove_dir_all(root).expect("cleanup temp dir");
+        // Best-effort cleanup: Windows CI occasionally holds a transient
+        // handle on the temp tree (antivirus / indexer), which would make
+        // `.expect()` panic after the real assertions have already passed.
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -706,7 +718,10 @@ mod tests {
 
         assert!(prompt.contains("Project rules"));
         assert!(prompt.contains("permissionMode"));
-        fs::remove_dir_all(root).expect("cleanup temp dir");
+        // Best-effort cleanup: Windows CI occasionally holds a transient
+        // handle on the temp tree (antivirus / indexer), which would make
+        // `.expect()` panic after the real assertions have already passed.
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -739,7 +754,10 @@ mod tests {
         assert!(prompt.contains("permissionMode"));
         assert!(prompt.contains(SYSTEM_PROMPT_DYNAMIC_BOUNDARY));
 
-        fs::remove_dir_all(root).expect("cleanup temp dir");
+        // Best-effort cleanup: Windows CI occasionally holds a transient
+        // handle on the temp tree (antivirus / indexer), which would make
+        // `.expect()` panic after the real assertions have already passed.
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -770,7 +788,10 @@ mod tests {
             render_instruction_files(&context.instruction_files).contains("instruction markdown")
         );
 
-        fs::remove_dir_all(root).expect("cleanup temp dir");
+        // Best-effort cleanup: Windows CI occasionally holds a transient
+        // handle on the temp tree (antivirus / indexer), which would make
+        // `.expect()` panic after the real assertions have already passed.
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
