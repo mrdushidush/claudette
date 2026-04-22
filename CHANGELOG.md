@@ -10,6 +10,59 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-04-23
+
+CI-unbreaking and crates.io debut. No user-visible behaviour change vs
+v0.2.1; the binary is byte-identical in its runtime paths. This is the
+first version published to crates.io as `cargo install claudette`.
+
+### Fixed
+
+- **CI on Linux (`list_dir` fixture).** The
+  `list_dir_classifies_file_and_subdir_correctly` test built its
+  fixture under `std::env::temp_dir()`, which resolves to `/tmp` on
+  Linux — outside `$HOME` and outside `CLAUDETTE_WORKSPACE`, so the
+  tightened `validate_read_path` from the v0.2.0 security polish
+  rejected the test's own `list_dir` call. Locally on Windows the
+  test passed because `%TEMP%` lives under `%USERPROFILE%`, which is
+  why the regression was invisible until CI was checked. Anchor the
+  fixture under `user_home()` instead — same semantic coverage, no
+  env-var mutation needed. Unblocks the CI history that had been red
+  since before v0.2.0.
+- **CI on Windows (`load_system_prompt` temp-dir cleanup).** Windows
+  Server runners hold transient handles on newly-written files
+  (Defender / indexer activity) long enough to race
+  `fs::remove_dir_all`. The test's assertions had already passed by
+  that point, so a panic there was pure hygiene noise. All seven
+  cleanup calls in `runtime/prompt.rs` downgraded to best-effort
+  `let _ = fs::remove_dir_all(...)`; real failures still surface via
+  earlier `.expect()` calls on the file writes themselves.
+
+### Changed (internal)
+
+- **Clippy 1.95 compliance across the tree (12 files).** GitHub Actions
+  ships stable Rust; clippy 1.95 picks up a handful of patterns the
+  older local toolchain (1.93) let through. All fixes applied via
+  `cargo clippy --fix` are mechanical: `map(f).unwrap_or(a)` →
+  `.map_or(a, f)` across timestamp helpers and token lookups;
+  `Duration::from_millis` for values ≥ 1000 → `from_secs` in
+  `telegram_mode.rs`; collapsed `if-inside-match-Ok/Err` arms in
+  `tui.rs`; `matches!` macro collapse in `codet.rs`; `_error` prefix
+  on an unused binding in `runtime/config.rs`; needless `&` drop in
+  `tools/ide.rs:177`.
+
+### Meta
+
+- **crates.io metadata polished for first publication.** `publish =
+  false` removed; description expanded to lead with the differentiator
+  (Telegram + voice + scheduler + Gmail + Calendar) rather than just
+  "powered by Ollama"; `text-processing` category dropped (Claudette
+  doesn't transform text, it generates responses);
+  `command-line-utilities` kept as the single most accurate slug;
+  keywords adjusted from `[ollama, agent, llm, local-first, cli]` →
+  `[ollama, llm, assistant, telegram, cli]` to match the way users
+  actually search.
+
 ## [0.2.1] - 2026-04-23
 
 Security-hardening patch. Collects the post-ship roast's Tier 1 findings
@@ -437,7 +490,8 @@ Initial public release of Claudette as a standalone repository.
 
 ---
 
-[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/mrdushidush/claudette/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/mrdushidush/claudette/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/mrdushidush/claudette/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mrdushidush/claudette/releases/tag/v0.1.0

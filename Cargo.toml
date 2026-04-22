@@ -1,18 +1,17 @@
 [package]
 name = "claudette"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 rust-version = "1.75"
 license = "Apache-2.0"
-publish = false
-description = "Local-first AI personal secretary, powered by Ollama. Single-binary Rust."
+description = "Local-first AI personal secretary for Ollama. Telegram bot, voice, persistent scheduler, Gmail and Calendar. Single-binary Rust."
 readme = "README.md"
 repository = "https://github.com/mrdushidush/claudette"
 homepage = "https://github.com/mrdushidush/claudette"
 documentation = "https://github.com/mrdushidush/claudette#readme"
 authors = ["mrdushidush <mrdushidush@gmail.com>"]
-keywords = ["ollama", "agent", "llm", "local-first", "cli"]
-categories = ["command-line-utilities", "text-processing"]
+keywords = ["ollama", "llm", "assistant", "telegram", "cli"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "claudette"
