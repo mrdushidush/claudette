@@ -63,6 +63,13 @@ bumps are non-breaking bugfixes only.
 - **External User-Agent referenced a non-existent repo.** Was
   `github.com/davidtzoar/claudette` (pre-scrub leftover); now correctly
   `github.com/mrdushidush/claudette`.
+- **`validate_read_path` no longer grants blanket CWD access.** The old
+  rule allowed any read if the path was under the current working dir;
+  running Claudette from `/etc` effectively whitelisted `/etc`. New
+  rule: `$HOME` always; CWD only if CWD is itself under `$HOME` (typical
+  dev layout); `CLAUDETTE_WORKSPACE` env var is the escape hatch for
+  out-of-HOME workspaces (`D:\dev\…`, `/workspace/…`). Writes remain
+  sandboxed to `~/.claudette/files/` unchanged.
 
 ### Security
 
@@ -96,10 +103,10 @@ bumps are non-breaking bugfixes only.
 - `examples/03-telegram-setup.md` "Two commands are Telegram-only" →
   "Three" (the bullet list already covered `/voice`, `/lang`,
   `/briefing`).
-- Test counts updated to 520 lib + 24 bin (new guardrail test on the
+- Test counts updated to 521 lib + 24 bin (new guardrail test on the
   `enable_tools` schema parameter description, UTF-8 boundary test for
-  the Telegram message splitter, and four tests for the `<untrusted>`
-  wrapper).
+  the Telegram message splitter, four tests for the `<untrusted>`
+  wrapper, and the `validate_read_path` workspace-env-var test).
 
 ## [0.2.0] - 2026-04-22
 

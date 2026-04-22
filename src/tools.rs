@@ -468,26 +468,55 @@ fn resolve_input_path(input: &str) -> Result<PathBuf, String> {
 // `is_code_extension` + CODE_EXTENSIONS moved with write_file into
 // src/tools/file_ops.rs.
 
-/// Validate a read/list path: must resolve under the user's home directory
-/// OR the current working directory (so the researcher agent can access
-/// project files outside $HOME).
+/// Validate a read/list path. Allowed roots, in order:
+///
+/// 1. `$HOME` — always.
+/// 2. The current working directory, but only if CWD is itself under `$HOME`
+///    (typical dev layout: `~/projects/foo`, `C:\Users\me\workspace\bar`).
+///    Running Claudette from a system dir like `/etc` or `C:\Windows` does
+///    NOT open those dirs to reads — the old rule did.
+/// 3. Any path in `CLAUDETTE_WORKSPACE` (colon-separated on Unix,
+///    semicolon-separated on Windows) — the explicit escape hatch for
+///    out-of-HOME workspaces like `D:\dev\…`.
 pub(super) fn validate_read_path(input: &str) -> Result<PathBuf, String> {
     let resolved = resolve_input_path(input)?;
     let home = normalize_path(&user_home());
     if resolved.starts_with(&home) {
         return Ok(resolved);
     }
-    // Also allow paths under the current working directory (project root).
     if let Ok(cwd) = std::env::current_dir() {
         let cwd_norm = normalize_path(&cwd);
-        if resolved.starts_with(&cwd_norm) {
+        if cwd_norm.starts_with(&home) && resolved.starts_with(&cwd_norm) {
             return Ok(resolved);
         }
     }
+    if workspace_allows(&resolved) {
+        return Ok(resolved);
+    }
     Err(format!(
-        "path is outside both $HOME ({}) and the working directory; reads are restricted for safety",
+        "path is outside $HOME ({}), the working directory (if under $HOME), \
+         and CLAUDETTE_WORKSPACE; reads are restricted for safety",
         home.display()
     ))
+}
+
+/// True if `resolved` is under any path in `CLAUDETTE_WORKSPACE`. Empty /
+/// unset env var → always false.
+fn workspace_allows(resolved: &Path) -> bool {
+    let Ok(ws) = std::env::var("CLAUDETTE_WORKSPACE") else {
+        return false;
+    };
+    #[cfg(unix)]
+    let sep = ':';
+    #[cfg(not(unix))]
+    let sep = ';';
+    ws.split(sep)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .any(|root| {
+            let root_norm = normalize_path(Path::new(root));
+            resolved.starts_with(&root_norm)
+        })
 }
 
 /// Validate a write path: must resolve under `~/.claudette/files/`.
@@ -895,11 +924,60 @@ mod tests {
     fn validate_read_path_rejects_traversal_escape() {
         // ~/.claudette/../../../etc/passwd resolves to outside home → reject
         let bad = "~/.claudette/../../../../../../etc/passwd";
+        // Clear workspace env var in case another test left it populated.
+        let prev = std::env::var("CLAUDETTE_WORKSPACE").ok();
+        std::env::remove_var("CLAUDETTE_WORKSPACE");
+
         let result = validate_read_path(bad);
+
+        if let Some(v) = prev {
+            std::env::set_var("CLAUDETTE_WORKSPACE", v);
+        }
+
         assert!(result.is_err(), "expected reject, got {result:?}");
         assert!(
             result.unwrap_err().contains("restricted for safety"),
             "wrong error message"
+        );
+    }
+
+    #[test]
+    fn validate_read_path_respects_claudette_workspace() {
+        // Use an invented absolute path so it can't possibly be under HOME
+        // or CWD on any test runner. resolve_input_path only normalises —
+        // it doesn't touch the disk — so the path need not exist.
+        #[cfg(unix)]
+        let (root, target_str) = (
+            "/claudette-ws-test-xyz-e3a7",
+            "/claudette-ws-test-xyz-e3a7/hello.txt",
+        );
+        #[cfg(not(unix))]
+        let (root, target_str) = (
+            r"Z:\claudette-ws-test-xyz-e3a7",
+            r"Z:\claudette-ws-test-xyz-e3a7\hello.txt",
+        );
+
+        let prev = std::env::var("CLAUDETTE_WORKSPACE").ok();
+
+        // (a) Without env var → rejected (outside HOME, outside CWD, outside workspace).
+        std::env::remove_var("CLAUDETTE_WORKSPACE");
+        let denied = validate_read_path(target_str);
+        assert!(denied.is_err(), "no workspace set, expected reject");
+
+        // (b) With env var pointing at the invented root → accepted.
+        std::env::set_var("CLAUDETTE_WORKSPACE", root);
+        let allowed = validate_read_path(target_str);
+
+        // Restore env before asserting so a panic does not poison other tests.
+        if let Some(v) = prev {
+            std::env::set_var("CLAUDETTE_WORKSPACE", v);
+        } else {
+            std::env::remove_var("CLAUDETTE_WORKSPACE");
+        }
+
+        assert!(
+            allowed.is_ok(),
+            "workspace set, expected ok, got {allowed:?}"
         );
     }
 

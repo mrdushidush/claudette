@@ -268,6 +268,7 @@ All variables are optional; defaults are shown. Set them in your shell environme
 | `CLAUDETTE_SKIP_OLLAMA_PROBE` | unset | Set to `1` to skip the startup probe (CI / offline). |
 | `CLAUDETTE_FALLBACK_BRAIN_MODEL` | `qwen3.5:9b` (Auto preset) | Brain to fall back to on stuck signals. |
 | `CLAUDETTE_LIVE_GOOGLE` | unset | Set to `1` to run live Google integration tests via `cargo test --ignored`. Never set in CI. |
+| `CLAUDETTE_WORKSPACE` | unset | Extra read roots outside `$HOME`, colon-separated on Unix, semicolon-separated on Windows. Example: `D:\dev\claudette` for developing Claudette itself. Reads under `$HOME` and under a `$HOME`-rooted CWD are always allowed regardless. |
 
 ### Codet (code-generation sidecar)
 
@@ -404,7 +405,7 @@ cargo clippy --all-targets --no-deps -- -D warnings
 cargo test --lib
 ```
 
-Tests: **520 passing, 4 ignored on Windows** (hook tests that use POSIX `printf`). Run `cargo fmt --all --check` before committing.
+Tests: **521 passing, 4 ignored on Windows** (hook tests that use POSIX `printf`). Run `cargo fmt --all --check` before committing.
 
 ### Project layout rules
 
