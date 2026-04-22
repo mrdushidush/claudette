@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
-use super::{normalize_path, strip_html, user_home, validate_read_path, MAX_FILE_BYTES};
+use super::{
+    normalize_path, strip_html, user_home, validate_read_path, wrap_untrusted, MAX_FILE_BYTES,
+};
 
 const MAX_GLOB_RESULTS: usize = 200;
 const MAX_GREP_MATCHES: usize = 50;
@@ -294,13 +296,20 @@ fn run_web_fetch(input: &str) -> Result<String, String> {
     let truncated = total_chars > WEB_FETCH_MAX_CHARS;
     let visible: String = cleaned.chars().take(WEB_FETCH_MAX_CHARS).collect();
 
+    // Wrap the page text in <untrusted source="web_fetch:URL">…</untrusted>
+    // and defang any in-body attempt to close the tag. Paired with the
+    // system-prompt invariant; prevents a hostile page from smuggling
+    // instructions into the model's trusted context. Same defense shape as
+    // Gmail's <email> wrapper.
+    let wrapped = wrap_untrusted(&format!("web_fetch:{final_url}"), &visible);
+
     Ok(json!({
         "url": final_url,
         "status": status.as_u16(),
         "chars": visible.chars().count(),
         "total_chars": total_chars,
         "truncated": truncated,
-        "text": visible,
+        "text": wrapped,
     })
     .to_string())
 }

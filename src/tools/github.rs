@@ -7,7 +7,7 @@
 
 use serde_json::{json, Value};
 
-use super::{external_http_client, extract_str, parse_json_input};
+use super::{external_http_client, extract_str, parse_json_input, wrap_untrusted};
 
 pub(super) fn schemas() -> Vec<Value> {
     vec![
@@ -264,6 +264,12 @@ fn run_gh_get_issue(input: &str) -> Result<String, String> {
         .take(2000)
         .collect::<String>();
 
+    // The issue body is attacker-controlled Markdown — wrap in
+    // <untrusted> and defang close-tag injection. Same defense as
+    // web_fetch and Gmail. Title is short + low-signal for injection
+    // so we leave it bare; if that changes, wrap it too.
+    let wrapped_body = wrap_untrusted(&format!("github-issue:{owner}/{repo}#{number}"), &body);
+
     Ok(json!({
         "owner": owner,
         "repo": repo,
@@ -271,7 +277,7 @@ fn run_gh_get_issue(input: &str) -> Result<String, String> {
         "title": data.get("title").and_then(Value::as_str).unwrap_or(""),
         "state": data.get("state").and_then(Value::as_str).unwrap_or(""),
         "author": data.pointer("/user/login").and_then(Value::as_str).unwrap_or(""),
-        "body": body,
+        "body": wrapped_body,
         "url": data.get("html_url").and_then(Value::as_str).unwrap_or(""),
         "is_pr": data.get("pull_request").is_some(),
         "labels": data.get("labels").and_then(Value::as_array).map(|arr| {

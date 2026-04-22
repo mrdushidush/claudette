@@ -49,6 +49,20 @@ bumps are non-breaking bugfixes only.
   emoji or CJK text near the 4000-byte Telegram limit would panic the
   consumer thread and hard-kill the bot. Walk back to the nearest char
   boundary before the newline-preferred split.
+- **Dotenv CWD hijack.** `dotenvy::dotenv()` walked the current working
+  directory and every parent looking for `.env`, letting a shared
+  project silently set `OLLAMA_HOST`, `GITHUB_TOKEN`, etc. for a
+  Claudette run. Drop the implicit walk; only `~/.claudette/.env` is
+  auto-loaded now.
+- **Prompt-injection provenance extended.** Gmail's `<email>` defang
+  pattern now has a sibling for any tool returning attacker-controlled
+  text: `web_fetch` and `gh_get_issue` wrap their payloads in
+  `<untrusted source="...">…</untrusted>` with the same close-tag
+  defang (whitespace + case + HTML-entity variants). The system-prompt
+  invariant extends to `<untrusted>` as well as `<email>`.
+- **External User-Agent referenced a non-existent repo.** Was
+  `github.com/davidtzoar/claudette` (pre-scrub leftover); now correctly
+  `github.com/mrdushidush/claudette`.
 
 ### Security
 
@@ -82,9 +96,10 @@ bumps are non-breaking bugfixes only.
 - `examples/03-telegram-setup.md` "Two commands are Telegram-only" →
   "Three" (the bullet list already covered `/voice`, `/lang`,
   `/briefing`).
-- Test counts updated to 516 lib + 24 bin (new guardrail test on the
-  `enable_tools` schema parameter description + UTF-8 boundary test
-  for the Telegram message splitter).
+- Test counts updated to 520 lib + 24 bin (new guardrail test on the
+  `enable_tools` schema parameter description, UTF-8 boundary test for
+  the Telegram message splitter, and four tests for the `<untrusted>`
+  wrapper).
 
 ## [0.2.0] - 2026-04-22
 
