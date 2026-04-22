@@ -258,13 +258,16 @@ All variables are optional; defaults are shown. Set them in the shell, in a `.en
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint. Honoured exactly like Ollama itself. |
+| `CLAUDETTE_ALLOW_REMOTE_OLLAMA` | unset | Set to `1` to silence the startup warning when `OLLAMA_HOST` is non-loopback. Default posture is local-only. |
 | `CLAUDETTE_MODEL` | `qwen3.5:4b` (Auto preset) | Brain model override. |
 | `CLAUDETTE_NUM_CTX` | `16384` | Brain context window in tokens. |
 | `CLAUDETTE_NUM_PREDICT` | `6144` | Max output tokens per request. |
 | `CLAUDETTE_COMPACT_THRESHOLD` | `12000` | Auto-compaction trigger (estimated tokens). |
 | `CLAUDETTE_SESSION` | `~/.claudette/sessions/last.json` | Override the session file path. |
+| `CLAUDETTE_MEMORY` | `~/.claudette/CLAUDETTE.MD` | Override the path Claudette loads user-memory from. |
 | `CLAUDETTE_SKIP_OLLAMA_PROBE` | unset | Set to `1` to skip the startup probe (CI / offline). |
 | `CLAUDETTE_FALLBACK_BRAIN_MODEL` | `qwen3.5:9b` (Auto preset) | Brain to fall back to on stuck signals. |
+| `CLAUDETTE_LIVE_GOOGLE` | unset | Set to `1` to run live Google integration tests via `cargo test --ignored`. Never set in CI. |
 
 ### Codet (code-generation sidecar)
 
@@ -282,6 +285,8 @@ All variables are optional; defaults are shown. Set them in the shell, in a `.en
 | `BRAVE_API_KEY` | Brave Search API key — required for `web_search`. |
 | `GITHUB_TOKEN` | GitHub PAT — required for the `github` tool group. Falls back to `CLAUDETTE_GITHUB_TOKEN` if unset. |
 | `TELEGRAM_BOT_TOKEN` | Bot token from `@BotFather` — required for `--telegram`. |
+| `CLAUDETTE_GOOGLE_CLIENT_ID` | Google OAuth client ID — required for `--auth-google` + the Calendar / Gmail tool groups. Falls back to `GOOGLE_CLIENT_ID`, or to `~/.claudette/secrets/google_oauth_client.json`. |
+| `CLAUDETTE_GOOGLE_CLIENT_SECRET` | Google OAuth client secret. Same fallback chain as the client ID. |
 | `VESTIGE_API_BASE` | Override for the vestige.fi Algorand API (`markets` group). |
 
 All tokens also support file-based fallback: save them to `~/.claudette/secrets/<name>.token` (for example `github.token`, `telegram.token`, `brave.token`). Environment variables win over files when both are present.
