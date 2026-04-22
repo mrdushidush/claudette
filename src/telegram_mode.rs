@@ -191,31 +191,31 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
     let default_scheduled_chat = allowed_chat_ids.first().copied();
     let scheduler_path = scheduler::default_path();
     let clock: Arc<dyn crate::clock::Clock> = Arc::new(SystemClock);
-    let catch_up_firings: Vec<Firing> =
-        match Scheduler::load(scheduler_path.clone(), clock.clone()) {
-            Ok((loaded, firings)) => {
-                eprintln!(
-                    "{} {}",
-                    theme::SAVE,
-                    theme::ok(&format!(
-                        "scheduler loaded ({} active, {} catch-up)",
-                        loaded.list().len(),
-                        firings.len(),
-                    ))
-                );
-                scheduler::install(loaded);
-                firings
-            }
-            Err(e) => {
-                eprintln!(
-                    "{} {}",
-                    theme::warn(theme::WARN_GLYPH),
-                    theme::warn(&format!("scheduler load failed: {e} — starting empty"))
-                );
-                scheduler::install(Scheduler::new(scheduler_path, clock));
-                Vec::new()
-            }
-        };
+    let catch_up_firings: Vec<Firing> = match Scheduler::load(scheduler_path.clone(), clock.clone())
+    {
+        Ok((loaded, firings)) => {
+            eprintln!(
+                "{} {}",
+                theme::SAVE,
+                theme::ok(&format!(
+                    "scheduler loaded ({} active, {} catch-up)",
+                    loaded.list().len(),
+                    firings.len(),
+                ))
+            );
+            scheduler::install(loaded);
+            firings
+        }
+        Err(e) => {
+            eprintln!(
+                "{} {}",
+                theme::warn(theme::WARN_GLYPH),
+                theme::warn(&format!("scheduler load failed: {e} — starting empty"))
+            );
+            scheduler::install(Scheduler::new(scheduler_path, clock));
+            Vec::new()
+        }
+    };
 
     // ── mpsc channel: one consumer, two producers ──────────────────────
     let (tx, rx) = mpsc::channel::<Event>();
@@ -367,328 +367,313 @@ pub fn run_telegram_bot(allowed_chat_ids: Vec<i64>, resume: bool) -> Result<()> 
                     .pointer("/chat/id")
                     .and_then(Value::as_i64)
                     .unwrap_or(0);
-                    let from = message
-                        .pointer("/from/first_name")
-                        .and_then(Value::as_str)
-                        .unwrap_or("unknown");
+                let from = message
+                    .pointer("/from/first_name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown");
 
-                    // Security: skip unauthorized chats.
-                    if !allowed_chat_ids.is_empty() && !allowed_chat_ids.contains(&chat_id) {
-                        eprintln!(
-                            "  {} {}",
-                            theme::dim("○"),
-                            theme::dim(&format!(
-                                "ignoring message from unauthorized chat {chat_id} ({from})"
-                            ))
-                        );
+                // Security: skip unauthorized chats.
+                if !allowed_chat_ids.is_empty() && !allowed_chat_ids.contains(&chat_id) {
+                    eprintln!(
+                        "  {} {}",
+                        theme::dim("○"),
+                        theme::dim(&format!(
+                            "ignoring message from unauthorized chat {chat_id} ({from})"
+                        ))
+                    );
+                    continue;
+                }
+
+                // Extract text from message — either typed text or voice
+                // transcription. Track which one it was so the reply
+                // mode (text-only vs text+voice) can match the input.
+                let mut input_was_voice = message.get("voice").is_some();
+                let mut text: String = if let Some(voice_obj) = message.get("voice") {
+                    // Voice message — download and transcribe via Whisper.
+                    let file_id = voice_obj
+                        .get("file_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("");
+                    if file_id.is_empty() {
                         continue;
                     }
-
-                    // Extract text from message — either typed text or voice
-                    // transcription. Track which one it was so the reply
-                    // mode (text-only vs text+voice) can match the input.
-                    let mut input_was_voice = message.get("voice").is_some();
-                    let mut text: String = if let Some(voice_obj) = message.get("voice") {
-                        // Voice message — download and transcribe via Whisper.
-                        let file_id = voice_obj
-                            .get("file_id")
-                            .and_then(Value::as_str)
-                            .unwrap_or("");
-                        if file_id.is_empty() {
-                            continue;
-                        }
-                        eprintln!(
-                            "\n  {} {} {}",
-                            theme::accent("←"),
-                            theme::accent(from),
-                            theme::dim("[voice message]")
-                        );
-                        match voice::transcribe_telegram_voice(
-                            &http,
-                            &base_url,
-                            file_id,
-                            &voice_lang,
-                        ) {
-                            Ok(transcript) => {
-                                eprintln!(
-                                    "  {} {}",
-                                    theme::dim("▸"),
-                                    theme::dim(&format!(
-                                        "transcribed: {}",
-                                        transcript.chars().take(80).collect::<String>()
-                                    ))
-                                );
-                                transcript
-                            }
-                            Err(e) => {
-                                eprintln!(
-                                    "  {} {}",
-                                    theme::error(theme::ERR_GLYPH),
-                                    theme::error(&format!("voice transcription failed: {e}"))
-                                );
-                                let _ = send_message(
-                                    &http,
-                                    &base_url,
-                                    chat_id,
-                                    &format!(
-                                        "Sorry, I couldn't transcribe your voice message: {e}"
-                                    ),
-                                );
-                                continue;
-                            }
-                        }
-                    } else {
-                        // Regular text message.
-                        let t = message
-                            .get("text")
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .trim()
-                            .to_string();
-                        if t.is_empty() {
-                            continue;
-                        }
-                        eprintln!(
-                            "\n  {} {} {}",
-                            theme::accent("←"),
-                            theme::accent(from),
-                            theme::dim(&t)
-                        );
-                        t
-                    };
-
-                    // /briefing is a slash command that runs a turn (rather
-                    // than sending a canned reply). Rewrite text into the
-                    // briefing prompt and let the normal pipeline handle
-                    // streaming + tool calls. Never echo a briefing as
-                    // voice — it's a ping, not a conversation.
-                    if text == "/briefing" {
-                        input_was_voice = false;
-                        text = crate::briefing::BRIEFING_PROMPT.to_string();
-                    } else if text.starts_with('/') {
-                        let reply = match text.as_str() {
-                            "/start" => Some(
-                                "Hello! I'm Claudette, your AI personal secretary. \
-                                 Send me any message and I'll help you out."
-                                    .to_string(),
-                            ),
-                            "/compact" => match maybe_compact_session(&mut runtime, true) {
-                                Some(removed) => {
-                                    let _ = save_session(runtime.session());
-                                    Some(format!("Compacted {removed} older messages."))
-                                }
-                                None => Some("Nothing to compact yet.".to_string()),
-                            },
-                            "/clear" => {
-                                runtime = build_runtime_streaming(Session::default(), true);
-                                Some("Session cleared.".to_string())
-                            }
-                            "/status" => {
-                                let msgs = runtime.session().messages.len();
-                                let est = crate::estimate_session_tokens(runtime.session());
-                                Some(format!(
-                                    "Messages: {msgs}\nEstimated tokens: {est}\n\
-                                     Compact threshold: {}",
-                                    crate::run::compact_threshold()
-                                ))
-                            }
-                            "/voice" => {
-                                if !tts_available {
-                                    Some(
-                                        "Voice output unavailable — run: pip install edge-tts"
-                                            .to_string(),
-                                    )
-                                } else {
-                                    tts_enabled = !tts_enabled;
-                                    if tts_enabled {
-                                        Some(format!(
-                                            "Voice output ON ({})",
-                                            tts::voice_for_lang(&voice_lang)
-                                        ))
-                                    } else {
-                                        Some("Voice output OFF.".to_string())
-                                    }
-                                }
-                            }
-                            cmd if cmd.starts_with("/lang") => {
-                                let arg = cmd
-                                    .strip_prefix("/lang")
-                                    .unwrap_or("")
-                                    .trim()
-                                    .to_lowercase();
-                                match arg.as_str() {
-                                    "he" | "hebrew" | "עברית" => {
-                                        voice_lang = "he".to_string();
-                                        Some("Language set to Hebrew. Voice messages will be transcribed and answered in Hebrew. Use /lang en to switch back.".to_string())
-                                    }
-                                    "en" | "english" | "" => {
-                                        voice_lang = "en".to_string();
-                                        Some("Language set to English (default). Voice messages will be translated to English. Use /lang he for Hebrew.".to_string())
-                                    }
-                                    other => Some(format!(
-                                        "Unknown language '{other}'. Use /lang en or /lang he."
-                                    )),
-                                }
-                            }
-                            _ => None, // Unknown slash command — send to model.
-                        };
-                        if let Some(msg) = reply {
-                            let _ = send_message(&http, &base_url, chat_id, &msg);
-                            continue;
-                        }
-                    }
-
-                    // Snapshot session so we can roll back on failure.
-                    let session_snapshot = runtime.session().clone();
-
-                    // Show typing while the model is thinking so the user
-                    // gets immediate feedback that the message was received.
-                    send_typing(&http, &base_url, chat_id);
-
-                    // Start a streaming paragraph poller. The brain's
-                    // text-delta callback appends tokens to the global
-                    // `telegram_stream_buffer`; this poller reads from that
-                    // buffer, detects completed paragraphs (blank-line
-                    // boundaries outside code fences), and sends each one
-                    // progressively. Net effect: paragraphs arrive in the
-                    // chat as Claudette writes them, not all at the end.
-                    crate::api::telegram_stream_reset();
-                    let active = Arc::new(AtomicBool::new(true));
-                    let poller_http = http.clone();
-                    let poller_base = base_url.clone();
-                    let poller_active = active.clone();
-                    let poller = std::thread::spawn(move || {
-                        run_streaming_poller(
-                            poller_http,
-                            poller_base,
-                            chat_id,
-                            poller_active,
-                        )
-                    });
-
-                    // Sprint 14: route through brain_selector so Auto-preset
-                    // turns escalate to the fallback brain on stuck signals.
-                    // Telegram has no prompter (every tool must be auto-OK)
-                    // so we pass a permanently-None option.
-                    let mut no_prompter: Option<&mut dyn crate::PermissionPrompter> = None;
-                    let turn_result = crate::brain_selector::run_turn_with_fallback(
-                        &mut runtime,
-                        &text,
-                        &mut no_prompter,
+                    eprintln!(
+                        "\n  {} {} {}",
+                        theme::accent("←"),
+                        theme::accent(from),
+                        theme::dim("[voice message]")
                     );
-
-                    // Signal poller to flush and exit, then wait for it.
-                    active.store(false, Ordering::SeqCst);
-                    let streamed_bytes = poller.join().unwrap_or(0);
-
-                    match turn_result {
-                        Ok(summary) => {
-                            let response = extract_response_text(&summary);
-
+                    match voice::transcribe_telegram_voice(&http, &base_url, file_id, &voice_lang) {
+                        Ok(transcript) => {
                             eprintln!(
-                                "  {} {} {}",
-                                theme::accent("→"),
+                                "  {} {}",
+                                theme::dim("▸"),
                                 theme::dim(&format!(
-                                    "iter={} in={} out={}",
-                                    summary.iterations,
-                                    summary.usage.input_tokens,
-                                    summary.usage.output_tokens,
-                                )),
-                                theme::dim(&response.chars().take(80).collect::<String>())
+                                    "transcribed: {}",
+                                    transcript.chars().take(80).collect::<String>()
+                                ))
                             );
-
-                            // If the streaming poller didn't emit anything
-                            // (tool-only turn, or callback never fired), fall
-                            // back to the classic paragraph-split-and-send so
-                            // the user still gets a reply.
-                            if streamed_bytes == 0 && !response.trim().is_empty() {
-                                let paragraphs =
-                                    split_into_paragraphs(&response, TG_MAX_MESSAGE_LEN);
-                                for chunk in &paragraphs {
-                                    send_typing(&http, &base_url, chat_id);
-                                    std::thread::sleep(paragraph_pacing(chunk));
-                                    if let Err(e) = send_message(&http, &base_url, chat_id, chunk) {
-                                        eprintln!(
-                                            "  {} {}",
-                                            theme::error(theme::ERR_GLYPH),
-                                            theme::error(&format!("send failed: {e}"))
-                                        );
-                                    }
-                                }
-                            }
-
-                            // Send voice response only when the input was
-                            // also voice. Text-in → text-out keeps typed
-                            // chats fast; voice-in → voice-out preserves
-                            // the hands-free experience. TTS must also be
-                            // enabled (master toggle via /voice).
-                            if tts_enabled && input_was_voice {
-                                if let Some(ogg_path) = tts::synthesize(&response, &voice_lang) {
-                                    eprintln!(
-                                        "  {} {}",
-                                        theme::dim("▸"),
-                                        theme::dim("sending voice response...")
-                                    );
-                                    if let Err(e) = tts::send_voice_message(
-                                        &http, &base_url, chat_id, &ogg_path,
-                                    ) {
-                                        eprintln!(
-                                            "  {} {}",
-                                            theme::warn(theme::WARN_GLYPH),
-                                            theme::warn(&format!("TTS send failed: {e}"))
-                                        );
-                                    }
-                                    let _ = std::fs::remove_file(&ogg_path);
-                                }
-                            }
-
-                            // Auto-compact if needed.
-                            if let Some(removed) = maybe_compact_session(&mut runtime, true) {
-                                eprintln!(
-                                    "  {} {}",
-                                    theme::SAVE,
-                                    theme::ok(&format!(
-                                        "auto-compacted {removed} older message(s)"
-                                    ))
-                                );
-                            }
-
-                            // Auto-save.
-                            if let Err(e) = save_session(runtime.session()) {
-                                eprintln!(
-                                    "  {} {}",
-                                    theme::warn(theme::WARN_GLYPH),
-                                    theme::warn(&format!("session save failed: {e:#}"))
-                                );
-                            }
-
-                            // Persist chat ID for future runs.
-                            save_chat_id(chat_id);
+                            transcript
                         }
                         Err(e) => {
                             eprintln!(
                                 "  {} {}",
                                 theme::error(theme::ERR_GLYPH),
-                                theme::error(&format!("turn failed: {e}"))
-                            );
-                            // Roll back session to prevent corruption from
-                            // partial messages left by the failed turn.
-                            runtime = build_runtime_streaming(session_snapshot, true);
-                            eprintln!(
-                                "  {} {}",
-                                theme::dim("▸"),
-                                theme::dim("session rolled back to pre-turn state")
+                                theme::error(&format!("voice transcription failed: {e}"))
                             );
                             let _ = send_message(
                                 &http,
                                 &base_url,
                                 chat_id,
-                                &format!("Sorry, I encountered an error: {e}"),
+                                &format!("Sorry, I couldn't transcribe your voice message: {e}"),
                             );
+                            continue;
                         }
                     }
-                } // end Event::TgUpdate arm
-            } // end match event
+                } else {
+                    // Regular text message.
+                    let t = message
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    if t.is_empty() {
+                        continue;
+                    }
+                    eprintln!(
+                        "\n  {} {} {}",
+                        theme::accent("←"),
+                        theme::accent(from),
+                        theme::dim(&t)
+                    );
+                    t
+                };
+
+                // /briefing is a slash command that runs a turn (rather
+                // than sending a canned reply). Rewrite text into the
+                // briefing prompt and let the normal pipeline handle
+                // streaming + tool calls. Never echo a briefing as
+                // voice — it's a ping, not a conversation.
+                if text == "/briefing" {
+                    input_was_voice = false;
+                    text = crate::briefing::BRIEFING_PROMPT.to_string();
+                } else if text.starts_with('/') {
+                    let reply = match text.as_str() {
+                        "/start" => Some(
+                            "Hello! I'm Claudette, your AI personal secretary. \
+                                 Send me any message and I'll help you out."
+                                .to_string(),
+                        ),
+                        "/compact" => match maybe_compact_session(&mut runtime, true) {
+                            Some(removed) => {
+                                let _ = save_session(runtime.session());
+                                Some(format!("Compacted {removed} older messages."))
+                            }
+                            None => Some("Nothing to compact yet.".to_string()),
+                        },
+                        "/clear" => {
+                            runtime = build_runtime_streaming(Session::default(), true);
+                            Some("Session cleared.".to_string())
+                        }
+                        "/status" => {
+                            let msgs = runtime.session().messages.len();
+                            let est = crate::estimate_session_tokens(runtime.session());
+                            Some(format!(
+                                "Messages: {msgs}\nEstimated tokens: {est}\n\
+                                     Compact threshold: {}",
+                                crate::run::compact_threshold()
+                            ))
+                        }
+                        "/voice" => {
+                            if !tts_available {
+                                Some(
+                                    "Voice output unavailable — run: pip install edge-tts"
+                                        .to_string(),
+                                )
+                            } else {
+                                tts_enabled = !tts_enabled;
+                                if tts_enabled {
+                                    Some(format!(
+                                        "Voice output ON ({})",
+                                        tts::voice_for_lang(&voice_lang)
+                                    ))
+                                } else {
+                                    Some("Voice output OFF.".to_string())
+                                }
+                            }
+                        }
+                        cmd if cmd.starts_with("/lang") => {
+                            let arg = cmd
+                                .strip_prefix("/lang")
+                                .unwrap_or("")
+                                .trim()
+                                .to_lowercase();
+                            match arg.as_str() {
+                                "he" | "hebrew" | "עברית" => {
+                                    voice_lang = "he".to_string();
+                                    Some("Language set to Hebrew. Voice messages will be transcribed and answered in Hebrew. Use /lang en to switch back.".to_string())
+                                }
+                                "en" | "english" | "" => {
+                                    voice_lang = "en".to_string();
+                                    Some("Language set to English (default). Voice messages will be translated to English. Use /lang he for Hebrew.".to_string())
+                                }
+                                other => Some(format!(
+                                    "Unknown language '{other}'. Use /lang en or /lang he."
+                                )),
+                            }
+                        }
+                        _ => None, // Unknown slash command — send to model.
+                    };
+                    if let Some(msg) = reply {
+                        let _ = send_message(&http, &base_url, chat_id, &msg);
+                        continue;
+                    }
+                }
+
+                // Snapshot session so we can roll back on failure.
+                let session_snapshot = runtime.session().clone();
+
+                // Show typing while the model is thinking so the user
+                // gets immediate feedback that the message was received.
+                send_typing(&http, &base_url, chat_id);
+
+                // Start a streaming paragraph poller. The brain's
+                // text-delta callback appends tokens to the global
+                // `telegram_stream_buffer`; this poller reads from that
+                // buffer, detects completed paragraphs (blank-line
+                // boundaries outside code fences), and sends each one
+                // progressively. Net effect: paragraphs arrive in the
+                // chat as Claudette writes them, not all at the end.
+                crate::api::telegram_stream_reset();
+                let active = Arc::new(AtomicBool::new(true));
+                let poller_http = http.clone();
+                let poller_base = base_url.clone();
+                let poller_active = active.clone();
+                let poller = std::thread::spawn(move || {
+                    run_streaming_poller(poller_http, poller_base, chat_id, poller_active)
+                });
+
+                // Sprint 14: route through brain_selector so Auto-preset
+                // turns escalate to the fallback brain on stuck signals.
+                // Telegram has no prompter (every tool must be auto-OK)
+                // so we pass a permanently-None option.
+                let mut no_prompter: Option<&mut dyn crate::PermissionPrompter> = None;
+                let turn_result = crate::brain_selector::run_turn_with_fallback(
+                    &mut runtime,
+                    &text,
+                    &mut no_prompter,
+                );
+
+                // Signal poller to flush and exit, then wait for it.
+                active.store(false, Ordering::SeqCst);
+                let streamed_bytes = poller.join().unwrap_or(0);
+
+                match turn_result {
+                    Ok(summary) => {
+                        let response = extract_response_text(&summary);
+
+                        eprintln!(
+                            "  {} {} {}",
+                            theme::accent("→"),
+                            theme::dim(&format!(
+                                "iter={} in={} out={}",
+                                summary.iterations,
+                                summary.usage.input_tokens,
+                                summary.usage.output_tokens,
+                            )),
+                            theme::dim(&response.chars().take(80).collect::<String>())
+                        );
+
+                        // If the streaming poller didn't emit anything
+                        // (tool-only turn, or callback never fired), fall
+                        // back to the classic paragraph-split-and-send so
+                        // the user still gets a reply.
+                        if streamed_bytes == 0 && !response.trim().is_empty() {
+                            let paragraphs = split_into_paragraphs(&response, TG_MAX_MESSAGE_LEN);
+                            for chunk in &paragraphs {
+                                send_typing(&http, &base_url, chat_id);
+                                std::thread::sleep(paragraph_pacing(chunk));
+                                if let Err(e) = send_message(&http, &base_url, chat_id, chunk) {
+                                    eprintln!(
+                                        "  {} {}",
+                                        theme::error(theme::ERR_GLYPH),
+                                        theme::error(&format!("send failed: {e}"))
+                                    );
+                                }
+                            }
+                        }
+
+                        // Send voice response only when the input was
+                        // also voice. Text-in → text-out keeps typed
+                        // chats fast; voice-in → voice-out preserves
+                        // the hands-free experience. TTS must also be
+                        // enabled (master toggle via /voice).
+                        if tts_enabled && input_was_voice {
+                            if let Some(ogg_path) = tts::synthesize(&response, &voice_lang) {
+                                eprintln!(
+                                    "  {} {}",
+                                    theme::dim("▸"),
+                                    theme::dim("sending voice response...")
+                                );
+                                if let Err(e) =
+                                    tts::send_voice_message(&http, &base_url, chat_id, &ogg_path)
+                                {
+                                    eprintln!(
+                                        "  {} {}",
+                                        theme::warn(theme::WARN_GLYPH),
+                                        theme::warn(&format!("TTS send failed: {e}"))
+                                    );
+                                }
+                                let _ = std::fs::remove_file(&ogg_path);
+                            }
+                        }
+
+                        // Auto-compact if needed.
+                        if let Some(removed) = maybe_compact_session(&mut runtime, true) {
+                            eprintln!(
+                                "  {} {}",
+                                theme::SAVE,
+                                theme::ok(&format!("auto-compacted {removed} older message(s)"))
+                            );
+                        }
+
+                        // Auto-save.
+                        if let Err(e) = save_session(runtime.session()) {
+                            eprintln!(
+                                "  {} {}",
+                                theme::warn(theme::WARN_GLYPH),
+                                theme::warn(&format!("session save failed: {e:#}"))
+                            );
+                        }
+
+                        // Persist chat ID for future runs.
+                        save_chat_id(chat_id);
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "  {} {}",
+                            theme::error(theme::ERR_GLYPH),
+                            theme::error(&format!("turn failed: {e}"))
+                        );
+                        // Roll back session to prevent corruption from
+                        // partial messages left by the failed turn.
+                        runtime = build_runtime_streaming(session_snapshot, true);
+                        eprintln!(
+                            "  {} {}",
+                            theme::dim("▸"),
+                            theme::dim("session rolled back to pre-turn state")
+                        );
+                        let _ = send_message(
+                            &http,
+                            &base_url,
+                            chat_id,
+                            &format!("Sorry, I encountered an error: {e}"),
+                        );
+                    }
+                }
+            } // end Event::TgUpdate arm
+        } // end match event
     } // end while let Ok(event)
     Ok(())
 }
@@ -722,7 +707,8 @@ fn run_synthetic_turn(
     });
 
     let mut no_prompter: Option<&mut dyn crate::PermissionPrompter> = None;
-    let turn_result = crate::brain_selector::run_turn_with_fallback(runtime, prompt, &mut no_prompter);
+    let turn_result =
+        crate::brain_selector::run_turn_with_fallback(runtime, prompt, &mut no_prompter);
 
     active.store(false, Ordering::SeqCst);
     let streamed_bytes = poller.join().unwrap_or(0);

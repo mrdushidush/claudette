@@ -72,8 +72,13 @@ pub struct ScheduleEntry {
 /// Parse result before the entry is materialised.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParsedSchedule {
-    OneShot { at: DateTime<Utc> },
-    Recurring { cron: String, next_fire_at: DateTime<Utc> },
+    OneShot {
+        at: DateTime<Utc>,
+    },
+    Recurring {
+        cron: String,
+        next_fire_at: DateTime<Utc>,
+    },
 }
 
 /// A single firing ready to deliver to the consumer.
@@ -123,7 +128,10 @@ pub fn parse_expression(expr: &str, clock: &dyn Clock) -> Result<ParsedSchedule,
     if let Some(rest) = normalised.strip_prefix("cron:") {
         let cron = rest.trim().to_string();
         let next = next_cron_fire(&cron, clock)?;
-        return Ok(ParsedSchedule::Recurring { cron, next_fire_at: next });
+        return Ok(ParsedSchedule::Recurring {
+            cron,
+            next_fire_at: next,
+        });
     }
 
     // "in N (minute|hour|day)s"
@@ -272,7 +280,9 @@ fn parse_every(rest: &str, clock: &dyn Clock) -> Result<ParsedSchedule, String> 
             } else if let Some(dow) = parse_weekday(kind) {
                 build_weekly_from_time(dow, t, clock)
             } else {
-                Err(format!("unsupported 'every {first}' pattern (tail='{tail}')"))
+                Err(format!(
+                    "unsupported 'every {first}' pattern (tail='{tail}')"
+                ))
             }
         }
     }
@@ -295,11 +305,7 @@ fn build_daily_from_time(t: NaiveTime, clock: &dyn Clock) -> Result<ParsedSchedu
 }
 
 fn build_weekdays_from_time(t: NaiveTime, clock: &dyn Clock) -> Result<ParsedSchedule, String> {
-    let cron = format!(
-        "0 {m} {h} * * Mon-Fri *",
-        h = t.hour(),
-        m = t.minute()
-    );
+    let cron = format!("0 {m} {h} * * Mon-Fri *", h = t.hour(), m = t.minute());
     let next_fire_at = next_cron_fire(&cron, clock)?;
     Ok(ParsedSchedule::Recurring { cron, next_fire_at })
 }
@@ -427,7 +433,10 @@ impl Eq for HeapItem {}
 impl Ord for HeapItem {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // Earlier fire_at = higher priority = "greater" in the max-heap.
-        other.fire_at.cmp(&self.fire_at).then_with(|| other.entry_id.cmp(&self.entry_id))
+        other
+            .fire_at
+            .cmp(&self.fire_at)
+            .then_with(|| other.entry_id.cmp(&self.entry_id))
     }
 }
 impl PartialOrd for HeapItem {
@@ -601,10 +610,9 @@ impl Scheduler {
         let now = self.clock.now();
         let (kind, next_fire_at, recurrence) = match parsed {
             ParsedSchedule::OneShot { at } => (ScheduleKind::OneShot, at, None),
-            ParsedSchedule::Recurring {
-                cron,
-                next_fire_at,
-            } => (ScheduleKind::Recurring, next_fire_at, Some(cron)),
+            ParsedSchedule::Recurring { cron, next_fire_at } => {
+                (ScheduleKind::Recurring, next_fire_at, Some(cron))
+            }
         };
 
         // Sensible default for catch-up: once for reminders, skip for
@@ -761,8 +769,13 @@ impl Scheduler {
         let tmp = self.path.with_extension("jsonl.tmp");
         std::fs::write(&tmp, &body)
             .map_err(|e| format!("scheduler: write {}: {e}", tmp.display()))?;
-        std::fs::rename(&tmp, &self.path)
-            .map_err(|e| format!("scheduler: rename {} -> {}: {e}", tmp.display(), self.path.display()))?;
+        std::fs::rename(&tmp, &self.path).map_err(|e| {
+            format!(
+                "scheduler: rename {} -> {}: {e}",
+                tmp.display(),
+                self.path.display()
+            )
+        })?;
         Ok(())
     }
 }
@@ -785,7 +798,9 @@ pub fn default_path() -> PathBuf {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".claudette").join("schedule.jsonl")
+    PathBuf::from(home)
+        .join(".claudette")
+        .join("schedule.jsonl")
 }
 
 /// Install a freshly-loaded scheduler as the process-wide singleton. Call
@@ -1043,7 +1058,8 @@ mod tests {
         let path = tmp_path("recurring");
         let c = fixed_clock(2026, 4, 21, 10, 0);
         let mut s = Scheduler::new(path.clone(), c.clone());
-        s.add("every 15 minutes", "poll".into(), None, None).unwrap();
+        s.add("every 15 minutes", "poll".into(), None, None)
+            .unwrap();
 
         let first_fire_at = s.list()[0].next_fire_at;
 

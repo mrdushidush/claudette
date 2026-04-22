@@ -339,8 +339,8 @@ fn run_briefing_setup(time: Option<&str>, days: Option<&str>) -> ExitCode {
     let when = match days_spec.as_str() {
         "weekdays" | "weekday" => format!("every weekday at {time_str}"),
         "daily" | "everyday" | "every-day" => format!("daily at {time_str}"),
-        "mon" | "monday" | "tue" | "tuesday" | "wed" | "wednesday" | "thu" | "thursday"
-        | "fri" | "friday" | "sat" | "saturday" | "sun" | "sunday" => {
+        "mon" | "monday" | "tue" | "tuesday" | "wed" | "wednesday" | "thu" | "thursday" | "fri"
+        | "friday" | "sat" | "saturday" | "sun" | "sunday" => {
             format!("every {days_spec} at {time_str}")
         }
         other => {
@@ -426,7 +426,10 @@ fn run_briefing_setup(time: Option<&str>, days: Option<&str>) -> ExitCode {
                 theme::dim("▸"),
                 theme::dim(&format!(
                     "next fire: {}",
-                    entry.next_fire_at.with_timezone(&chrono::Local).to_rfc3339()
+                    entry
+                        .next_fire_at
+                        .with_timezone(&chrono::Local)
+                        .to_rfc3339()
                 ))
             );
             ExitCode::SUCCESS
@@ -465,10 +468,7 @@ mod tests {
     fn parse_args_resume_long() {
         let a = parse_args(&["--resume".into(), "what".into(), "time".into()]);
         assert!(a.resume);
-        assert_eq!(
-            a.prompt_words,
-            vec!["what".to_string(), "time".to_string()]
-        );
+        assert_eq!(a.prompt_words, vec!["what".to_string(), "time".to_string()]);
     }
 
     #[test]
@@ -551,11 +551,7 @@ mod tests {
 
     #[test]
     fn parse_args_auth_google_with_calendar_scope_then_revoke() {
-        let a = parse_args(&[
-            "--auth-google".into(),
-            "calendar".into(),
-            "--revoke".into(),
-        ]);
+        let a = parse_args(&["--auth-google".into(), "calendar".into(), "--revoke".into()]);
         assert!(a.auth_google);
         assert_eq!(a.auth_google_scope.as_deref(), Some("calendar"));
         assert!(a.auth_google_revoke);
@@ -569,7 +565,10 @@ mod tests {
         let a = parse_args(&["--auth-google".into(), "nonsense".into(), "-r".into()]);
         assert!(a.auth_google);
         assert_eq!(a.auth_google_scope, None);
-        assert!(a.resume, "resume flag after unknown scope should still register");
+        assert!(
+            a.resume,
+            "resume flag after unknown scope should still register"
+        );
         assert!(a.prompt_words.contains(&"nonsense".to_string()));
     }
 

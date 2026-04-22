@@ -93,14 +93,14 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
 }
 
 fn parse_catch_up(v: &Value) -> Option<CatchUp> {
-    v.get("catch_up").and_then(Value::as_str).and_then(|s| {
-        match s.to_lowercase().as_str() {
+    v.get("catch_up")
+        .and_then(Value::as_str)
+        .and_then(|s| match s.to_lowercase().as_str() {
             "once" => Some(CatchUp::Once),
             "skip" => Some(CatchUp::Skip),
             "all" => Some(CatchUp::All),
             _ => None,
-        }
-    })
+        })
 }
 
 fn run_schedule_once(input: &str) -> Result<String, String> {
@@ -235,10 +235,7 @@ mod tests {
 
     #[test]
     fn schedule_once_rejects_invalid_expression() {
-        let err = run_schedule_once(
-            r#"{"when":"sometime soon","prompt":"x"}"#,
-        )
-        .unwrap_err();
+        let err = run_schedule_once(r#"{"when":"sometime soon","prompt":"x"}"#).unwrap_err();
         assert!(err.contains("could not parse"), "got: {err}");
     }
 
@@ -246,10 +243,7 @@ mod tests {
     fn schedule_recurring_rejects_oneshot_expression() {
         // "in 5 minutes" parses as one-shot — the recurring tool must
         // reject that rather than silently downgrade.
-        let err = run_schedule_recurring(
-            r#"{"when":"in 5 minutes","prompt":"x"}"#,
-        )
-        .unwrap_err();
+        let err = run_schedule_recurring(r#"{"when":"in 5 minutes","prompt":"x"}"#).unwrap_err();
         assert!(err.contains("parsed as a one-shot"), "got: {err}");
     }
 
@@ -261,8 +255,7 @@ mod tests {
 
     #[test]
     fn schedule_cancel_rejects_unknown_id() {
-        let err =
-            run_schedule_cancel(r#"{"id":"sch_definitely_not_real_xyz123"}"#).unwrap_err();
+        let err = run_schedule_cancel(r#"{"id":"sch_definitely_not_real_xyz123"}"#).unwrap_err();
         assert!(err.contains("no entry with id"), "got: {err}");
     }
 

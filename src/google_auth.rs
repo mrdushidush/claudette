@@ -203,8 +203,7 @@ fn load_tokens(ctx: AuthContext) -> Result<GoogleTokens, String> {
     }
     let raw = std::fs::read_to_string(&path)
         .map_err(|e| format!("google_auth: read {}: {e}", path.display()))?;
-    serde_json::from_str(&raw)
-        .map_err(|e| format!("google_auth: parse {}: {e}", path.display()))
+    serde_json::from_str(&raw).map_err(|e| format!("google_auth: parse {}: {e}", path.display()))
 }
 
 fn now_unix() -> i64 {
@@ -306,8 +305,8 @@ pub fn run_auth_flow(ctx: AuthContext) -> Result<(), String> {
     let creds = load_client_creds()?;
 
     // Bind first so we know which port to put in the redirect URI.
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .map_err(|e| format!("google_auth: bind loopback: {e}"))?;
+    let listener =
+        TcpListener::bind("127.0.0.1:0").map_err(|e| format!("google_auth: bind loopback: {e}"))?;
     let port = listener
         .local_addr()
         .map_err(|e| format!("google_auth: local_addr: {e}"))?
@@ -423,8 +422,7 @@ fn accept_callback(listener: &TcpListener) -> Result<(String, String), String> {
     // connection never arrives and `incoming().next()` is None, returning
     // the "listener closed" error below.
     if let Some(stream) = listener.incoming().next() {
-        let mut stream =
-            stream.map_err(|e| format!("google_auth: accept connection: {e}"))?;
+        let mut stream = stream.map_err(|e| format!("google_auth: accept connection: {e}"))?;
         let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
         let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
 
@@ -662,7 +660,10 @@ mod tests {
         assert_eq!(AuthContext::parse("cal"), Some(AuthContext::Calendar));
         assert_eq!(AuthContext::parse("gcal"), Some(AuthContext::Calendar));
         assert_eq!(AuthContext::parse("gmail"), Some(AuthContext::GmailRead));
-        assert_eq!(AuthContext::parse("gmail-read"), Some(AuthContext::GmailRead));
+        assert_eq!(
+            AuthContext::parse("gmail-read"),
+            Some(AuthContext::GmailRead)
+        );
         assert_eq!(AuthContext::parse("GMAIL"), Some(AuthContext::GmailRead));
         assert_eq!(AuthContext::parse("unknown"), None);
         assert_eq!(AuthContext::parse(""), None);

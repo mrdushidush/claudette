@@ -164,13 +164,10 @@ fn run_list_events(input: &str) -> Result<String, String> {
         .get("time_min")
         .and_then(Value::as_str)
         .map_or_else(|| Utc::now().to_rfc3339(), str::to_string);
-    let time_max = v
-        .get("time_max")
-        .and_then(Value::as_str)
-        .map_or_else(
-            || (Utc::now() + Duration::days(7)).to_rfc3339(),
-            str::to_string,
-        );
+    let time_max = v.get("time_max").and_then(Value::as_str).map_or_else(
+        || (Utc::now() + Duration::days(7)).to_rfc3339(),
+        str::to_string,
+    );
     let max_results = v
         .get("max_results")
         .and_then(Value::as_i64)
@@ -529,13 +526,16 @@ mod tests {
 
     #[test]
     fn create_event_rejects_missing_summary() {
-        let err = run_create_event(r#"{"start":"2026-01-01T00:00:00Z","end":"2026-01-01T01:00:00Z"}"#).unwrap_err();
+        let err =
+            run_create_event(r#"{"start":"2026-01-01T00:00:00Z","end":"2026-01-01T01:00:00Z"}"#)
+                .unwrap_err();
         assert!(err.contains("summary"), "got: {err}");
     }
 
     #[test]
     fn create_event_rejects_missing_end() {
-        let err = run_create_event(r#"{"summary":"x","start":"2026-01-01T00:00:00Z"}"#).unwrap_err();
+        let err =
+            run_create_event(r#"{"summary":"x","start":"2026-01-01T00:00:00Z"}"#).unwrap_err();
         assert!(err.contains("end"), "got: {err}");
     }
 
@@ -582,8 +582,7 @@ mod tests {
         // Skip if the user is actually authenticated — the handler validates
         // the response value BEFORE calling access_token, so this case is
         // covered regardless.
-        let err =
-            run_respond_to_event(r#"{"event_id":"abc","response":"maybe"}"#).unwrap_err();
+        let err = run_respond_to_event(r#"{"event_id":"abc","response":"maybe"}"#).unwrap_err();
         assert!(err.contains("invalid response"), "got: {err}");
     }
 
