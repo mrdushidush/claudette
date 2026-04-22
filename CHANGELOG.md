@@ -44,6 +44,11 @@ bumps are non-breaking bugfixes only.
   future 13th group flows through automatically.
 - **Gmail email-provenance defang.** Closing-tag detection now catches
   additional injection variants surfaced by round-1 audit.
+- **Telegram message splitter UTF-8 panic.** `split_message` sliced at
+  `text[..max_len]` without checking char boundaries; any reply with
+  emoji or CJK text near the 4000-byte Telegram limit would panic the
+  consumer thread and hard-kill the bot. Walk back to the nearest char
+  boundary before the newline-preferred split.
 
 ### Security
 
@@ -66,8 +71,20 @@ bumps are non-breaking bugfixes only.
   `advanced`); `cargo install` path harmonized between Quick Start and
   Install sections; `qwen2.5-coder:7b` called out as a lightweight
   coder option; `docs/comparison.md` post-v0.1.0 commit count refreshed.
-- Test counts updated to 515 lib + 24 bin (new guardrail test on the
-  `enable_tools` schema).
+- `--tui` now documented as pre-enabling the same Markets / Facts /
+  Advanced / Git / Search groups as `--telegram` (both modes share the
+  same ratchet).
+- `examples/02-tool-groups.md` `/tools` transcript rewritten to match
+  the actual binary output (the old transcript fabricated an
+  `ENABLED`/`DISABLED` column that `handle_tools` cannot produce).
+- `examples/04-morning-briefing.md` `--briefing` sample output fixed
+  to match the real two-line startup banner.
+- `examples/03-telegram-setup.md` "Two commands are Telegram-only" →
+  "Three" (the bullet list already covered `/voice`, `/lang`,
+  `/briefing`).
+- Test counts updated to 516 lib + 24 bin (new guardrail test on the
+  `enable_tools` schema parameter description + UTF-8 boundary test
+  for the Telegram message splitter).
 
 ## [0.2.0] - 2026-04-22
 
@@ -222,7 +239,7 @@ release.
 
 ### Tests
 
-- 483 → 515 lib tests, 13 → 24 bin tests. New coverage:
+- 483 → 516 lib tests, 13 → 24 bin tests. New coverage:
   clock trait + `MockClock` (7), schedule parser + scheduler state +
   catch-up policies (25), schedule tool validation (8), calendar
   defaults + helpers (10), gmail MIME walker + base64url decoder +

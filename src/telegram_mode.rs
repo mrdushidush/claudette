@@ -1099,8 +1099,17 @@ fn split_message(text: &str, max_len: usize) -> Vec<&str> {
             chunks.push(remaining);
             break;
         }
-        // Try to split at a newline boundary.
-        let split_at = remaining[..max_len].rfind('\n').unwrap_or(max_len);
+        // Walk down to the highest char-safe byte offset <= max_len. A
+        // naive `remaining[..max_len]` slice panics if that byte lands
+        // inside a multibyte char, which any emoji-heavy or CJK reply
+        // near the 4000-byte Telegram limit will do.
+        let mut boundary = max_len;
+        while boundary > 0 && !remaining.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        // Prefer a newline split inside [0, boundary); fall back to the
+        // boundary itself.
+        let split_at = remaining[..boundary].rfind('\n').unwrap_or(boundary);
         let (chunk, rest) = remaining.split_at(split_at);
         chunks.push(chunk);
         remaining = rest.trim_start_matches('\n');
@@ -1134,6 +1143,28 @@ mod tests {
         for chunk in &chunks {
             assert!(chunk.len() <= 30);
         }
+    }
+
+    #[test]
+    fn split_message_multibyte_safe_boundary() {
+        // `🎉` is 4 bytes in UTF-8. Crafting a string where a naive
+        // `remaining[..max_len]` would bisect the emoji exposes the
+        // pre-fix panic: 3998 ASCII bytes + `🎉` = emoji spans bytes
+        // 3998..=4001, so slicing at max_len=4000 lands inside the char.
+        let mut text = "a".repeat(3998);
+        text.push('🎉');
+        text.push_str(" — plus more text after the emoji so we have to split.");
+        let chunks = split_message(&text, 4000);
+        assert!(chunks.len() >= 2);
+        // Every chunk must be valid UTF-8 (implicit for &str, but also
+        // verify no chunk ends mid-emoji by checking byte length stays
+        // on a char boundary).
+        for chunk in &chunks {
+            assert!(chunk.is_char_boundary(chunk.len()));
+        }
+        // Round-trip: no newlines in the input, so concatenation equals
+        // the original.
+        assert_eq!(chunks.concat(), text);
     }
 
     #[test]

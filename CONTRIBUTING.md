@@ -45,7 +45,7 @@ cargo clippy --all-targets --no-deps -- -D warnings
 cargo test --lib
 ```
 
-All three must pass. Tests currently sit at **515 passing, 4 ignored
+All three must pass. Tests currently sit at **516 passing, 4 ignored
 on Windows** (hook tests that use POSIX `printf`) — a PR that drops
 the pass count needs a justification in the description.
 
