@@ -162,7 +162,7 @@ A subset of the REPL slashes work identically in Telegram:
 Destructive ones (`/exit`, bash, edit_file, git commit/push) are
 blocked — no interactive TTY to confirm.
 
-Two commands are Telegram-only:
+Three commands are Telegram-only:
 
 - `/voice` — toggle voice output on/off.
 - `/lang he|en` — switch transcription + TTS language.
