@@ -163,7 +163,7 @@ release.
 
 ### Tests
 
-- 483 → 514 lib tests, 13 → 24 bin tests. New coverage:
+- 483 → 515 lib tests, 13 → 24 bin tests. New coverage:
   clock trait + `MockClock` (7), schedule parser + scheduler state +
   catch-up policies (25), schedule tool validation (8), calendar
   defaults + helpers (10), gmail MIME walker + base64url decoder +

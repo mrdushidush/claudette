@@ -379,6 +379,15 @@ fn enable_tools_schema() -> Value {
         .map(|g| Value::String(g.name().to_string()))
         .collect();
 
+    let group_param_description = format!(
+        "Group name: one of {}.",
+        ToolGroup::all()
+            .iter()
+            .map(|g| g.name())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+
     json!({
         "type": "function",
         "function": {
@@ -390,7 +399,7 @@ fn enable_tools_schema() -> Value {
                     "group": {
                         "type": "string",
                         "enum": enum_values,
-                        "description": "Group name: git, ide, search, or advanced"
+                        "description": group_param_description
                     }
                 },
                 "required": ["group"]
@@ -596,6 +605,22 @@ mod tests {
             assert!(
                 desc.contains(g.name()),
                 "description should mention {}: {desc}",
+                g.name()
+            );
+        }
+    }
+
+    #[test]
+    fn enable_tools_group_param_description_mentions_every_group() {
+        let schema = enable_tools_schema();
+        let desc = schema
+            .pointer("/function/parameters/properties/group/description")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        for g in ToolGroup::all() {
+            assert!(
+                desc.contains(g.name()),
+                "group parameter description should mention {}: {desc}",
                 g.name()
             );
         }
