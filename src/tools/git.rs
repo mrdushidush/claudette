@@ -443,8 +443,13 @@ fn run_git_checkout(input: &str) -> Result<String, String> {
 }
 
 fn run_git_push() -> Result<String, String> {
-    // Stub confirmation — print a warning for now. Real PermissionMode::Prompt
-    // will be wired in Sprint 2c when the permission system is tightened.
+    // Gate enforcement lives at the policy layer: `git_push` is registered
+    // as `DangerFullAccess` in `run.rs::build_permission_policy` and in
+    // `agents.rs`, so every call path either (a) already runs under
+    // DangerFullAccess, (b) triggers the `CliPrompter` `[y/N]` confirm in
+    // REPL mode, or (c) is denied outright (Telegram bot, unattended agents).
+    // See `runtime/permissions.rs::PermissionPolicy::authorize`. The banner
+    // here is informational — it has already been authorised to run.
     eprintln!(
         "{} {}",
         crate::theme::warn(crate::theme::WARN_GLYPH),
