@@ -14,10 +14,11 @@ bumps are non-breaking bugfixes only.
 
 ### Added — Life Agent sprint, phases 1-4 (2026-04-21)
 
-Claudette is growing from a reactive chatbot into a proactive personal
+Claudette grew from a reactive chatbot into a proactive personal
 life agent. The sprint plan lives at
 [`docs/sprint_life_agent.md`](docs/sprint_life_agent.md); phases 1-4
-are landed, phases 5-6 (Gmail write + launch polish) are pending.
+and 6 landed in v0.2.0, phase 5 (Gmail write) is deferred to a later
+release.
 
 - **`calendar` tool group** (5 tools) against Google Calendar v3:
   `calendar_list_events`, `calendar_create_event`,
@@ -140,8 +141,25 @@ are landed, phases 5-6 (Gmail write + launch polish) are pending.
 - [`docs/google_setup.md`](docs/google_setup.md) — end-to-end Google
   Cloud Console setup covering both Calendar and Gmail scopes with
   separate `--auth-google` invocations.
-- README — new "Life Agent (v0.2.0 in progress)" paragraph and the
-  three new groups in the tool matrix.
+- [`docs/comparison.md`](docs/comparison.md) — honest positioning
+  against opencode, Aider, OpenHands, Cline, Continue.
+- [`examples/`](examples/) — six scenario walkthroughs (quick tour,
+  tool groups, Telegram setup, morning briefing, code generation,
+  brain100 harness) with real transcript output from `qwen3.5:4b`
+  runs on a 3060 Ti.
+- README — new "Life Agent (v0.2.0)" paragraph and the three new
+  groups in the tool matrix.
+
+### Community files
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — full contribution guide
+  (setup, required checks, commit style, tool-adding how-to, permission
+  tier guidance).
+- [`SECURITY.md`](SECURITY.md) — private vulnerability-reporting flow
+  via GitHub security advisories; scope, threat model, response
+  timeline.
+- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — short "be kind" rules
+  of engagement for the project space.
 
 ### Tests
 

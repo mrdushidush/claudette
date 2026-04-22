@@ -423,12 +423,16 @@ Longer-term vision:
 
 ## Contributing
 
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full guide. Quick summary:
+
 - File bugs at <https://github.com/mrdushidush/claudette/issues>.
-- Run `cargo fmt --check`, `cargo clippy --all-targets --no-deps -- -D warnings`, and `cargo test --lib` before opening a PR.
-- Follow Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`.
+- Run `cargo fmt --all --check`, `cargo clippy --all-targets --no-deps -- -D warnings`, and `cargo test --lib` before opening a PR.
+- Follow Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `style:`, `ci:`.
 - By contributing, you agree your work is licensed under Apache 2.0.
 
-Be kind — treat fellow contributors with respect in issues, PRs, and discussions.
+Security issues: please use the private advisory flow described in [`SECURITY.md`](SECURITY.md) — don't open a public issue.
+
+Be kind — [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) has the short version.
 
 ---
 
