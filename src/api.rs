@@ -189,6 +189,13 @@ pub struct OllamaApiClient {
     /// returned `AssistantEvent::TextDelta` — the callback is purely for UX
     /// (e.g. the REPL prints tokens to stdout as they appear).
     text_callback: Option<TextCallback>,
+    /// When true, swap the request shape + endpoint to OpenAI Chat
+    /// Completions (`/v1/chat/completions`) and parse a single non-streaming
+    /// JSON response. Driven by `CLAUDETTE_OPENAI_COMPAT=1`. Lets a single
+    /// client point at LM Studio (or any OpenAI-format server) without a
+    /// second `ApiClient` impl. Trade-off: no token-by-token streaming UX in
+    /// compat mode (the text callback fires once with the full content).
+    openai_compat: bool,
 }
 
 impl OllamaApiClient {
@@ -229,7 +236,18 @@ impl OllamaApiClient {
             num_ctx: current_num_ctx(),
             num_predict: current_num_predict(),
             text_callback: None,
+            openai_compat: resolve_openai_compat(),
         }
+    }
+
+    /// Force OpenAI-compat mode on or off, overriding the
+    /// `CLAUDETTE_OPENAI_COMPAT` env var. Mostly for tests; production code
+    /// should set the env var so every code path that constructs a client
+    /// (REPL, TUI, agents, fallback) inherits it consistently.
+    #[must_use]
+    pub fn with_openai_compat(mut self, on: bool) -> Self {
+        self.openai_compat = on;
+        self
     }
 
     #[must_use]
@@ -276,6 +294,24 @@ pub fn resolve_ollama_url() -> String {
         }
         _ => DEFAULT_OLLAMA_URL.to_string(),
     }
+}
+
+/// Returns true when LM Studio (or any OpenAI Chat Completions-compatible)
+/// mode is requested. Set `CLAUDETTE_OPENAI_COMPAT=1` to opt in. The brain
+/// client will then POST to `/v1/chat/completions` instead of `/api/chat`,
+/// parse a non-streaming JSON response (no SSE yet), and skip Ollama-specific
+/// request fields (`think`, `options.num_*`, `keep_alive`).
+///
+/// Pair with `OLLAMA_HOST=http://localhost:1234` for a local LM Studio
+/// server, and a model id that LM Studio recognises (e.g.
+/// `CLAUDETTE_MODEL=openai/gpt-oss-20b`). Disable the
+/// 4b→9b fallback dance with `CLAUDETTE_FALLBACK_BRAIN_MODEL=` since
+/// LM Studio doesn't speak Ollama's keep-alive eviction protocol.
+#[must_use]
+pub fn resolve_openai_compat() -> bool {
+    std::env::var("CLAUDETTE_OPENAI_COMPAT")
+        .ok()
+        .is_some_and(|v| !v.is_empty() && v != "0")
 }
 
 /// Returns true when the given URL's host is a loopback / localhost
@@ -381,14 +417,21 @@ pub fn probe_ollama() -> Result<String, String> {
         .timeout(Duration::from_secs(3))
         .build()
         .map_err(|e| format!("could not build probe client: {e}"))?;
-    match client.get(&url).send() {
+    // In OpenAI-compat mode hit `/v1/models` instead of the bare root, since
+    // LM Studio doesn't answer GET / with a 200 the way Ollama does.
+    let (probe_url, mode_label) = if resolve_openai_compat() {
+        (format!("{url}/v1/models"), "OpenAI-compat brain")
+    } else {
+        (url.clone(), "Ollama")
+    };
+    match client.get(&probe_url).send() {
         Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => Ok(url),
         Ok(resp) => Err(format!(
-            "Ollama at {url} returned HTTP {} — is a different service bound to that port?",
+            "{mode_label} at {probe_url} returned HTTP {} — is a different service bound to that port?",
             resp.status()
         )),
         Err(e) => Err(format!(
-            "Ollama not reachable at {url} ({e}). Start it with `ollama serve` \
+            "{mode_label} not reachable at {probe_url} ({e}). Start the server \
              (or set OLLAMA_HOST), then retry. Set CLAUDETTE_SKIP_OLLAMA_PROBE=1 to bypass."
         )),
     }
@@ -397,28 +440,44 @@ pub fn probe_ollama() -> Result<String, String> {
 impl ApiClient for OllamaApiClient {
     fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
         let body = self.build_chat_body(&request);
-        let url = format!("{}/api/chat", self.base_url);
+        let path = if self.openai_compat {
+            "/v1/chat/completions"
+        } else {
+            "/api/chat"
+        };
+        let url = format!("{}{}", self.base_url, path);
 
         let resp = self
             .http
             .post(&url)
             .json(&body)
             .send()
-            .map_err(|e| RuntimeError::new(format!("Ollama request failed: {e}")))?;
+            .map_err(|e| RuntimeError::new(format!("Brain request failed: {e}")))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().unwrap_or_default();
             return Err(RuntimeError::new(format!(
-                "Ollama HTTP {status}: {}",
+                "Brain HTTP {status}: {}",
                 text.chars().take(400).collect::<String>()
             )));
         }
 
-        // Reqwest's blocking Response implements Read, so we can wrap it in a
-        // BufReader and consume the NDJSON stream line by line. The text
-        // callback (if installed) is fired for every non-empty content delta.
-        self.consume_stream_lines(BufReader::new(resp))
+        if self.openai_compat {
+            // Non-streaming for now — single JSON response, no SSE parsing.
+            // Trade-off: the text callback fires once with the full content,
+            // not token-by-token. Adding SSE support is a follow-up.
+            let body: Value = resp.json().map_err(|e| {
+                RuntimeError::new(format!("OpenAI-compat response parse failed: {e}"))
+            })?;
+            self.parse_openai_response(&body)
+        } else {
+            // Reqwest's blocking Response implements Read, so we can wrap it
+            // in a BufReader and consume the NDJSON stream line by line. The
+            // text callback (if installed) is fired for every non-empty
+            // content delta.
+            self.consume_stream_lines(BufReader::new(resp))
+        }
     }
 }
 
@@ -431,24 +490,125 @@ impl OllamaApiClient {
         let tools = self.tools.current();
         let history_budget = self.history_budget_chars_for_tools(request, &tools);
         let messages = build_messages(request, history_budget);
-        json!({
-            "model": self.model,
-            "messages": messages,
-            "tools": tools,
-            // `stream: true` switches Ollama into NDJSON mode — one JSON
-            // object per line. Each chunk carries a `message.content` delta
-            // (often a single token) and the final chunk has `done: true`
-            // plus the prompt/eval token counts. See `consume_stream_lines`
-            // for the parser. We need streaming so the REPL can print tokens
-            // to stdout as they arrive via the `text_callback`.
-            "stream": true,
-            "think": false,
-            "options": {
+        if self.openai_compat {
+            // OpenAI Chat Completions shape. `temperature` and `max_tokens`
+            // are top-level (not nested in `options`). `num_ctx` has no
+            // analogue — context is set at model-load time in LM Studio
+            // (e.g. `lms load --context-length 32768`). The Ollama-only
+            // `think: false` flag is dropped — gpt-oss and other reasoning
+            // models on LM Studio benefit from their reasoning trace.
+            json!({
+                "model": self.model,
+                "messages": messages,
+                "tools": tools,
+                "stream": false,
                 "temperature": 0.0,
-                "num_ctx": self.num_ctx,
-                "num_predict": self.num_predict
+                "max_tokens": self.num_predict,
+            })
+        } else {
+            json!({
+                "model": self.model,
+                "messages": messages,
+                "tools": tools,
+                // `stream: true` switches Ollama into NDJSON mode — one JSON
+                // object per line. Each chunk carries a `message.content`
+                // delta (often a single token) and the final chunk has
+                // `done: true` plus the prompt/eval token counts. See
+                // `consume_stream_lines` for the parser.
+                "stream": true,
+                "think": false,
+                "options": {
+                    "temperature": 0.0,
+                    "num_ctx": self.num_ctx,
+                    "num_predict": self.num_predict
+                }
+            })
+        }
+    }
+
+    /// Parse a non-streaming OpenAI Chat Completions response into the same
+    /// `Vec<AssistantEvent>` shape the runtime expects. The single-message
+    /// JSON body is much simpler than Ollama's NDJSON stream — we just
+    /// extract `choices[0].message.{content,tool_calls}` and the top-level
+    /// `usage` block.
+    ///
+    /// **Tool call argument shape diff:** Ollama emits
+    /// `function.arguments` as a JSON object; OpenAI emits it as a JSON
+    /// **string** containing the arguments JSON. We pass the raw string
+    /// straight through to `AssistantEvent::ToolUse.input` (which is itself
+    /// a `String` of JSON), matching the Ollama path's behaviour after its
+    /// own `serde_json::to_string` round-trip.
+    fn parse_openai_response(&self, body: &Value) -> Result<Vec<AssistantEvent>, RuntimeError> {
+        if let Some(err) = body.pointer("/error/message").and_then(Value::as_str) {
+            return Err(RuntimeError::new(format!("OpenAI-compat error: {err}")));
+        }
+
+        let message = body
+            .pointer("/choices/0/message")
+            .ok_or_else(|| RuntimeError::new("OpenAI response missing choices[0].message"))?;
+
+        let mut events = Vec::new();
+
+        let content = message.get("content").and_then(Value::as_str).unwrap_or("");
+        if !content.is_empty() {
+            // Compat mode is non-streaming, but the REPL/TUI text callback
+            // still expects to see the assistant's prose at some point. Fire
+            // it once with the full content, then once with a trailing
+            // newline so the next REPL line lands cleanly — same contract as
+            // the Ollama streaming path's terminal newline.
+            if let Some(cb) = &self.text_callback {
+                cb(content);
+                cb("\n");
             }
-        })
+            events.push(AssistantEvent::TextDelta(content.to_string()));
+        }
+
+        if let Some(arr) = message.get("tool_calls").and_then(Value::as_array) {
+            for (idx, tc) in arr.iter().enumerate() {
+                let name = tc
+                    .pointer("/function/name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+                    .to_string();
+                // OpenAI tool-call arguments are a JSON-encoded string, not
+                // a nested object. Keep it as-is — the runtime hands this
+                // straight to the tool dispatcher which parses it with
+                // `serde_json::from_str`.
+                let arguments_str = tc
+                    .pointer("/function/arguments")
+                    .and_then(Value::as_str)
+                    .map_or_else(|| "{}".to_string(), str::to_string);
+                let id = tc
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map_or_else(|| format!("call_{idx}"), String::from);
+                events.push(AssistantEvent::ToolUse {
+                    id,
+                    name,
+                    input: arguments_str,
+                });
+            }
+        }
+
+        let usage = body.get("usage");
+        let input_tokens = usage
+            .and_then(|u| u.get("prompt_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as u32;
+        let output_tokens = usage
+            .and_then(|u| u.get("completion_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as u32;
+
+        events.push(AssistantEvent::Usage(TokenUsage {
+            input_tokens,
+            output_tokens,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+        }));
+        events.push(AssistantEvent::MessageStop);
+
+        Ok(events)
     }
 
     /// Consume an NDJSON stream from Ollama and assemble the same
@@ -1195,6 +1355,239 @@ mod tests {
         assert!(
             delta + 4 >= tools_chars && delta <= tools_chars + 4,
             "delta {delta} should approximately equal tools_chars {tools_chars}"
+        );
+    }
+
+    // === OpenAI-compat tests ================================================
+
+    #[test]
+    fn resolve_openai_compat_unset_returns_false() {
+        let prev = std::env::var("CLAUDETTE_OPENAI_COMPAT").ok();
+        std::env::remove_var("CLAUDETTE_OPENAI_COMPAT");
+        assert!(!resolve_openai_compat());
+        if let Some(v) = prev {
+            std::env::set_var("CLAUDETTE_OPENAI_COMPAT", v);
+        }
+    }
+
+    #[test]
+    fn resolve_openai_compat_set_to_one_returns_true() {
+        let prev = std::env::var("CLAUDETTE_OPENAI_COMPAT").ok();
+        std::env::set_var("CLAUDETTE_OPENAI_COMPAT", "1");
+        assert!(resolve_openai_compat());
+        match prev {
+            Some(v) => std::env::set_var("CLAUDETTE_OPENAI_COMPAT", v),
+            None => std::env::remove_var("CLAUDETTE_OPENAI_COMPAT"),
+        }
+    }
+
+    #[test]
+    fn resolve_openai_compat_set_to_zero_returns_false() {
+        let prev = std::env::var("CLAUDETTE_OPENAI_COMPAT").ok();
+        std::env::set_var("CLAUDETTE_OPENAI_COMPAT", "0");
+        assert!(!resolve_openai_compat());
+        match prev {
+            Some(v) => std::env::set_var("CLAUDETTE_OPENAI_COMPAT", v),
+            None => std::env::remove_var("CLAUDETTE_OPENAI_COMPAT"),
+        }
+    }
+
+    #[test]
+    fn build_chat_body_compat_uses_openai_shape() {
+        let client = OllamaApiClient::new("openai/gpt-oss-20b", json!([])).with_openai_compat(true);
+        let req = ApiRequest {
+            messages: vec![user_text("hi")],
+            system_prompt: vec!["sys".to_string()],
+        };
+        let body = client.build_chat_body(&req);
+        assert_eq!(body["stream"], json!(false));
+        assert_eq!(body["temperature"], json!(0.0));
+        assert!(body.get("max_tokens").is_some(), "max_tokens missing");
+        assert!(
+            body.get("think").is_none(),
+            "think field must NOT be sent in compat mode"
+        );
+        assert!(
+            body.get("options").is_none(),
+            "options.* must NOT be sent in compat mode"
+        );
+    }
+
+    #[test]
+    fn build_chat_body_default_stays_ollama_shape() {
+        let client = OllamaApiClient::new("qwen3.5:4b", json!([]));
+        let req = ApiRequest {
+            messages: vec![user_text("hi")],
+            system_prompt: vec!["sys".to_string()],
+        };
+        let body = client.build_chat_body(&req);
+        assert_eq!(body["stream"], json!(true));
+        assert_eq!(body["think"], json!(false));
+        assert!(
+            body.get("options").is_some(),
+            "options.* required for ollama"
+        );
+        assert!(
+            body.get("max_tokens").is_none(),
+            "max_tokens is openai-only"
+        );
+    }
+
+    #[test]
+    fn parse_openai_response_text_only() {
+        let client = OllamaApiClient::new("test", json!([])).with_openai_compat(true);
+        let body = json!({
+            "id": "chatcmpl-x",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "Hello world"},
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13}
+        });
+        let events = client.parse_openai_response(&body).unwrap();
+        assert_eq!(events.len(), 3);
+        match &events[0] {
+            AssistantEvent::TextDelta(t) => assert_eq!(t, "Hello world"),
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+        match &events[1] {
+            AssistantEvent::Usage(u) => {
+                assert_eq!(u.input_tokens, 10);
+                assert_eq!(u.output_tokens, 3);
+            }
+            other => panic!("expected Usage, got {other:?}"),
+        }
+        assert!(matches!(events[2], AssistantEvent::MessageStop));
+    }
+
+    #[test]
+    fn parse_openai_response_with_tool_calls() {
+        let client = OllamaApiClient::new("test", json!([])).with_openai_compat(true);
+        // OpenAI emits function.arguments as a JSON-encoded STRING (note the
+        // outer quotes on the arguments value), unlike Ollama which uses a
+        // nested object.
+        let body = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_abc",
+                        "type": "function",
+                        "function": {
+                            "name": "get_time",
+                            "arguments": "{\"tz\":\"UTC\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "usage": {"prompt_tokens": 50, "completion_tokens": 12}
+        });
+        let events = client.parse_openai_response(&body).unwrap();
+        // Expect: ToolUse, Usage, MessageStop — no TextDelta (content was null).
+        assert_eq!(events.len(), 3);
+        match &events[0] {
+            AssistantEvent::ToolUse { id, name, input } => {
+                assert_eq!(id, "call_abc");
+                assert_eq!(name, "get_time");
+                assert_eq!(input, "{\"tz\":\"UTC\"}");
+            }
+            other => panic!("expected ToolUse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_openai_response_text_then_tool_call() {
+        let client = OllamaApiClient::new("test", json!([])).with_openai_compat(true);
+        let body = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "Let me check the time.",
+                    "tool_calls": [{
+                        "id": "x",
+                        "type": "function",
+                        "function": {"name": "get_time", "arguments": "{}"}
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        });
+        let events = client.parse_openai_response(&body).unwrap();
+        assert_eq!(events.len(), 4); // text, tool, usage(0), stop
+        assert!(
+            matches!(&events[0], AssistantEvent::TextDelta(t) if t == "Let me check the time.")
+        );
+        assert!(matches!(&events[1], AssistantEvent::ToolUse { name, .. } if name == "get_time"));
+    }
+
+    #[test]
+    fn parse_openai_response_error_field_returns_err() {
+        let client = OllamaApiClient::new("test", json!([])).with_openai_compat(true);
+        let body =
+            json!({"error": {"message": "model not found", "type": "invalid_request_error"}});
+        let result = client.parse_openai_response(&body);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("model not found"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_openai_response_missing_choices_is_err() {
+        let client = OllamaApiClient::new("test", json!([])).with_openai_compat(true);
+        let body = json!({"id": "x", "object": "chat.completion"});
+        let result = client.parse_openai_response(&body);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_openai_response_missing_id_synthesises_one() {
+        let client = OllamaApiClient::new("test", json!([])).with_openai_compat(true);
+        let body = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "type": "function",
+                        "function": {"name": "a", "arguments": "{}"}
+                    }]
+                }
+            }]
+        });
+        let events = client.parse_openai_response(&body).unwrap();
+        match &events[0] {
+            AssistantEvent::ToolUse { id, .. } => {
+                assert!(id.starts_with("call_"), "expected synthesised id, got {id}");
+            }
+            other => panic!("expected ToolUse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_openai_response_callback_fires_with_full_text() {
+        use std::sync::{Arc, Mutex};
+        let log: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let log_clone = log.clone();
+        let cb: TextCallback = Box::new(move |s: &str| {
+            log_clone.lock().unwrap().push(s.to_string());
+        });
+        let client = OllamaApiClient::new("test", json!([]))
+            .with_openai_compat(true)
+            .with_text_callback(cb);
+        let body = json!({
+            "choices": [{
+                "message": {"role": "assistant", "content": "foo bar"}
+            }]
+        });
+        let _ = client.parse_openai_response(&body).unwrap();
+        let entries = log.lock().unwrap();
+        assert_eq!(
+            *entries,
+            vec!["foo bar".to_string(), "\n".to_string()],
+            "callback should fire full text + trailing newline (no per-token streaming yet)"
         );
     }
 

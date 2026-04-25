@@ -307,7 +307,14 @@ fn prompt_hash(s: &str) -> String {
 /// evict `model` from memory immediately. Mirrors `voice.rs`'s unload
 /// trick. Silently ignores failures — if Ollama is down the next chat
 /// turn will surface a clearer error than this helper could.
+///
+/// Skipped in OpenAI-compat mode: LM Studio (and other OpenAI-format
+/// servers) don't honour the `keep_alive` extension. Eviction there is a
+/// GUI/CLI action (`lms unload <model>`), out of scope for this helper.
 fn unload_ollama_model(model: &str) {
+    if crate::api::resolve_openai_compat() {
+        return;
+    }
     let host =
         std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string());
     let _ = reqwest::blocking::Client::new()
