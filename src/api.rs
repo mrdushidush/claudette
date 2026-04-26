@@ -296,6 +296,52 @@ pub fn resolve_ollama_url() -> String {
     }
 }
 
+/// Resolve the per-request tools-array cap. Set `CLAUDETTE_MAX_TOOLS=N`
+/// to truncate the advertised tools to N entries — the `enable_tools`
+/// meta-tool is moved to position 0 first so the model can still expand
+/// the registry mid-conversation. `0` (or unset / unparseable) = no cap.
+///
+/// Why this exists: smaller models like gpt-oss-20b spiral into a
+/// degenerate token loop when handed claudette's full 17-tool default
+/// registry. Capping the always-on slice and letting the model opt into
+/// more via `enable_tools` keeps the cognitive load survivable.
+#[must_use]
+pub fn resolve_max_tools() -> Option<usize> {
+    std::env::var("CLAUDETTE_MAX_TOOLS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|&n| n > 0)
+}
+
+/// Truncate a `tools` JSON array to `cap` entries while preserving
+/// `enable_tools` at position 0 (when present), so the dynamic registry
+/// expansion path still works after capping. Non-array inputs and
+/// already-short arrays pass through unchanged.
+///
+/// Semantics: if `enable_tools` is somewhere in the array, it's removed,
+/// the rest of the array is truncated to `cap - 1`, then `enable_tools`
+/// is inserted at the front. Original relative order of the other tools
+/// is preserved (a swap-based impl would reorder them).
+fn cap_tools(tools: Value, cap: usize) -> Value {
+    let Value::Array(mut arr) = tools else {
+        return tools;
+    };
+    if arr.len() <= cap {
+        return Value::Array(arr);
+    }
+    let enable_pos = arr
+        .iter()
+        .position(|t| t.pointer("/function/name").and_then(Value::as_str) == Some("enable_tools"));
+    if let Some(pos) = enable_pos {
+        let enable = arr.remove(pos);
+        arr.truncate(cap.saturating_sub(1));
+        arr.insert(0, enable);
+    } else {
+        arr.truncate(cap);
+    }
+    Value::Array(arr)
+}
+
 /// Returns true when LM Studio (or any OpenAI Chat Completions-compatible)
 /// mode is requested. Set `CLAUDETTE_OPENAI_COMPAT=1` to opt in. The brain
 /// client will then POST to `/v1/chat/completions` instead of `/api/chat`,
@@ -488,6 +534,15 @@ impl OllamaApiClient {
         // request body, so we never race with a concurrent `enable_tools`
         // call that would make the two views disagree.
         let tools = self.tools.current();
+        // Apply the optional CLAUDETTE_MAX_TOOLS cap before computing the
+        // history budget — that way the budget reflects the actual tools
+        // payload sent on the wire. When the env var is unset, this is a
+        // no-op (cap_tools is also a no-op for already-short arrays).
+        let tools = if let Some(cap) = resolve_max_tools() {
+            cap_tools(tools, cap)
+        } else {
+            tools
+        };
         let history_budget = self.history_budget_chars_for_tools(request, &tools);
         if self.openai_compat {
             // OpenAI Chat Completions shape. `temperature` and `max_tokens`
@@ -1694,6 +1749,131 @@ mod tests {
             }
             other => panic!("expected ToolUse, got {other:?}"),
         }
+    }
+
+    // === Tools-cap tests ====================================================
+
+    fn fake_tool(name: &str) -> Value {
+        json!({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": format!("desc for {name}"),
+                "parameters": {"type": "object", "properties": {}, "required": []}
+            }
+        })
+    }
+
+    #[test]
+    fn resolve_max_tools_unset_returns_none() {
+        let prev = std::env::var("CLAUDETTE_MAX_TOOLS").ok();
+        std::env::remove_var("CLAUDETTE_MAX_TOOLS");
+        assert_eq!(resolve_max_tools(), None);
+        if let Some(v) = prev {
+            std::env::set_var("CLAUDETTE_MAX_TOOLS", v);
+        }
+    }
+
+    #[test]
+    fn resolve_max_tools_zero_is_treated_as_no_cap() {
+        let prev = std::env::var("CLAUDETTE_MAX_TOOLS").ok();
+        std::env::set_var("CLAUDETTE_MAX_TOOLS", "0");
+        assert_eq!(resolve_max_tools(), None);
+        match prev {
+            Some(v) => std::env::set_var("CLAUDETTE_MAX_TOOLS", v),
+            None => std::env::remove_var("CLAUDETTE_MAX_TOOLS"),
+        }
+    }
+
+    #[test]
+    fn resolve_max_tools_garbage_returns_none() {
+        let prev = std::env::var("CLAUDETTE_MAX_TOOLS").ok();
+        std::env::set_var("CLAUDETTE_MAX_TOOLS", "not-a-number");
+        assert_eq!(resolve_max_tools(), None);
+        match prev {
+            Some(v) => std::env::set_var("CLAUDETTE_MAX_TOOLS", v),
+            None => std::env::remove_var("CLAUDETTE_MAX_TOOLS"),
+        }
+    }
+
+    #[test]
+    fn cap_tools_passthrough_when_under_cap() {
+        let tools = Value::Array(vec![fake_tool("a"), fake_tool("b")]);
+        let capped = cap_tools(tools.clone(), 5);
+        assert_eq!(capped, tools);
+    }
+
+    #[test]
+    fn cap_tools_truncates_when_over_cap() {
+        let tools = Value::Array((0..10).map(|i| fake_tool(&format!("t{i}"))).collect());
+        let capped = cap_tools(tools, 3);
+        let arr = capped.as_array().unwrap();
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr[0]["function"]["name"], "t0");
+        assert_eq!(arr[2]["function"]["name"], "t2");
+    }
+
+    #[test]
+    fn cap_tools_moves_enable_tools_to_front_when_present() {
+        let tools = Value::Array(vec![
+            fake_tool("a"),
+            fake_tool("b"),
+            fake_tool("enable_tools"),
+            fake_tool("c"),
+            fake_tool("d"),
+        ]);
+        let capped = cap_tools(tools, 3);
+        let arr = capped.as_array().unwrap();
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr[0]["function"]["name"], "enable_tools");
+        // Remaining slots fill from the original order, skipping the moved
+        // enable_tools entry — first two leftovers were `a` and `b`.
+        assert_eq!(arr[1]["function"]["name"], "a");
+        assert_eq!(arr[2]["function"]["name"], "b");
+    }
+
+    #[test]
+    fn cap_tools_keeps_enable_tools_at_front_when_already_first() {
+        let tools = Value::Array(vec![
+            fake_tool("enable_tools"),
+            fake_tool("a"),
+            fake_tool("b"),
+            fake_tool("c"),
+        ]);
+        let capped = cap_tools(tools, 2);
+        let arr = capped.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["function"]["name"], "enable_tools");
+        assert_eq!(arr[1]["function"]["name"], "a");
+    }
+
+    #[test]
+    fn cap_tools_preserves_enable_tools_even_when_cap_is_one() {
+        let tools = Value::Array(vec![
+            fake_tool("a"),
+            fake_tool("b"),
+            fake_tool("enable_tools"),
+        ]);
+        let capped = cap_tools(tools, 1);
+        let arr = capped.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["function"]["name"], "enable_tools");
+    }
+
+    #[test]
+    fn cap_tools_passes_through_non_array() {
+        let v = json!({"not": "an array"});
+        assert_eq!(cap_tools(v.clone(), 5), v);
+    }
+
+    #[test]
+    fn cap_tools_no_enable_tools_just_takes_first_n() {
+        let tools = Value::Array(vec![fake_tool("a"), fake_tool("b"), fake_tool("c")]);
+        let capped = cap_tools(tools, 2);
+        let arr = capped.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["function"]["name"], "a");
+        assert_eq!(arr[1]["function"]["name"], "b");
     }
 
     #[test]
