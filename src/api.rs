@@ -489,7 +489,6 @@ impl OllamaApiClient {
         // call that would make the two views disagree.
         let tools = self.tools.current();
         let history_budget = self.history_budget_chars_for_tools(request, &tools);
-        let messages = build_messages(request, history_budget);
         if self.openai_compat {
             // OpenAI Chat Completions shape. `temperature` and `max_tokens`
             // are top-level (not nested in `options`). `num_ctx` has no
@@ -497,33 +496,38 @@ impl OllamaApiClient {
             // (e.g. `lms load --context-length 32768`). The Ollama-only
             // `think: false` flag is dropped — gpt-oss and other reasoning
             // models on LM Studio benefit from their reasoning trace.
-            json!({
+            //
+            // Messages use the OpenAI-shape converter so tool results
+            // become standalone {role:"tool",tool_call_id:...} entries and
+            // assistant-with-tool_calls sends content:null.
+            let messages = build_messages_openai_compat(request, history_budget);
+            return json!({
                 "model": self.model,
                 "messages": messages,
                 "tools": tools,
                 "stream": false,
                 "temperature": 0.0,
                 "max_tokens": self.num_predict,
-            })
-        } else {
-            json!({
-                "model": self.model,
-                "messages": messages,
-                "tools": tools,
-                // `stream: true` switches Ollama into NDJSON mode — one JSON
-                // object per line. Each chunk carries a `message.content`
-                // delta (often a single token) and the final chunk has
-                // `done: true` plus the prompt/eval token counts. See
-                // `consume_stream_lines` for the parser.
-                "stream": true,
-                "think": false,
-                "options": {
-                    "temperature": 0.0,
-                    "num_ctx": self.num_ctx,
-                    "num_predict": self.num_predict
-                }
-            })
+            });
         }
+        let messages = build_messages(request, history_budget);
+        json!({
+            "model": self.model,
+            "messages": messages,
+            "tools": tools,
+            // `stream: true` switches Ollama into NDJSON mode — one JSON
+            // object per line. Each chunk carries a `message.content`
+            // delta (often a single token) and the final chunk has
+            // `done: true` plus the prompt/eval token counts. See
+            // `consume_stream_lines` for the parser.
+            "stream": true,
+            "think": false,
+            "options": {
+                "temperature": 0.0,
+                "num_ctx": self.num_ctx,
+                "num_predict": self.num_predict
+            }
+        })
     }
 
     /// Parse a non-streaming OpenAI Chat Completions response into the same
@@ -813,6 +817,132 @@ fn build_history_messages(msgs: &[crate::ConversationMessage]) -> Vec<Value> {
             "content": content,
         });
         if !tool_calls.is_empty() {
+            obj["tool_calls"] = json!(tool_calls);
+        }
+        messages.push(obj);
+    }
+    messages
+}
+
+/// Build the full OpenAI-compat `messages` array. Same shape as
+/// [`build_messages`] (system prompt + truncated history) but routes
+/// history through [`build_history_messages_openai_compat`] so tool
+/// results become standalone `tool` messages keyed by `tool_call_id`.
+fn build_messages_openai_compat(request: &ApiRequest, history_budget_chars: usize) -> Vec<Value> {
+    let history = build_history_messages_openai_compat(&request.messages);
+    let history = truncate_to_budget(history, history_budget_chars);
+
+    let mut messages = Vec::with_capacity(history.len() + 1);
+    let system_prompt = request.system_prompt.join("\n\n");
+    if !system_prompt.is_empty() {
+        messages.push(json!({
+            "role": "system",
+            "content": system_prompt,
+        }));
+    }
+    messages.extend(history);
+    messages
+}
+
+/// Convert conversation messages into the OpenAI Chat Completions JSON
+/// shape. Three differences from [`build_history_messages`]:
+///
+/// 1. **Tool results become standalone messages.** A `MessageRole::Tool`
+///    `ConversationMessage` containing N `ToolResult` blocks emits N
+///    separate `{"role":"tool","tool_call_id":...,"content":...}`
+///    entries. The Ollama path coalesces them into the prior message's
+///    content; OpenAI strict validators (LM Studio, vLLM in strict mode,
+///    OpenAI itself) reject this and require the `tool` role.
+///
+/// 2. **Assistant + `tool_calls` sends `content: null`.** When an
+///    assistant message has tool_calls and no prose alongside, OpenAI
+///    requires `content: null` rather than `""`. Both fields can coexist
+///    when the assistant did emit text *and* called a tool.
+///
+/// 3. **`function.arguments` is a JSON-encoded string**, not a parsed
+///    object. The internal `ContentBlock::ToolUse.input` is already a
+///    JSON string (the runtime stores it that way), so we pass it
+///    through verbatim instead of `serde_json::from_str`-ing it back to
+///    a `Value` like the Ollama path does.
+///
+/// **Truncation hazard**: [`truncate_to_budget`] is unaware of the
+/// assistant→tool pairing invariant. If the budget happens to drop a
+/// `tool` message but keep its preceding assistant `tool_calls`, the
+/// server will reject the next request. The brain-side runtime's
+/// auto-compaction is the long-term fix; for now the per-turn budget
+/// at the configured `num_ctx` is comfortably above any realistic
+/// single tool roundtrip.
+fn build_history_messages_openai_compat(msgs: &[crate::ConversationMessage]) -> Vec<Value> {
+    let mut messages = Vec::with_capacity(msgs.len());
+    for msg in msgs {
+        // Special-case the Tool role: emit one OpenAI `tool` message per
+        // ToolResult block, each carrying its own tool_call_id. This is
+        // what differentiates the OpenAI shape from the Ollama coalesced
+        // form.
+        if matches!(msg.role, MessageRole::Tool) {
+            for block in &msg.blocks {
+                if let ContentBlock::ToolResult {
+                    tool_use_id,
+                    output,
+                    ..
+                } = block
+                {
+                    messages.push(json!({
+                        "role": "tool",
+                        "tool_call_id": tool_use_id,
+                        "content": output,
+                    }));
+                }
+            }
+            continue;
+        }
+
+        let role = role_str(msg.role);
+        let mut content_parts: Vec<String> = Vec::new();
+        let mut tool_calls: Vec<Value> = Vec::new();
+
+        for block in &msg.blocks {
+            match block {
+                ContentBlock::Text { text } => {
+                    content_parts.push(text.clone());
+                }
+                ContentBlock::ToolUse { id, name, input } => {
+                    // OpenAI expects `arguments` as a JSON string verbatim.
+                    // `input` already is one (the runtime stored it that
+                    // way), so pass straight through — no parse round-trip
+                    // and no risk of losing precision on int/float values.
+                    tool_calls.push(json!({
+                        "id": id,
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "arguments": input,
+                        }
+                    }));
+                }
+                ContentBlock::ToolResult { .. } => {
+                    // Should not appear under non-Tool roles in well-formed
+                    // sessions; ignore defensively. The Tool-role branch
+                    // above handles every legitimate occurrence.
+                }
+            }
+        }
+
+        let content = content_parts.join("\n");
+        let mut obj = json!({ "role": role });
+        if tool_calls.is_empty() {
+            obj["content"] = json!(content);
+        } else {
+            // OpenAI requires `content: null` (not `""`) when tool_calls
+            // is present without accompanying prose — LM Studio rejects
+            // the empty-string form with "Invalid 'messages' in payload".
+            // When the assistant DID emit text alongside the tool call,
+            // send both fields.
+            obj["content"] = if content.is_empty() {
+                Value::Null
+            } else {
+                Value::String(content)
+            };
             obj["tool_calls"] = json!(tool_calls);
         }
         messages.push(obj);
@@ -1564,6 +1694,164 @@ mod tests {
             }
             other => panic!("expected ToolUse, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn openai_history_emits_separate_tool_messages_with_tool_call_id() {
+        // The bug that triggered turn 3 to fail with "Invalid 'messages'":
+        // a Tool-role ConversationMessage with two ToolResult blocks must
+        // become TWO {"role":"tool","tool_call_id":...} entries, not one
+        // coalesced message.
+        let msgs = vec![
+            ConversationMessage {
+                role: MessageRole::Assistant,
+                blocks: vec![ContentBlock::ToolUse {
+                    id: "call_a".into(),
+                    name: "note_list".into(),
+                    input: "{}".into(),
+                }],
+                usage: None,
+            },
+            ConversationMessage {
+                role: MessageRole::Tool,
+                blocks: vec![ContentBlock::ToolResult {
+                    tool_use_id: "call_a".into(),
+                    tool_name: "note_list".into(),
+                    output: "no notes yet".into(),
+                    is_error: false,
+                }],
+                usage: None,
+            },
+        ];
+        let out = build_history_messages_openai_compat(&msgs);
+        assert_eq!(out.len(), 2);
+        // assistant entry: content:null + tool_calls
+        assert_eq!(out[0]["role"], "assistant");
+        assert!(
+            out[0]["content"].is_null(),
+            "assistant content must be JSON null when tool_calls present, got {:?}",
+            out[0]["content"]
+        );
+        assert_eq!(out[0]["tool_calls"][0]["id"], "call_a");
+        // arguments must be the raw "{}" STRING, not a nested object
+        assert_eq!(out[0]["tool_calls"][0]["function"]["arguments"], "{}");
+        // tool entry: standalone with tool_call_id
+        assert_eq!(out[1]["role"], "tool");
+        assert_eq!(out[1]["tool_call_id"], "call_a");
+        assert_eq!(out[1]["content"], "no notes yet");
+    }
+
+    #[test]
+    fn openai_history_assistant_with_text_and_tool_calls_keeps_both() {
+        let msgs = vec![ConversationMessage {
+            role: MessageRole::Assistant,
+            blocks: vec![
+                ContentBlock::Text {
+                    text: "Looking up your notes.".into(),
+                },
+                ContentBlock::ToolUse {
+                    id: "x".into(),
+                    name: "note_list".into(),
+                    input: "{\"limit\":5}".into(),
+                },
+            ],
+            usage: None,
+        }];
+        let out = build_history_messages_openai_compat(&msgs);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["content"], "Looking up your notes.");
+        assert_eq!(out[0]["tool_calls"][0]["function"]["name"], "note_list");
+        assert_eq!(
+            out[0]["tool_calls"][0]["function"]["arguments"],
+            "{\"limit\":5}"
+        );
+    }
+
+    #[test]
+    fn openai_history_plain_text_message_unchanged() {
+        let msgs = vec![ConversationMessage {
+            role: MessageRole::User,
+            blocks: vec![ContentBlock::Text { text: "hey".into() }],
+            usage: None,
+        }];
+        let out = build_history_messages_openai_compat(&msgs);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["role"], "user");
+        assert_eq!(out[0]["content"], "hey");
+        assert!(out[0].get("tool_calls").is_none());
+    }
+
+    #[test]
+    fn openai_history_multiple_tool_results_in_one_message_become_separate() {
+        // A Tool-role message can carry multiple ToolResult blocks (one per
+        // tool call from the prior assistant turn). Each must become its own
+        // top-level message with the matching tool_call_id.
+        let msgs = vec![ConversationMessage {
+            role: MessageRole::Tool,
+            blocks: vec![
+                ContentBlock::ToolResult {
+                    tool_use_id: "id1".into(),
+                    tool_name: "a".into(),
+                    output: "result one".into(),
+                    is_error: false,
+                },
+                ContentBlock::ToolResult {
+                    tool_use_id: "id2".into(),
+                    tool_name: "b".into(),
+                    output: "result two".into(),
+                    is_error: false,
+                },
+            ],
+            usage: None,
+        }];
+        let out = build_history_messages_openai_compat(&msgs);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0]["tool_call_id"], "id1");
+        assert_eq!(out[0]["content"], "result one");
+        assert_eq!(out[1]["tool_call_id"], "id2");
+        assert_eq!(out[1]["content"], "result two");
+    }
+
+    #[test]
+    fn build_chat_body_compat_uses_openai_history_shape() {
+        // End-to-end: a request with a tool roundtrip must produce a
+        // body whose messages array has the OpenAI-shape tool entry.
+        let client = OllamaApiClient::new("openai/gpt-oss-20b", json!([])).with_openai_compat(true);
+        let req = ApiRequest {
+            messages: vec![
+                user_text("show notes"),
+                ConversationMessage {
+                    role: MessageRole::Assistant,
+                    blocks: vec![ContentBlock::ToolUse {
+                        id: "c1".into(),
+                        name: "note_list".into(),
+                        input: "{}".into(),
+                    }],
+                    usage: None,
+                },
+                ConversationMessage {
+                    role: MessageRole::Tool,
+                    blocks: vec![ContentBlock::ToolResult {
+                        tool_use_id: "c1".into(),
+                        tool_name: "note_list".into(),
+                        output: "[]".into(),
+                        is_error: false,
+                    }],
+                    usage: None,
+                },
+            ],
+            system_prompt: vec!["sys".to_string()],
+        };
+        let body = client.build_chat_body(&req);
+        let msgs = body["messages"].as_array().expect("messages array");
+        // system + user + assistant(tool_calls) + tool
+        assert_eq!(msgs.len(), 4);
+        assert_eq!(msgs[0]["role"], "system");
+        assert_eq!(msgs[1]["role"], "user");
+        assert_eq!(msgs[2]["role"], "assistant");
+        assert!(msgs[2]["content"].is_null());
+        assert_eq!(msgs[3]["role"], "tool");
+        assert_eq!(msgs[3]["tool_call_id"], "c1");
     }
 
     #[test]
