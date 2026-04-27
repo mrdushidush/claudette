@@ -1027,21 +1027,52 @@ fn build_history_messages_openai_compat(msgs: &[crate::ConversationMessage]) -> 
 /// tokenizer to the client. `chars / 4` is the standard English rule of thumb
 /// and we pad with `SAFETY_CHARS` to absorb the inaccuracy.
 fn truncate_to_budget(messages: Vec<Value>, budget_chars: usize) -> Vec<Value> {
-    let mut kept: Vec<Value> = Vec::with_capacity(messages.len());
-    let mut used = 0usize;
     let total = messages.len();
+    if total == 0 {
+        return Vec::new();
+    }
+
+    // Pre-pin indices that must survive truncation regardless of budget:
+    //   1. The newest message (current turn input).
+    //   2. The most recent user message — strict jinja templates (e.g.
+    //      Qwen3 on LM Studio) reject requests with no user-role message
+    //      and return HTTP 400 "No user query found in messages." A huge
+    //      tool result can otherwise exhaust the budget and orphan the
+    //      preceding user query.
+    //   3. The assistant.tool_calls immediately preceding any kept `tool`
+    //      message — same templates reject orphan tool results.
+    // Pinning is set up below; the third rule is applied during the
+    // reverse walk because pairing depends on which messages were kept.
+    let mut must_keep = vec![false; total];
+    must_keep[total - 1] = true;
+    if let Some(idx) = messages
+        .iter()
+        .rposition(|m| m.get("role").and_then(Value::as_str) == Some("user"))
+    {
+        must_keep[idx] = true;
+    }
+
+    let mut kept: Vec<Value> = Vec::with_capacity(total);
+    let mut used = 0usize;
     for (idx_from_end, msg) in messages.into_iter().rev().enumerate() {
+        let idx = total - 1 - idx_from_end;
         let cost = estimate_message_chars(&msg);
-        // Always keep the most recent message regardless of budget — the user
-        // (or the agent loop) just produced it and dropping it breaks the
-        // current turn. budget_chars==0 still admits this one message.
-        let is_newest = idx_from_end == 0 && total > 0;
-        if !is_newest && used.saturating_add(cost) > budget_chars {
+        let force = must_keep[idx];
+        if !force && used.saturating_add(cost) > budget_chars {
             // Skip this older message but keep walking — a smaller older
-            // message might still fit. NB: this can produce a "history with
-            // a hole", but the model handles missing chronological pieces
-            // better than missing the immediate context.
+            // message might still fit. NB: this can produce a "history
+            // with a hole", but the model handles missing chronological
+            // pieces better than missing the immediate context.
             continue;
+        }
+        // Tool→assistant pairing: if we keep a tool message, force-keep
+        // the assistant tool_calls at idx-1. Reverse iteration means
+        // idx-1 is the next message, so setting the flag here is in
+        // time. (Repeated tool results in a single turn each pin their
+        // own preceding assistant.)
+        let role = msg.get("role").and_then(Value::as_str).unwrap_or("");
+        if role == "tool" && idx > 0 {
+            must_keep[idx - 1] = true;
         }
         used = used.saturating_add(cost);
         kept.push(msg);
