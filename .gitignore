@@ -8,3 +8,8 @@ Cargo.lock.bak
 # Claude Code local settings (per-user IDE state, not part of the project).
 .claude/
 tests/results_brain100/
+tests/results_brain100_*/
+tests/results_sandbox10_*/
+tests/brain100_prompts_failsubset.txt
+tests/brain100_prompts_truncbug.txt
+tests/sandbox10_scoreboard.csv

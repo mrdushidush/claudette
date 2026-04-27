@@ -10,7 +10,7 @@ set -uo pipefail
 MODEL="${1:-qwen3.5:4b}"
 OUTDIR="${2:-tests/results_brain100}"
 BINARY="D:/dev/claudette/target/release/claudette.exe"
-PROMPTS_FILE="D:/dev/claudette/tests/brain100_prompts.txt"
+PROMPTS_FILE="${BRAIN100_PROMPTS:-D:/dev/claudette/tests/brain100_prompts.txt}"
 DELAY=1
 
 mkdir -p "$OUTDIR"

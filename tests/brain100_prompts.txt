@@ -37,7 +37,7 @@
 26|||Find all .toml files under D:/dev/claudette|||cargo|toml|||glob_search
 27|||Create a note titled 'parameterized-test' with body 'Testing correct parameter passing to tools'|||created|saved|added|note|||note_create
 28|||Add a todo: verify the tools refactor is documented|||added|created|todo|saved|||todo_add
-29|||Search the web for 'qwen3 ollama tool calling'|||qwen|ollama|tool|||web_search
+29|||Run the bash command: echo CLAUDETTE_BENCH_OK|||CLAUDETTE_BENCH_OK|||bash
 30|||What is 1234 + 5678?|||6912|||NO_TOOL
 31|||Explain what a Rust trait is in exactly two sentences.|||trait|interface|behavior|method|||NO_TOOL
 32|||What timezone am I in based on the current time?|||timezone|UTC|GMT|\\+|\\-|hours|||get_current_time
@@ -46,7 +46,7 @@
 35|||List all files in D:/dev/claudette/src that start with 'a'|||agents|api|||glob_search
 36|||Read D:/dev/claudette/Cargo.toml|||claudette|dependencies|reqwest|||read_file
 37|||Show the git log for commits touching src/agents.rs|||agent|spawn|sprint|||git_log
-38|||What is 99 squared?|||9801|||NO_TOOL
+38|||What is 99 squared?|||9,?801|||NO_TOOL
 39|||Write a two-line poem about Rust programming|||rust|borrow|safe|fast|||NO_TOOL
 40|||What is the population of Tokyo? Give a rough estimate.|||million|13|14|tokyo|||NO_TOOL
 
@@ -56,16 +56,16 @@
 43|||What time is it and what day of the week? Then create a note with the answer as the body, titled 'time-check'.|||created|note|saved|||note_create
 44|||Search for 'AgentType' in the claudette source and tell me what variants it has.|||researcher|gitops|||grep_search
 45|||Read D:/dev/claudette/src/agents.rs and explain what spawn_agent does.|||spawn|agent|delegate|task|||read_file
-46|||Show the git log and tell me what the most recent commit does.|||refactor|tools|extract|||git_log
+46|||Read the note titled 'tier1-test' and tell me what its body says.|||hello from the test suite|hello|test suite|||note_read
 47|||Search for all functions named 'run_' in D:/dev/claudette/src/tools.rs|||run_|tool|function|||grep_search
 48|||List the directory D:/dev/claudette/src/tools and tell me how many sub-modules there are.|||facts|git|markets|||list_dir
 49|||Fetch https://example.com and tell me what the title of the page is|||example|domain|||web_fetch
 50|||What are the first 3 lines of D:/dev/claudette/.gitignore?|||target|env|swap|||read_file
-51|||Search the web for 'Rust 2024 edition features' and give me a 3-bullet summary|||rust|edition|||web_search
+51|||Look up 'Rust (programming language)' on Wikipedia and tell me roughly when it first appeared.|||2010|2014|2015|mozilla|graydon|||wikipedia_search
 52|||Read D:/dev/claudette/src/run.rs and tell me what the default model is.|||qwen|qwen3|||read_file
 53|||Show the git diff and summarize what files changed in one sentence.|||claudette|change|tools|||git_diff
 54|||Search for 'max_iterations' in the claudette source and tell me the default values.|||10|8|max|||grep_search
-55|||What is 17 factorial? Show your work.|||355687428096000|||NO_TOOL
+55|||What is 17 factorial? Show your work.|||355,?687,?428,?096,?000|||NO_TOOL
 56|||Explain the difference between Rust's Box and Rc in three sentences.|||box|rc|owner|reference|||NO_TOOL
 57|||Create a note titled 'multi-step-test' and in the body list the current date and time obtained from the time tool.|||created|note|saved|||note_create
 58|||Find all Python files under D:/dev/claudette using glob search|||py|python|none|||glob_search
@@ -87,12 +87,12 @@
 72|||What was the last git commit message?|||refactor|feat|fix|docs|test|chore|perf|||git_log
 73|||Read D:/dev/claudette/src/theme.rs and list any emoji or glyph constants.|||GLYPH|WARN|ROBOT|NOTE|||read_file
 74|||Search the web for 'asdfghjkl nonsense query 12345' — what do you find?|||no result|nothing|nonsense|not|||web_search
-75|||How many tools does Claudette have? Count from the tools list.|||\\d+|tools|||get_capabilities
+75|||How many tools does Claudette have? Count from the tools list.|||[0-9]+ tools|17 tools|tool count|||get_capabilities
 76|||Show git diff for staged changes only|||diff|stage|change|no|||git_diff
 77|||What is the meaning of life, the universe, and everything?|||42|||NO_TOOL
 78|||Translate 'I love programming' into 5 different languages.|||programming|amour|liebe|amo|||NO_TOOL
 79|||Read D:/dev/claudette/src/codet.rs and tell me what MAX_FIX_ATTEMPTS is.|||3|attempt|||read_file
-80|||List the contents of D:/dev/claudette/src|||tools|run|agents|||list_dir
+80|||Try to delete a todo with the impossible id 'fake-id-9999'.|||not found|cannot|error|no such|missing|invalid|fail|||todo_delete
 
 # === TIER 5: Complex multi-tool chains (81-100) ===
 81|||Check the git status, then show the log for the last 3 commits, and summarize the state of the repo.|||clean|branch|commit|refactor|||git_status
@@ -100,18 +100,18 @@
 83|||Search for 'pub fn' in D:/dev/claudette/src/agents.rs, then explain each public function.|||spawn|agent|parse|config|||grep_search
 84|||Get the current time, create a note titled 'complex-test' with the time as body, then list notes to confirm.|||created|note|complex|saved|||note_create
 85|||Search the web for 'Ollama API documentation', then summarize the result.|||ollama|api|||web_search
-86|||List D:/dev/claudette/src and tell me what files are there.|||agents|tools|run|||list_dir
+86|||Delete the note titled 'tier1-test'.|||deleted|removed|gone|||note_delete
 87|||Show the git log for the last 5 commits|||refactor|feat|fix|||git_log
-88|||Search for 'TODO' or 'FIXME' in the claudette source. Report what you find.|||todo|fixme|search|none|0|||grep_search
+88|||Look up the 'serde' crate on crates.io and tell me a recent version number.|||[0-9]+\.[0-9]+\.[0-9]+|||crate_info
 89|||Read D:/dev/claudette/src/tools.rs and tell me what tool handler functions it contains.|||run_|spawn|tool|dispatch|||read_file
 90|||Add a todo 'write documentation', then list todos and tell me how many are pending.|||documentation|todo|pending|||todo_add
 91|||Search for 'fn ' in D:/dev/claudette/src/agents.rs|||spawn|parse|config|fn|||grep_search
-92|||Read D:/dev/claudette/src/api.rs and tell me what the default num_ctx is.|||\\d{4,5}|num_ctx|context|||read_file
+92|||Read D:/dev/claudette/src/api.rs and tell me what the default num_ctx is.|||[0-9]{4,5}|||read_file
 93|||Fetch https://httpbin.org/headers and tell me what User-Agent is being sent.|||user-agent|reqwest|curl|agent|claudette|||web_fetch
 94|||Get the git status, show any uncommitted changes, and recommend whether it's safe to commit.|||status|clean|safe|commit|||git_status
 95|||Search for 'CliPrompter' in the claudette source and tell me what file it's in.|||run|prompter|||grep_search
 96|||Create a note titled 'final-test' with a body that summarizes what Claudette is.|||created|note|final|saved|||note_create
 97|||List all .rs files in D:/dev/claudette/src|||agents|tools|run|api|||glob_search
-98|||Show the last 3 git commits|||refactor|feat|fix|||git_log
+98|||Add a todo 'parity-bench-marker', then mark it as complete.|||completed|marked|done|finished|||todo_complete
 99|||Read D:/dev/claudette/src/agents.rs and explain how spawn_agent works.|||spawn|agent|task|delegate|||read_file
 100|||Get the current time, show git status, and list my todos. Give me a status report.|||time|status|todo|||get_current_time
