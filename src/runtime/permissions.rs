@@ -85,6 +85,58 @@ impl PermissionPolicy {
             .unwrap_or(PermissionMode::DangerFullAccess)
     }
 
+    /// True if `tool_name` has an explicit requirement registered. Used by
+    /// the conversation loop to short-circuit unknown-tool calls into a
+    /// structured "did you mean?" tool_result instead of bubbling a
+    /// permission prompt for a name that won't dispatch anyway.
+    #[must_use]
+    pub fn is_known(&self, tool_name: &str) -> bool {
+        self.tool_requirements.contains_key(tool_name)
+    }
+
+    /// Up to `max` known tool names ranked by closeness to `unknown_name`.
+    /// Heuristic, in order: exact substring matches first (either direction),
+    /// then Levenshtein distance ≤ 3. Stable tie-break by lexicographic order
+    /// so test output is deterministic.
+    ///
+    /// Returns an empty vec for names with no nearby matches (e.g. group
+    /// names like `facts` that don't share characters with any tool). Caller
+    /// is expected to layer additional hints (group-aware suggestions) on top.
+    #[must_use]
+    pub fn suggest_for(&self, unknown_name: &str, max: usize) -> Vec<String> {
+        if max == 0 {
+            return Vec::new();
+        }
+        let needle = unknown_name.to_lowercase();
+        // The first underscore-delimited component is the strongest signal —
+        // tool names are conventionally `<noun>_<verb>` (e.g. `note_create`),
+        // so a confabulated `note_update` should suggest every `note_*` tool.
+        let needle_prefix = needle.split('_').next().unwrap_or("").to_string();
+        let mut scored: Vec<(u32, String)> = self
+            .tool_requirements
+            .keys()
+            .filter_map(|name| {
+                let lower = name.to_lowercase();
+                // Score: lower is better. Bands are separated so a prefix
+                // match always outranks substring, which outranks Levenshtein.
+                if needle_prefix.len() >= 3 && lower.starts_with(&format!("{needle_prefix}_")) {
+                    Some((1, name.clone()))
+                } else if lower.contains(&needle) || needle.contains(&lower) {
+                    Some((2, name.clone()))
+                } else {
+                    let d = levenshtein(&needle, &lower);
+                    if d <= 3 {
+                        Some((10 + d, name.clone()))
+                    } else {
+                        None
+                    }
+                }
+            })
+            .collect();
+        scored.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+        scored.into_iter().map(|(_, n)| n).take(max).collect()
+    }
+
     #[must_use]
     pub fn authorize(
         &self,
@@ -132,6 +184,30 @@ impl PermissionPolicy {
             ),
         }
     }
+}
+
+/// Iterative Levenshtein distance, two-row variant. `O(m*n)` time, `O(min(m,n))`
+/// space. Operates on chars so non-ASCII names aren't penalised by byte length.
+fn levenshtein(a: &str, b: &str) -> u32 {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    if a.is_empty() {
+        return u32::try_from(b.len()).unwrap_or(u32::MAX);
+    }
+    if b.is_empty() {
+        return u32::try_from(a.len()).unwrap_or(u32::MAX);
+    }
+    let mut prev: Vec<u32> = (0..=u32::try_from(b.len()).unwrap_or(u32::MAX)).collect();
+    let mut curr: Vec<u32> = vec![0; b.len() + 1];
+    for (i, &ca) in a.iter().enumerate() {
+        curr[0] = u32::try_from(i + 1).unwrap_or(u32::MAX);
+        for (j, &cb) in b.iter().enumerate() {
+            let cost = u32::from(ca != cb);
+            curr[j + 1] = (curr[j] + 1).min(prev[j + 1] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[b.len()]
 }
 
 #[cfg(test)]
@@ -228,5 +304,83 @@ mod tests {
             policy.authorize("bash", "echo hi", Some(&mut prompter)),
             PermissionOutcome::Deny { reason } if reason == "not now"
         ));
+    }
+
+    fn standard_policy() -> PermissionPolicy {
+        PermissionPolicy::new(PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("note_create", PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("note_list", PermissionMode::ReadOnly)
+            .with_tool_requirement("note_read", PermissionMode::ReadOnly)
+            .with_tool_requirement("note_delete", PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("weather_current", PermissionMode::ReadOnly)
+            .with_tool_requirement("git_log", PermissionMode::ReadOnly)
+            .with_tool_requirement("bash", PermissionMode::DangerFullAccess)
+    }
+
+    #[test]
+    fn is_known_returns_true_for_registered_tool() {
+        let policy = standard_policy();
+        assert!(policy.is_known("note_create"));
+        assert!(policy.is_known("bash"));
+    }
+
+    #[test]
+    fn is_known_returns_false_for_unregistered_tool() {
+        let policy = standard_policy();
+        assert!(!policy.is_known("note_update"));
+        assert!(!policy.is_known("facts"));
+        assert!(!policy.is_known(""));
+    }
+
+    #[test]
+    fn suggest_for_returns_close_matches_by_substring() {
+        // `note_update` shares the `note_` prefix with all four note_* tools;
+        // each contains `note_` as a substring, so all four should appear,
+        // ordered lexicographically (stable tie-break).
+        let policy = standard_policy();
+        let suggestions = policy.suggest_for("note_update", 5);
+        assert!(suggestions.contains(&"note_create".to_string()));
+        assert!(suggestions.contains(&"note_list".to_string()));
+        assert!(suggestions.contains(&"note_read".to_string()));
+        assert!(suggestions.contains(&"note_delete".to_string()));
+    }
+
+    #[test]
+    fn suggest_for_respects_max_cap() {
+        let policy = standard_policy();
+        let suggestions = policy.suggest_for("note_update", 2);
+        assert_eq!(suggestions.len(), 2);
+    }
+
+    #[test]
+    fn suggest_for_returns_empty_for_distant_names() {
+        // `facts` shares no characters/substring with any registered tool
+        // and Levenshtein distance to all of them exceeds 3. The expected
+        // behavior is empty — caller layers a group-aware hinter on top.
+        let policy = standard_policy();
+        assert!(policy.suggest_for("facts", 5).is_empty());
+    }
+
+    #[test]
+    fn suggest_for_finds_levenshtein_neighbors() {
+        // Single-char typo within distance ≤ 3.
+        let policy = standard_policy();
+        let suggestions = policy.suggest_for("not_create", 3);
+        assert!(suggestions.contains(&"note_create".to_string()));
+    }
+
+    #[test]
+    fn suggest_for_zero_max_returns_empty() {
+        let policy = standard_policy();
+        assert!(policy.suggest_for("note_update", 0).is_empty());
+    }
+
+    #[test]
+    fn levenshtein_basic_distances() {
+        assert_eq!(super::levenshtein("", ""), 0);
+        assert_eq!(super::levenshtein("abc", "abc"), 0);
+        assert_eq!(super::levenshtein("abc", "ab"), 1);
+        assert_eq!(super::levenshtein("kitten", "sitting"), 3);
+        assert_eq!(super::levenshtein("", "hello"), 5);
     }
 }

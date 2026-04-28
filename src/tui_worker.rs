@@ -48,6 +48,7 @@ fn build_tui_runtime(session: Session, tui_tx: SyncSender<TuiEvent>) -> TuiRunti
     let api_client = OllamaApiClient::with_registry(current_model(), registry.clone())
         .with_text_callback(tui_text_callback(tui_tx.clone()));
 
+    let hinter_registry = Arc::clone(&registry);
     let inner = SecretaryToolExecutor::with_registry(registry);
     let executor = TuiToolExecutor::new(inner, tui_tx);
 
@@ -61,8 +62,17 @@ fn build_tui_runtime(session: Session, tui_tx: SyncSender<TuiEvent>) -> TuiRunti
         policy,
         secretary_system_prompt_with_memory(memory.as_deref(), false),
     )
-    .with_max_iterations(15)
+    .with_max_iterations(crate::run::max_iterations())
     .with_auto_compaction_input_tokens_threshold(u32::MAX)
+    .with_unknown_tool_hinter(move |name: &str| {
+        ToolGroup::parse(name).map_or_else(Vec::new, |group| {
+            let reg = match hinter_registry.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            reg.group_tool_names(group)
+        })
+    })
 }
 
 /// Compact the runtime in-place when the session exceeds the threshold.

@@ -10,6 +10,56 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **`note_update` tool** — fifth tool in the notes group. Updates an existing
+  note's title, body, or tags by id (filename). Pass only the fields you want
+  to change; omitted fields are preserved. The id stays stable on title
+  changes (only the `# heading` line in the file is rewritten), so any
+  brain-held reference to the note remains valid. Tags semantics: replace,
+  not merge — empty string `""` clears all tags, an absent field leaves
+  existing tags untouched. Atomic write (sibling tmp file + rename) so a
+  mid-write crash leaves the original intact. Preserves `Created:`,
+  refreshes `Updated:` on every call. Permission tier `WorkspaceWrite`
+  (auto-allowed). The `note_read` and `note_list` parsers also learned to
+  recognize `Updated:` as a metadata line — older notes without it
+  round-trip unchanged.
+- **Unknown-tool short-circuit with "did you mean?" suggestions.** When the
+  brain emits a tool_use with a name that isn't registered (a confabulation
+  like `facts` or `note_update` against an older binary), the runtime no
+  longer triggers the CLI permission prompt for a name that won't dispatch
+  anyway. Instead, it short-circuits before authorization with a structured
+  tool_result body — `{"error":"unknown tool: X","did_you_mean":[...],"hint":"..."}`
+  — so the next iteration sees the suggestion list and can self-correct.
+  Suggestions rank by shared first-component (`note_update` → all four
+  `note_*` tools), then substring containment, then Levenshtein ≤ 3. When
+  none of those match (group-name confabulations like `facts`), claudette
+  falls back to a registry-backed hinter that maps the name to the group's
+  actual tools (`facts` → `weather_current`, `wikipedia_search`, etc.).
+  New `PermissionPolicy::is_known` and `PermissionPolicy::suggest_for`
+  methods; new `ConversationRuntime::with_unknown_tool_hinter` builder
+  with a `pub type UnknownToolHinter` alias.
+- **`CLAUDETTE_MAX_ITERATIONS` env var.** Caps the per-turn (model → tool
+  → result) loop. Default raised from `15` to `40` to accommodate
+  legitimate long tool chains; small-model spirals are still bounded.
+- **PowerShell as the Windows shell for the `bash` tool.** Was `cmd /C`,
+  which couldn't parse the bash-style pipelines small-model brains tend
+  to emit on Windows (forcing the brain into a `findstr` + `Select-Object`
+  spiral). PowerShell 5.1+ ships with every supported Windows release;
+  flags `-NoProfile -NonInteractive -Command` keep startup deterministic.
+  The `bash` tool's description and the system prompt's environment
+  section both got a `Shell:` line so the brain knows which dialect to
+  emit.
+
+### Changed
+
+- **Auto-compact default raised from 12 000 to 1 000 000 estimated tokens.**
+  At 16K-and-up `num_ctx` windows the old 12K threshold tripped on every
+  multi-turn session, and the resulting summarise-and-replace flow caused
+  the qwen/mistral chat templates to occasionally reject the post-compact
+  message shape ("No user query found in messages"). Users on tight
+  contexts can opt back in via `CLAUDETTE_COMPACT_THRESHOLD=12000`.
+
 ## [0.2.2] - 2026-04-23
 
 CI-unbreaking and crates.io debut. No user-visible behaviour change vs

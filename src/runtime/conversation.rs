@@ -97,6 +97,10 @@ pub struct AutoCompactionEvent {
     pub removed_message_count: usize,
 }
 
+/// Callback that maps an unknown tool name to a list of suggested real
+/// tool names. See [`ConversationRuntime::with_unknown_tool_hinter`].
+pub type UnknownToolHinter = Box<dyn Fn(&str) -> Vec<String>>;
+
 pub struct ConversationRuntime<C, T> {
     session: Session,
     api_client: C,
@@ -107,6 +111,11 @@ pub struct ConversationRuntime<C, T> {
     usage_tracker: UsageTracker,
     hook_runner: HookRunner,
     auto_compaction_input_tokens_threshold: u32,
+    /// Optional fallback for unknown-tool suggestions. Invoked only when
+    /// `PermissionPolicy::suggest_for` returns no candidates — claudette
+    /// wires this to map a confabulated group name (e.g. `facts`) to that
+    /// group's actual tools (e.g. `weather_current`, `wikipedia_search`).
+    unknown_tool_hinter: Option<UnknownToolHinter>,
 }
 
 impl<C, T> ConversationRuntime<C, T>
@@ -152,6 +161,7 @@ where
             usage_tracker,
             hook_runner: HookRunner::from_feature_config(&feature_config),
             auto_compaction_input_tokens_threshold: auto_compaction_threshold_from_env(),
+            unknown_tool_hinter: None,
         }
     }
 
@@ -164,6 +174,20 @@ where
     #[must_use]
     pub fn with_auto_compaction_input_tokens_threshold(mut self, threshold: u32) -> Self {
         self.auto_compaction_input_tokens_threshold = threshold;
+        self
+    }
+
+    /// Register a fallback that maps an unknown tool name to a list of
+    /// real tool names to suggest. Used by claudette to turn the brain's
+    /// confabulated *group* names (`facts`, `markets`, `notes`) into the
+    /// group's actual tools — `PermissionPolicy::suggest_for` is generic
+    /// and can't know which tool group a name refers to.
+    #[must_use]
+    pub fn with_unknown_tool_hinter<F>(mut self, hinter: F) -> Self
+    where
+        F: Fn(&str) -> Vec<String> + 'static,
+    {
+        self.unknown_tool_hinter = Some(Box::new(hinter));
         self
     }
 
@@ -216,6 +240,28 @@ where
             }
 
             for (tool_use_id, tool_name, input) in pending_tool_uses {
+                // Short-circuit unknown tools BEFORE the permission gate.
+                // The brain confabulating a tool name (e.g. calling the
+                // *group* `facts` instead of the actual tool
+                // `weather_current`) should get a structured "did you mean?"
+                // tool_result, not a `[y/N]` prompt for a name that won't
+                // dispatch anyway. The next iteration sees the suggestion
+                // list and can self-correct without bothering the user.
+                if !self.permission_policy.is_known(&tool_name) {
+                    let mut suggestions = self.permission_policy.suggest_for(&tool_name, 5);
+                    if suggestions.is_empty() {
+                        if let Some(hinter) = self.unknown_tool_hinter.as_ref() {
+                            suggestions = hinter(&tool_name);
+                        }
+                    }
+                    let body = build_unknown_tool_body(&tool_name, &suggestions);
+                    let result_message =
+                        ConversationMessage::tool_result(tool_use_id, tool_name, body, true);
+                    self.session.messages.push(result_message.clone());
+                    tool_results.push(result_message);
+                    continue;
+                }
+
                 let permission_outcome = if let Some(prompt) = prompter.as_mut() {
                     self.permission_policy
                         .authorize(&tool_name, &input, Some(*prompt))
@@ -397,6 +443,26 @@ fn flush_text_block(text: &mut String, blocks: &mut Vec<ContentBlock>) {
     }
 }
 
+/// Build the JSON tool_result body returned to the brain when it calls a
+/// tool that isn't registered. The structure (`error` + `did_you_mean` +
+/// `hint`) is intentionally machine-readable so the next iteration can
+/// pluck the right name out without natural-language parsing.
+fn build_unknown_tool_body(tool_name: &str, suggestions: &[String]) -> String {
+    let suggestions_json = if suggestions.is_empty() {
+        "[]".to_string()
+    } else {
+        let quoted: Vec<String> = suggestions
+            .iter()
+            .map(|s| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")))
+            .collect();
+        format!("[{}]", quoted.join(","))
+    };
+    let escaped_name = tool_name.replace('\\', "\\\\").replace('"', "\\\"");
+    format!(
+        "{{\"error\":\"unknown tool: {escaped_name}\",\"did_you_mean\":{suggestions_json},\"hint\":\"Use one of the listed tools, or call enable_tools to activate a tool group.\"}}"
+    )
+}
+
 fn format_hook_message(result: &HookRunResult, fallback: &str) -> String {
     if result.messages().is_empty() {
         fallback.to_string()
@@ -543,7 +609,8 @@ mod tests {
                 .sum::<i32>();
             Ok(total.to_string())
         });
-        let permission_policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite);
+        let permission_policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("add", PermissionMode::DangerFullAccess);
         let system_prompt = SystemPromptBuilder::new()
             .with_project_context(ProjectContext {
                 cwd: PathBuf::from("/tmp/project"),
@@ -624,7 +691,8 @@ mod tests {
             Session::new(),
             SingleCallApiClient,
             StaticToolExecutor::new(),
-            PermissionPolicy::new(PermissionMode::WorkspaceWrite),
+            PermissionPolicy::new(PermissionMode::WorkspaceWrite)
+                .with_tool_requirement("blocked", PermissionMode::DangerFullAccess),
             vec!["system".to_string()],
         );
 
@@ -675,7 +743,8 @@ mod tests {
             StaticToolExecutor::new().register("blocked", |_input| {
                 panic!("tool should not execute when hook denies")
             }),
-            PermissionPolicy::new(PermissionMode::DangerFullAccess),
+            PermissionPolicy::new(PermissionMode::DangerFullAccess)
+                .with_tool_requirement("blocked", PermissionMode::DangerFullAccess),
             vec!["system".to_string()],
             RuntimeFeatureConfig::default().with_hooks(RuntimeHookConfig::new(
                 vec![shell_snippet("printf 'blocked by hook'; exit 2")],
@@ -741,7 +810,8 @@ mod tests {
             Session::new(),
             TwoCallApiClient { calls: 0 },
             StaticToolExecutor::new().register("add", |_input| Ok("4".to_string())),
-            PermissionPolicy::new(PermissionMode::DangerFullAccess),
+            PermissionPolicy::new(PermissionMode::DangerFullAccess)
+                .with_tool_requirement("add", PermissionMode::DangerFullAccess),
             vec!["system".to_string()],
             RuntimeFeatureConfig::default().with_hooks(RuntimeHookConfig::new(
                 vec![shell_snippet("printf 'pre hook ran'")],
@@ -971,6 +1041,171 @@ mod tests {
         assert_eq!(
             parse_auto_compaction_threshold(Some("not-a-number")),
             DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD
+        );
+    }
+
+    // ── unknown-tool short-circuit ─────────────────────────────────────
+
+    /// API client that emits one tool_use for `tool_name` on the first call,
+    /// then a final text response on the second call (which the runtime
+    /// reaches once the unknown-tool tool_result has been recorded).
+    struct UnknownToolApi {
+        tool_name: String,
+        calls: usize,
+    }
+
+    impl ApiClient for UnknownToolApi {
+        fn stream(&mut self, _request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
+            self.calls += 1;
+            match self.calls {
+                1 => Ok(vec![
+                    AssistantEvent::ToolUse {
+                        id: "tool-1".to_string(),
+                        name: self.tool_name.clone(),
+                        input: "{}".to_string(),
+                    },
+                    AssistantEvent::MessageStop,
+                ]),
+                _ => Ok(vec![
+                    AssistantEvent::TextDelta("ok, recovered.".to_string()),
+                    AssistantEvent::MessageStop,
+                ]),
+            }
+        }
+    }
+
+    struct ForbiddenPrompter;
+
+    impl PermissionPrompter for ForbiddenPrompter {
+        fn decide(&mut self, request: &PermissionRequest) -> PermissionPromptDecision {
+            panic!(
+                "prompter must not be invoked for unknown tool {} — \
+                 short-circuit is broken",
+                request.tool_name
+            );
+        }
+    }
+
+    struct ForbiddenExecutor;
+
+    impl super::ToolExecutor for ForbiddenExecutor {
+        fn execute(&mut self, tool_name: &str, _input: &str) -> Result<String, super::ToolError> {
+            panic!("executor must not be invoked for unknown tool {tool_name}");
+        }
+    }
+
+    #[test]
+    fn unknown_tool_short_circuits_without_invoking_prompter_or_executor() {
+        let policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("note_create", PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("note_read", PermissionMode::ReadOnly);
+        let mut runtime = ConversationRuntime::new(
+            Session::new(),
+            UnknownToolApi {
+                tool_name: "note_update".to_string(),
+                calls: 0,
+            },
+            ForbiddenExecutor,
+            policy,
+            vec!["system".to_string()],
+        );
+
+        let summary = runtime
+            .run_turn("update my note", Some(&mut ForbiddenPrompter))
+            .expect("unknown tool should produce a tool_result, not error the loop");
+
+        assert_eq!(summary.tool_results.len(), 1);
+        let ContentBlock::ToolResult {
+            is_error, output, ..
+        } = &summary.tool_results[0].blocks[0]
+        else {
+            panic!("expected tool result block");
+        };
+        assert!(*is_error, "unknown-tool result must be flagged is_error");
+        assert!(
+            output.contains("unknown tool: note_update"),
+            "result must name the unknown tool: {output}"
+        );
+        assert!(
+            output.contains("note_create") && output.contains("note_read"),
+            "did_you_mean must list both registered note_* tools: {output}"
+        );
+        assert!(
+            output.contains("\"did_you_mean\""),
+            "result body must be JSON-shaped with a did_you_mean key: {output}"
+        );
+    }
+
+    #[test]
+    fn unknown_tool_falls_through_to_hinter_when_suggest_for_is_empty() {
+        // `facts` is a group-name confabulation — no registered tool name
+        // shares any substring or close edit distance with it. The generic
+        // suggest_for returns []; the hinter must kick in and supply the
+        // group's actual tools.
+        let policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("weather_current", PermissionMode::ReadOnly)
+            .with_tool_requirement("wikipedia_search", PermissionMode::ReadOnly);
+        let mut runtime = ConversationRuntime::new(
+            Session::new(),
+            UnknownToolApi {
+                tool_name: "facts".to_string(),
+                calls: 0,
+            },
+            ForbiddenExecutor,
+            policy,
+            vec!["system".to_string()],
+        )
+        .with_unknown_tool_hinter(|name: &str| {
+            if name == "facts" {
+                vec![
+                    "weather_current".to_string(),
+                    "wikipedia_search".to_string(),
+                ]
+            } else {
+                Vec::new()
+            }
+        });
+
+        let summary = runtime
+            .run_turn("what's the weather?", Some(&mut ForbiddenPrompter))
+            .expect("conversation continues after unknown tool");
+
+        let ContentBlock::ToolResult { output, .. } = &summary.tool_results[0].blocks[0] else {
+            panic!("expected tool result block");
+        };
+        assert!(
+            output.contains("weather_current") && output.contains("wikipedia_search"),
+            "hinter suggestions must appear in did_you_mean: {output}"
+        );
+    }
+
+    #[test]
+    fn unknown_tool_with_no_suggestions_returns_empty_did_you_mean() {
+        let policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("weather_current", PermissionMode::ReadOnly);
+        let mut runtime = ConversationRuntime::new(
+            Session::new(),
+            UnknownToolApi {
+                tool_name: "totally_unrelated_xyz".to_string(),
+                calls: 0,
+            },
+            ForbiddenExecutor,
+            policy,
+            vec!["system".to_string()],
+        );
+
+        let summary = runtime
+            .run_turn("?", Some(&mut ForbiddenPrompter))
+            .expect("loop continues");
+
+        let ContentBlock::ToolResult { output, .. } = &summary.tool_results[0].blocks[0] else {
+            panic!("expected tool result block");
+        };
+        // Empty list is still a structured response — the brain knows the
+        // tool doesn't exist even if no close match is suggested.
+        assert!(
+            output.contains("\"did_you_mean\":[]"),
+            "no-match case should still produce a structured response: {output}"
         );
     }
 }

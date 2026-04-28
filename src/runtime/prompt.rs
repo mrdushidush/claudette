@@ -169,6 +169,11 @@ impl SystemPromptBuilder {
             || "unknown".to_string(),
             |context| context.current_date.clone(),
         );
+        let shell = if cfg!(target_os = "windows") {
+            "PowerShell (use Windows shell syntax: ; for chaining, $env:VAR, no && or Unix pipes; backslash paths; use findstr/Select-String not grep)"
+        } else {
+            "sh"
+        };
         let mut lines = vec!["# Environment context".to_string()];
         lines.extend(prepend_bullets(vec![
             format!("Model family: {FRONTIER_MODEL_NAME}"),
@@ -179,6 +184,7 @@ impl SystemPromptBuilder {
                 self.os_name.as_deref().unwrap_or("unknown"),
                 self.os_version.as_deref().unwrap_or("unknown")
             ),
+            format!("Shell (for the bash tool): {shell}"),
         ]));
         lines.join("\n")
     }

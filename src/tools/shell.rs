@@ -27,7 +27,7 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "bash",
-                "description": "Run a shell command. Requires user confirmation. Use for system tasks the other tools can't handle.",
+                "description": "Run a shell command. Requires user confirmation. Use for system tasks the other tools can't handle. The shell is PowerShell on Windows (use Windows syntax: ; for chaining, $env:VAR, no &&; backslash paths) and sh on macOS/Linux.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -78,8 +78,17 @@ fn run_bash(input: &str) -> Result<String, String> {
     }
 
     // Execute via the platform shell so pipes, redirects, and builtins work.
+    // Windows: PowerShell 5.1+ (powershell.exe) — ships with every supported
+    // Windows release. cmd.exe is avoided because small-model brains tend to
+    // emit Unix-style pipelines that cmd can't parse, and findstr/Select-Object
+    // get mixed in the same line. PowerShell is closer to that pre-trained
+    // distribution. Flags: -NoProfile (skip $PROFILE), -NonInteractive (fail
+    // fast on Read-Host instead of hanging), -Command (single-string).
     #[cfg(target_os = "windows")]
-    let (program, args) = ("cmd", vec!["/C", command]);
+    let (program, args) = (
+        "powershell",
+        vec!["-NoProfile", "-NonInteractive", "-Command", command],
+    );
     #[cfg(not(target_os = "windows"))]
     let (program, args) = ("sh", vec!["-c", command]);
 

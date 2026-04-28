@@ -99,7 +99,7 @@ Switch at runtime with `/preset fast | auto | smart`, or pin a specific brain wi
 | Tier | Behaviour | Example tools |
 |------|-----------|---------------|
 | **ReadOnly** | Auto-allowed | time, note_list, file reads, git status, all external APIs |
-| **WorkspaceWrite** | Auto-allowed | note_create, todo_add, web_search, generate_code, github comment |
+| **WorkspaceWrite** | Auto-allowed | note_create, note_update, todo_add, web_search, generate_code, github comment |
 | **DangerFullAccess** | Prompts `[y/N]` every time | bash, edit_file, git add/commit/push/checkout |
 
 The REPL prompter is interactive. The TUI renders the permission dialog in its tool pane. Telegram bot denies DangerFullAccess by default (no TTY to confirm with).
@@ -109,7 +109,7 @@ The REPL prompter is interactive. The TUI renders the permission dialog in its t
 - **Autosave** after every REPL turn to `~/.claudette/sessions/last.json`.
 - **Resume** with `--resume` or `-r`.
 - **Named sessions** via `/save <name>` and `/load <name>` (stored at `~/.claudette/sessions/<name>.json`).
-- **Auto-compaction** fires at 12 K estimated tokens (configurable via `CLAUDETTE_COMPACT_THRESHOLD`) — summarises old turns, keeps recent ones verbatim, preserves tool-result anchoring so the runtime never ends up in a broken state.
+- **Auto-compaction** is effectively off by default (1 M estimated tokens) — opt in for tight context windows via `CLAUDETTE_COMPACT_THRESHOLD=12000`. When it does fire, it summarises old turns, keeps recent ones verbatim, and preserves tool-result anchoring so the runtime never ends up in a broken state.
 - **Sliding-window truncator** acts as a safety net inside the API client.
 
 ### Voice in, voice out
@@ -263,7 +263,8 @@ All variables are optional; defaults are shown. Set them in your shell environme
 | `CLAUDETTE_MODEL` | `qwen3.5:4b` (Auto preset) | Brain model override. |
 | `CLAUDETTE_NUM_CTX` | `16384` | Brain context window in tokens. |
 | `CLAUDETTE_NUM_PREDICT` | `6144` | Max output tokens per request. |
-| `CLAUDETTE_COMPACT_THRESHOLD` | `12000` | Auto-compaction trigger (estimated tokens). |
+| `CLAUDETTE_COMPACT_THRESHOLD` | `1000000` | Auto-compaction trigger (estimated tokens). Default makes auto-compact a no-op for typical 16K–128K context windows; set to `12000` (or a fraction of your `num_ctx`) on tight contexts. |
+| `CLAUDETTE_MAX_ITERATIONS` | `40` | Per-turn (model → tool → result) loop ceiling. Lower it (e.g. `15`) to fail-fast on small-model spirals; raise it for legitimate long tool chains. |
 | `CLAUDETTE_SESSION` | `~/.claudette/sessions/last.json` | Override the session file path. |
 | `CLAUDETTE_MEMORY` | `~/.claudette/CLAUDETTE.MD` | Override the path Claudette loads user-memory from. |
 | `CLAUDETTE_SKIP_OLLAMA_PROBE` | unset | Set to `1` to skip the startup probe (CI / offline). |

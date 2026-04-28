@@ -18,7 +18,7 @@ use crate::memory::try_load_memory;
 use crate::model_config;
 use crate::prompt::secretary_system_prompt_with_memory;
 use crate::theme;
-use crate::tool_groups::ToolRegistry;
+use crate::tool_groups::{ToolGroup, ToolRegistry};
 
 // Brain default now lives in `model_config::ModelConfig::from_preset`. The
 // Auto preset (qwen3.5:4b brain + qwen3.5:9b fallback, shipped Sprint 14)
@@ -44,10 +44,13 @@ use crate::tool_groups::ToolRegistry;
 /// a metric that's actually bounded by the current session size and
 /// drops back below the threshold after a successful compact.
 ///
-/// Default `12_000` ≈ 73% of the 16 K `num_ctx` window, leaving headroom
-/// for the system prompt (~500 tokens) and tool schemas (~2-4K tokens
-/// depending on enabled groups). Override via `CLAUDETTE_COMPACT_THRESHOLD`.
-pub const DEFAULT_COMPACT_THRESHOLD: usize = 12_000;
+/// Default `1_000_000` makes auto-compact effectively a no-op for typical
+/// local-brain setups (16K–128K context). The gate stays in place so a
+/// pathologically long session still trips it, but day-to-day work won't
+/// see compaction noise. Users on tight context windows who *want* the old
+/// safety net can set `CLAUDETTE_COMPACT_THRESHOLD=12000` (or whatever
+/// fraction of their `num_ctx` they prefer).
+pub const DEFAULT_COMPACT_THRESHOLD: usize = 1_000_000;
 
 /// Resolve the compaction threshold the REPL is currently using — honors
 /// the `CLAUDETTE_COMPACT_THRESHOLD` env var, falls back to
@@ -60,6 +63,26 @@ pub fn compact_threshold() -> usize {
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(DEFAULT_COMPACT_THRESHOLD)
+}
+
+/// Default REPL/TUI max iterations per turn — how many (model → tool → result)
+/// cycles a single user prompt is allowed to drive before the runtime aborts
+/// with "conversation loop exceeded the maximum number of iterations".
+///
+/// `40` is generous: it accommodates legitimate long tool chains (multi-step
+/// research, build + test + grep + fix) while still capping pathological
+/// spirals from small brains. Override via `CLAUDETTE_MAX_ITERATIONS`.
+pub const DEFAULT_MAX_ITERATIONS: usize = 40;
+
+/// Resolve the per-turn max-iteration ceiling. Honors
+/// `CLAUDETTE_MAX_ITERATIONS`; falls back to [`DEFAULT_MAX_ITERATIONS`].
+#[must_use]
+pub fn max_iterations() -> usize {
+    std::env::var("CLAUDETTE_MAX_ITERATIONS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(DEFAULT_MAX_ITERATIONS)
 }
 
 /// Resolve the model name the runtime is currently using. Sprint 14: this
@@ -429,7 +452,6 @@ pub(crate) fn build_runtime_with_brain(
     // Cost: ~3K tokens of schema (~18% of 16K context). Worth it for the
     // single-iteration tool calls.
     if telegram {
-        use crate::tool_groups::ToolGroup;
         reg.enable(ToolGroup::Markets);
         reg.enable(ToolGroup::Facts);
         reg.enable(ToolGroup::Advanced);
@@ -450,6 +472,11 @@ pub(crate) fn build_runtime_with_brain(
         };
         api_client = api_client.with_text_callback(cb);
     }
+    // Clone the registry handle for the unknown-tool hinter before the
+    // executor consumes it. The hinter maps a confabulated *group* name
+    // (e.g. `facts`, `markets`) to that group's actual tools so the brain
+    // gets a useful "did you mean?" list instead of an empty array.
+    let hinter_registry = Arc::clone(&registry);
     let executor = SecretaryToolExecutor::with_registry(registry);
     let policy = build_permission_policy();
     let memory = try_load_memory();
@@ -463,9 +490,22 @@ pub(crate) fn build_runtime_with_brain(
     )
     // Tools in optional groups need 3+ iterations (enable_tools → tool call
     // → respond). With the empty-response retry nudge, 8 was too tight for
-    // single-shot search/grep/git chains. 15 matches TUI and Telegram.
-    .with_max_iterations(15)
+    // single-shot search/grep/git chains. The shared default (currently 40)
+    // and the `CLAUDETTE_MAX_ITERATIONS` env-var knob live in `max_iterations`.
+    .with_max_iterations(max_iterations())
     .with_auto_compaction_input_tokens_threshold(u32::MAX)
+    .with_unknown_tool_hinter(move |name: &str| {
+        ToolGroup::parse(name).map_or_else(Vec::new, |group| {
+            // Poisoned-lock recovery: another thread held the lock and
+            // panicked. Continue with the inner state — the hinter is a
+            // best-effort suggestion, not a correctness path.
+            let reg = match hinter_registry.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            reg.group_tool_names(group)
+        })
+    })
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -498,6 +538,7 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("git_branch", ReadOnly)
         // ── Workspace-write (auto-allowed) ──────────────────────────
         .with_tool_requirement("note_create", WorkspaceWrite)
+        .with_tool_requirement("note_update", WorkspaceWrite)
         .with_tool_requirement("note_delete", WorkspaceWrite)
         .with_tool_requirement("todo_add", WorkspaceWrite)
         .with_tool_requirement("todo_complete", WorkspaceWrite)
