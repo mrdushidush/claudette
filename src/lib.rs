@@ -69,7 +69,7 @@ pub use run::{
     default_session_path, run_secretary, run_secretary_repl, save_session, save_session_at,
     try_load_session, try_load_session_at, SessionOptions,
 };
-pub use tools::secretary_tools_json;
+pub use tools::{secretary_tools_json, workspace_startup_diagnostics};
 
 /// Process-wide lock for tests that mutate environment variables. Several
 /// runtime tests call `crate::test_env_lock()` to serialise env-var mutation

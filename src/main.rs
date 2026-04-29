@@ -21,7 +21,7 @@ use std::process::ExitCode;
 
 use claudette::{
     briefing, clock, google_auth, probe_ollama, run_secretary, run_secretary_repl, scheduler,
-    secrets, telegram_mode, theme, try_load_session, SessionOptions,
+    secrets, telegram_mode, theme, try_load_session, workspace_startup_diagnostics, SessionOptions,
 };
 use claudette::{ContentBlock, Session};
 
@@ -166,6 +166,19 @@ fn main() -> ExitCode {
     if args.version {
         println!("claudette {}", env!("CARGO_PKG_VERSION"));
         return ExitCode::SUCCESS;
+    }
+
+    // ── Workspace-roots startup probe ─────────────────────────────────
+    // Catches the 2026-04-28 wrapper-forgot-CLAUDETTE_WORKSPACE class of
+    // bug at startup rather than first read attempt. Prints to stderr
+    // because the runtime may use stdout for one-shot replies; warnings
+    // shouldn't pollute scriptable output.
+    for warning in workspace_startup_diagnostics() {
+        eprintln!(
+            "{} {}",
+            theme::warn(theme::WARN_GLYPH),
+            theme::warn(&warning)
+        );
     }
 
     let CliArgs {

@@ -469,6 +469,104 @@ fn resolve_input_path(input: &str) -> Result<PathBuf, String> {
 // `is_code_extension` + CODE_EXTENSIONS moved with write_file into
 // src/tools/file_ops.rs.
 
+/// Resolved workspace roots — the three places `validate_read_path` looks
+/// for allowed reads, captured into one value so the resolution rules are
+/// expressed once instead of re-derived per call. Callers can either build
+/// fresh from env (the typical path, see [`Self::from_env`]) or construct
+/// directly in tests for dependency injection.
+///
+/// **Why a value type instead of caching globally**: `from_env` is cheap
+/// (env reads + path normalisation, no I/O) and per-call freshness is what
+/// existing tests assume. The 2026-04-28 wrapper-forgot-`CLAUDETTE_WORKSPACE`
+/// bug originated *outside* this binary; this type doesn't structurally
+/// prevent it but it does enable [`Self::startup_diagnostics`] to issue a
+/// loud warning at startup when the resolution would deny most reads.
+///
+/// Note: `cwd` may be `None` if `current_dir()` failed (very rare — usually
+/// only happens when the caller's CWD has been deleted from underneath
+/// it). In that case the CWD-based allowance never fires; allow-list is
+/// $HOME plus `CLAUDETTE_WORKSPACE` only.
+#[derive(Debug, Clone)]
+pub(crate) struct WorkspaceRoots {
+    /// Always allowed.
+    pub home: PathBuf,
+    /// Captured at construction. Allowed only if itself under `home`.
+    pub cwd: Option<PathBuf>,
+    /// Explicit out-of-HOME roots from `CLAUDETTE_WORKSPACE`.
+    pub workspace: Vec<PathBuf>,
+}
+
+impl WorkspaceRoots {
+    /// Build by reading the process environment plus the current working
+    /// directory. Cheap; safe to call per request, but tests and tooling
+    /// that need to vary the resolution may construct directly.
+    pub fn from_env() -> Self {
+        Self {
+            home: normalize_path(&user_home()),
+            cwd: std::env::current_dir().ok(),
+            workspace: parse_workspace_env(),
+        }
+    }
+
+    /// Diagnostics to emit at startup. Returns an empty vec when the
+    /// resolution looks healthy; otherwise one or more warnings the
+    /// caller should print to stderr before the runtime begins. Does NOT
+    /// exit the process — running with restricted reads is legitimate
+    /// and many invocations do (one-shot scripts, `--briefing`, etc.).
+    ///
+    /// Today the only check is the wrapper-forgot-env scenario from
+    /// 2026-04-28: cwd outside `$HOME` and no `CLAUDETTE_WORKSPACE`,
+    /// which is exactly when the brain will silently fail to read files
+    /// under the working directory.
+    #[must_use]
+    pub fn startup_diagnostics(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+        if let Some(cwd) = &self.cwd {
+            let cwd_under_home = cwd.starts_with(&self.home);
+            if !cwd_under_home && self.workspace.is_empty() {
+                warnings.push(format!(
+                    "Working directory ({}) is outside $HOME ({}) and \
+                     CLAUDETTE_WORKSPACE is not set. File reads will be \
+                     restricted to $HOME — `read_file` and `list_dir` \
+                     will refuse paths under the working directory. \
+                     Export CLAUDETTE_WORKSPACE=\"$(pwd)\" if you intended \
+                     the brain to read files here.",
+                    cwd.display(),
+                    self.home.display(),
+                ));
+            }
+        }
+        warnings
+    }
+}
+
+/// Parse `CLAUDETTE_WORKSPACE` into a list of root paths. Empty when the
+/// env var is unset or all-whitespace after splitting. Separator is `:`
+/// on Unix, `;` on Windows (matching `PATH` conventions).
+fn parse_workspace_env() -> Vec<PathBuf> {
+    let Ok(ws) = std::env::var("CLAUDETTE_WORKSPACE") else {
+        return Vec::new();
+    };
+    #[cfg(unix)]
+    let sep = ':';
+    #[cfg(not(unix))]
+    let sep = ';';
+    ws.split(sep)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// Top-level convenience for `main`: build `WorkspaceRoots::from_env()`
+/// and return its [`WorkspaceRoots::startup_diagnostics`] output. Exposed
+/// at the crate root so the binary can print warnings before the runtime
+/// touches anything.
+#[must_use]
+pub fn workspace_startup_diagnostics() -> Vec<String> {
+    WorkspaceRoots::from_env().startup_diagnostics()
+}
+
 /// Validate a read/list path. Allowed roots, in order:
 ///
 /// 1. `$HOME` — always.
@@ -485,14 +583,25 @@ fn resolve_input_path(input: &str) -> Result<PathBuf, String> {
 /// check on `fs::canonicalize` output that defeats symlink escapes
 /// (`~/.claudette/files/trap -> /etc/shadow`).
 pub(super) fn validate_read_path(input: &str) -> Result<PathBuf, String> {
-    let resolved = resolve_input_path(input)?;
-    let home = normalize_path(&user_home());
+    let roots = WorkspaceRoots::from_env();
+    validate_read_path_with(input, &roots)
+}
 
-    if !path_is_allowed(&resolved, &home, false) {
+/// Underlying implementation of [`validate_read_path`] taking explicit
+/// roots, for dependency injection in tests and future call sites that
+/// want to amortise root construction across multiple validations in a
+/// single tool dispatch.
+pub(super) fn validate_read_path_with(
+    input: &str,
+    roots: &WorkspaceRoots,
+) -> Result<PathBuf, String> {
+    let resolved = resolve_input_path(input)?;
+
+    if !path_is_allowed(&resolved, roots, false) {
         return Err(format!(
             "path is outside $HOME ({}), the working directory (if under $HOME), \
              and CLAUDETTE_WORKSPACE; reads are restricted for safety",
-            home.display()
+            roots.home.display()
         ));
     }
 
@@ -500,7 +609,7 @@ pub(super) fn validate_read_path(input: &str) -> Result<PathBuf, String> {
     // re-check against canonicalised allowed roots. Skipped for paths that
     // don't exist yet (there's no symlink to follow).
     if let Ok(canonical) = std::fs::canonicalize(&resolved) {
-        if !path_is_allowed(&canonical, &home, true) {
+        if !path_is_allowed(&canonical, roots, true) {
             return Err(format!(
                 "path resolves via symlink outside allowed roots: {} → {}",
                 resolved.display(),
@@ -512,48 +621,38 @@ pub(super) fn validate_read_path(input: &str) -> Result<PathBuf, String> {
     Ok(resolved)
 }
 
-/// Check whether `path` is under any allowed root.
+/// Check whether `path` is under any allowed root in `roots`.
 /// `canonical = true` canonicalises each root before comparing so a symlinked
 /// `path` already resolved through `fs::canonicalize` matches correctly.
-fn path_is_allowed(path: &Path, home: &Path, canonical: bool) -> bool {
+fn path_is_allowed(path: &Path, roots: &WorkspaceRoots, canonical: bool) -> bool {
     let home_canonical = if canonical {
-        std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf())
+        std::fs::canonicalize(&roots.home).unwrap_or_else(|_| roots.home.clone())
     } else {
-        home.to_path_buf()
+        roots.home.clone()
     };
     if path.starts_with(&home_canonical) {
         return true;
     }
 
-    if let Ok(cwd) = std::env::current_dir() {
+    if let Some(cwd) = &roots.cwd {
         let cwd_check = if canonical {
-            std::fs::canonicalize(&cwd).unwrap_or_else(|_| normalize_path(&cwd))
+            std::fs::canonicalize(cwd).unwrap_or_else(|_| normalize_path(cwd))
         } else {
-            normalize_path(&cwd)
+            normalize_path(cwd)
         };
         if cwd_check.starts_with(&home_canonical) && path.starts_with(&cwd_check) {
             return true;
         }
     }
 
-    let Ok(ws) = std::env::var("CLAUDETTE_WORKSPACE") else {
-        return false;
-    };
-    #[cfg(unix)]
-    let sep = ':';
-    #[cfg(not(unix))]
-    let sep = ';';
-    ws.split(sep)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .any(|root| {
-            let root_check = if canonical {
-                std::fs::canonicalize(root).unwrap_or_else(|_| PathBuf::from(root))
-            } else {
-                normalize_path(Path::new(root))
-            };
-            path.starts_with(&root_check)
-        })
+    roots.workspace.iter().any(|root| {
+        let root_check = if canonical {
+            std::fs::canonicalize(root).unwrap_or_else(|_| root.clone())
+        } else {
+            normalize_path(root)
+        };
+        path.starts_with(&root_check)
+    })
 }
 
 /// Validate a write path: must resolve under `~/.claudette/files/`.
@@ -1038,6 +1137,134 @@ mod tests {
         assert!(
             result.unwrap_err().contains("via symlink"),
             "wrong error: expected 'via symlink'"
+        );
+    }
+
+    // ── WorkspaceRoots tests ─────────────────────────────────────────
+    //
+    // The struct centralises the three-way ($HOME / cwd / CLAUDETTE_WORKSPACE)
+    // resolution rules that `validate_read_path` and `validate_read_path_with`
+    // share. Two reasons to test it directly: (a) `from_env`/`startup_diagnostics`
+    // are the primitives main.rs calls and need their own coverage, and
+    // (b) `validate_read_path_with` lets future call sites build the struct
+    // once and reuse it across multiple validations in a single tool dispatch.
+
+    #[test]
+    fn workspace_roots_from_env_captures_home() {
+        let roots = WorkspaceRoots::from_env();
+        assert_eq!(roots.home, normalize_path(&user_home()));
+        // cwd is captured at construction; in test environments it
+        // should always be readable.
+        assert!(roots.cwd.is_some(), "test cwd must be readable");
+    }
+
+    #[test]
+    fn workspace_roots_parse_workspace_env_splits_on_platform_sep() {
+        // Roundtrip the platform-correct separator. Use absolute paths
+        // because parse_workspace_env preserves them as PathBuf without
+        // resolving — we just want to confirm the split + trim logic.
+        let prev = std::env::var("CLAUDETTE_WORKSPACE").ok();
+        #[cfg(unix)]
+        let val = "/a:/b:/c";
+        #[cfg(not(unix))]
+        let val = r"C:\a;D:\b;E:\c";
+        std::env::set_var("CLAUDETTE_WORKSPACE", val);
+        let parsed = parse_workspace_env();
+        // Restore env before asserting so a panic doesn't poison other tests.
+        match prev {
+            Some(v) => std::env::set_var("CLAUDETTE_WORKSPACE", v),
+            None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+        }
+        assert_eq!(parsed.len(), 3, "expected 3 paths, got {parsed:?}");
+    }
+
+    #[test]
+    fn workspace_roots_parse_workspace_env_empty_when_unset() {
+        let prev = std::env::var("CLAUDETTE_WORKSPACE").ok();
+        std::env::remove_var("CLAUDETTE_WORKSPACE");
+        let parsed = parse_workspace_env();
+        if let Some(v) = prev {
+            std::env::set_var("CLAUDETTE_WORKSPACE", v);
+        }
+        assert!(parsed.is_empty(), "unset env must yield empty: {parsed:?}");
+    }
+
+    #[test]
+    fn workspace_startup_diagnostics_quiet_when_cwd_under_home() {
+        // Healthy resolution: cwd is under home, workspace doesn't matter.
+        let roots = WorkspaceRoots {
+            home: PathBuf::from("/home/u"),
+            cwd: Some(PathBuf::from("/home/u/projects/x")),
+            workspace: Vec::new(),
+        };
+        assert!(roots.startup_diagnostics().is_empty());
+    }
+
+    #[test]
+    fn workspace_startup_diagnostics_warns_on_unwrappered_cwd() {
+        // The 2026-04-28 wrapper-forgot-CLAUDETTE_WORKSPACE shape:
+        // cwd is outside HOME and no workspace is set. This is the
+        // exact configuration that produced ~20 pts of bench delta in
+        // `claudette_lmstudio_parity.md` before the wrapper was fixed.
+        let roots = WorkspaceRoots {
+            home: PathBuf::from("/home/u"),
+            cwd: Some(PathBuf::from("/var/run/some/path")),
+            workspace: Vec::new(),
+        };
+        let warnings = roots.startup_diagnostics();
+        assert_eq!(warnings.len(), 1, "expected one warning, got {warnings:?}");
+        assert!(
+            warnings[0].contains("CLAUDETTE_WORKSPACE"),
+            "warning must name the env var so users know how to fix; got {}",
+            warnings[0]
+        );
+    }
+
+    #[test]
+    fn workspace_startup_diagnostics_quiet_when_workspace_set() {
+        // Out-of-home cwd is fine if CLAUDETTE_WORKSPACE provides
+        // explicit allowance.
+        let roots = WorkspaceRoots {
+            home: PathBuf::from("/home/u"),
+            cwd: Some(PathBuf::from("/var/run/x")),
+            workspace: vec![PathBuf::from("/var/run/x")],
+        };
+        assert!(roots.startup_diagnostics().is_empty());
+    }
+
+    #[test]
+    fn validate_read_path_with_injects_custom_roots() {
+        // Demonstrate the dependency-injection contract: same input
+        // path, two different WorkspaceRoots → opposite outcomes,
+        // independent of process env. Future call sites that build the
+        // struct once per dispatch rely on this.
+        #[cfg(unix)]
+        let target = "/synthetic-ws/file.txt";
+        #[cfg(not(unix))]
+        let target = r"Z:\synthetic-ws\file.txt";
+
+        let denying = WorkspaceRoots {
+            home: PathBuf::from(if cfg!(unix) { "/home/u" } else { r"C:\home\u" }),
+            cwd: None,
+            workspace: Vec::new(),
+        };
+        assert!(
+            validate_read_path_with(target, &denying).is_err(),
+            "no workspace, expected reject"
+        );
+
+        let permitting = WorkspaceRoots {
+            home: denying.home.clone(),
+            cwd: None,
+            workspace: vec![PathBuf::from(if cfg!(unix) {
+                "/synthetic-ws"
+            } else {
+                r"Z:\synthetic-ws"
+            })],
+        };
+        assert!(
+            validate_read_path_with(target, &permitting).is_ok(),
+            "workspace covers target, expected ok"
         );
     }
 
