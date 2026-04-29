@@ -1,0 +1,84 @@
+name: Release
+
+# Triggered by pushing a v-prefix tag (e.g. `git tag v0.2.3 && git push --tags`).
+# Runs the test suite once on the tagged commit, then publishes to crates.io
+# using a short-lived OIDC token exchanged via crates-io-auth-action — no
+# CARGO_REGISTRY_TOKEN secret is stored in this repo.
+#
+# One-time setup on crates.io (UI):
+#   1. Visit https://crates.io/crates/claudette/settings (logged in as
+#      a crate owner).
+#   2. Under "Trusted Publishers" → Add → GitHub.
+#   3. Repository owner = mrdushidush, repository name = claudette,
+#      workflow filename = release.yml. Environment may be left blank.
+#   4. Save.
+# After that, every tagged push runs through this workflow without any
+# rotating tokens or secrets to manage.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Default-deny everything; the publish job opts back into id-token:write
+# for the OIDC exchange. contents:read is needed for actions/checkout.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    name: verify (test + clippy + fmt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2.9.1
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --no-deps -- -D warnings
+      - run: cargo test --lib --bins
+        env:
+          CLAUDETTE_SKIP_OLLAMA_PROBE: "1"
+
+  tag-version-match:
+    name: tag matches Cargo.toml version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - name: Compare tag to package version
+        # Tag format `v0.2.3` must match the `version = "0.2.3"` line in
+        # Cargo.toml. Mismatch is almost always a forgot-to-bump in the
+        # release prep — fail fast rather than publish a wrong version.
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          ver="$(grep -E '^version = ' Cargo.toml | head -1 | sed -E 's/^version = "([^"]+)".*/\1/')"
+          echo "tag = $tag"
+          echo "Cargo.toml version = $ver"
+          if [ "$tag" != "$ver" ]; then
+            echo "::error::tag $tag does not match Cargo.toml version $ver"
+            exit 1
+          fi
+
+  publish:
+    name: cargo publish (crates.io)
+    runs-on: ubuntu-latest
+    needs: [verify, tag-version-match]
+    # OIDC exchange needs id-token:write. Grant nothing else.
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2.9.1
+      - name: Exchange OIDC token for crates.io publish token
+        uses: rust-lang/crates-io-auth-action@b7e9a28eded4986ec6b1fa40eeee8f8f165559ec  # v1.0.4
+        id: auth
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: cargo publish --locked

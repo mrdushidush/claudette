@@ -1,0 +1,42 @@
+# Dependabot keeps cargo and GitHub Actions deps current.
+#
+# Cargo minor/patch are grouped into a single PR per week; majors come
+# as separate PRs because they tend to need code changes. Actions are
+# pinned by SHA in workflows (see ci.yml), so dependabot will rewrite
+# the SHA + version comment together when it opens a PR.
+version: 2
+
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+    labels:
+      - "dependencies"
+    groups:
+      cargo-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "ci"
