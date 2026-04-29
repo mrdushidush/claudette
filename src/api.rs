@@ -920,13 +920,16 @@ fn build_messages_openai_compat(request: &ApiRequest, history_budget_chars: usiz
 ///    through verbatim instead of `serde_json::from_str`-ing it back to
 ///    a `Value` like the Ollama path does.
 ///
-/// **Truncation hazard**: [`truncate_to_budget`] is unaware of the
-/// assistant→tool pairing invariant. If the budget happens to drop a
-/// `tool` message but keep its preceding assistant `tool_calls`, the
-/// server will reject the next request. The brain-side runtime's
-/// auto-compaction is the long-term fix; for now the per-turn budget
-/// at the configured `num_ctx` is comfortably above any realistic
-/// single tool roundtrip.
+/// **Truncation pairing**: [`truncate_to_budget`] enforces both
+/// directions of the assistant↔tool pairing invariant — kept tool
+/// messages pin their preceding assistant.`tool_calls`, and kept
+/// `assistant.tool_calls` whose tool result was dropped are themselves
+/// dropped in a post-pass. The remaining edge case is partial-drop in
+/// OpenAI-compat shape: a single assistant with N tool_calls expands to
+/// N separate tool messages, and dropping some-but-not-all leaves the
+/// assistant's `tool_calls` array referencing missing IDs. In practice
+/// the per-turn budget at default `num_ctx` is comfortably above any
+/// realistic multi-tool roundtrip.
 fn build_history_messages_openai_compat(msgs: &[crate::ConversationMessage]) -> Vec<Value> {
     let mut messages = Vec::with_capacity(msgs.len());
     for msg in msgs {
@@ -1020,6 +1023,29 @@ fn build_history_messages_openai_compat(msgs: &[crate::ConversationMessage]) -> 
 /// we keep N-1. Previously a `break` here meant a single huge tool result
 /// (e.g. `list_dir` on a deep home directory) wiped out *every* prior turn.
 ///
+/// **Pairing invariants** are enforced for strict-jinja servers (LM Studio
+/// with the GGUF template toggle on, vLLM in strict mode, OpenAI itself):
+///
+///   - the most recent user message survives even when the budget is
+///     smaller than a single oversized tool result (otherwise HTTP 400
+///     "No user query found in messages");
+///   - any kept `tool` message has its preceding assistant.`tool_calls`
+///     force-pinned via the reverse walk (no orphan tool results);
+///   - any kept `assistant.tool_calls` is followed by a `tool` message
+///     in the kept set, otherwise the assistant is dropped in a post-pass
+///     (no orphan tool calls). The newest message is exempt from the
+///     drop — the always-keep-newest rule wins.
+///
+/// **Known limitation**: in OpenAI-compat shape a single assistant with
+/// N `tool_calls` expands to N separate `tool` messages, one per
+/// `tool_call_id`. If the budget drops some but not all of those tool
+/// messages, the assistant's `tool_calls` array still references the
+/// dropped IDs and strict validators reject. The partial-drop case is
+/// not yet handled (would require rewriting the assistant's `tool_calls`
+/// array to exclude orphaned IDs); in practice the per-turn budget at
+/// default `num_ctx` is comfortably above any realistic multi-tool
+/// roundtrip.
+///
 /// **Why a free function and not inside `build_messages`:** keeps it pure and
 /// directly testable (no `ApiRequest` ceremony to construct in tests).
 ///
@@ -1078,6 +1104,47 @@ fn truncate_to_budget(messages: Vec<Value>, budget_chars: usize) -> Vec<Value> {
         kept.push(msg);
     }
     kept.reverse();
+
+    // Post-pass: drop any kept `assistant.tool_calls` whose paired tool
+    // result was skipped. The forward-direction pin above closes the
+    // orphan-tool-result hazard (kept tool → pin assistant); this closes
+    // the inverse orphan-tool-call hazard (kept assistant whose tool was
+    // dropped because it overshot the budget).
+    //
+    // Never drops the newest message — the always-keep-newest rule wins
+    // even if newest is itself an orphan assistant. That would only
+    // happen in a bad runtime state; the API call will fail loudly
+    // rather than silently mutating the user's input.
+    let kept_len = kept.len();
+    if kept_len >= 2 {
+        let drop_mask: Vec<bool> = kept
+            .iter()
+            .enumerate()
+            .map(|(i, msg)| {
+                if i == kept_len - 1 {
+                    return false;
+                }
+                let has_tool_calls = msg
+                    .get("tool_calls")
+                    .and_then(|v| v.as_array())
+                    .is_some_and(|a| !a.is_empty());
+                has_tool_calls
+                    && kept
+                        .get(i + 1)
+                        .and_then(|n| n.get("role"))
+                        .and_then(Value::as_str)
+                        != Some("tool")
+            })
+            .collect();
+        if drop_mask.iter().any(|d| *d) {
+            kept = kept
+                .into_iter()
+                .zip(drop_mask)
+                .filter(|(_, drop)| !*drop)
+                .map(|(m, _)| m)
+                .collect();
+        }
+    }
     kept
 }
 
@@ -1273,6 +1340,216 @@ mod tests {
         assert_eq!(kept.len(), 2, "kept: {kept:?}");
         assert_eq!(kept[0]["content"], "tiny old");
         assert_eq!(kept[1]["content"], "newest");
+    }
+
+    // --- Pairing-invariant regression tests ------------------------------
+    //
+    // These cover the three correctness rules `truncate_to_budget` enforces
+    // beyond the simple "drop oldest first" rule:
+    //
+    //   (a) the most recent user message survives even when the budget is
+    //       smaller than a single oversized tool result (the 2026-04-28
+    //       LM Studio HTTP 400 bug, fixed by commit 970984c);
+    //   (b) any kept `tool` message has its preceding assistant.tool_calls
+    //       force-pinned (the orphan-tool-result hazard called out in the
+    //       source comment, also closed by 970984c);
+    //   (c) any kept `assistant.tool_calls` is followed by a `tool` message
+    //       in the kept set, otherwise the assistant is dropped — closes
+    //       the inverse orphan-tool-call hazard that 970984c didn't cover
+    //       and surfaced when the OpenAI-compat path was exercised under
+    //       tight budgets.
+    //
+    // Both message shapes are exercised: the Ollama-coalesced shape (one
+    // `tool` message per turn carrying all results in `content`) and the
+    // OpenAI-compat shape (N separate `tool` messages, one per
+    // `tool_call_id`).
+
+    /// Build the `assistant` half of a tool roundtrip in either shape —
+    /// the JSON shape is identical between Ollama and OpenAI-compat for
+    /// this side of the pair (`tool_calls` array on the assistant
+    /// message), so one helper covers both.
+    fn assistant_with_tool_call(call_id: &str, fn_name: &str) -> Value {
+        json!({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": call_id,
+                "type": "function",
+                "function": { "name": fn_name, "arguments": "{}" }
+            }]
+        })
+    }
+
+    /// Build an OpenAI-compat `tool` message keyed by `tool_call_id`.
+    fn openai_tool_msg(call_id: &str, content: &str) -> Value {
+        json!({
+            "role": "tool",
+            "tool_call_id": call_id,
+            "content": content,
+        })
+    }
+
+    #[test]
+    fn truncate_pins_user_query_under_giant_tool_result_ollama_shape() {
+        // (a) — Ollama-coalesced shape. The newest message is a 50K-char
+        // tool result that already overshoots the budget; without the
+        // user-pin the preceding user query (small) would be dropped and
+        // strict-jinja servers return HTTP 400 "No user query found".
+        let messages = vec![
+            text_msg("user", "read the big file"),
+            assistant_with_tool_call("call_1", "read_file"),
+            text_msg("tool", &"X".repeat(50_000)),
+        ];
+        let kept = truncate_to_budget(messages, 100);
+        let last_user = kept
+            .iter()
+            .rev()
+            .find(|m| m.get("role").and_then(Value::as_str) == Some("user"));
+        assert!(
+            last_user.is_some(),
+            "user query must survive even under giant tool results: {kept:?}"
+        );
+        assert_eq!(last_user.unwrap()["content"], "read the big file");
+    }
+
+    #[test]
+    fn truncate_pins_user_query_under_giant_tool_result_openai_shape() {
+        // (a) — OpenAI-compat shape. Same scenario, separate tool message
+        // with `tool_call_id`. The pin logic is shape-agnostic (looks at
+        // `role`) but exercising both shapes catches future regressions
+        // where one path diverges.
+        let messages = vec![
+            text_msg("user", "read the big file"),
+            assistant_with_tool_call("call_1", "read_file"),
+            openai_tool_msg("call_1", &"X".repeat(50_000)),
+        ];
+        let kept = truncate_to_budget(messages, 100);
+        let last_user = kept
+            .iter()
+            .rev()
+            .find(|m| m.get("role").and_then(Value::as_str) == Some("user"));
+        assert!(
+            last_user.is_some(),
+            "user query must survive even under giant tool results: {kept:?}"
+        );
+        assert_eq!(last_user.unwrap()["content"], "read the big file");
+    }
+
+    #[test]
+    fn truncate_pins_assistant_tool_calls_when_keeping_tool_ollama_shape() {
+        // (b) — Ollama shape. The newest message is a tool result; the
+        // assistant.tool_calls preceding it must be force-kept even if a
+        // naive cost calculation would drop it.
+        let messages = vec![
+            text_msg("user", "first turn"),
+            assistant_with_tool_call("call_1", "list_dir"),
+            text_msg("tool", "(small result)"),
+        ];
+        // Budget room for tool (15) + assistant (~150 JSON) but NOT
+        // user (10) — without the tool→assistant pin the assistant
+        // would be at risk depending on exact cost ordering.
+        let kept = truncate_to_budget(messages, 200);
+        let last = kept.last().unwrap();
+        assert_eq!(last["role"], "tool");
+        // Index of the newest assistant.tool_calls in `kept` — must
+        // be exactly one before the tool.
+        let assistant_idx = kept.len() - 2;
+        assert_eq!(kept[assistant_idx]["role"], "assistant");
+        assert!(
+            kept[assistant_idx]["tool_calls"]
+                .as_array()
+                .is_some_and(|a| !a.is_empty()),
+            "expected paired tool_calls before tool, got {kept:?}"
+        );
+    }
+
+    #[test]
+    fn truncate_pins_assistant_tool_calls_when_keeping_tool_openai_shape() {
+        // (b) — OpenAI shape. Same scenario with `tool_call_id`-keyed
+        // tool message; the pin logic must work identically.
+        let messages = vec![
+            text_msg("user", "first turn"),
+            assistant_with_tool_call("call_1", "list_dir"),
+            openai_tool_msg("call_1", "(small result)"),
+        ];
+        let kept = truncate_to_budget(messages, 200);
+        let last = kept.last().unwrap();
+        assert_eq!(last["role"], "tool");
+        assert_eq!(last["tool_call_id"], "call_1");
+        let assistant_idx = kept.len() - 2;
+        assert_eq!(kept[assistant_idx]["role"], "assistant");
+    }
+
+    #[test]
+    fn truncate_drops_orphan_assistant_when_tool_skipped_ollama_shape() {
+        // (c) — Ollama shape. Budget fits user + assistant + new_user but
+        // not the giant tool result between them. Without the post-pass,
+        // the kept set is [old_user, assistant_with_tool_calls, new_user]
+        // — assistant.tool_calls is now orphaned and strict validators
+        // reject the request.
+        let messages = vec![
+            text_msg("user", "what's in src?"),
+            assistant_with_tool_call("call_1", "list_dir"),
+            text_msg("tool", &"X".repeat(50_000)),
+            text_msg("user", "and what about tests?"),
+        ];
+        let kept = truncate_to_budget(messages, 300);
+
+        // Assert no orphan assistant.tool_calls in the result. An assistant
+        // with non-empty tool_calls must be immediately followed by a
+        // `tool` message in the kept (chronological) sequence — except for
+        // the newest message, which is always retained as-is.
+        for (i, msg) in kept.iter().enumerate() {
+            if i == kept.len() - 1 {
+                continue;
+            }
+            let has_tc = msg
+                .get("tool_calls")
+                .and_then(|v| v.as_array())
+                .is_some_and(|a| !a.is_empty());
+            if has_tc {
+                let next = kept.get(i + 1);
+                let next_is_tool =
+                    next.and_then(|n| n.get("role")).and_then(Value::as_str) == Some("tool");
+                assert!(
+                    next_is_tool,
+                    "assistant.tool_calls at idx {i} is orphaned (next: {next:?}); full kept: {kept:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn truncate_drops_orphan_assistant_when_tool_skipped_openai_shape() {
+        // (c) — OpenAI-compat shape. Same scenario with separate
+        // tool_call_id-keyed tool message; the post-pass must apply
+        // identically to both shapes.
+        let messages = vec![
+            text_msg("user", "what's in src?"),
+            assistant_with_tool_call("call_1", "list_dir"),
+            openai_tool_msg("call_1", &"X".repeat(50_000)),
+            text_msg("user", "and what about tests?"),
+        ];
+        let kept = truncate_to_budget(messages, 300);
+
+        for (i, msg) in kept.iter().enumerate() {
+            if i == kept.len() - 1 {
+                continue;
+            }
+            let has_tc = msg
+                .get("tool_calls")
+                .and_then(|v| v.as_array())
+                .is_some_and(|a| !a.is_empty());
+            if has_tc {
+                let next = kept.get(i + 1);
+                let next_is_tool =
+                    next.and_then(|n| n.get("role")).and_then(Value::as_str) == Some("tool");
+                assert!(
+                    next_is_tool,
+                    "assistant.tool_calls at idx {i} is orphaned (next: {next:?}); full kept: {kept:?}"
+                );
+            }
+        }
     }
 
     #[test]
