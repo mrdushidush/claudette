@@ -3,10 +3,13 @@
 **Local-first AI personal secretary.** Runs entirely on your own hardware — no cloud brain, no subscription, no telemetry from Claudette itself. Powered by [Ollama](https://ollama.com) and a Rust agent loop. The default brain (`qwen3.5:4b`) fits comfortably on an 8 GB GPU; the optional Codet code-generation sidecar wants 32 GB RAM + a bigger coder model (see [Hardware requirements](#hardware-requirements) below). TTS voice replies use Microsoft's public edge-tts endpoint when `/voice` is enabled — everything else stays on-device.
 
 ```bash
-cargo install claudette         # from crates.io
-ollama serve &                  # in another shell
-claudette                       # interactive REPL
+cargo install claudette                     # from crates.io
+ollama serve &                              # in another shell
+claudette "what time is it?"                # 30-second smoke test
+claudette                                   # interactive REPL
 ```
+
+**Works zero-config out of the box**: notes, todos, files, time, weather, Wikipedia, and code search. Brave, GitHub, Google Calendar, and Gmail tools light up when you set the relevant API key — see [Tokens (per-tool)](#tokens-per-tool) below.
 
 [![Crates.io](https://img.shields.io/crates/v/claudette.svg)](https://crates.io/crates/claudette)
 [![CI](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml/badge.svg)](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml)
@@ -21,9 +24,32 @@ Claudette is a conversational agent built around **messaging-app access to a loc
 
 **What it's not:** a coding assistant competing with Cline or Aider on IDE integration, nor a general-purpose agent framework. Claudette is intentionally single-binary, single-machine, single-user — see [`docs/comparison.md`](docs/comparison.md) for an honest side-by-side against OpenHands, Aider, opencode, Cline, and Continue (Claudette isn't the winner in most of them).
 
-> **v0.2.0 — the Life Agent.** Google Calendar and Gmail (read-only) tool groups, a persistent scheduler that fires prompts back at you, and a `/briefing` Telegram command (or `claudette --briefing` for a recurring 07:00 weekday briefing) that covers the day's calendar, weather, and unread email. See [`docs/sprint_life_agent.md`](docs/sprint_life_agent.md) and [`docs/google_setup.md`](docs/google_setup.md).
+> **v0.2.0 — the Life Agent.** Google Calendar and Gmail (read-only) tool groups, a persistent scheduler that fires prompts back at you, and a `/briefing` Telegram command (or `claudette --briefing` for a recurring 07:00 weekday briefing) that covers the day's calendar, weather, and unread email. See [`docs/life_agent.md`](docs/life_agent.md) and [`docs/google_setup.md`](docs/google_setup.md).
 
 Short walkthroughs (quick tour, Telegram setup, morning briefing, code generation, the brain100 harness) live in [`examples/`](examples/).
+
+<!--
+ASCIINEMA SLOT — replace this comment with the embed once recorded.
+
+Suggested demo path (~60s, run after `cargo install claudette &&
+ollama serve`):
+  $ claudette
+  > what time is it?
+  > take a note: pick up bread tomorrow
+  > what's on my todo list?
+  > /briefing
+  > /quit
+
+Record:  asciinema rec claudette-demo.cast
+Upload:  asciinema upload claudette-demo.cast    (returns a URL like https://asciinema.org/a/123456)
+Replace: this comment with:
+
+  [![asciicast](https://asciinema.org/a/123456.svg)](https://asciinema.org/a/123456)
+
+The `.svg` form renders inline on GitHub as a static thumbnail; clicking
+it opens the asciinema player. No autoplay, no JS — works inside the
+README markdown rendering.
+-->
 
 ---
 
@@ -42,11 +68,11 @@ Each mode reuses the same conversation runtime, the same tool set, and the same 
 
 ### 70+ tools across 12 on-demand groups
 
-To keep the model's context window small, Claudette advertises only ~17 "core" tools by default. The rest load when the model calls `enable_tools(group)`. Each group is a self-contained capability:
+To keep the model's context window small, Claudette advertises only ~18 "core" tools by default. The rest load when the model calls `enable_tools(group)`. Each group is a self-contained capability:
 
 | Group | Tools | What it does |
 |-------|-------|--------------|
-| **core** (always on) | 17 | Notes, todos, files, time, capabilities, web search, code generation, `enable_tools` itself |
+| **core** (always on) | 18 | Notes (incl. `note_update`), todos, files, time, capabilities, web search, code generation, `enable_tools` itself |
 | `git` | 8 | status, diff, log, add, commit, branch, checkout, push |
 | `ide` | 3 | Open in editor (`code`), reveal in file manager, open URL in browser |
 | `search` | 3 | Glob patterns, grep file contents, fetch + strip web pages |

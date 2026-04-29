@@ -1,5 +1,13 @@
 # Google OAuth setup for Claudette
 
+> **Heads-up: this is a ~5-minute, ~6-screen click-through in Google
+> Cloud Console.** No script automates it because Google requires a
+> human-in-the-browser to create the OAuth client. The steps below are
+> in order; do them once and Claudette uses the same credentials for
+> Calendar and Gmail going forward. If a step looks unfamiliar, the
+> screenshot of Google's UI on that step is the source of truth — they
+> rename buttons every couple of years.
+
 Claudette talks to Google Calendar (and, later, Gmail) using your own OAuth
 client. You create a tiny OAuth client in Google Cloud Console once, paste
 the `client_id` and `client_secret` into Claudette's secrets dir, then run
