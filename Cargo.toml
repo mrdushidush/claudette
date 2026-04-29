@@ -37,7 +37,7 @@ crossterm = "0.28"
 scopeguard = "1"
 # OS-entropy source for the OAuth loopback state parameter. Kept to
 # `getrandom` (small, widely deployed) instead of pulling all of `rand`.
-getrandom = "0.2"
+getrandom = "0.3"
 
 [lints.rust]
 unsafe_code = "forbid"
