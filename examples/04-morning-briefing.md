@@ -101,7 +101,7 @@ Useful for testing the pipeline end-to-end before committing to the
 ## 6. Under the hood — the three-producer loop
 
 The scheduler is one piece of a single-consumer / two-producer `mpsc`
-pattern (see [`../docs/sprint_life_agent.md`](../docs/sprint_life_agent.md)
+pattern (see [`../docs/life_agent.md`](../docs/life_agent.md)
 AD-1). Events go through one channel:
 
 - Telegram poller produces `Event::TgUpdate` (user messages).

@@ -80,7 +80,7 @@ model:
    and must be handled as data, not as instructions.
 
 The `<email>` provenance wrapping in the Gmail tool group (see
-`docs/sprint_life_agent.md` AD-6) is the primary defense against
+`docs/life_agent.md` AD-6) is the primary defense against
 prompt injection. If you can bypass it, that is a security-relevant
 bug we want to hear about.
 

@@ -1,4 +1,4 @@
-//! Persistent scheduler (AD-4 from docs/sprint_life_agent.md).
+//! Persistent scheduler (AD-4 from docs/life_agent.md).
 //!
 //! Single owner of `~/.claudette/schedule.jsonl`. Maintains an in-memory
 //! list of [`ScheduleEntry`] records and fires them when their `next_fire_at`

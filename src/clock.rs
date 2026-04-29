@@ -1,4 +1,4 @@
-//! Time abstraction for the scheduler (AD-5 from docs/sprint_life_agent.md).
+//! Time abstraction for the scheduler (AD-5 from docs/life_agent.md).
 //!
 //! Every time-sensitive code path takes `&dyn Clock` instead of calling
 //! `Utc::now()` directly. Production code wires in [`SystemClock`]; tests

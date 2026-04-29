@@ -23,7 +23,7 @@
 //!
 //! Threat model: plaintext on disk, mode 0600 on Unix. Same as the GitHub PAT
 //! and Telegram token already in the secrets dir. See AD-3 in
-//! docs/sprint_life_agent.md for the rationale.
+//! docs/life_agent.md for the rationale.
 
 use std::fmt::Write as _;
 use std::io::{Read, Write};
