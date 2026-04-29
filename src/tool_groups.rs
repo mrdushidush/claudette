@@ -149,6 +149,7 @@ pub const CORE_TOOL_NAMES: &[&str] = &[
     "note_create",
     "note_list",
     "note_read",
+    "note_update",
     "note_delete",
     "todo_add",
     "todo_list",
@@ -488,6 +489,41 @@ mod tests {
                 "core tool {name} should not map to a group"
             );
         }
+    }
+
+    #[test]
+    fn every_advertised_tool_is_classified() {
+        // Catches the class of bug where a new tool gets added to
+        // `crate::tools::secretary_tools_json` (so it shows up in the schema)
+        // but the maintainer forgets to add it to either CORE_TOOL_NAMES or
+        // the `group_of` match arms — the registry's `for tool in arr`
+        // loop silently drops such tools, so the brain never sees them in
+        // an `enable_tools(group)` advertise. Exactly how `note_update`
+        // shipped to v0.2.2-line `[Unreleased]` invisibly until v0.2.3
+        // reconciliation.
+        let full = crate::tools::secretary_tools_json();
+        let arr = full.as_array().cloned().unwrap_or_default();
+        let mut unclassified: Vec<String> = Vec::new();
+        for tool in arr {
+            let Some(name) = tool
+                .pointer("/function/name")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            let is_core = CORE_TOOL_NAMES.contains(&name.as_str());
+            let is_grouped = group_of(&name).is_some();
+            if !is_core && !is_grouped {
+                unclassified.push(name);
+            }
+        }
+        assert!(
+            unclassified.is_empty(),
+            "tool(s) advertised but not classified into core/group — \
+             will be silently dropped by ToolRegistry::new: {unclassified:?}. \
+             Add to CORE_TOOL_NAMES or to a `group_of` arm."
+        );
     }
 
     #[test]
