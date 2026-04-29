@@ -10,6 +10,20 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-04-30
+
+Hygiene + tag release. The bulk of the user-visible work is the LM
+Studio (OpenAI-compat) brain that landed on main between v0.2.2 and
+this tag — `[Unreleased]` had not been updated to reflect the merged
+commits, so this release also catches the changelog up. Plus a
+truncation-pairing fix surfaced by the new compat path, the `web_search`
+prompt-injection wrap closing the last attacker-controlled tool surface,
+a `WorkspaceRoots` refactor with a startup diagnostic that warns about
+the 2026-04-28 wrapper-forgot-env-var configuration, and supply-chain
+hygiene around CI (Dependabot, `cargo-audit`, SHA-pinned actions,
+default-deny permissions, MSRV verification, tagged release via
+crates.io trusted publisher).
+
 ### Added
 
 - **LM Studio (and any OpenAI-compat server) as the brain via
