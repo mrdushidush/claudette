@@ -10,9 +10,7 @@
 set -uo pipefail
 
 MODELS=(
-    "openai/gpt-oss-20b"
-    "unsloth/gpt-oss-20b"
-    "google/gemma-4-26b-a4b"
+    "unsloth/qwen3.6-35b-a3b"
 )
 
 cd "$(dirname "$0")/.."
