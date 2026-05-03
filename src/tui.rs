@@ -20,7 +20,10 @@ use std::time::{Duration, Instant};
 use crate::Session;
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    event::{
+        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind,
+        KeyModifiers,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -33,7 +36,7 @@ use ratatui::{
     Frame, Terminal,
 };
 
-use crate::tui_events::{TuiEvent, UserInput};
+use crate::tui_events::{ImageAttachment, TuiEvent, UserInput};
 use crate::tui_worker;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -195,6 +198,13 @@ struct App {
     streaming_text: String,
     current_turn_tools: Vec<ToolEntry>,
     input: String,
+    /// Images staged for the next submit (populated by Ctrl+V or by
+    /// `@path` tokens detected when the user presses Enter). Cleared on
+    /// every successful send and on Esc.
+    pending_images: Vec<ImageAttachment>,
+    /// Transient one-line notice shown in the input row (e.g. "📎 image
+    /// attached", "clipboard empty"). Cleared on the next keypress.
+    paste_notice: Option<String>,
     working: bool,
 
     // ── Tool log ──────────────────────────────────────────────────────────
@@ -228,6 +238,8 @@ impl Default for App {
             streaming_text: String::new(),
             current_turn_tools: Vec::new(),
             input: String::new(),
+            pending_images: Vec::new(),
+            paste_notice: None,
             working: false,
             all_tool_records: Vec::new(),
             notes: NotesState::default(),
@@ -566,19 +578,76 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Image attachment helpers (vision input)
+// ─────────────────────────────────────────────────────────────────────────────
+
+use crate::image_attach::{
+    attachment_from_file, encode_base64_standard, extract_image_attachments_from_input,
+    image_mime_from_path,
+};
+
+/// Try to grab an image from the OS clipboard. On success returns one
+/// `ImageAttachment` (PNG-encoded). On failure, returns the clipboard
+/// text content if any (for the caller to handle as a possible path or
+/// fall through to literal text paste).
+enum ClipboardPaste {
+    Image(ImageAttachment),
+    Text(String),
+    Empty,
+}
+
+fn read_clipboard_paste() -> ClipboardPaste {
+    let mut clipboard = match arboard::Clipboard::new() {
+        Ok(c) => c,
+        Err(_) => return ClipboardPaste::Empty,
+    };
+    if let Ok(img) = clipboard.get_image() {
+        // arboard hands back raw RGBA. Re-encode to PNG so vision models
+        // can ingest it — they don't accept raw pixel buffers.
+        let buf = match image::RgbaImage::from_raw(
+            img.width as u32,
+            img.height as u32,
+            img.bytes.into_owned(),
+        ) {
+            Some(b) => b,
+            None => return ClipboardPaste::Empty,
+        };
+        let mut png_bytes: Vec<u8> = Vec::new();
+        let dynimg = image::DynamicImage::ImageRgba8(buf);
+        if dynimg
+            .write_to(
+                &mut std::io::Cursor::new(&mut png_bytes),
+                image::ImageFormat::Png,
+            )
+            .is_err()
+        {
+            return ClipboardPaste::Empty;
+        }
+        return ClipboardPaste::Image(ImageAttachment {
+            media_type: "image/png".to_string(),
+            data_b64: encode_base64_standard(&png_bytes),
+        });
+    }
+    if let Ok(text) = clipboard.get_text() {
+        return ClipboardPaste::Text(text);
+    }
+    ClipboardPaste::Empty
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Entry point
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub fn run_tui(session: Session) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     scopeguard::defer! {
         let _ = disable_raw_mode();
-        let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
+        let _ = execute!(std::io::stdout(), DisableBracketedPaste, LeaveAlternateScreen);
     }
 
     let (tui_tx, tui_rx) = std::sync::mpsc::sync_channel::<TuiEvent>(512);
@@ -670,8 +739,39 @@ fn run_loop(
         if !event::poll(Duration::from_millis(50))? {
             continue;
         }
-        let Event::Key(key) = event::read()? else {
-            continue;
+        let key = match event::read()? {
+            Event::Key(k) => k,
+            // Bracketed paste — Windows Terminal delivers drag-dropped
+            // file paths and Ctrl+V text content this way as a single
+            // event, not as a stream of Char keypresses. If the pasted
+            // text resolves to an image-file path, attach it; otherwise
+            // splice into the input buffer as if the user had typed it.
+            Event::Paste(text) if !app.working => {
+                app.paste_notice = None;
+                let trimmed = text.trim();
+                let candidate = trimmed.trim_matches('"');
+                let path = std::path::Path::new(candidate);
+                if image_mime_from_path(path).is_some() && path.is_file() {
+                    match attachment_from_file(path) {
+                        Ok(att) => {
+                            app.pending_images.push(att);
+                            app.paste_notice = Some(format!(
+                                "📎 image attached from drop ({} total)",
+                                app.pending_images.len()
+                            ));
+                        }
+                        Err(e) => app.paste_notice = Some(format!("paste failed: {e}")),
+                    }
+                } else {
+                    for c in text.chars() {
+                        if c != '\r' && c != '\n' {
+                            app.input.push(c);
+                        }
+                    }
+                }
+                continue;
+            }
+            _ => continue,
         };
         // Windows fires both Press and Release events — only handle Press.
         if key.kind != KeyEventKind::Press {
@@ -815,19 +915,110 @@ fn run_loop(
                 _ => {}
             },
 
+            // Paste from clipboard. Bitmap → PNG-attached image; text →
+            // if it parses as an image-file path, attach; otherwise append
+            // to the input line as if the user had typed it.
+            //
+            // **Alt+V, not Ctrl+V** — Windows Terminal (and most modern
+            // terminals) intercept Ctrl+V at the terminal level and paste
+            // the clipboard's *text* form as a stream of Char events, so a
+            // Ctrl+V key event never reaches the TUI. Alt+V passes through
+            // unmodified on every terminal we care about.
+            (KeyCode::Char('v'), KeyModifiers::ALT) if !app.working => {
+                app.paste_notice = None;
+                match read_clipboard_paste() {
+                    ClipboardPaste::Image(att) => {
+                        app.pending_images.push(att);
+                        app.paste_notice = Some(format!(
+                            "📎 image attached ({} total)",
+                            app.pending_images.len()
+                        ));
+                    }
+                    ClipboardPaste::Text(text) => {
+                        let trimmed = text.trim().trim_matches('"');
+                        let path = std::path::Path::new(trimmed);
+                        if image_mime_from_path(path).is_some() && path.is_file() {
+                            match attachment_from_file(path) {
+                                Ok(att) => {
+                                    app.pending_images.push(att);
+                                    app.paste_notice = Some(format!(
+                                        "📎 image attached from path ({} total)",
+                                        app.pending_images.len()
+                                    ));
+                                }
+                                Err(e) => {
+                                    app.paste_notice = Some(format!("paste failed: {e}"));
+                                }
+                            }
+                        } else {
+                            // Plain text paste — append as if typed. Strip
+                            // CR/LF so a multi-line paste doesn't spuriously
+                            // submit on the embedded newline.
+                            for c in text.chars() {
+                                if c != '\r' && c != '\n' {
+                                    app.input.push(c);
+                                }
+                            }
+                        }
+                    }
+                    ClipboardPaste::Empty => {
+                        app.paste_notice = Some("clipboard empty or unreadable".to_string());
+                    }
+                }
+            }
+
+            // Drop staged attachments (Esc clears the pending image queue
+            // when input is empty so the user can back out of a misclick).
+            (KeyCode::Esc, _) if !app.pending_images.is_empty() && app.input.is_empty() => {
+                app.pending_images.clear();
+                app.paste_notice = Some("attachments cleared".to_string());
+            }
+
             // Submit input.
-            (KeyCode::Enter, _) if !app.working && !app.input.is_empty() => {
+            (KeyCode::Enter, _)
+                if !app.working
+                    && (!app.input.is_empty() || !app.pending_images.is_empty()) =>
+            {
                 let text = std::mem::take(&mut app.input);
+                app.paste_notice = None;
                 app.chat_scroll = 0;
                 if let Some(cmd) = text.strip_prefix('/') {
                     let _ = user_tx.send(UserInput::SlashCommand(cmd.to_string()));
+                    app.pending_images.clear();
                 } else {
+                    // Merge clipboard-staged images with any path tokens
+                    // typed/drag-dropped into this line.
+                    let mut images = std::mem::take(&mut app.pending_images);
+                    let extracted = extract_image_attachments_from_input(&text);
+                    let staged_count = images.len();
+                    let extension_matches = extracted.extension_matches;
+                    let attach_failure = extracted.first_failure.clone();
+                    images.extend(extracted.attached);
+
+                    // Surface diagnostics in the next-turn history slot —
+                    // a silent miss is what got us here in the first place.
+                    if extension_matches > 0 && images.len() == staged_count {
+                        if let Some(reason) = attach_failure {
+                            app.history.push(Message {
+                                role: "Error".to_string(),
+                                text: format!(
+                                    "image-path token detected but couldn't attach: {reason}"
+                                ),
+                            });
+                        }
+                    }
+
+                    let display_text = if images.is_empty() {
+                        text.clone()
+                    } else {
+                        format!("{text}  [📎 {}]", images.len())
+                    };
                     app.history.push(Message {
                         role: "You".to_string(),
-                        text: text.clone(),
+                        text: display_text,
                     });
                     app.active_tab = TAB_CHAT;
-                    let _ = user_tx.send(UserInput::Message(text));
+                    let _ = user_tx.send(UserInput::Message { text, images });
                 }
             }
 
@@ -835,9 +1026,11 @@ fn run_loop(
             (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT)
                 if !app.working && (!app.input.is_empty() || !c.is_ascii_digit()) =>
             {
+                app.paste_notice = None;
                 app.input.push(c);
             }
             (KeyCode::Backspace, _) if !app.working => {
+                app.paste_notice = None;
                 app.input.pop();
             }
 
@@ -1612,6 +1805,13 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
             format!(" Filter by tag: {}_", app.notes.filter_input),
             Style::default().fg(Color::Yellow),
         )
+    } else if let Some(notice) = &app.paste_notice {
+        // Paste feedback wins over the regular prompt for one keypress.
+        // Cleared on the next character/backspace so it doesn't linger.
+        (
+            format!(" {notice}"),
+            Style::default().fg(Color::Cyan),
+        )
     } else if app.working {
         // Richer state indicator based on where we are in the turn.
         let (msg, color) = if !app.streaming_text.is_empty() {
@@ -1634,8 +1834,13 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
         let spinner = if app.cursor_phase { "⟳" } else { "·" };
         (format!(" {spinner} {msg}…"), Style::default().fg(color))
     } else {
+        let attach = if app.pending_images.is_empty() {
+            String::new()
+        } else {
+            format!(" [📎 {}]", app.pending_images.len())
+        };
         (
-            format!(" > {}_", app.input),
+            format!(" > {}_{attach}", app.input),
             Style::default().fg(Color::White),
         )
     };

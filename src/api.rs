@@ -838,11 +838,19 @@ fn build_history_messages(msgs: &[crate::ConversationMessage]) -> Vec<Value> {
         let role = role_str(msg.role);
         let mut content_parts: Vec<String> = Vec::new();
         let mut tool_calls: Vec<Value> = Vec::new();
+        let mut images: Vec<String> = Vec::new();
 
         for block in &msg.blocks {
             match block {
                 ContentBlock::Text { text } => {
                     content_parts.push(text.clone());
+                }
+                ContentBlock::Image { data_b64, .. } => {
+                    // Ollama's /api/chat takes images as a flat array of
+                    // base64 strings on the message itself; the message's
+                    // text content is unchanged. media_type is unused on
+                    // this path — the loaded mmproj decides the format.
+                    images.push(data_b64.clone());
                 }
                 ContentBlock::ToolUse { id, name, input } => {
                     let arguments: Value =
@@ -873,6 +881,9 @@ fn build_history_messages(msgs: &[crate::ConversationMessage]) -> Vec<Value> {
         });
         if !tool_calls.is_empty() {
             obj["tool_calls"] = json!(tool_calls);
+        }
+        if !images.is_empty() {
+            obj["images"] = json!(images);
         }
         messages.push(obj);
     }
@@ -958,11 +969,26 @@ fn build_history_messages_openai_compat(msgs: &[crate::ConversationMessage]) -> 
         let role = role_str(msg.role);
         let mut content_parts: Vec<String> = Vec::new();
         let mut tool_calls: Vec<Value> = Vec::new();
+        let mut image_parts: Vec<Value> = Vec::new();
 
         for block in &msg.blocks {
             match block {
                 ContentBlock::Text { text } => {
                     content_parts.push(text.clone());
+                }
+                ContentBlock::Image {
+                    media_type,
+                    data_b64,
+                } => {
+                    // OpenAI vision shape: an `image_url` part with a
+                    // `data:<mime>;base64,<b64>` URL. LM Studio + the
+                    // Qwen mmproj backend accept this verbatim.
+                    image_parts.push(json!({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": format!("data:{media_type};base64,{data_b64}")
+                        }
+                    }));
                 }
                 ContentBlock::ToolUse { id, name, input } => {
                     // OpenAI expects `arguments` as a JSON string verbatim.
@@ -989,7 +1015,22 @@ fn build_history_messages_openai_compat(msgs: &[crate::ConversationMessage]) -> 
         let content = content_parts.join("\n");
         let mut obj = json!({ "role": role });
         if tool_calls.is_empty() {
-            obj["content"] = json!(content);
+            // Image attachments require content as a parts array. Emit a
+            // text part only when there's actually text to send — strict
+            // OpenAI-compat servers (LM Studio's strict mode, vLLM) reject
+            // a `{type:"text", text:""}` entry. The image_url part alone
+            // is a valid "describe this" prompt.
+            if image_parts.is_empty() {
+                obj["content"] = json!(content);
+            } else {
+                let mut parts: Vec<Value> =
+                    Vec::with_capacity(image_parts.len() + usize::from(!content.is_empty()));
+                if !content.is_empty() {
+                    parts.push(json!({ "type": "text", "text": content }));
+                }
+                parts.extend(image_parts);
+                obj["content"] = Value::Array(parts);
+            }
         } else {
             // OpenAI requires `content: null` (not `""`) when tool_calls
             // is present without accompanying prose — LM Studio rejects
@@ -1148,15 +1189,25 @@ fn truncate_to_budget(messages: Vec<Value>, budget_chars: usize) -> Vec<Value> {
     kept
 }
 
-/// Estimate the character cost of an Ollama message: text content plus
-/// the JSON-encoded length of any `tool_calls` block.
+/// Estimate the character cost of a built message: text content plus the
+/// JSON-encoded length of any `tool_calls` block, plus image payloads on
+/// either transport (Ollama `images: [b64,…]` or OpenAI-compat array-shape
+/// `content` with `image_url` parts).
 fn estimate_message_chars(msg: &Value) -> usize {
-    let content = msg
-        .get("content")
-        .and_then(Value::as_str)
-        .map_or(0, str::len);
+    let content = match msg.get("content") {
+        Some(Value::String(s)) => s.len(),
+        // OpenAI-compat array shape: each part may be {type:"text",text:"…"}
+        // or {type:"image_url",image_url:{url:"data:…"}}. Sum part lengths
+        // verbatim — for image parts the data URL dominates and reflects the
+        // real wire cost.
+        Some(Value::Array(parts)) => parts.iter().map(|p| p.to_string().len()).sum(),
+        _ => 0,
+    };
     let tools = msg.get("tool_calls").map_or(0, |v| v.to_string().len());
-    content + tools
+    // Ollama-shape image attachments live alongside content as a sibling
+    // array of base64 strings — `to_string().len()` charges them honestly.
+    let images = msg.get("images").map_or(0, |v| v.to_string().len());
+    content + tools + images
 }
 
 fn role_str(role: MessageRole) -> &'static str {

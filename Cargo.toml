@@ -35,6 +35,12 @@ glob = "0.3"
 ratatui = "0.29"
 crossterm = "0.28"
 scopeguard = "1"
+# Vision input: read OS clipboard bitmaps (Ctrl+V) and re-encode the raw
+# RGBA pixels arboard hands back into PNG so vision models can ingest it.
+# `image` is restricted to the PNG codec to keep the dependency footprint
+# small (no JPEG/WebP/GIF transitive crates pulled).
+arboard = "3"
+image = { version = "0.25", default-features = false, features = ["png"] }
 # OS-entropy source for the OAuth loopback state parameter. Kept to
 # `getrandom` (small, widely deployed) instead of pulling all of `rand`.
 getrandom = "0.2"

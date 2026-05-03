@@ -36,11 +36,25 @@ pub enum TuiEvent {
     SessionReset,
 }
 
+/// One image attached to a user turn — base64-encoded payload paired with
+/// its MIME type. Both transports (Ollama `images: [b64,…]` and
+/// OpenAI-compat `image_url` data URLs) consume this directly.
+#[derive(Debug, Clone)]
+pub struct ImageAttachment {
+    pub media_type: String,
+    pub data_b64: String,
+}
+
 /// Commands sent from the TUI render loop to the worker thread.
 #[derive(Debug)]
 pub enum UserInput {
-    /// User submitted a text message to send to the model.
-    Message(String),
+    /// User submitted a text message to send to the model. `images` is
+    /// empty for plain-text turns and non-empty when the user pasted /
+    /// drag-dropped image attachments before pressing Enter.
+    Message {
+        text: String,
+        images: Vec<ImageAttachment>,
+    },
     /// User typed a slash command (e.g. `clear` for `/clear`).
     SlashCommand(String),
     /// User quit the TUI.

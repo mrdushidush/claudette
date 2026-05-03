@@ -194,11 +194,26 @@ where
     pub fn run_turn(
         &mut self,
         user_input: impl Into<String>,
+        prompter: Option<&mut dyn PermissionPrompter>,
+    ) -> Result<TurnSummary, RuntimeError> {
+        self.run_turn_with_images(user_input, Vec::new(), prompter)
+    }
+
+    /// Same as [`Self::run_turn`] but the user message also carries N image
+    /// attachments (`(media_type, base64_data)` pairs). Used by the TUI's
+    /// clipboard-paste / `@path` flow.
+    pub fn run_turn_with_images(
+        &mut self,
+        user_input: impl Into<String>,
+        images: Vec<(String, String)>,
         mut prompter: Option<&mut dyn PermissionPrompter>,
     ) -> Result<TurnSummary, RuntimeError> {
-        self.session
-            .messages
-            .push(ConversationMessage::user_text(user_input.into()));
+        let user_message = if images.is_empty() {
+            ConversationMessage::user_text(user_input.into())
+        } else {
+            ConversationMessage::user_with_images(user_input.into(), images)
+        };
+        self.session.messages.push(user_message);
 
         let mut assistant_messages = Vec::new();
         let mut tool_results = Vec::new();

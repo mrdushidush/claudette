@@ -142,6 +142,18 @@ The REPL prompter is interactive. The TUI renders the permission dialog in its t
 
 Telegram voice messages are transcribed end-to-end locally via [Whisper](https://github.com/ggerganov/whisper.cpp) (default model `ggml-large-v3-turbo`). The reply can be spoken back via [edge-tts](https://github.com/rany2/edge-tts) in English (`en-US-AriaNeural`) or Hebrew (`he-IL-HilaNeural`). Toggle voice output with `/voice`.
 
+### Vision input
+
+Image attachments work in both the TUI and the REPL when the loaded brain is multimodal (e.g. Qwen 3.6 35B-A3B with the `mmproj-F32` sidecar in LM Studio). Three input paths:
+
+| How | Where | What it does |
+|-----|-------|--------------|
+| **Alt+V** | TUI only | Reads the OS clipboard. A bitmap (e.g. `Win+Shift+S` snip) is re-encoded to PNG and base64'd; clipboard text is treated as a possible image-file path. |
+| **Drag-drop a file** | TUI + REPL | Windows Terminal pastes the path as text — the TUI's bracketed-paste handler attaches it instantly; the REPL detects it on submit. |
+| **Type `@/path/to/img.png`** | TUI + REPL | Tokens with `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, or `.bmp` extensions that resolve to a real file are attached on Enter. |
+
+Each turn shows explicit feedback (`📎 image attached` / `image-path detected but couldn't attach: <reason>`) so a missed attachment can never be silent. Per-image hard cap: 20 MiB. Both transports are supported on the wire — Ollama's `images: [b64,…]` array and the OpenAI-compat `image_url` parts shape (`data:<mime>;base64,…` URLs).
+
 ### On-demand tool enablement
 
 The `enable_tools(group)` meta-tool lets the model pull in capability groups when it realises it needs them. Adding a new group to Claudette costs zero context until the model actually calls one — the trick that lets a 70-tool surface fit a 16K context window.

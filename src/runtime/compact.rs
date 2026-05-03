@@ -175,7 +175,7 @@ fn summarize_messages(messages: &[ConversationMessage]) -> String {
         .filter_map(|block| match block {
             ContentBlock::ToolUse { name, .. } => Some(name.as_str()),
             ContentBlock::ToolResult { tool_name, .. } => Some(tool_name.as_str()),
-            ContentBlock::Text { .. } => None,
+            ContentBlock::Text { .. } | ContentBlock::Image { .. } => None,
         })
         .collect::<Vec<_>>();
     tool_names.sort_unstable();
@@ -245,6 +245,7 @@ fn summarize_messages(messages: &[ConversationMessage]) -> String {
 fn summarize_block(block: &ContentBlock) -> String {
     let raw = match block {
         ContentBlock::Text { text } => text.clone(),
+        ContentBlock::Image { media_type, .. } => format!("[image {media_type}]"),
         ContentBlock::ToolUse { name, input, .. } => format!("tool_use {name}({input})"),
         ContentBlock::ToolResult {
             tool_name,
@@ -306,6 +307,7 @@ fn collect_key_files(messages: &[ConversationMessage]) -> Vec<String> {
             ContentBlock::Text { text } => text.as_str(),
             ContentBlock::ToolUse { input, .. } => input.as_str(),
             ContentBlock::ToolResult { output, .. } => output.as_str(),
+            ContentBlock::Image { .. } => "",
         })
         .flat_map(extract_file_candidates)
         .collect::<Vec<_>>();
@@ -328,6 +330,7 @@ fn first_text_block(message: &ConversationMessage) -> Option<&str> {
         ContentBlock::Text { text } if !text.trim().is_empty() => Some(text.as_str()),
         ContentBlock::ToolUse { .. }
         | ContentBlock::ToolResult { .. }
+        | ContentBlock::Image { .. }
         | ContentBlock::Text { .. } => None,
     })
 }
@@ -378,6 +381,11 @@ fn estimate_message_tokens(message: &ConversationMessage) -> usize {
             ContentBlock::ToolResult {
                 tool_name, output, ..
             } => (tool_name.len() + output.len()) / 4 + 1,
+            // Vision tokens are model-specific (Qwen, LLaVA et al. emit a few
+            // hundred tokens per 224×224 tile). 256 tokens per attached image
+            // is a conservative ceiling that keeps the compaction trigger
+            // honest without needing a model-specific tokenizer.
+            ContentBlock::Image { .. } => 256,
         })
         .sum()
 }

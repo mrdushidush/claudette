@@ -319,16 +319,53 @@ pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
 
         crate::tools::set_current_turn_paths(crate::tools::extract_user_prompt_paths(trimmed));
 
-        // Sprint 14: route through brain_selector so Auto-preset turns get
-        // the 4b → 9b escalation when stuck signals fire. On Fast/Smart
-        // (no fallback configured) this collapses to the existing
-        // run_turn_with_retry behaviour — no overhead.
-        let mut prompter_opt: Option<&mut dyn PermissionPrompter> = Some(&mut prompter);
-        match crate::brain_selector::run_turn_with_fallback(
-            &mut runtime,
-            trimmed,
-            &mut prompter_opt,
-        ) {
+        // Vision: if the line contains image-file path tokens (drag-drop
+        // typically pastes them via Windows Terminal), attach them and
+        // route directly to `run_turn_with_images`, bypassing the brain
+        // selector. The fallback logic is for "stuck" detection on text
+        // turns and doesn't apply when we're sending an image.
+        let extracted = crate::image_attach::extract_image_attachments_from_input(trimmed);
+        if extracted.extension_matches > 0 && extracted.attached.is_empty() {
+            if let Some(reason) = &extracted.first_failure {
+                eprintln!(
+                    "{} {}",
+                    theme::WARN_GLYPH,
+                    theme::warn(&format!(
+                        "image-path detected but couldn't attach: {reason}"
+                    ))
+                );
+            }
+        }
+
+        let turn_result: Result<TurnSummary, String> = if extracted.attached.is_empty() {
+            // Sprint 14: route through brain_selector so Auto-preset turns get
+            // the 4b → 9b escalation when stuck signals fire. On Fast/Smart
+            // (no fallback configured) this collapses to the existing
+            // run_turn_with_retry behaviour — no overhead.
+            let mut prompter_opt: Option<&mut dyn PermissionPrompter> = Some(&mut prompter);
+            crate::brain_selector::run_turn_with_fallback(
+                &mut runtime,
+                trimmed,
+                &mut prompter_opt,
+            )
+        } else {
+            let count = extracted.attached.len();
+            eprintln!(
+                "{} {}",
+                theme::SAVE,
+                theme::dim(&format!("📎 attached {count} image(s) — routing to vision"))
+            );
+            let images: Vec<(String, String)> = extracted
+                .attached
+                .into_iter()
+                .map(|a| (a.media_type, a.data_b64))
+                .collect();
+            runtime
+                .run_turn_with_images(trimmed, images, Some(&mut prompter))
+                .map_err(|e| e.to_string())
+        };
+
+        match turn_result {
             Ok(summary) => {
                 // No post-turn re-print: streaming has already pushed every
                 // text delta to stdout via `stdout_text_callback`. The model's

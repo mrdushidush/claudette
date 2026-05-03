@@ -134,13 +134,22 @@ pub fn spawn_worker(
                     }
                 },
 
-                UserInput::Message(text) => {
+                UserInput::Message { text, images } => {
                     let _ = tui_tx.send(TuiEvent::Working(true));
 
                     crate::tools::set_current_turn_paths(crate::tools::extract_user_prompt_paths(
                         &text,
                     ));
-                    match runtime.run_turn(&text, None) {
+                    let image_pairs: Vec<(String, String)> = images
+                        .into_iter()
+                        .map(|att| (att.media_type, att.data_b64))
+                        .collect();
+                    let turn_result = if image_pairs.is_empty() {
+                        runtime.run_turn(&text, None)
+                    } else {
+                        runtime.run_turn_with_images(&text, image_pairs, None)
+                    };
+                    match turn_result {
                         Ok(summary) => {
                             // Extract the last assistant text block.
                             let response = summary

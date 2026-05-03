@@ -19,6 +19,14 @@ pub enum ContentBlock {
     Text {
         text: String,
     },
+    Image {
+        /// MIME type, e.g. `image/png`, `image/jpeg`.
+        media_type: String,
+        /// Standard-alphabet base64 of the raw image bytes (no `data:` prefix,
+        /// no padding stripping). Both transport shapes (Ollama `images: []`
+        /// and OpenAI-compat `image_url`) consume this directly.
+        data_b64: String,
+    },
     ToolUse {
         id: String,
         name: String,
@@ -151,6 +159,30 @@ impl ConversationMessage {
         }
     }
 
+    /// Build a user message with one text block followed by N image blocks.
+    /// Empty `text` is allowed (e.g. drag-dropped image with no caption);
+    /// the text block is still emitted so the API path's "user role with
+    /// content" invariant holds.
+    #[must_use]
+    pub fn user_with_images(
+        text: impl Into<String>,
+        images: Vec<(String, String)>,
+    ) -> Self {
+        let mut blocks: Vec<ContentBlock> = Vec::with_capacity(1 + images.len());
+        blocks.push(ContentBlock::Text { text: text.into() });
+        for (media_type, data_b64) in images {
+            blocks.push(ContentBlock::Image {
+                media_type,
+                data_b64,
+            });
+        }
+        Self {
+            role: MessageRole::User,
+            blocks,
+            usage: None,
+        }
+    }
+
     #[must_use]
     pub fn assistant(blocks: Vec<ContentBlock>) -> Self {
         Self {
@@ -257,6 +289,17 @@ impl ContentBlock {
                 object.insert("type".to_string(), JsonValue::String("text".to_string()));
                 object.insert("text".to_string(), JsonValue::String(text.clone()));
             }
+            Self::Image {
+                media_type,
+                data_b64,
+            } => {
+                object.insert("type".to_string(), JsonValue::String("image".to_string()));
+                object.insert(
+                    "media_type".to_string(),
+                    JsonValue::String(media_type.clone()),
+                );
+                object.insert("data_b64".to_string(), JsonValue::String(data_b64.clone()));
+            }
             Self::ToolUse { id, name, input } => {
                 object.insert(
                     "type".to_string(),
@@ -302,6 +345,10 @@ impl ContentBlock {
         {
             "text" => Ok(Self::Text {
                 text: required_string(object, "text")?,
+            }),
+            "image" => Ok(Self::Image {
+                media_type: required_string(object, "media_type")?,
+                data_b64: required_string(object, "data_b64")?,
             }),
             "tool_use" => Ok(Self::ToolUse {
                 id: required_string(object, "id")?,

@@ -10,6 +10,55 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **Vision input — paste / drag-drop / `@path` images into TUI and REPL.**
+  User messages can now carry image attachments alongside text. Three
+  input UXs:
+  - **TUI Alt+V** reads the OS clipboard. A bitmap (e.g. a fresh
+    `Win+Shift+S` snip) is re-encoded to PNG via the `image` crate and
+    base64'd. If the clipboard is text, it falls through to a path check
+    (still attaches if the text is a recognised image-file path).
+  - **Drag-drop** a file into either mode. The TUI uses bracketed-paste
+    mode (`EnableBracketedPaste`) so Windows Terminal delivers the path
+    as a single `Event::Paste` instead of fragmented key events; the REPL
+    just relies on stdin and detects the path on submit. Both show
+    explicit feedback (`📎 image attached` / `image-path detected but
+    couldn't attach: <reason>`) — no more silent misses.
+  - **Typed `@/path/to/foo.png`** in either mode. Tokens with `.png`,
+    `.jpg`, `.jpeg`, `.gif`, `.webp`, or `.bmp` extensions that resolve
+    to a real file are attached on submit. 20 MiB hard cap per image.
+- **Wire format: both transports.** The Ollama path emits user messages
+  with a flat `images: [b64,…]` sibling array (vanilla Ollama
+  `/api/chat`). The OpenAI-compat path (LM Studio, vLLM, etc.) emits
+  `content` as a parts array with `{"type":"image_url","image_url":
+  {"url":"data:<mime>;base64,…"}}`, skipping the empty `text` part so
+  strict servers don't reject it. Tested against LM Studio + Qwen 3.6
+  35B-A3B with the bundled `mmproj-F32` sidecar.
+- **`ContentBlock::Image { media_type, data_b64 }`** + JSON round-trip,
+  plus `ConversationMessage::user_with_images()` constructor and a new
+  `ConversationRuntime::run_turn_with_images()` method (existing
+  `run_turn` is now a thin wrapper). Sessions persist image attachments
+  losslessly across save/load. The compaction cost estimator charges
+  256 tokens per image (conservative ceiling for Qwen / LLaVA-style
+  vision pipelines) so auto-compaction stays honest with mixed turns.
+- **`src/image_attach.rs`** — shared helpers (`split_path_tokens`,
+  `image_mime_from_path`, `attachment_from_file`,
+  `extract_image_attachments_from_input`, hand-rolled standard-alphabet
+  base64 encoder) used by both TUI and REPL. Same lean approach as the
+  hand-rolled base64url decoder in `tools/gmail.rs` — no `base64` crate
+  pulled in.
+- **New deps: `arboard = "3"`** (cross-platform clipboard, only
+  exercised in the TUI Alt+V path) and **`image = "0.25"`** restricted
+  to `default-features = false, features = ["png"]` so JPEG/WebP/GIF
+  codec crates aren't pulled in transitively.
+
+### Changed
+
+- **`UserInput::Message`** in `tui_events` is now a struct variant
+  `{ text, images }` instead of `Message(String)`. Internal type; not
+  re-exported at the crate root. Pre-1.0 breakage budget.
+
 ## [0.2.3] - 2026-04-30
 
 Hygiene + tag release. The bulk of the user-visible work is the LM
