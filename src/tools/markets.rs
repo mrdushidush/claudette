@@ -33,12 +33,12 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "tv_get_quote",
-                "description": "Get current price and % change for a stock/crypto/forex symbol via TradingView. Accepts bare tickers (BTC, AAPL) or qualified (BINANCE:BTCUSDT, NASDAQ:NVDA). Default market 'america'; use 'crypto' for coins.",
+                "description": "TradingView price + % change for stock/crypto/forex. Bare ticker (BTC, AAPL) or qualified (BINANCE:BTCUSDT).",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "symbol": { "type": "string", "description": "Ticker — bare (BTC, AAPL) or with exchange (BINANCE:BTCUSDT)" },
-                        "market": { "type": "string", "description": "Market: 'america' (default), 'crypto', 'forex', 'futures'" }
+                        "symbol": { "type": "string", "description": "Ticker (bare or EXCHANGE:SYM)" },
+                        "market": { "type": "string", "description": "america (default), crypto, forex, futures" }
                     },
                     "required": ["symbol"]
                 }

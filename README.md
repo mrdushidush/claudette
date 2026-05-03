@@ -66,16 +66,21 @@ README markdown rendering.
 
 Each mode reuses the same conversation runtime, the same tool set, and the same session format. Switching modes is just a different entry point.
 
-### 70+ tools across 12 on-demand groups
+### 70+ tools across 17 on-demand groups
 
-To keep the model's context window small, Claudette advertises only ~18 "core" tools by default. The rest load when the model calls `enable_tools(group)`. Each group is a self-contained capability:
+Every tool except `enable_tools` and `get_current_time` lives in a group that the model has to opt into via `enable_tools(group)`. The base schema is ~680 chars (~170 tokens) regardless of how many tools exist; each group adds only the tools it owns when first enabled.
 
 | Group | Tools | What it does |
 |-------|-------|--------------|
-| **core** (always on) | 18 | Notes (incl. `note_update`), todos, files, time, capabilities, web search, code generation, `enable_tools` itself |
+| **core** (always on) | 2 | `enable_tools` (the meta-tool), `get_current_time` |
+| `notes` | 5 | Personal notes — create, list, read, update, delete |
+| `todos` | 5 | Todo list — add, list, complete, uncomplete, delete |
+| `files` | 3 | `read_file`, `write_file` (sandboxed under `~/.claudette/files/`), `list_dir` |
+| `code` | 1 | `generate_code` — routes through the Codet coder + validator pipeline |
+| `meta` | 1 | `get_capabilities` — config, tool inventory, limits |
 | `git` | 8 | status, diff, log, add, commit, branch, checkout, push |
 | `ide` | 3 | Open in editor (`code`), reveal in file manager, open URL in browser |
-| `search` | 3 | Glob patterns, grep file contents, fetch + strip web pages |
+| `search` | 4 | `web_search` (Brave), `web_fetch`, `glob_search`, `grep_search` |
 | `advanced` | 3 | Bash shell, `edit_file` (find/replace), `spawn_agent` (delegate to a sub-agent) |
 | `facts` | 4 | Wikipedia search/summary, Open-Meteo weather (current/forecast) |
 | `registry` | 4 | crates.io info/search, npmjs info/search |
@@ -86,7 +91,7 @@ To keep the model's context window small, Claudette advertises only ~18 "core" t
 | `schedule` | 4 | Proactive reminders: one-shot + recurring schedules that fire prompts back at you |
 | `gmail` | 4 | Gmail (read-only): list, search, read, list labels — with `<email>` provenance wrapping |
 
-Schema cost: the core advertises only ~4.7 KB of tool schema on every turn; enabling all 12 groups at once is roughly 5× that. Loading on demand keeps typical conversations well under the full schema cost.
+Schema cost: ~680 chars (~170 tokens) on every turn until the model enables a group; the full 17-group surface is ~26 KB only if every group is loaded at once. Pre-rewrite the TUI/Telegram modes auto-enabled five groups (~25 KB / ~6,300 tokens shipped per turn — even for a one-word "hey"), which the [Unreleased] tool-array slimming retired.
 
 ### Three specialised sub-agents
 
@@ -156,9 +161,9 @@ Each turn shows explicit feedback (`📎 image attached` / `image-path detected 
 
 ### On-demand tool enablement
 
-The `enable_tools(group)` meta-tool lets the model pull in capability groups when it realises it needs them. Adding a new group to Claudette costs zero context until the model actually calls one — the trick that lets a 70-tool surface fit a 16K context window.
+The `enable_tools(group)` meta-tool lets the model pull in capability groups when it realises it needs them. Every group costs zero context until the model actually calls one — the trick that lets a 70-tool surface ship a ~170-token base schema.
 
-The model can also be told to pre-load groups in Telegram and TUI modes where the user can't confirm permissions turn-by-turn — `markets`, `facts`, `search`, `advanced`, and `git` are pre-loaded when `--telegram` or `--tui` is passed.
+No mode (REPL, single-shot, TUI, Telegram) pre-loads groups any more. The first tool use in a session costs one extra round-trip (`enable_tools(group)` then the tool itself), which amortises to nothing across a multi-turn conversation while saving ~6,000 tokens per turn for chats that don't need tools at all (e.g. "hey", "what time is it"). For sessions that always reach for the same group, you can always call `enable_tools` from the system prompt or from your first message.
 
 ---
 

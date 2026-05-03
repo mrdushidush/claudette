@@ -27,11 +27,11 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "bash",
-                "description": "Run a shell command. Requires user confirmation. Use for system tasks the other tools can't handle. The shell is PowerShell on Windows (use Windows syntax: ; for chaining, $env:VAR, no &&; backslash paths) and sh on macOS/Linux.",
+                "description": "Run a shell command (asks for confirmation). PowerShell on Windows (use ; not &&, $env:VAR, backslash paths); sh elsewhere.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "command": { "type": "string", "description": "Shell command to execute" }
+                        "command": { "type": "string", "description": "Shell command" }
                     },
                     "required": ["command"]
                 }

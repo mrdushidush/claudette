@@ -260,13 +260,13 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "generate_code",
-                "description": "Generate code using the specialized coder model and write it to a file. USE THIS instead of write_file for any code. Supports Python, Rust, JavaScript, TypeScript, HTML, CSS. Auto-validates syntax and tests. The file is written to disk; reply with a SHORT confirmation (path + 1 sentence). DO NOT paste the generated code in your reply — it bloats the conversation and the user can already open the file. BROWNFIELD: when the user mentions an existing file the new code must match (e.g. 'add tests for X.py', 'extend X.py', 'refactor X.py'), ALWAYS list those file paths in `reference_files` so the coder can read the real API instead of inventing one.",
+                "description": "Write code to a file via the specialised coder model (auto-validates syntax + tests). Use instead of write_file for any code file. Reply with path + one sentence — never paste the generated code. For brownfield edits, pass the existing file in reference_files so the coder reads the real API.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "description":     { "type": "string", "description": "What code to write — include language, functions, tests needed" },
-                        "filename":        { "type": "string", "description": "Filename (e.g. 'calc.py', 'lib.rs', 'app.ts'). Extension sets the language." },
-                        "reference_files": { "type": "array", "items": { "type": "string" }, "description": "Existing file paths the coder MUST read before writing (real class/method names, signatures, exceptions). Pass each path as the user typed it — '~/.claudette/files/X.py', './X.py', or 'X.py'. Up to 4 files; oversize files are auto-truncated." }
+                        "description":     { "type": "string", "description": "What code to write" },
+                        "filename":        { "type": "string", "description": "Filename; extension sets the language (calc.py, lib.rs, app.ts)" },
+                        "reference_files": { "type": "array", "items": { "type": "string" }, "description": "Paths the coder must read first (up to 4). Required for brownfield." }
                     },
                     "required": ["description", "filename"]
                 }

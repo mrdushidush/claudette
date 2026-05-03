@@ -29,20 +29,16 @@ type TuiRuntime = ConversationRuntime<OllamaApiClient, TuiToolExecutor>;
 
 /// Build a runtime with `TuiToolExecutor` + TUI text callback.
 ///
-/// Pre-enables the same five tool groups as Telegram mode so the model can
-/// use them without an extra `enable_tools` round-trip.
+/// Ships only the core tools (`enable_tools` + `get_current_time`) — every
+/// other group must be opted into via `enable_tools`. Pre-rewrite this
+/// auto-enabled five groups (Markets/Facts/Advanced/Git/Search), which
+/// pushed the per-turn payload to ~2,500 tokens. Now ~200.
 ///
 /// Uses the same per-tool permission policy as the REPL so `ReadOnly` +
 /// `WorkspaceWrite` tools pass through. `DangerFullAccess` tools are denied
 /// (no prompter yet). Sprint G will add `TuiPrompter` for confirmation modals.
 fn build_tui_runtime(session: Session, tui_tx: SyncSender<TuiEvent>) -> TuiRuntime {
-    let mut reg = ToolRegistry::new();
-    reg.enable(ToolGroup::Markets);
-    reg.enable(ToolGroup::Facts);
-    reg.enable(ToolGroup::Advanced);
-    reg.enable(ToolGroup::Git);
-    reg.enable(ToolGroup::Search);
-
+    let reg = ToolRegistry::new();
     let registry = Arc::new(Mutex::new(reg));
 
     let api_client = OllamaApiClient::with_registry(current_model(), registry.clone())

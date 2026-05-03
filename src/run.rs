@@ -477,25 +477,20 @@ pub(crate) fn build_runtime_with_brain(
     streaming: bool,
     telegram: bool,
 ) -> ConversationRuntime<OllamaApiClient, SecretaryToolExecutor> {
-    // Sprint 8: one shared ToolRegistry is the single source of truth for
-    // the `tools` field on every request. The API client reads from it
-    // (via ToolsProvider::Dynamic) and the executor mutates it when the
-    // model calls `enable_tools`. Both halves hold a clone of the Arc so
-    // the mutations are immediately visible on the next chat turn.
-    let mut reg = ToolRegistry::new();
-
-    // In Telegram mode, pre-enable the most-used groups so the model can
-    // call tools directly without the enable_tools → tool two-step dance.
-    // Cost: ~3K tokens of schema (~18% of 16K context). Worth it for the
-    // single-iteration tool calls.
-    if telegram {
-        reg.enable(ToolGroup::Markets);
-        reg.enable(ToolGroup::Facts);
-        reg.enable(ToolGroup::Advanced);
-        reg.enable(ToolGroup::Git);
-        reg.enable(ToolGroup::Search);
-    }
-
+    // One shared ToolRegistry is the single source of truth for the
+    // `tools` field on every request. The API client reads from it (via
+    // ToolsProvider::Dynamic) and the executor mutates it when the model
+    // calls `enable_tools`. Both halves hold a clone of the Arc so the
+    // mutations are immediately visible on the next chat turn.
+    //
+    // No mode (REPL, single-shot, Telegram) pre-enables groups any more.
+    // Pre-rewrite, Telegram auto-enabled five groups so the model could
+    // call tools without the enable_tools → tool two-step. The cost
+    // (~2,500 tokens of schema on every turn, ~15% of a 16K window) was
+    // dominating one-word interactions like "hey". Now everything goes
+    // through enable_tools; the brain pays one extra round-trip for the
+    // first tool call in a session and saves ~2,300 tokens per turn.
+    let reg = ToolRegistry::new();
     let registry = Arc::new(Mutex::new(reg));
 
     let mut api_client = OllamaApiClient::with_registry(brain.model.clone(), registry.clone())

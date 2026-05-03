@@ -22,14 +22,14 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "schedule_once",
-                "description": "Schedule a one-shot reminder. The prompt is what the assistant will act on at fire time (e.g. 'send me a message: call the dentist'). Accepts human expressions like 'in 30 minutes', 'tomorrow at 15:00', 'at 7pm', 'today at 3pm', or an RFC3339 datetime.",
+                "description": "Schedule a one-shot reminder; prompt fires at the given time. Accepts NL ('in 30 min', 'tomorrow at 15:00') or RFC3339.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "when":    { "type": "string", "description": "When to fire (natural language or RFC3339)." },
-                        "prompt":  { "type": "string", "description": "What the assistant should do at fire time." },
-                        "chat_id": { "type": "number", "description": "Telegram chat to notify. Defaults to the current chat if called from the Telegram bot." },
-                        "catch_up": { "type": "string", "enum": ["once", "skip", "all"], "description": "What to do if the bot was offline at fire time. Default: 'once'." }
+                        "when":    { "type": "string", "description": "Fire time (NL or RFC3339)" },
+                        "prompt":  { "type": "string", "description": "What to do at fire time" },
+                        "chat_id": { "type": "number", "description": "Telegram chat (defaults to current)" },
+                        "catch_up": { "type": "string", "enum": ["once", "skip", "all"], "description": "If bot was offline. Default 'once'" }
                     },
                     "required": ["when", "prompt"]
                 }
@@ -39,14 +39,14 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "schedule_recurring",
-                "description": "Schedule a recurring reminder. Accepts human expressions like 'every weekday at 07:00', 'daily at 09:30', 'every 15 minutes', 'every monday at 10:00', or a raw cron string prefixed with 'cron:'.",
+                "description": "Schedule a recurring reminder. Accepts 'every weekday at 07:00', 'daily at 09:30', 'every 15 minutes', or 'cron: ...'.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "when":    { "type": "string", "description": "Recurrence expression (see description)." },
-                        "prompt":  { "type": "string", "description": "What the assistant should do at fire time." },
-                        "chat_id": { "type": "number", "description": "Telegram chat to notify. Defaults to the current chat if called from the Telegram bot." },
-                        "catch_up": { "type": "string", "enum": ["once", "skip", "all"], "description": "What to do about missed occurrences. Default: 'skip' for recurring." }
+                        "when":    { "type": "string", "description": "Recurrence expression" },
+                        "prompt":  { "type": "string", "description": "What to do at fire time" },
+                        "chat_id": { "type": "number", "description": "Telegram chat (defaults to current)" },
+                        "catch_up": { "type": "string", "enum": ["once", "skip", "all"], "description": "Missed occurrences. Default 'skip'" }
                     },
                     "required": ["when", "prompt"]
                 }

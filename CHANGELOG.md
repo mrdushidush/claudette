@@ -10,6 +10,42 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Changed
+
+- **Tool-array baseline cut from ~6,300 tokens to ~170 tokens per request
+  (97% reduction).** Pre-rewrite the TUI and Telegram modes auto-enabled
+  five tool groups (Markets, Facts, Advanced, Git, Search), and 18 more
+  tools were always shipped as "core". Even a one-word greeting like
+  "hey" cost ~2,800 prompt tokens — almost all of it tool-definition JSON.
+  Now `enable_tools` and `get_current_time` are the only tools shipped by
+  default (~680 chars / ~170 tokens); everything else lives in a group
+  the model has to ask for via `enable_tools(group)`. Concrete numbers
+  via `cargo test schema_size_report -- --nocapture`:
+  - **Old flat registry (30 tools shipped):** 25,329 chars.
+  - **New core only (2 tools):** 681 chars (~170 tokens). **−97%.**
+  - **Core + every group enabled (72 tools):** 25,818 chars — same
+    ceiling as the old flat schema, but you only pay for what's enabled.
+- **Five new on-demand groups carved out of the old "core" pile:**
+  `notes` (5 tools), `todos` (5), `files` (3), `code` (`generate_code`),
+  `meta` (`get_capabilities`). `web_search` moved into the existing
+  `search` group alongside `web_fetch`/`glob_search`/`grep_search`.
+- **No mode pre-enables groups any more.** REPL, single-shot, TUI, and
+  Telegram all start with the minimal core. The first tool use in a
+  session costs one extra round-trip (`enable_tools(group)` then the
+  tool itself); amortises to nothing across a multi-turn conversation
+  while making "hey"-style chats genuinely cheap.
+- **`enable_tools` schema slimmed.** The description now lists group
+  names only (no per-group prose summaries — those still ship via
+  `get_capabilities` when the model asks). The `group` parameter relies
+  on its `enum` constraint instead of a redundant prose description.
+- **Top 10 fattest tool descriptions pruned** for when their groups
+  *are* loaded: `generate_code` 652→307 chars, `write_file` 287→133,
+  `schedule_once` 252→152, `gmail_list` 239→128, `web_search` 235→106,
+  `bash` 228→133, `tv_get_quote` 207→117, `schedule_recurring` 194→124,
+  `note_update` 190→107, `gmail_read` 178→111. Substantive constraints
+  preserved (write_file's "no code files" rule, bash's PowerShell-on-
+  Windows note, gmail_read's `<email>`-tag warning).
+
 ### Added
 
 - **Vision input — paste / drag-drop / `@path` images into TUI and REPL.**

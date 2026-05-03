@@ -60,7 +60,7 @@ pub fn secretary_tools_json() -> Value {
             "type": "function",
             "function": {
                 "name": "get_current_time",
-                "description": "Returns the current date, time, weekday, and timezone.",
+                "description": "Current date, time, weekday, timezone.",
                 "parameters": { "type": "object", "properties": {}, "required": [] }
             }
         },
@@ -1306,17 +1306,27 @@ mod tests {
         let v: Value = serde_json::from_str(&raw).unwrap();
 
         assert_eq!(v["name"], "Claudette");
-        // Sprint 8: tools are now reported as core + optional groups.
+        // Post-rewrite: core is intentionally minimal — just enable_tools
+        // (synthesised) and get_current_time. Everything else lives in
+        // optional groups so the per-turn baseline stays under ~200 tokens.
         let core = v["tools"]["core"].as_array().expect("core tools array");
-        assert!(core.iter().any(|n| n == "get_capabilities"));
-        assert!(core.iter().any(|n| n == "read_file"));
-        assert!(core.iter().any(|n| n == "todo_add"));
         assert!(
             core.iter().any(|n| n == "enable_tools"),
             "enable_tools meta-tool must be in core"
         );
+        assert!(
+            core.iter().any(|n| n == "get_current_time"),
+            "get_current_time must be in core"
+        );
+        for moved in &["get_capabilities", "read_file", "todo_add", "generate_code", "web_search"] {
+            assert!(
+                !core.iter().any(|n| n == moved),
+                "{moved} should now live in a group, not core"
+            );
+        }
 
-        // Optional groups should include git, ide, search, advanced.
+        // Optional groups must cover the previously-core territory plus the
+        // pre-existing groups.
         let groups = v["tools"]["optional_groups"]
             .as_array()
             .expect("optional_groups array");
@@ -1324,10 +1334,14 @@ mod tests {
             .iter()
             .filter_map(|g| g.get("name").and_then(Value::as_str))
             .collect();
-        assert!(group_names.contains(&"git"));
-        assert!(group_names.contains(&"ide"));
-        assert!(group_names.contains(&"search"));
-        assert!(group_names.contains(&"advanced"));
+        for required in &[
+            "notes", "todos", "files", "code", "meta", "git", "ide", "search", "advanced",
+        ] {
+            assert!(
+                group_names.contains(required),
+                "optional groups missing {required}: got {group_names:?}"
+            );
+        }
 
         // Total count should add up.
         let total = v["tools"]["total"].as_u64().unwrap() as usize;
@@ -1628,13 +1642,25 @@ mod tests {
     // live in src/tools/todos.rs alongside their handlers.
 
     #[test]
-    fn core_tool_names_include_new_tools() {
-        use crate::tool_groups::CORE_TOOL_NAMES;
-        for tool in &["note_read", "note_delete", "todo_uncomplete", "todo_delete"] {
+    fn note_and_todo_tools_classified_into_their_groups() {
+        // Post-rewrite: note_* and todo_* are no longer in CORE — they live
+        // in the Notes / Todos groups so the per-turn baseline payload
+        // stays under ~200 tokens. Verify the new classification holds.
+        use crate::tool_groups::{group_of, ToolGroup, CORE_TOOL_NAMES};
+
+        for tool in &["note_create", "note_list", "note_read", "note_update", "note_delete"] {
             assert!(
-                CORE_TOOL_NAMES.contains(tool),
-                "CORE_TOOL_NAMES missing {tool}"
+                !CORE_TOOL_NAMES.contains(tool),
+                "{tool} must NOT be in core (regression — it should live in the Notes group)"
             );
+            assert_eq!(group_of(tool), Some(ToolGroup::Notes), "{tool} must classify as Notes");
+        }
+        for tool in &["todo_add", "todo_list", "todo_complete", "todo_uncomplete", "todo_delete"] {
+            assert!(
+                !CORE_TOOL_NAMES.contains(tool),
+                "{tool} must NOT be in core (regression — it should live in the Todos group)"
+            );
+            assert_eq!(group_of(tool), Some(ToolGroup::Todos), "{tool} must classify as Todos");
         }
     }
 

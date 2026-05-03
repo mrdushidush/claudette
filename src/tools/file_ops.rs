@@ -66,7 +66,7 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "write_file",
-                "description": "Write plain text / config / data to ~/.claudette/files/ (notes, JSON, YAML, TOML, MD, TXT, XML, INI). REFUSES code files (.py .rs .js .ts .html .css .go .java .c .cpp .rb .php .sh .sql etc) — for code you MUST use generate_code instead so the specialised coder + validator pipeline runs.",
+                "description": "Write text/config/data to ~/.claudette/files/. Refuses code files (.py/.rs/.js/.ts/etc) — use generate_code for those.",
                 "parameters": {
                     "type": "object",
                     "properties": {

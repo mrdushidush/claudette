@@ -102,14 +102,14 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "note_update",
-                "description": "Update an existing note's title, body, or tags by id. Pass only the fields you want to change. The filename (id) stays stable on title changes; only the heading inside the file is rewritten.",
+                "description": "Update a note by id; pass only fields to change. Filename stays stable on title change.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "id":    { "type": "string", "description": "Note id from note_list" },
-                        "title": { "type": "string", "description": "New title (heading line)" },
-                        "body":  { "type": "string", "description": "New body content" },
-                        "tags":  { "type": "string", "description": "Comma-separated tags. Empty string clears all tags. Omit to leave existing tags untouched." }
+                        "title": { "type": "string", "description": "New title" },
+                        "body":  { "type": "string", "description": "New body" },
+                        "tags":  { "type": "string", "description": "Comma-separated; empty clears, omit keeps" }
                     },
                     "required": ["id"]
                 }

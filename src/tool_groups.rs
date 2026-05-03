@@ -1,17 +1,16 @@
-//! On-demand tool group registry (Sprint 8).
+//! On-demand tool group registry.
 //!
-//! Claudette advertises a small **core** of tools on every request, plus a
-//! `enable_tools(group)` meta-tool. When the model calls `enable_tools`, the
-//! chosen group's tools are added to the registry and show up on the next
-//! `/api/chat` call. This keeps the base schema flat regardless of how many
-//! total tools exist — we pay the schema cost only for the groups the model
-//! actually asked for.
+//! Claudette ships a minimal **core** of tools on every request — just
+//! `enable_tools(group)` plus `get_current_time` — and gates everything
+//! else behind `enable_tools`. When the model calls `enable_tools`, the
+//! chosen group's tools are added to the registry and show up on the
+//! next `/api/chat` call. The base schema stays under ~200 tokens
+//! regardless of how many groups exist.
 //!
 //! Why it matters: every char of the `tools` field counts against `num_ctx`.
-//! Our 16 K window was spending ~7.5 K chars (≈1.9 K tokens) on the full
-//! 30-tool schema every turn, even when the user asked a plain question like
-//! "what time is it?". With Sprint 8 the baseline drops to ~3.5 K chars
-//! (≈900 tokens) and a specialised group adds ~1-2 K chars only when needed.
+//! Pre-rewrite the baseline was ~2,500 tokens (43 tools shipped per turn
+//! in TUI/Telegram). Now it's ~200 tokens, with each group adding only
+//! the tools it owns when the model asks for it.
 //!
 //! Mutation model: the registry lives behind an `Arc<Mutex<_>>` shared by
 //! [`OllamaApiClient`] (which reads it to build the `tools` field) and
@@ -23,16 +22,26 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{json, Value};
 
-/// Named tool groups that can be enabled on demand. Core tools are always
-/// advertised and are NOT represented here — this enum only covers the
-/// optional groups.
+/// Named tool groups that can be enabled on demand. Only `enable_tools`
+/// and `get_current_time` ship in core — every other tool lives in one of
+/// these groups.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ToolGroup {
+    /// Personal notes: create, list, read, update, delete.
+    Notes,
+    /// Todo list: add, list, complete, uncomplete, delete.
+    Todos,
+    /// File ops: read_file, write_file, list_dir.
+    Files,
+    /// Code generation via the specialised coder model: generate_code.
+    Code,
+    /// Self-introspection: get_capabilities (config, tool inventory, limits).
+    Meta,
     /// Git workflow tools: status, diff, log, add, commit, branch, checkout, push.
     Git,
     /// IDE integration: open in editor, reveal in file manager, open URL.
     Ide,
-    /// Code/file/web search: glob, grep, `web_fetch`.
+    /// Search: web_search (Brave), web_fetch, glob_search, grep_search.
     Search,
     /// Power tools: bash, `edit_file`, `spawn_agent` (delegation).
     Advanced,
@@ -63,6 +72,11 @@ impl ToolGroup {
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {
+            Self::Notes => "notes",
+            Self::Todos => "todos",
+            Self::Files => "files",
+            Self::Code => "code",
+            Self::Meta => "meta",
             Self::Git => "git",
             Self::Ide => "ide",
             Self::Search => "search",
@@ -78,14 +92,20 @@ impl ToolGroup {
         }
     }
 
-    /// One-line human summary. Shown in the `enable_tools` description so the
-    /// model knows what each group contains without the full schema being loaded.
+    /// One-line human summary. Shown by `get_capabilities` (NOT in the
+    /// `enable_tools` schema — that one stays minimal to keep the base
+    /// payload under 200 tokens).
     #[must_use]
     pub fn summary(self) -> &'static str {
         match self {
+            Self::Notes => "personal notes: create/list/read/update/delete",
+            Self::Todos => "todo list: add/list/complete/uncomplete/delete",
+            Self::Files => "file ops: read_file, write_file, list_dir (under ~/)",
+            Self::Code => "code generation via specialised coder model + validator",
+            Self::Meta => "self-introspection: config, tool inventory, limits",
             Self::Git => "git workflows: status, diff, log, add, commit, branch, checkout, push",
             Self::Ide => "IDE integration: open_in_editor, reveal_in_explorer, open_url",
-            Self::Search => "code/file/web search: glob_search, grep_search, web_fetch",
+            Self::Search => "search: web_search (Brave), web_fetch, glob_search, grep_search",
             Self::Advanced => "power tools: bash, edit_file, spawn_agent (delegation)",
             Self::Facts => "reference lookups: wikipedia, weather (no API key needed)",
             Self::Registry => "package registries: crates.io and npmjs metadata",
@@ -100,8 +120,13 @@ impl ToolGroup {
 
     /// All groups in a stable order, for schema generation and tests.
     #[must_use]
-    pub fn all() -> [ToolGroup; 12] {
+    pub fn all() -> [ToolGroup; 17] {
         [
+            Self::Notes,
+            Self::Todos,
+            Self::Files,
+            Self::Code,
+            Self::Meta,
             Self::Git,
             Self::Ide,
             Self::Search,
@@ -121,9 +146,14 @@ impl ToolGroup {
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s.trim().to_lowercase().as_str() {
+            "notes" | "note" => Some(Self::Notes),
+            "todos" | "todo" | "tasks" | "task" => Some(Self::Todos),
+            "files" | "file" | "fs" => Some(Self::Files),
+            "code" | "codegen" | "coder" => Some(Self::Code),
+            "meta" | "capabilities" | "info" | "status" => Some(Self::Meta),
             "git" => Some(Self::Git),
             "ide" | "editor" => Some(Self::Ide),
-            "search" | "grep" | "glob" => Some(Self::Search),
+            "search" | "grep" | "glob" | "web" => Some(Self::Search),
             "advanced" | "shell" | "power" | "bash" => Some(Self::Advanced),
             "facts" | "wikipedia" | "weather" => Some(Self::Facts),
             "registry" | "crates" | "npm" => Some(Self::Registry),
@@ -140,29 +170,17 @@ impl ToolGroup {
     }
 }
 
-/// Names of the core tools — always advertised, never gated. Keep in sync
-/// with the `json!` array in [`crate::tools::secretary_tools_json`] (plus
-/// the synthetic `enable_tools` meta-tool that lives only in this registry).
-pub const CORE_TOOL_NAMES: &[&str] = &[
-    "enable_tools",
-    "get_current_time",
-    "note_create",
-    "note_list",
-    "note_read",
-    "note_update",
-    "note_delete",
-    "todo_add",
-    "todo_list",
-    "todo_complete",
-    "todo_uncomplete",
-    "todo_delete",
-    "read_file",
-    "write_file",
-    "list_dir",
-    "get_capabilities",
-    "web_search",
-    "generate_code",
-];
+/// Names of the core tools — always advertised, never gated. Kept tiny by
+/// design so the base payload stays under ~200 tokens. Everything else
+/// (notes, todos, files, codegen, search, etc.) lives in a [`ToolGroup`]
+/// and ships only after the model calls `enable_tools`.
+///
+/// The synthetic `enable_tools` meta-tool is added by [`ToolRegistry::new`]
+/// and isn't pulled from `secretary_tools_json`. `get_current_time` is
+/// kept in core because it's tiny (~25 tokens), used in nearly every
+/// conversation, and asking the model to call `enable_tools(time)` first
+/// would burn an unnecessary round-trip.
+pub const CORE_TOOL_NAMES: &[&str] = &["enable_tools", "get_current_time"];
 
 /// Classify a tool name into its group. Returns `None` for core tools, for
 /// unknown names, and for `add_numbers` (kept in `dispatch_tool` for
@@ -170,10 +188,19 @@ pub const CORE_TOOL_NAMES: &[&str] = &[
 #[must_use]
 pub fn group_of(tool: &str) -> Option<ToolGroup> {
     match tool {
+        "note_create" | "note_list" | "note_read" | "note_update" | "note_delete" => {
+            Some(ToolGroup::Notes)
+        }
+        "todo_add" | "todo_list" | "todo_complete" | "todo_uncomplete" | "todo_delete" => {
+            Some(ToolGroup::Todos)
+        }
+        "read_file" | "write_file" | "list_dir" => Some(ToolGroup::Files),
+        "generate_code" => Some(ToolGroup::Code),
+        "get_capabilities" => Some(ToolGroup::Meta),
         "git_status" | "git_diff" | "git_log" | "git_add" | "git_commit" | "git_branch"
         | "git_checkout" | "git_push" => Some(ToolGroup::Git),
         "open_in_editor" | "reveal_in_explorer" | "open_url" => Some(ToolGroup::Ide),
-        "glob_search" | "grep_search" | "web_fetch" => Some(ToolGroup::Search),
+        "glob_search" | "grep_search" | "web_fetch" | "web_search" => Some(ToolGroup::Search),
         "bash" | "edit_file" | "spawn_agent" => Some(ToolGroup::Advanced),
         "wikipedia_search" | "wikipedia_summary" | "weather_current" | "weather_forecast" => {
             Some(ToolGroup::Facts)
@@ -358,36 +385,32 @@ impl Default for ToolRegistry {
     }
 }
 
-/// Build the JSON schema for the `enable_tools` meta-tool. The description
-/// lists every group with its one-line summary so the model can pick the
-/// right one without the full schema being loaded.
+/// Build the JSON schema for the `enable_tools` meta-tool.
+///
+/// Description and parameter description list every group name (no
+/// per-group summaries) so the base payload stays under ~200 tokens.
+/// The model has enough training-data prior on names like `git`,
+/// `calendar`, `gmail` to pick correctly; the few non-obvious groups
+/// (`meta`, `facts`, `advanced`) cost at most one extra round-trip
+/// when the model picks wrong, which is dwarfed by the per-turn token
+/// savings versus shipping verbose summaries every request.
 fn enable_tools_schema() -> Value {
-    // Description spells out every group + summary so the model can pick
-    // without a second tool call. Keep the prose terse to stay within the
-    // Qwen tool-description budget.
-    let group_lines: Vec<String> = ToolGroup::all()
+    let names_csv = ToolGroup::all()
         .iter()
-        .map(|g| format!("{} ({})", g.name(), g.summary()))
-        .collect();
-    let description = format!(
-        "Enable an optional tool group when you need tools beyond the core set. \
-         The new tools become available on the next turn. Groups: {}.",
-        group_lines.join("; ")
-    );
+        .map(|g| g.name())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let description = format!("Enable a tool group (available next turn). Groups: {names_csv}.");
 
+    // The enum below is the ONLY constraint the model needs on the
+    // `group` parameter — adding a `description` here would duplicate
+    // the same list a third time and pushes us past the 200-token
+    // baseline. The function-level description above already names every
+    // valid group.
     let enum_values: Vec<Value> = ToolGroup::all()
         .iter()
         .map(|g| Value::String(g.name().to_string()))
         .collect();
-
-    let group_param_description = format!(
-        "Group name: one of {}.",
-        ToolGroup::all()
-            .iter()
-            .map(|g| g.name())
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
 
     json!({
         "type": "function",
@@ -399,8 +422,7 @@ fn enable_tools_schema() -> Value {
                 "properties": {
                     "group": {
                         "type": "string",
-                        "enum": enum_values,
-                        "description": group_param_description
+                        "enum": enum_values
                     }
                 },
                 "required": ["group"]
@@ -530,13 +552,18 @@ mod tests {
     fn registry_starts_with_only_core() {
         let reg = ToolRegistry::new();
         assert!(reg.enabled_groups().is_empty());
-        // Core should include every CORE_TOOL_NAMES entry that exists in
-        // secretary_tools_json plus the synthetic enable_tools.
+        // Core is intentionally tiny: just enable_tools (synthesized) and
+        // get_current_time. Everything else (notes, todos, files, code,
+        // meta, search, etc.) must be enabled on demand.
         let core_names = reg.core_tool_names();
+        assert_eq!(core_names.len(), 2, "core should be exactly 2 tools, got {core_names:?}");
         assert!(core_names.contains(&"enable_tools".to_string()));
         assert!(core_names.contains(&"get_current_time".to_string()));
-        assert!(core_names.contains(&"read_file".to_string()));
-        assert!(core_names.contains(&"generate_code".to_string()));
+        // The previously-core tools must now live in their groups.
+        assert!(!core_names.contains(&"read_file".to_string()));
+        assert!(!core_names.contains(&"generate_code".to_string()));
+        assert!(!core_names.contains(&"note_create".to_string()));
+        assert!(!core_names.contains(&"web_search".to_string()));
     }
 
     #[test]
@@ -647,19 +674,17 @@ mod tests {
     }
 
     #[test]
-    fn enable_tools_group_param_description_mentions_every_group() {
+    fn enable_tools_group_param_has_no_redundant_description() {
+        // The `group` parameter constrains values via the `enum`; an
+        // extra prose description would just duplicate the names listed
+        // in the function-level description and push the baseline over
+        // the 200-token budget. Verify it stays absent.
         let schema = enable_tools_schema();
-        let desc = schema
-            .pointer("/function/parameters/properties/group/description")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        for g in ToolGroup::all() {
-            assert!(
-                desc.contains(g.name()),
-                "group parameter description should mention {}: {desc}",
-                g.name()
-            );
-        }
+        let desc = schema.pointer("/function/parameters/properties/group/description");
+        assert!(
+            desc.is_none(),
+            "group param must not carry a description (token budget): {desc:?}"
+        );
     }
 
     #[test]
