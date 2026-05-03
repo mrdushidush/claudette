@@ -95,6 +95,30 @@ bumps are non-breaking bugfixes only.
   `{ text, images }` instead of `Message(String)`. Internal type; not
   re-exported at the crate root. Pre-1.0 breakage budget.
 
+### Fixed
+
+- **`open_url` survives path-mangling hallucinations.** Symptom seen in
+  the wild on Qwen 3.6 35B-A3B: after `generate_code` returned an
+  absolute path under `~/.claudette/files/`, the brain would construct
+  a `file:///` URL by hand and occasionally drop characters (e.g.
+  `.claude/files/test_calc.html` instead of `.claudette/files/...`),
+  then confidently report "opened in your browser" while the OS shell
+  errored on the missing file. Fix has three layers:
+  - `open_url` now resolves bare filenames against `~/.claudette/files/`
+    (same convention `write_file`/`generate_code` already use for
+    relative paths). Model can pass `"test_calc.html"` and it works.
+  - `generate_code` and `write_file` responses include a pre-built
+    `file_url` field plus a `reply_hint` instructing the model to pass
+    `path` or `file_url` verbatim instead of reconstructing URLs.
+  - New helper `tools::file_url_for(&Path)` builds Windows-correct
+    `file:///C:/...` URLs (forward slashes, no leading-slash double-up).
+- **Hermetic prompt-discovery tests.** `discover_instruction_files`
+  walked all ancestors of cwd, so unit tests running from a temp dir
+  under the user's home would silently pick up real `~/CLAUDETTE.md` or
+  `~/.claudette/instructions.md` files. Added an internal
+  `discover_instruction_files_within(cwd, stop_at)` so the two affected
+  tests can bound the walk; production behaviour unchanged.
+
 ## [0.2.3] - 2026-04-30
 
 Hygiene + tag release. The bulk of the user-visible work is the LM

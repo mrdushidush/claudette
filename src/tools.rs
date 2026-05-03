@@ -306,6 +306,15 @@ pub(super) fn ensure_dir(path: &Path) -> Result<(), String> {
     fs::create_dir_all(path).map_err(|e| format!("create dir {}: {e}", path.display()))
 }
 
+/// Render an absolute path as a `file:///` URL the OS shell can open.
+/// Handles Windows (`C:\foo` → `file:///C:/foo`) and Unix
+/// (`/home/x/foo` → `file:///home/x/foo`) without pulling in the `url` crate.
+pub(super) fn file_url_for(path: &Path) -> String {
+    let s = path.display().to_string().replace('\\', "/");
+    let s = s.trim_start_matches('/');
+    format!("file:///{s}")
+}
+
 // Notes group (note_*) + the slugify helper live in src/tools/notes.rs.
 // Todos group (todo_*) + Todo struct + load/save_todos + todos_path
 // live in src/tools/todos.rs.

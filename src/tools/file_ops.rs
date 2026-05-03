@@ -16,7 +16,9 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
-use super::{ensure_dir, files_dir, validate_read_path, validate_write_path, MAX_FILE_BYTES};
+use super::{
+    ensure_dir, file_url_for, files_dir, validate_read_path, validate_write_path, MAX_FILE_BYTES,
+};
 
 const MAX_LIST_ENTRIES: usize = 200;
 
@@ -202,6 +204,7 @@ fn run_write_file(input: &str) -> Result<String, String> {
     let mut result = json!({
         "ok": true,
         "path": path.display().to_string(),
+        "file_url": file_url_for(&path),
         "bytes": content.len(),
     });
 

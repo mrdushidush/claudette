@@ -25,7 +25,7 @@ use std::sync::{Mutex, OnceLock};
 
 use serde_json::{json, Value};
 
-use super::{ensure_dir, files_dir, validate_read_path, validate_write_path};
+use super::{ensure_dir, file_url_for, files_dir, validate_read_path, validate_write_path};
 
 /// File extensions we'll include as reference context.
 const REF_EXTENSIONS: &[&str] = &[
@@ -370,12 +370,16 @@ fn run_generate_code(input: &str) -> Result<String, String> {
     let mut result = json!({
         "ok": true,
         "path": path.display().to_string(),
+        "file_url": file_url_for(&path),
         "bytes": code.len(),
         "language": language,
         "generated_by": crate::codet::coder_model(),
         // Strong hint for the model: the file is on disk, do not paste
         "reply_hint": "File written. Reply with: file path + 1-sentence \
-                       summary. DO NOT include the code in your response.",
+                       summary. DO NOT include the code in your response. \
+                       If the user wants it opened in a browser, pass `path` \
+                       (or `file_url`) verbatim to open_url — do not \
+                       reconstruct file:// URLs by hand.",
     });
 
     // Run Codet validation (same as write_file post-write hook). Pass the

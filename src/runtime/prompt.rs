@@ -196,10 +196,23 @@ pub fn prepend_bullets(items: Vec<String>) -> Vec<String> {
 }
 
 fn discover_instruction_files(cwd: &Path) -> std::io::Result<Vec<ContextFile>> {
+    discover_instruction_files_within(cwd, None)
+}
+
+/// Walk cwd's ancestor chain collecting instruction files. When `stop_at` is
+/// `Some`, the walk stops after visiting that directory — used by tests so
+/// they don't pick up real config files in the user's actual home directory.
+fn discover_instruction_files_within(
+    cwd: &Path,
+    stop_at: Option<&Path>,
+) -> std::io::Result<Vec<ContextFile>> {
     let mut directories = Vec::new();
     let mut cursor = Some(cwd);
     while let Some(dir) = cursor {
         directories.push(dir.to_path_buf());
+        if stop_at.is_some_and(|stop| dir == stop) {
+            break;
+        }
         cursor = dir.parent();
     }
     directories.reverse();
@@ -547,9 +560,11 @@ mod tests {
         )
         .expect("write nested instructions");
 
-        let context = ProjectContext::discover(&nested, "2026-03-31").expect("context should load");
-        let contents = context
-            .instruction_files
+        // Bound the walk to `root` so the test doesn't pick up real
+        // CLAUDETTE.md / instructions.md files in the user's actual home.
+        let files = super::discover_instruction_files_within(&nested, Some(&root))
+            .expect("discovery should succeed");
+        let contents = files
             .iter()
             .map(|file| file.content.as_str())
             .collect::<Vec<_>>();
@@ -579,10 +594,11 @@ mod tests {
         fs::write(root.join("CLAUDETTE.md"), "same rules\n\n").expect("write root");
         fs::write(nested.join("CLAUDETTE.md"), "same rules\n").expect("write nested");
 
-        let context = ProjectContext::discover(&nested, "2026-03-31").expect("context should load");
-        assert_eq!(context.instruction_files.len(), 1);
+        let files = super::discover_instruction_files_within(&nested, Some(&root))
+            .expect("discovery should succeed");
+        assert_eq!(files.len(), 1);
         assert_eq!(
-            normalize_instruction_content(&context.instruction_files[0].content),
+            normalize_instruction_content(&files[0].content),
             "same rules"
         );
         // Best-effort cleanup: Windows CI occasionally holds a transient
