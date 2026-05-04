@@ -164,10 +164,7 @@ impl ConversationMessage {
     /// the text block is still emitted so the API path's "user role with
     /// content" invariant holds.
     #[must_use]
-    pub fn user_with_images(
-        text: impl Into<String>,
-        images: Vec<(String, String)>,
-    ) -> Self {
+    pub fn user_with_images(text: impl Into<String>, images: Vec<(String, String)>) -> Self {
         let mut blocks: Vec<ContentBlock> = Vec::with_capacity(1 + images.len());
         blocks.push(ContentBlock::Text { text: text.into() });
         for (media_type, data_b64) in images {

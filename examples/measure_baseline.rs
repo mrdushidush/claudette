@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 
 fn approx_tokens(chars: usize) -> usize {
     // 4 chars/token is the qwen-family BPE rough rule. Order-of-magnitude only.
-    (chars + 3) / 4
+    chars.div_ceil(4)
 }
 
 fn print_section(label: &str, content: &str) {

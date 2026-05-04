@@ -182,11 +182,7 @@ impl ToolGroup {
 /// kept in core because it's tiny (~25 tokens), used in nearly every
 /// conversation, and asking the model to call `enable_tools(time)` first
 /// would burn an unnecessary round-trip.
-pub const CORE_TOOL_NAMES: &[&str] = &[
-    "enable_tools",
-    "get_current_time",
-    "load_workspace_rules",
-];
+pub const CORE_TOOL_NAMES: &[&str] = &["enable_tools", "get_current_time", "load_workspace_rules"];
 
 /// Classify a tool name into its group. Returns `None` for core tools, for
 /// unknown names, and for `add_numbers` (kept in `dispatch_tool` for
@@ -556,7 +552,11 @@ mod tests {
         // was tried briefly but removed — qwen3.5-4b couldn't figure out
         // how to call it and the manifest already carries the verb hints.
         let core_names = reg.core_tool_names();
-        assert_eq!(core_names.len(), 3, "core should be exactly 3 tools, got {core_names:?}");
+        assert_eq!(
+            core_names.len(),
+            3,
+            "core should be exactly 3 tools, got {core_names:?}"
+        );
         assert!(core_names.contains(&"enable_tools".to_string()));
         assert!(core_names.contains(&"get_current_time".to_string()));
         assert!(core_names.contains(&"load_workspace_rules".to_string()));

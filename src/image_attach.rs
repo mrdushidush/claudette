@@ -15,8 +15,7 @@ const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 /// dependency surface unchanged for what is otherwise a 25-line routine.
 #[must_use]
 pub fn encode_base64_standard(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
         let (b0, b1, b2, len) = match chunk {
@@ -63,8 +62,8 @@ pub fn image_mime_from_path(path: &std::path::Path) -> Option<&'static str> {
 pub fn attachment_from_file(path: &std::path::Path) -> Result<ImageAttachment, String> {
     let mime = image_mime_from_path(path)
         .ok_or_else(|| format!("not an image file: {}", path.display()))?;
-    let metadata = std::fs::metadata(path)
-        .map_err(|e| format!("can't stat {}: {e}", path.display()))?;
+    let metadata =
+        std::fs::metadata(path).map_err(|e| format!("can't stat {}: {e}", path.display()))?;
     if metadata.len() as usize > MAX_IMAGE_BYTES {
         return Err(format!(
             "image too large ({} bytes, cap is {MAX_IMAGE_BYTES}): {}",
@@ -72,8 +71,7 @@ pub fn attachment_from_file(path: &std::path::Path) -> Result<ImageAttachment, S
             path.display()
         ));
     }
-    let bytes =
-        std::fs::read(path).map_err(|e| format!("can't read {}: {e}", path.display()))?;
+    let bytes = std::fs::read(path).map_err(|e| format!("can't read {}: {e}", path.display()))?;
     Ok(ImageAttachment {
         media_type: mime.to_string(),
         data_b64: encode_base64_standard(&bytes),

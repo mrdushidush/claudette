@@ -343,11 +343,7 @@ pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
             // (no fallback configured) this collapses to the existing
             // run_turn_with_retry behaviour — no overhead.
             let mut prompter_opt: Option<&mut dyn PermissionPrompter> = Some(&mut prompter);
-            crate::brain_selector::run_turn_with_fallback(
-                &mut runtime,
-                trimmed,
-                &mut prompter_opt,
-            )
+            crate::brain_selector::run_turn_with_fallback(&mut runtime, trimmed, &mut prompter_opt)
         } else {
             let count = extracted.attached.len();
             eprintln!(

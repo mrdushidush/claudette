@@ -10,6 +10,8 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-04
+
 ### Changed
 
 - **Tool-array baseline cut from ~6,300 tokens to ~170 tokens per request
@@ -45,6 +47,18 @@ bumps are non-breaking bugfixes only.
   `note_update` 190→107, `gmail_read` 178→111. Substantive constraints
   preserved (write_file's "no code files" rule, bash's PowerShell-on-
   Windows note, gmail_read's `<email>`-tag warning).
+- **Per-turn token baseline cut another ~17%.** Turn-1 input on the
+  user's real-cwd setup goes from ~833 → ~660 tokens. Three changes
+  compounded: (1) dropped the `enum` constraint from
+  `enable_tools_schema` — `run_enable_tools` already returns a clear
+  "unknown group" error listing every valid name, so the duplicate
+  enum cost ~37 tokens for nothing. (2) Stopped auto-loading
+  `~/.claudette/instructions.md` into the system prompt every turn —
+  saves ~190 tokens when workspace rules aren't needed. The env block
+  now just notes the file is available via the new
+  `load_workspace_rules` tool. (3) Tests:
+  `cargo run --example measure_baseline` from the user's home prints a
+  char-level breakdown of system prompt + tools array.
 
 ### Added
 
@@ -88,6 +102,11 @@ bumps are non-breaking bugfixes only.
   exercised in the TUI Alt+V path) and **`image = "0.25"`** restricted
   to `default-features = false, features = ["png"]` so JPEG/WebP/GIF
   codec crates aren't pulled in transitively.
+- **`load_workspace_rules` core tool.** Loads `CLAUDETTE.md` /
+  `.claudette/instructions.md` from the project ancestor chain on
+  demand. Replaces the implicit auto-load that previously fired on
+  every turn — now the model loads workspace conventions only when
+  they matter for the answer.
 
 ### Changed
 
@@ -118,6 +137,14 @@ bumps are non-breaking bugfixes only.
   `~/.claudette/instructions.md` files. Added an internal
   `discover_instruction_files_within(cwd, stop_at)` so the two affected
   tests can bound the walk; production behaviour unchanged.
+
+### CI
+
+- **`tests/brain100_test.sh` exports `CLAUDETTE_WORKSPACE="$(pwd)"`
+  per invocation.** Without it, file/search prompts under the project
+  tree are sandbox-refused since the harness cwd is outside `$HOME` —
+  this manifested as ~16 false-positive failures during 4b regression
+  testing.
 
 ## [0.2.3] - 2026-04-30
 
@@ -847,7 +874,9 @@ Initial public release of Claudette as a standalone repository.
 
 ---
 
-[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/mrdushidush/claudette/compare/v0.2.3...v0.3.0
+[0.2.3]: https://github.com/mrdushidush/claudette/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/mrdushidush/claudette/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/mrdushidush/claudette/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/mrdushidush/claudette/compare/v0.1.0...v0.2.0

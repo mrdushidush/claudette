@@ -597,20 +597,16 @@ enum ClipboardPaste {
 }
 
 fn read_clipboard_paste() -> ClipboardPaste {
-    let mut clipboard = match arboard::Clipboard::new() {
-        Ok(c) => c,
-        Err(_) => return ClipboardPaste::Empty,
+    let Ok(mut clipboard) = arboard::Clipboard::new() else {
+        return ClipboardPaste::Empty;
     };
     if let Ok(img) = clipboard.get_image() {
         // arboard hands back raw RGBA. Re-encode to PNG so vision models
         // can ingest it — they don't accept raw pixel buffers.
-        let buf = match image::RgbaImage::from_raw(
-            img.width as u32,
-            img.height as u32,
-            img.bytes.into_owned(),
-        ) {
-            Some(b) => b,
-            None => return ClipboardPaste::Empty,
+        let Some(buf) =
+            image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.into_owned())
+        else {
+            return ClipboardPaste::Empty;
         };
         let mut png_bytes: Vec<u8> = Vec::new();
         let dynimg = image::DynamicImage::ImageRgba8(buf);
@@ -976,8 +972,7 @@ fn run_loop(
 
             // Submit input.
             (KeyCode::Enter, _)
-                if !app.working
-                    && (!app.input.is_empty() || !app.pending_images.is_empty()) =>
+                if !app.working && (!app.input.is_empty() || !app.pending_images.is_empty()) =>
             {
                 let text = std::mem::take(&mut app.input);
                 app.paste_notice = None;
@@ -1808,10 +1803,7 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
     } else if let Some(notice) = &app.paste_notice {
         // Paste feedback wins over the regular prompt for one keypress.
         // Cleared on the next character/backspace so it doesn't linger.
-        (
-            format!(" {notice}"),
-            Style::default().fg(Color::Cyan),
-        )
+        (format!(" {notice}"), Style::default().fg(Color::Cyan))
     } else if app.working {
         // Richer state indicator based on where we are in the turn.
         let (msg, color) = if !app.streaming_text.is_empty() {

@@ -1362,7 +1362,13 @@ mod tests {
             core.iter().any(|n| n == "get_current_time"),
             "get_current_time must be in core"
         );
-        for moved in &["get_capabilities", "read_file", "todo_add", "generate_code", "web_search"] {
+        for moved in &[
+            "get_capabilities",
+            "read_file",
+            "todo_add",
+            "generate_code",
+            "web_search",
+        ] {
             assert!(
                 !core.iter().any(|n| n == moved),
                 "{moved} should now live in a group, not core"
@@ -1692,19 +1698,39 @@ mod tests {
         // stays under ~200 tokens. Verify the new classification holds.
         use crate::tool_groups::{group_of, ToolGroup, CORE_TOOL_NAMES};
 
-        for tool in &["note_create", "note_list", "note_read", "note_update", "note_delete"] {
+        for tool in &[
+            "note_create",
+            "note_list",
+            "note_read",
+            "note_update",
+            "note_delete",
+        ] {
             assert!(
                 !CORE_TOOL_NAMES.contains(tool),
                 "{tool} must NOT be in core (regression — it should live in the Notes group)"
             );
-            assert_eq!(group_of(tool), Some(ToolGroup::Notes), "{tool} must classify as Notes");
+            assert_eq!(
+                group_of(tool),
+                Some(ToolGroup::Notes),
+                "{tool} must classify as Notes"
+            );
         }
-        for tool in &["todo_add", "todo_list", "todo_complete", "todo_uncomplete", "todo_delete"] {
+        for tool in &[
+            "todo_add",
+            "todo_list",
+            "todo_complete",
+            "todo_uncomplete",
+            "todo_delete",
+        ] {
             assert!(
                 !CORE_TOOL_NAMES.contains(tool),
                 "{tool} must NOT be in core (regression — it should live in the Todos group)"
             );
-            assert_eq!(group_of(tool), Some(ToolGroup::Todos), "{tool} must classify as Todos");
+            assert_eq!(
+                group_of(tool),
+                Some(ToolGroup::Todos),
+                "{tool} must classify as Todos"
+            );
         }
     }
 
