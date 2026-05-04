@@ -72,7 +72,7 @@ while IFS= read -r line; do
     # file — without this the outer while-read-loop skips ahead and parse
     # misaligns on the next iteration.
     set +e
-    OUTPUT=$(CLAUDETTE_MODEL="$MODEL" CLAUDETTE_SKIP_OLLAMA_PROBE=1 timeout 180 "$BINARY" "$PROMPT" < /dev/null 2>&1)
+    OUTPUT=$(CLAUDETTE_MODEL="$MODEL" CLAUDETTE_SKIP_OLLAMA_PROBE=1 CLAUDETTE_WORKSPACE="$(pwd)" timeout 180 "$BINARY" "$PROMPT" < /dev/null 2>&1)
     EXIT_CODE=$?
     set -e
 

@@ -36,16 +36,16 @@ pub fn secretary_system_prompt() -> Vec<String> {
 /// discovered via `crate::ProjectContext`.
 #[must_use]
 pub fn secretary_system_prompt_with_memory(memory: Option<&str>, concise: bool) -> Vec<String> {
-    // Dynamic group listing — scales to any number of groups without
-    // touching the prompt string. Each group name + summary is included so
-    // the model can pick the right one on the first attempt.
+    // Verbose manifest — 17 groups × verb-level summary (~440 tokens). A
+    // terser variant (5-8 tokens per line) regressed brain100 on qwen3.5-4b
+    // from 94% to 84%: the small brain needs the verb decomposition to
+    // chain `enable_tools(group)` into the right specific tool name without
+    // looping or hallucinating.
     let groups: Vec<String> = crate::tool_groups::ToolGroup::all()
         .iter()
         .map(|g| format!("{} ({})", g.name(), g.summary()))
         .collect();
 
-    // In Telegram mode, most groups are pre-loaded — no enable_tools needed.
-    // In REPL mode, the model must call enable_tools first.
     let group_hint = if concise {
         format!(
             "Most tool groups are pre-loaded. Additional groups via enable_tools(group): {}.",
@@ -117,15 +117,15 @@ pub(crate) fn build_environment_block() -> Option<String> {
         lines.push(format!("Git:\n{truncated}"));
     }
 
-    // Include CLAUDETTE.md / project instruction files (compact, max 800 chars).
-    for file in &ctx.instruction_files {
-        let content: String = file.content.chars().take(800).collect();
-        if !content.trim().is_empty() {
-            lines.push(format!(
-                "Project instructions ({}):\n{content}",
-                file.path.display()
-            ));
-        }
+    // Workspace instructions (CLAUDETTE.md / .claudette/instructions.md) are
+    // NOT auto-loaded into the system prompt — they cost ~190 tokens per turn
+    // for content the model usually doesn't need. The `load_workspace_rules`
+    // core tool returns them on demand.
+    if !ctx.instruction_files.is_empty() {
+        lines.push(format!(
+            "Workspace rules available via load_workspace_rules ({} file(s)).",
+            ctx.instruction_files.len()
+        ));
     }
 
     Some(lines.join("\n"))

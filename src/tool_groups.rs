@@ -92,9 +92,11 @@ impl ToolGroup {
         }
     }
 
-    /// One-line human summary. Shown by `get_capabilities` (NOT in the
-    /// `enable_tools` schema — that one stays minimal to keep the base
-    /// payload under 200 tokens).
+    /// One-line human summary. Used in the system prompt manifest so the 4b
+    /// brain has the verb-level hints it needs to chain `enable_tools(group)`
+    /// into the specific tool name. Brain100 on 4b regressed from 94% to 84%
+    /// when we tried a terser variant — the verb decomposition is
+    /// load-bearing on small models. Also shown by `get_capabilities`.
     #[must_use]
     pub fn summary(self) -> &'static str {
         match self {
@@ -180,7 +182,11 @@ impl ToolGroup {
 /// kept in core because it's tiny (~25 tokens), used in nearly every
 /// conversation, and asking the model to call `enable_tools(time)` first
 /// would burn an unnecessary round-trip.
-pub const CORE_TOOL_NAMES: &[&str] = &["enable_tools", "get_current_time"];
+pub const CORE_TOOL_NAMES: &[&str] = &[
+    "enable_tools",
+    "get_current_time",
+    "load_workspace_rules",
+];
 
 /// Classify a tool name into its group. Returns `None` for core tools, for
 /// unknown names, and for `add_numbers` (kept in `dispatch_tool` for
@@ -402,16 +408,11 @@ fn enable_tools_schema() -> Value {
         .join(", ");
     let description = format!("Enable a tool group (available next turn). Groups: {names_csv}.");
 
-    // The enum below is the ONLY constraint the model needs on the
-    // `group` parameter — adding a `description` here would duplicate
-    // the same list a third time and pushes us past the 200-token
-    // baseline. The function-level description above already names every
-    // valid group.
-    let enum_values: Vec<Value> = ToolGroup::all()
-        .iter()
-        .map(|g| Value::String(g.name().to_string()))
-        .collect();
-
+    // No `enum` constraint on `group` — the description above lists every
+    // valid name, and `run_enable_tools` returns a clear "unknown group"
+    // error with the full list on typos. The enum was costing ~37 tokens
+    // per turn for a duplicate name list; server-side validation is enough
+    // and lets the brain typo-recover via the error message.
     json!({
         "type": "function",
         "function": {
@@ -420,10 +421,7 @@ fn enable_tools_schema() -> Value {
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "group": {
-                        "type": "string",
-                        "enum": enum_values
-                    }
+                    "group": { "type": "string" }
                 },
                 "required": ["group"]
             }
@@ -552,13 +550,16 @@ mod tests {
     fn registry_starts_with_only_core() {
         let reg = ToolRegistry::new();
         assert!(reg.enabled_groups().is_empty());
-        // Core is intentionally tiny: just enable_tools (synthesized) and
-        // get_current_time. Everything else (notes, todos, files, code,
-        // meta, search, etc.) must be enabled on demand.
+        // Core: enable_tools (synthesised) + get_current_time +
+        // load_workspace_rules. Everything else (notes, todos, files, code,
+        // meta, search, etc.) must be enabled on demand. `describe_group`
+        // was tried briefly but removed — qwen3.5-4b couldn't figure out
+        // how to call it and the manifest already carries the verb hints.
         let core_names = reg.core_tool_names();
-        assert_eq!(core_names.len(), 2, "core should be exactly 2 tools, got {core_names:?}");
+        assert_eq!(core_names.len(), 3, "core should be exactly 3 tools, got {core_names:?}");
         assert!(core_names.contains(&"enable_tools".to_string()));
         assert!(core_names.contains(&"get_current_time".to_string()));
+        assert!(core_names.contains(&"load_workspace_rules".to_string()));
         // The previously-core tools must now live in their groups.
         assert!(!core_names.contains(&"read_file".to_string()));
         assert!(!core_names.contains(&"generate_code".to_string()));
@@ -675,10 +676,9 @@ mod tests {
 
     #[test]
     fn enable_tools_group_param_has_no_redundant_description() {
-        // The `group` parameter constrains values via the `enum`; an
-        // extra prose description would just duplicate the names listed
-        // in the function-level description and push the baseline over
-        // the 200-token budget. Verify it stays absent.
+        // The function-level description already lists every valid group
+        // name; a per-property description would duplicate that. Keep
+        // the parameter schema bare to stay under the token budget.
         let schema = enable_tools_schema();
         let desc = schema.pointer("/function/parameters/properties/group/description");
         assert!(
@@ -688,17 +688,17 @@ mod tests {
     }
 
     #[test]
-    fn enable_tools_schema_enum_matches_groups() {
+    fn enable_tools_schema_has_no_enum() {
+        // The `enum` was removed to save ~37 tokens per turn — server-side
+        // validation in `run_enable_tools` returns a clear error listing
+        // every valid group on typos, which is enough for the model to
+        // recover. Re-adding the enum here would silently undo the saving.
         let schema = enable_tools_schema();
-        let enum_arr = schema
-            .pointer("/function/parameters/properties/group/enum")
-            .and_then(Value::as_array)
-            .expect("group enum should be an array");
-        let values: Vec<&str> = enum_arr.iter().filter_map(Value::as_str).collect();
-        assert_eq!(values.len(), ToolGroup::all().len());
-        for g in ToolGroup::all() {
-            assert!(values.contains(&g.name()));
-        }
+        let enum_node = schema.pointer("/function/parameters/properties/group/enum");
+        assert!(
+            enum_node.is_none(),
+            "group param must not carry an enum (token budget): {enum_node:?}"
+        );
     }
 
     /// Report the concrete schema-size numbers so the author (and anyone

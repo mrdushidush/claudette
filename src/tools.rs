@@ -64,6 +64,14 @@ pub fn secretary_tools_json() -> Value {
                 "parameters": { "type": "object", "properties": {}, "required": [] }
             }
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "load_workspace_rules",
+                "description": "Load CLAUDETTE.md / .claudette/instructions.md from the project ancestor chain. Call when project conventions matter for the answer.",
+                "parameters": { "type": "object", "properties": {}, "required": [] }
+            }
+        },
         // Notes group (note_create, note_list, note_read, note_delete)
         // lives in src/tools/notes.rs and is appended to this array below.
         // Todos group (todo_add, todo_list, todo_complete, todo_uncomplete,
@@ -191,6 +199,7 @@ pub fn dispatch_tool(name: &str, input: &str) -> Result<String, String> {
 
     match name {
         "get_current_time" => Ok(run_get_current_time()),
+        "load_workspace_rules" => Ok(run_load_workspace_rules()),
         // add_numbers removed from registry (model can do arithmetic).
         // Dispatch kept so old sessions with tool_calls still work.
         "add_numbers" => run_add_numbers(input),
@@ -278,6 +287,32 @@ fn run_add_numbers(input: &str) -> Result<String, String> {
         .and_then(Value::as_f64)
         .ok_or_else(|| format!("add_numbers: missing or non-numeric 'b' in {input}"))?;
     Ok(json!({ "a": a, "b": b, "sum": a + b }).to_string())
+}
+
+fn run_load_workspace_rules() -> String {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+    match crate::prompt_runtime::ProjectContext::discover(&cwd, date) {
+        Ok(ctx) if !ctx.instruction_files.is_empty() => {
+            let blocks: Vec<Value> = ctx
+                .instruction_files
+                .iter()
+                .map(|f| {
+                    let content: String = f.content.chars().take(2000).collect();
+                    json!({
+                        "path": f.path.display().to_string(),
+                        "content": content,
+                    })
+                })
+                .collect();
+            json!({ "files": blocks }).to_string()
+        }
+        _ => json!({
+            "files": [],
+            "note": "no CLAUDETTE.md or .claudette/instructions.md found in cwd or its ancestors",
+        })
+        .to_string(),
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────────────
