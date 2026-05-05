@@ -441,7 +441,7 @@ pub fn probe_ollama() -> Result<String, String> {
     if !is_local_ollama_url(&url)
         && std::env::var("CLAUDETTE_ALLOW_REMOTE_OLLAMA")
             .ok()
-            .map_or(true, |v| v.is_empty() || v == "0")
+            .is_none_or(|v| v.is_empty() || v == "0")
     {
         eprintln!(
             "⚠  OLLAMA_HOST points at a non-loopback address: {url}\n\

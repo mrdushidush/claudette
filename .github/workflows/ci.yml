@@ -98,7 +98,7 @@ jobs:
     # Keep the version below in sync with `rust-version` in Cargo.toml.
     # Hardcoded (not `${{ env.MSRV }}`) because the `env` context is not
     # available in `jobs.<id>.name`, which fails workflow validation.
-    name: MSRV (Rust 1.75)
+    name: MSRV (Rust 1.88)
     runs-on: ubuntu-latest
     # Rust version declared in Cargo.toml `rust-version`. Verified here so
     # the claim doesn't drift — if a dep starts requiring a newer Rust,
@@ -110,7 +110,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
       - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.75"
+          toolchain: "1.88"
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2.9.1
         with:
           key: msrv

@@ -2,7 +2,7 @@
 name = "claudette"
 version = "0.3.1"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.88"
 license = "Apache-2.0"
 description = "Local-first AI personal secretary for Ollama. Telegram bot, voice, persistent scheduler, Gmail and Calendar. Single-binary Rust."
 readme = "README.md"
@@ -32,7 +32,7 @@ dotenvy = "0.15"
 toml = "1"
 colored = "3"
 glob = "0.3"
-ratatui = "0.30"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 crossterm = "0.29"
 scopeguard = "1"
 # Vision input: read OS clipboard bitmaps (Ctrl+V) and re-encode the raw
