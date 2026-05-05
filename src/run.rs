@@ -614,6 +614,24 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("tg_get_updates", ReadOnly)
         .with_tool_requirement("tg_send", WorkspaceWrite)
         .with_tool_requirement("tg_send_photo", WorkspaceWrite)
+        // ── Life Agent (v0.2.0): calendar group ──────────────────────
+        // Reads: auto-allowed. Writes/RSVP: WorkspaceWrite. Delete is
+        // irreversible from claudette's side, so DangerFullAccess.
+        .with_tool_requirement("calendar_list_events", ReadOnly)
+        .with_tool_requirement("calendar_create_event", WorkspaceWrite)
+        .with_tool_requirement("calendar_update_event", WorkspaceWrite)
+        .with_tool_requirement("calendar_respond_to_event", WorkspaceWrite)
+        .with_tool_requirement("calendar_delete_event", DangerFullAccess)
+        // ── Life Agent: gmail group (gmail.readonly OAuth scope) ─────
+        .with_tool_requirement("gmail_list", ReadOnly)
+        .with_tool_requirement("gmail_search", ReadOnly)
+        .with_tool_requirement("gmail_read", ReadOnly)
+        .with_tool_requirement("gmail_list_labels", ReadOnly)
+        // ── Life Agent: schedule group ───────────────────────────────
+        .with_tool_requirement("schedule_list", ReadOnly)
+        .with_tool_requirement("schedule_once", WorkspaceWrite)
+        .with_tool_requirement("schedule_recurring", WorkspaceWrite)
+        .with_tool_requirement("schedule_cancel", WorkspaceWrite)
         // ── Dangerous (ALWAYS prompts for [y/N] confirmation) ────��──
         .with_tool_requirement("bash", DangerFullAccess)
         .with_tool_requirement("edit_file", DangerFullAccess)

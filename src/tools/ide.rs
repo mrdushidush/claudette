@@ -176,8 +176,12 @@ fn run_open_url(input: &str) -> Result<String, String> {
 
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", target])
+        // Bypass cmd — its `&`-as-separator parsing truncates URLs with
+        // query strings at the first ampersand. rundll32's
+        // FileProtocolHandler hands the URL to the default browser via
+        // Win32 directly, no shell involvement.
+        std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", target])
             .spawn()
             .map_err(|e| format!("open_url: failed to open: {e}"))?;
     }

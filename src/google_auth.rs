@@ -486,8 +486,15 @@ fn accept_callback(listener: &TcpListener) -> Result<(String, String), String> {
 fn open_browser(url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
+        // `cmd /C start "" <url>` re-parses the URL through cmd, which
+        // treats `&` as a command-chain separator. OAuth URLs have
+        // multiple `&` query params, so the URL gets truncated at the
+        // first `&` and Google rejects it with "Required parameter is
+        // missing: response_type". `rundll32 url.dll,FileProtocolHandler`
+        // bypasses the shell entirely — Win32 hands the URL to the
+        // default browser as a single string.
+        std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", url])
             .spawn()
             .map(|_| ())
     }
