@@ -10,6 +10,50 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-05-05
+
+Patch release: two real bugs that affect every Windows user who tries
+to set up Google auth. Both shipped silently broken since v0.3.0 and
+v0.2.3 respectively — not caught until the morning-briefing flow was
+actually exercised end-to-end on Windows + LM Studio for the first time.
+
+### Fixed
+
+- **Windows: OAuth URL truncation breaks `--auth-google` and any
+  `open_url` with multiple query parameters.** `cmd /C start "" <url>`
+  re-parses the URL through cmd's command-line parser, which interprets
+  `&` as a command-chain separator. OAuth URLs always have multiple
+  `&`-separated query params (`response_type`, `scope`, `access_type`,
+  `state`), so cmd ate everything after the first `&` and Google
+  rejected the truncated URL with `invalid_request: Required parameter
+  is missing: response_type`. Same bug latent in `open_url` for any
+  URL with query params (it just rarely tripped because most URLs the
+  brain hand-built were `file:///` paths with no query string). Both
+  `open_browser` (in `google_auth.rs`) and `open_url` (in
+  `tools/ide.rs`) now use `rundll32 url.dll,FileProtocolHandler`
+  instead — Win32 hands the URL to the default browser as a single
+  string with no shell parsing.
+- **Permission policy missing every calendar / gmail / schedule tool.**
+  v0.2.3's unknown-tool short-circuit (added 2026-04-30 to convert
+  confabulated tool names into structured "did you mean?" results)
+  checks `PermissionPolicy::is_known()` against the `tool_requirements`
+  map. The Life Agent groups (calendar, gmail, schedule — added in
+  v0.2.0) were never registered in `build_permission_policy()`, so
+  every call to `calendar_list_events`, `gmail_list`, etc. tripped
+  the short-circuit and returned `{"error":"unknown tool: X",
+  "did_you_mean":[],...}` before reaching the actual dispatcher in
+  `tools.rs`. The dispatcher would have handled them fine. Net effect:
+  anyone who completed `--auth-google` after v0.2.3 saw "unknown tool"
+  errors for everything they just authorised, and the morning briefing
+  in particular was producing fully-hallucinated calendar + email
+  output because the model swallowed the auth-error result and
+  confabulated. Added 13 missing entries: 5 calendar (delete as
+  `DangerFullAccess` since it's irreversible from claudette's side;
+  create/update/RSVP as `WorkspaceWrite`; list as `ReadOnly`), 4 gmail
+  (all `ReadOnly` — the OAuth scope is `gmail.readonly` anyway),
+  4 schedule (`schedule_list` as `ReadOnly`, others as
+  `WorkspaceWrite`).
+
 ## [0.3.0] - 2026-05-04
 
 ### Changed
@@ -874,7 +918,8 @@ Initial public release of Claudette as a standalone repository.
 
 ---
 
-[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/mrdushidush/claudette/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/mrdushidush/claudette/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/mrdushidush/claudette/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/mrdushidush/claudette/compare/v0.2.1...v0.2.2
