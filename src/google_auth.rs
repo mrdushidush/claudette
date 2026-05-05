@@ -537,7 +537,7 @@ fn open_browser(url: &str) -> std::io::Result<()> {
 /// the exact weakness this function was rewritten to fix.
 fn random_state() -> String {
     let mut buf = [0u8; 16];
-    getrandom::getrandom(&mut buf).expect("OS RNG failed — refusing to use weaker entropy");
+    getrandom::fill(&mut buf).expect("OS RNG failed — refusing to use weaker entropy");
     let mut out = String::with_capacity(32);
     for b in buf {
         use std::fmt::Write;
