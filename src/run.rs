@@ -65,6 +65,36 @@ pub fn compact_threshold() -> usize {
         .unwrap_or(DEFAULT_COMPACT_THRESHOLD)
 }
 
+/// Soft (early) compaction threshold. Returns `None` when unset — the
+/// default — preserving the existing one-tier behaviour where the only
+/// gate is `compact_threshold()` at 1M.
+///
+/// When the env var is set to a positive number AND the session has grown
+/// above it but is still under the hard threshold, [`maybe_compact_session`]
+/// runs a *soft* compact: same machinery as the hard path but preserves
+/// 12 recent messages instead of 4, so summarisation kicks in earlier with
+/// less context loss. Useful for long real-world sessions on 35B+ brains
+/// where one transcript was paying ~573K input tokens per turn.
+///
+/// Tracks P3 in the 2026-05-04 optimization queue.
+#[must_use]
+pub fn soft_compact_threshold() -> Option<usize> {
+    std::env::var("CLAUDETTE_SOFT_COMPACT_THRESHOLD")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+}
+
+/// Recent-message preservation count for the hard (1M default) compaction
+/// path. Aggressive — keeps just enough context for the model to continue
+/// the immediate conversation.
+const HARD_COMPACT_PRESERVE: usize = 4;
+
+/// Recent-message preservation count for the soft (env-var-gated) path.
+/// Three times the hard count: the user opted into early compaction, so
+/// trade summary aggressiveness for continuity.
+const SOFT_COMPACT_PRESERVE: usize = 12;
+
 /// Default REPL/TUI max iterations per turn — how many (model → tool → result)
 /// cycles a single user prompt is allowed to drive before the runtime aborts
 /// with "conversation loop exceeded the maximum number of iterations".
@@ -742,26 +772,32 @@ pub(crate) fn run_turn_with_retry(
         .map_err(|e| e.to_string())
 }
 
-/// Check whether the runtime's session is over the
-/// [`compact_threshold`] and, if so, compact it in place. Returns
-/// `Some(removed)` if compaction happened, `None` otherwise.
+/// Check whether the runtime's session is over the compaction threshold
+/// and, if so, compact it in place. Returns `Some(removed)` if compaction
+/// happened, `None` otherwise.
 ///
 /// Called from [`run_secretary_repl`] after every model turn. The metric
 /// is `crate::estimate_session_tokens` (a char-count heuristic that
 /// scales with the actual session size), not the cumulative input-token
 /// counter that grows monotonically.
+///
+/// **Tiered behaviour (P3, 2026-05-04 queue):**
+/// - At/above [`compact_threshold`] (1M default): hard compact, preserves
+///   [`HARD_COMPACT_PRESERVE`] recent messages.
+/// - At/above [`soft_compact_threshold`] but below the hard threshold:
+///   soft compact, preserves [`SOFT_COMPACT_PRESERVE`] recent messages.
+///   Only fires when the user opts in via `CLAUDETTE_SOFT_COMPACT_THRESHOLD`.
+/// - Below both: no-op.
 pub(crate) fn maybe_compact_session(
     runtime: &mut ConversationRuntime<OllamaApiClient, SecretaryToolExecutor>,
     telegram: bool,
 ) -> Option<usize> {
     let estimated = estimate_session_tokens(runtime.session());
-    if estimated < compact_threshold() {
-        return None;
-    }
+    let preserve = pick_compact_preserve(estimated, compact_threshold(), soft_compact_threshold())?;
     let result = compact_session(
         runtime.session(),
         CompactionConfig {
-            preserve_recent_messages: 4,
+            preserve_recent_messages: preserve,
             // 0 means "force the should_compact gate" — we're already past
             // the size threshold so we want compaction to actually fire.
             max_estimated_tokens: 0,
@@ -773,6 +809,30 @@ pub(crate) fn maybe_compact_session(
     let removed = result.removed_message_count;
     *runtime = build_runtime_streaming(result.compacted_session, telegram);
     Some(removed)
+}
+
+/// Choose how many recent messages to preserve based on the session's
+/// estimated token count and the two thresholds. Returns `None` when
+/// neither threshold is crossed (no compaction).
+///
+/// Pure function — separates the tiering policy from the runtime-mutating
+/// half of `maybe_compact_session` so it can be unit-tested without
+/// constructing a runtime.
+#[must_use]
+fn pick_compact_preserve(
+    estimated: usize,
+    hard_threshold: usize,
+    soft_threshold: Option<usize>,
+) -> Option<usize> {
+    if estimated >= hard_threshold {
+        return Some(HARD_COMPACT_PRESERVE);
+    }
+    if let Some(soft) = soft_threshold {
+        if estimated >= soft {
+            return Some(SOFT_COMPACT_PRESERVE);
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -973,6 +1033,90 @@ mod tests {
         assert!(path.exists());
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    // ─── Tiered compaction policy (P3) ──────────────────────────────────────
+
+    #[test]
+    fn pick_compact_preserve_returns_none_below_both_thresholds() {
+        assert_eq!(pick_compact_preserve(50_000, 1_000_000, Some(200_000)), None);
+        assert_eq!(pick_compact_preserve(50_000, 1_000_000, None), None);
+    }
+
+    #[test]
+    fn pick_compact_preserve_returns_soft_when_only_soft_crossed() {
+        assert_eq!(
+            pick_compact_preserve(250_000, 1_000_000, Some(200_000)),
+            Some(SOFT_COMPACT_PRESERVE)
+        );
+    }
+
+    #[test]
+    fn pick_compact_preserve_returns_hard_when_hard_crossed() {
+        assert_eq!(
+            pick_compact_preserve(1_500_000, 1_000_000, Some(200_000)),
+            Some(HARD_COMPACT_PRESERVE)
+        );
+    }
+
+    #[test]
+    fn pick_compact_preserve_prefers_hard_over_soft_when_both_crossed() {
+        // At >= hard, the soft tier is skipped — we want maximally aggressive
+        // summarisation when the session is genuinely huge.
+        assert_eq!(
+            pick_compact_preserve(2_000_000, 1_000_000, Some(200_000)),
+            Some(HARD_COMPACT_PRESERVE)
+        );
+    }
+
+    #[test]
+    fn pick_compact_preserve_skips_soft_when_threshold_unset() {
+        // No CLAUDETTE_SOFT_COMPACT_THRESHOLD set → only the hard threshold
+        // gates compaction, preserving the historical one-tier behaviour.
+        assert_eq!(pick_compact_preserve(500_000, 1_000_000, None), None);
+    }
+
+    #[test]
+    fn soft_compact_threshold_returns_none_when_unset() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("CLAUDETTE_SOFT_COMPACT_THRESHOLD").ok();
+        std::env::remove_var("CLAUDETTE_SOFT_COMPACT_THRESHOLD");
+
+        assert_eq!(soft_compact_threshold(), None);
+
+        if let Some(v) = prev {
+            std::env::set_var("CLAUDETTE_SOFT_COMPACT_THRESHOLD", v);
+        }
+    }
+
+    #[test]
+    fn soft_compact_threshold_returns_some_when_set() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("CLAUDETTE_SOFT_COMPACT_THRESHOLD").ok();
+        std::env::set_var("CLAUDETTE_SOFT_COMPACT_THRESHOLD", "200000");
+
+        assert_eq!(soft_compact_threshold(), Some(200_000));
+
+        match prev {
+            Some(v) => std::env::set_var("CLAUDETTE_SOFT_COMPACT_THRESHOLD", v),
+            None => std::env::remove_var("CLAUDETTE_SOFT_COMPACT_THRESHOLD"),
+        }
+    }
+
+    #[test]
+    fn soft_compact_threshold_treats_zero_as_unset() {
+        // 0 is a magic "disabled" value — explicit opt-out via env without
+        // having to unset.
+        let _guard = ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("CLAUDETTE_SOFT_COMPACT_THRESHOLD").ok();
+        std::env::set_var("CLAUDETTE_SOFT_COMPACT_THRESHOLD", "0");
+
+        assert_eq!(soft_compact_threshold(), None);
+
+        match prev {
+            Some(v) => std::env::set_var("CLAUDETTE_SOFT_COMPACT_THRESHOLD", v),
+            None => std::env::remove_var("CLAUDETTE_SOFT_COMPACT_THRESHOLD"),
+        }
     }
 
     /// Regression test: every tool name advertised in `secretary_tools_json`
