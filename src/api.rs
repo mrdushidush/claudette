@@ -355,9 +355,16 @@ fn cap_tools(tools: Value, cap: usize) -> Value {
 /// LM Studio doesn't speak Ollama's keep-alive eviction protocol.
 #[must_use]
 pub fn resolve_openai_compat() -> bool {
-    std::env::var("CLAUDETTE_OPENAI_COMPAT")
-        .ok()
-        .is_some_and(|v| !v.is_empty() && v != "0")
+    is_compat_value_truthy(std::env::var("CLAUDETTE_OPENAI_COMPAT").ok().as_deref())
+}
+
+/// Pure predicate behind [`resolve_openai_compat`]. Factored out so tests
+/// can pass explicit values instead of mutating process env (which is
+/// global and races between parallel test threads — see P7 in the
+/// 2026-05-04 optimization queue).
+#[must_use]
+fn is_compat_value_truthy(value: Option<&str>) -> bool {
+    value.is_some_and(|v| !v.is_empty() && v != "0")
 }
 
 /// Strip Harmony / Qwen-3.6-style chat-template separators that occasionally
@@ -2179,37 +2186,42 @@ mod tests {
     }
 
     // === OpenAI-compat tests ================================================
+    //
+    // These exercise `is_compat_value_truthy` directly with explicit values
+    // rather than mutating `CLAUDETTE_OPENAI_COMPAT`. Earlier versions of
+    // these tests touched process env and raced under cargo's default
+    // parallel test execution — fix tracked as P7 in the 2026-05-04
+    // optimization queue. The public wrapper `resolve_openai_compat()` is
+    // a one-liner that reads the env var and delegates here, so coverage
+    // of the predicate is sufficient.
 
     #[test]
-    fn resolve_openai_compat_unset_returns_false() {
-        let prev = std::env::var("CLAUDETTE_OPENAI_COMPAT").ok();
-        std::env::remove_var("CLAUDETTE_OPENAI_COMPAT");
-        assert!(!resolve_openai_compat());
-        if let Some(v) = prev {
-            std::env::set_var("CLAUDETTE_OPENAI_COMPAT", v);
-        }
+    fn is_compat_value_truthy_returns_false_for_unset() {
+        assert!(!is_compat_value_truthy(None));
     }
 
     #[test]
-    fn resolve_openai_compat_set_to_one_returns_true() {
-        let prev = std::env::var("CLAUDETTE_OPENAI_COMPAT").ok();
-        std::env::set_var("CLAUDETTE_OPENAI_COMPAT", "1");
-        assert!(resolve_openai_compat());
-        match prev {
-            Some(v) => std::env::set_var("CLAUDETTE_OPENAI_COMPAT", v),
-            None => std::env::remove_var("CLAUDETTE_OPENAI_COMPAT"),
-        }
+    fn is_compat_value_truthy_returns_true_for_one() {
+        assert!(is_compat_value_truthy(Some("1")));
     }
 
     #[test]
-    fn resolve_openai_compat_set_to_zero_returns_false() {
-        let prev = std::env::var("CLAUDETTE_OPENAI_COMPAT").ok();
-        std::env::set_var("CLAUDETTE_OPENAI_COMPAT", "0");
-        assert!(!resolve_openai_compat());
-        match prev {
-            Some(v) => std::env::set_var("CLAUDETTE_OPENAI_COMPAT", v),
-            None => std::env::remove_var("CLAUDETTE_OPENAI_COMPAT"),
-        }
+    fn is_compat_value_truthy_returns_false_for_zero() {
+        assert!(!is_compat_value_truthy(Some("0")));
+    }
+
+    #[test]
+    fn is_compat_value_truthy_returns_false_for_empty() {
+        assert!(!is_compat_value_truthy(Some("")));
+    }
+
+    #[test]
+    fn is_compat_value_truthy_treats_other_strings_as_truthy() {
+        // Anything non-empty other than "0" enables compat — matches the
+        // historical contract from the env-bound version.
+        assert!(is_compat_value_truthy(Some("true")));
+        assert!(is_compat_value_truthy(Some("yes")));
+        assert!(is_compat_value_truthy(Some("on")));
     }
 
     #[test]
