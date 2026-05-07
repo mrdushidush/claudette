@@ -179,12 +179,63 @@ pub fn validate_code_file(path: &Path, references: &[ReferenceFile]) -> Option<C
         return None;
     }
     let ext = path.extension()?.to_str()?;
-    match ext {
-        "py" => Some(validate_python(path, references)),
-        "rs" => Some(validate_rust(path, references)),
-        "js" | "mjs" | "cjs" => Some(validate_js(path, references)),
-        "ts" | "tsx" => Some(validate_ts(path, references)),
-        _ => None,
+    let validator: fn(&Path, &[ReferenceFile]) -> CodetResult = match ext {
+        "py" => validate_python,
+        "rs" => validate_rust,
+        "js" | "mjs" | "cjs" => validate_js,
+        "ts" | "tsx" => validate_ts,
+        _ => return None,
+    };
+    let _swap = CoderSwapGuard::begin(&coder_model());
+    Some(validator(path, references))
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// VRAM-swap guard (P0, 2026-05-07)
+// ────────────────────────────────────────────────────────────────────────────
+
+/// RAII guard that frees VRAM around a Codet operation by evicting the
+/// brain on construction and the coder on drop. Short-circuits to a no-op
+/// when brain == coder (since loading the model a second time costs
+/// nothing). Drop fires on every exit path including early returns and
+/// panics, so the brain always gets its VRAM back on the next user turn.
+///
+/// **Backend dispatch** lives in `brain_selector` and is gated by
+/// `CLAUDETTE_OPENAI_COMPAT`: LM Studio uses `lms unload --all`, Ollama
+/// uses `keep_alive: 0` per-model.
+struct CoderSwapGuard {
+    coder_model: String,
+    needs_swap: bool,
+}
+
+impl CoderSwapGuard {
+    fn begin(coder_model: &str) -> Self {
+        let brain_model = crate::model_config::active().brain.model.clone();
+        let needs_swap = crate::brain_selector::should_swap_for_coder(&brain_model, coder_model);
+
+        if needs_swap {
+            eprintln!(
+                "  {} {}",
+                crate::theme::dim("\u{21bb}"),
+                crate::theme::dim(&format!(
+                    "codet: swapping brain ({brain_model}) \u{2192} coder ({coder_model})..."
+                )),
+            );
+            crate::brain_selector::evict_brain_for_codet(&brain_model);
+        }
+
+        Self {
+            coder_model: coder_model.to_string(),
+            needs_swap,
+        }
+    }
+}
+
+impl Drop for CoderSwapGuard {
+    fn drop(&mut self) {
+        if self.needs_swap {
+            crate::brain_selector::evict_coder_after_codet(&self.coder_model);
+        }
     }
 }
 
@@ -763,6 +814,7 @@ pub fn generate_code(
     references: &[ReferenceFile],
 ) -> Option<String> {
     let model = coder_model();
+    let _swap = CoderSwapGuard::begin(&model);
     if !references.is_empty() {
         eprintln!(
             "  {} {}",

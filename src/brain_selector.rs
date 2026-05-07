@@ -315,6 +315,13 @@ fn unload_ollama_model(model: &str) {
     if crate::api::resolve_openai_compat() {
         return;
     }
+    ollama_evict_model(model);
+}
+
+/// Unconditional Ollama eviction (no openai_compat short-circuit). Used by
+/// the codet VRAM-swap path where the caller has already decided the brain
+/// is on Ollama.
+fn ollama_evict_model(model: &str) {
     let host =
         std::env::var("OLLAMA_HOST").unwrap_or_else(|_| "http://localhost:11434".to_string());
     let _ = reqwest::blocking::Client::new()
@@ -324,6 +331,57 @@ fn unload_ollama_model(model: &str) {
             "keep_alive": 0,
         }))
         .send();
+}
+
+/// Subprocess `lms unload --all`, best-effort. The `--all` form matches the
+/// `tests/brain100_lmstudio_shopping.sh` convention and avoids fighting
+/// LM Studio's model-id normalisation when only a name is in hand.
+/// Silently swallows all errors — `lms` may not be on PATH and no model
+/// may be loaded; both are fine. Stdout/stderr are nulled so a missing
+/// `lms` binary doesn't pollute the user's terminal during a codet run.
+fn lms_unload_all() {
+    use std::process::{Command, Stdio};
+    let _ = Command::new("lms")
+        .args(["unload", "--all"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+// ─── Codet VRAM-swap helpers (P0, 2026-05-07) ──────────────────────────────
+
+/// Whether a brain↔coder swap is needed. Returns `false` when both roles
+/// resolve to the same model — re-loading is a no-op on either backend, so
+/// the codet path can skip the evict/reload dance entirely.
+#[must_use]
+pub fn should_swap_for_coder(brain_model: &str, coder_model: &str) -> bool {
+    brain_model != coder_model
+}
+
+/// Evict the resident brain to free VRAM before codet loads its model.
+/// Best-effort — failures are silent.
+///
+/// - **LM Studio** (`CLAUDETTE_OPENAI_COMPAT=1`): `lms unload --all`.
+/// - **Ollama**: POST `/api/chat` with `keep_alive: 0` for `brain_model`,
+///   leaving any other resident models (e.g. embedders) alone.
+pub fn evict_brain_for_codet(brain_model: &str) {
+    if crate::api::resolve_openai_compat() {
+        lms_unload_all();
+    } else {
+        ollama_evict_model(brain_model);
+    }
+}
+
+/// Evict the coder model after Codet finishes so the brain reclaims its
+/// VRAM slot on the next user turn. Same dispatch as
+/// [`evict_brain_for_codet`]: claudette currently runs both roles on the
+/// backend that `CLAUDETTE_OPENAI_COMPAT` selects.
+pub fn evict_coder_after_codet(coder_model: &str) {
+    if crate::api::resolve_openai_compat() {
+        lms_unload_all();
+    } else {
+        ollama_evict_model(coder_model);
+    }
 }
 
 fn escape_json(s: &str) -> String {
@@ -519,5 +577,22 @@ mod tests {
     #[test]
     fn prompt_hash_differs_for_different_inputs() {
         assert_ne!(prompt_hash("a"), prompt_hash("b"));
+    }
+
+    #[test]
+    fn should_swap_for_coder_returns_false_for_same_model() {
+        assert!(!should_swap_for_coder("qwen3.5:4b", "qwen3.5:4b"));
+    }
+
+    #[test]
+    fn should_swap_for_coder_returns_true_for_different_models() {
+        assert!(should_swap_for_coder("qwen3.5:4b", "qwen3-coder:30b"));
+    }
+
+    #[test]
+    fn should_swap_for_coder_is_case_sensitive() {
+        // Ollama tags are case-sensitive on the server, so a casing mismatch
+        // means a different model id even if the user thought otherwise.
+        assert!(should_swap_for_coder("Qwen3.5:4B", "qwen3.5:4b"));
     }
 }
