@@ -558,6 +558,10 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("read_file", ReadOnly)
         .with_tool_requirement("list_dir", ReadOnly)
         .with_tool_requirement("get_capabilities", ReadOnly)
+        // load_workspace_rules: reads ~/.claudette/instructions.md on demand
+        // (added in the 2026-05-04 token-trim work to lazy-load what used to
+        // auto-attach to the system prompt). Read-only.
+        .with_tool_requirement("load_workspace_rules", ReadOnly)
         .with_tool_requirement("glob_search", ReadOnly)
         .with_tool_requirement("grep_search", ReadOnly)
         .with_tool_requirement("git_status", ReadOnly)
@@ -969,5 +973,46 @@ mod tests {
         assert!(path.exists());
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    /// Regression test: every tool name advertised in `secretary_tools_json`
+    /// must have a matching entry in `build_permission_policy()` so the
+    /// unknown-tool short-circuit (added v0.2.3) does not swallow real tools
+    /// before they reach the dispatcher.
+    ///
+    /// This is the bug class that hit v0.3.0–v0.3.1: the v0.2.0 Life Agent
+    /// groups (calendar / gmail / schedule) were never registered in the
+    /// permission policy, so every call returned `{"error":"unknown tool"}`
+    /// and the morning briefing hallucinated to cover. Fixed in v0.3.1, but
+    /// the only thing keeping it fixed without this test is hand-discipline.
+    /// (Companion to `every_advertised_tool_is_classified` in
+    /// `tool_groups.rs`, which catches the analogous schema↔registry gap.)
+    #[test]
+    fn every_advertised_tool_has_permission_requirement() {
+        let policy = build_permission_policy();
+        let full = crate::tools::secretary_tools_json();
+        let arr = full.as_array().cloned().unwrap_or_default();
+
+        let mut missing: Vec<String> = Vec::new();
+        for tool in arr {
+            let Some(name) = tool
+                .pointer("/function/name")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            if !policy.is_known(&name) {
+                missing.push(name);
+            }
+        }
+
+        assert!(
+            missing.is_empty(),
+            "tool(s) advertised but not registered in build_permission_policy() — \
+             will be swallowed by the unknown-tool short-circuit and never reach \
+             the dispatcher: {missing:?}. Add a `.with_tool_requirement(name, ...)` \
+             entry."
+        );
     }
 }
