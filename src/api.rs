@@ -544,14 +544,23 @@ pub fn is_local_ollama_url(url: &str) -> bool {
 /// Returns a user-facing message on failure — main.rs prints this verbatim.
 ///
 /// Set `CLAUDETTE_SKIP_OLLAMA_PROBE=1` to bypass (CI / offline sessions
-/// that will only hit saved state).
+/// that will only hit saved state). In OpenAI-compat mode,
+/// `CLAUDETTE_SKIP_LM_STUDIO_PROBE=1` also skips — symmetric to the
+/// Ollama-mode flag and clearer about which backend is being probed.
 ///
 /// Prints a loud stderr warning when the resolved URL is not a loopback
 /// address, unless `CLAUDETTE_ALLOW_REMOTE_OLLAMA=1` is set. Claudette's
 /// marketing story is local-first; a surprise remote host is a footgun
 /// worth surfacing at startup.
+///
+/// **OpenAI-compat (LM Studio) extension:** beyond the reachability check,
+/// the probe also confirms at least one model is loaded by parsing the
+/// `/v1/models` `data` array. An empty array means LM Studio is up but
+/// can't answer chat requests — the first prompt would otherwise fail with
+/// an opaque `HTTP 400 — No models loaded`.
 pub fn probe_ollama() -> Result<String, String> {
     let url = resolve_ollama_url();
+    let openai_compat = resolve_openai_compat();
 
     // Warn on non-loopback hosts. Runs regardless of the skip-probe flag
     // because "I skipped the probe" doesn't imply "I consented to a
@@ -571,10 +580,13 @@ pub fn probe_ollama() -> Result<String, String> {
         );
     }
 
-    if std::env::var("CLAUDETTE_SKIP_OLLAMA_PROBE")
+    let skip_ollama_flag = std::env::var("CLAUDETTE_SKIP_OLLAMA_PROBE")
         .ok()
-        .is_some_and(|v| !v.is_empty() && v != "0")
-    {
+        .is_some_and(|v| !v.is_empty() && v != "0");
+    let skip_lm_studio_flag = std::env::var("CLAUDETTE_SKIP_LM_STUDIO_PROBE")
+        .ok()
+        .is_some_and(|v| !v.is_empty() && v != "0");
+    if skip_ollama_flag || (openai_compat && skip_lm_studio_flag) {
         return Ok(url);
     }
     let client = reqwest::blocking::Client::builder()
@@ -583,22 +595,54 @@ pub fn probe_ollama() -> Result<String, String> {
         .map_err(|e| format!("could not build probe client: {e}"))?;
     // In OpenAI-compat mode hit `/v1/models` instead of the bare root, since
     // LM Studio doesn't answer GET / with a 200 the way Ollama does.
-    let (probe_url, mode_label) = if resolve_openai_compat() {
-        (format!("{url}/v1/models"), "OpenAI-compat brain")
+    let (probe_url, mode_label, skip_flag_name) = if openai_compat {
+        (
+            format!("{url}/v1/models"),
+            "OpenAI-compat brain",
+            "CLAUDETTE_SKIP_LM_STUDIO_PROBE",
+        )
     } else {
-        (url.clone(), "Ollama")
+        (url.clone(), "Ollama", "CLAUDETTE_SKIP_OLLAMA_PROBE")
     };
     match client.get(&probe_url).send() {
-        Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => Ok(url),
+        Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => {
+            if openai_compat {
+                let body_text = resp.text().unwrap_or_default();
+                if lm_studio_models_data_is_empty(&body_text) {
+                    return Err(format!(
+                        "LM Studio reachable at {probe_url} but no model is loaded. \
+                         Run `lms load <model>` (or load via the LM Studio GUI), then \
+                         retry. Set CLAUDETTE_SKIP_LM_STUDIO_PROBE=1 to bypass."
+                    ));
+                }
+            }
+            Ok(url)
+        }
         Ok(resp) => Err(format!(
             "{mode_label} at {probe_url} returned HTTP {} — is a different service bound to that port?",
             resp.status()
         )),
         Err(e) => Err(format!(
             "{mode_label} not reachable at {probe_url} ({e}). Start the server \
-             (or set OLLAMA_HOST), then retry. Set CLAUDETTE_SKIP_OLLAMA_PROBE=1 to bypass."
+             (or set OLLAMA_HOST), then retry. Set {skip_flag_name}=1 to bypass."
         )),
     }
+}
+
+/// Returns true when the LM Studio `/v1/models` response body parses as JSON
+/// with a top-level `data` array that is empty. Pure helper so the empty-
+/// data branch of `probe_ollama` is unit-testable without a real server.
+/// Failures (non-JSON, missing `data`, non-array `data`) all return false —
+/// the probe should not block on a server that responds in a shape we
+/// don't recognise.
+#[must_use]
+fn lm_studio_models_data_is_empty(body: &str) -> bool {
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .as_ref()
+        .and_then(|v| v.get("data"))
+        .and_then(Value::as_array)
+        .is_some_and(Vec::is_empty)
 }
 
 impl ApiClient for OllamaApiClient {
@@ -1421,6 +1465,39 @@ mod tests {
     fn strip_harmony_no_op_on_clean_text() {
         let input = "hello world\nthis is fine";
         assert_eq!(strip_harmony_separators(input), input);
+    }
+
+    // ─── LM Studio models-data emptiness check (P4) ─────────────────────────
+
+    #[test]
+    fn lm_studio_data_empty_array_returns_true() {
+        let body = r#"{"object":"list","data":[]}"#;
+        assert!(lm_studio_models_data_is_empty(body));
+    }
+
+    #[test]
+    fn lm_studio_data_with_loaded_model_returns_false() {
+        let body = r#"{"object":"list","data":[{"id":"qwen3.6-35b-a3b","object":"model"}]}"#;
+        assert!(!lm_studio_models_data_is_empty(body));
+    }
+
+    #[test]
+    fn lm_studio_invalid_json_returns_false() {
+        // Be permissive: an unrecognised shape shouldn't block startup.
+        assert!(!lm_studio_models_data_is_empty("not json"));
+        assert!(!lm_studio_models_data_is_empty(""));
+    }
+
+    #[test]
+    fn lm_studio_missing_data_field_returns_false() {
+        let body = r#"{"object":"list"}"#;
+        assert!(!lm_studio_models_data_is_empty(body));
+    }
+
+    #[test]
+    fn lm_studio_data_not_an_array_returns_false() {
+        let body = r#"{"object":"list","data":"oops"}"#;
+        assert!(!lm_studio_models_data_is_empty(body));
     }
 
     #[test]
