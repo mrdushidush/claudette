@@ -32,6 +32,7 @@ mod gmail;
 mod ide;
 mod markets;
 mod notes;
+mod recall;
 mod registry;
 mod schedule;
 mod search;
@@ -127,6 +128,7 @@ pub fn secretary_tools_json() -> Value {
     tools.extend(ide::schemas());
     tools.extend(markets::schemas());
     tools.extend(notes::schemas());
+    tools.extend(recall::schemas());
     tools.extend(registry::schemas());
     tools.extend(schedule::schemas());
     tools.extend(search::schemas());
@@ -173,6 +175,9 @@ pub fn dispatch_tool(name: &str, input: &str) -> Result<String, String> {
         return result;
     }
     if let Some(result) = notes::dispatch(name, input) {
+        return result;
+    }
+    if let Some(result) = recall::dispatch(name, input) {
         return result;
     }
     if let Some(result) = registry::dispatch(name, input) {

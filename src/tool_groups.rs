@@ -65,6 +65,9 @@ pub enum ToolGroup {
     /// `claudette --auth-google gmail` one-time setup. Scope separated from
     /// Calendar per AD-6; no send/modify in this group.
     Gmail,
+    /// Cross-session semantic recall: search past conversations indexed in
+    /// `~/.claudette/recall.sqlite`. One tool — `recall(query, k)`.
+    Recall,
 }
 
 impl ToolGroup {
@@ -89,6 +92,7 @@ impl ToolGroup {
             Self::Calendar => "calendar",
             Self::Schedule => "schedule",
             Self::Gmail => "gmail",
+            Self::Recall => "recall",
         }
     }
 
@@ -117,12 +121,13 @@ impl ToolGroup {
             Self::Calendar => "google calendar: list/create/update/delete events, RSVP (requires claudette --auth-google)",
             Self::Schedule => "proactive reminders: one-shot + recurring schedules that fire prompts back at you",
             Self::Gmail => "gmail (read-only): list/search/read messages, list labels (requires claudette --auth-google gmail)",
+            Self::Recall => "cross-session memory: recall past messages by semantic similarity (use when user references prior conversations)",
         }
     }
 
     /// All groups in a stable order, for schema generation and tests.
     #[must_use]
-    pub fn all() -> [ToolGroup; 17] {
+    pub fn all() -> [ToolGroup; 18] {
         [
             Self::Notes,
             Self::Todos,
@@ -141,6 +146,7 @@ impl ToolGroup {
             Self::Calendar,
             Self::Schedule,
             Self::Gmail,
+            Self::Recall,
         ]
     }
 
@@ -167,6 +173,7 @@ impl ToolGroup {
             "calendar" | "gcal" | "google-calendar" | "google_calendar" => Some(Self::Calendar),
             "schedule" | "scheduler" | "reminders" | "reminder" => Some(Self::Schedule),
             "gmail" | "mail" | "email" | "inbox" => Some(Self::Gmail),
+            "recall" | "memory" | "remember" | "history" => Some(Self::Recall),
             _ => None,
         }
     }
@@ -233,6 +240,7 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         "gmail_list" | "gmail_search" | "gmail_read" | "gmail_list_labels" => {
             Some(ToolGroup::Gmail)
         }
+        "recall" => Some(ToolGroup::Recall),
         _ => None,
     }
 }

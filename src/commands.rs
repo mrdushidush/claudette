@@ -70,6 +70,10 @@ pub enum SlashCommand {
     /// Sprint 14: dump the current model config (brain, fallback, coder,
     /// last fallback timestamp from `fallback.jsonl`).
     Models,
+    /// Cross-session recall: search the embedded memory for past messages
+    /// matching the query. Bypasses the brain — runs the same lookup as the
+    /// `recall` tool would, but prints results straight to the REPL.
+    Recall(String),
     /// Recognised as starting with `/` but unusable: unknown name, missing
     /// required argument, etc. Carries a human-readable error.
     Invalid(String),
@@ -174,6 +178,12 @@ pub fn parse_slash_command(line: &str) -> Option<SlashCommand> {
             None => SlashCommand::Invalid("/coder requires a model name".to_string()),
         },
         "models" => SlashCommand::Models,
+        "recall" => match arg.filter(|s| !s.is_empty()) {
+            Some(query) => SlashCommand::Recall(query),
+            None => SlashCommand::Invalid(
+                "/recall requires a query. Try: /recall meeting with brian".to_string(),
+            ),
+        },
         "exit" | "quit" | "q" | "x" => SlashCommand::Exit,
         other => SlashCommand::Invalid(format!("unknown command: /{other} — try /help")),
     };
@@ -276,6 +286,10 @@ pub fn dispatch_slash_command(
             handle_models(&mut err);
             SlashOutcome::Continue
         }
+        SlashCommand::Recall(query) => {
+            handle_recall(&mut err, &query);
+            SlashOutcome::Continue
+        }
         SlashCommand::Exit => SlashOutcome::Exit,
         SlashCommand::Invalid(msg) => {
             let _ = writeln!(
@@ -330,6 +344,7 @@ fn print_help(out: &mut impl Write) {
         ),
         ("/coder <model>", "Pin coder model"),
         ("/models", "Show current model config"),
+        ("/recall <query>", "Search cross-session memory"),
         ("/exit (quit, q, x)", "Leave the REPL"),
     ];
     let _ = writeln!(
@@ -854,6 +869,54 @@ fn handle_models(out: &mut impl Write) {
     print_models(out, &model_config::active(), None);
 }
 
+fn handle_recall(out: &mut impl Write, query: &str) {
+    let _ = writeln!(
+        out,
+        "{} {} {}",
+        theme::BRAIN,
+        theme::accent("recall"),
+        theme::dim(query)
+    );
+    match crate::recall::global_query(query, 5) {
+        Ok(hits) if hits.is_empty() => {
+            let _ = writeln!(out, "  {}", theme::dim("(no matches)"));
+        }
+        Ok(hits) => {
+            for hit in hits {
+                let role = match hit.role {
+                    crate::recall::Role::User => "user",
+                    crate::recall::Role::Assistant => "asst",
+                };
+                let preview = first_sentence(&hit.snippet, 200);
+                let _ = writeln!(
+                    out,
+                    "  {} {} {} {}",
+                    theme::ok(theme::OK_GLYPH),
+                    theme::dim(&format!("{:.3}", hit.score)),
+                    theme::accent(&format!("[{role}] {}", short_ts(&hit.ts))),
+                    preview
+                );
+            }
+        }
+        Err(e) => {
+            let _ = writeln!(
+                out,
+                "  {} {}",
+                theme::error(theme::ERR_GLYPH),
+                theme::error(&e)
+            );
+        }
+    }
+}
+
+/// Trim an RFC3339 timestamp to its calendar-date prefix for display.
+/// `2026-05-08T14:33:21+00:00` → `2026-05-08`. Falls back to the full
+/// string if there's no `T`.
+fn short_ts(ts: &str) -> String {
+    ts.split_once('T')
+        .map_or_else(|| ts.to_string(), |(date, _)| date.to_string())
+}
+
 fn print_models(out: &mut impl Write, cfg: &ModelConfig, just_switched: Option<Preset>) {
     let _ = writeln!(out, "{} {}", theme::ROBOT, theme::accent("models"));
     if let Some(p) = just_switched {
@@ -1342,6 +1405,32 @@ mod tests {
     #[test]
     fn parse_models_alias() {
         assert_eq!(parse_slash_command("/models"), Some(SlashCommand::Models));
+    }
+
+    #[test]
+    fn parse_recall_with_query() {
+        assert_eq!(
+            parse_slash_command("/recall meeting with brian"),
+            Some(SlashCommand::Recall("meeting with brian".to_string()))
+        );
+        assert_eq!(
+            parse_slash_command("/recall   trimmed query  "),
+            Some(SlashCommand::Recall("trimmed query".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_recall_without_query_is_invalid() {
+        let parsed = parse_slash_command("/recall");
+        assert!(matches!(parsed, Some(SlashCommand::Invalid(_))));
+        let parsed = parse_slash_command("/recall   ");
+        assert!(matches!(parsed, Some(SlashCommand::Invalid(_))));
+    }
+
+    #[test]
+    fn short_ts_trims_to_date_prefix() {
+        assert_eq!(short_ts("2026-05-08T14:33:21+00:00"), "2026-05-08");
+        assert_eq!(short_ts("2026-05-08"), "2026-05-08");
     }
 
     #[test]

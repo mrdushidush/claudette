@@ -408,6 +408,21 @@ pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
                     ))
                 );
 
+                // Cross-session recall: index the user input + the assistant
+                // text from this turn. Best-effort — a transient Ollama
+                // outage or a missing embed model emits a single warn line
+                // without breaking the REPL. Disable with
+                // `CLAUDETTE_RECALL_DISABLE=1` (e.g., privacy, no Ollama).
+                if !recall_disabled() {
+                    if let Err(e) = index_turn_for_recall(trimmed, &runtime) {
+                        eprintln!(
+                            "{} {}",
+                            theme::warn(theme::WARN_GLYPH),
+                            theme::warn(&format!("recall: {e}"))
+                        );
+                    }
+                }
+
                 // the runtime's built-in trigger is disabled (see
                 // build_runtime_inner) — we fire our own session-size trigger
                 // here instead, AFTER the turn so the model never sees a
@@ -666,6 +681,8 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("schedule_once", WorkspaceWrite)
         .with_tool_requirement("schedule_recurring", WorkspaceWrite)
         .with_tool_requirement("schedule_cancel", WorkspaceWrite)
+        // ── Recall (cross-session memory): pure search ───────────────
+        .with_tool_requirement("recall", ReadOnly)
         // ── Dangerous (ALWAYS prompts for [y/N] confirmation) ────��──
         .with_tool_requirement("bash", DangerFullAccess)
         .with_tool_requirement("edit_file", DangerFullAccess)
@@ -673,6 +690,61 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("git_commit", DangerFullAccess)
         .with_tool_requirement("git_push", DangerFullAccess)
         .with_tool_requirement("git_checkout", DangerFullAccess)
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Cross-session recall hooks
+// ────────────────────────────────────────────────────────────────────────────
+
+/// Whether the post-turn recall indexing is disabled. Off-by-default
+/// privacy/perf escape hatch: `CLAUDETTE_RECALL_DISABLE=1`. Anything else
+/// (unset, "0", garbage) leaves indexing enabled.
+fn recall_disabled() -> bool {
+    matches!(std::env::var("CLAUDETTE_RECALL_DISABLE").as_deref(), Ok("1"))
+}
+
+/// Index the user input string + the most recent assistant text-blocks
+/// into the cross-session recall store. Skips empty or tool-only messages.
+///
+/// Why we use `user_input` directly instead of walking back to find the
+/// "latest user message": on retries, the runtime injects a synthetic
+/// nudge user-message into the session (see [`run_turn_with_retry`]). The
+/// raw `trimmed` REPL line is what the human actually typed, so we index
+/// that and skip the synthetic.
+fn index_turn_for_recall(
+    user_input: &str,
+    runtime: &ConversationRuntime<OllamaApiClient, SecretaryToolExecutor>,
+) -> Result<(), String> {
+    use crate::recall::{global_index, Role};
+    use crate::ContentBlock;
+
+    let user_text = user_input.trim();
+    if !user_text.is_empty() {
+        global_index(Role::User, user_text)?;
+    }
+
+    if let Some(msg) = runtime
+        .session()
+        .messages
+        .iter()
+        .rev()
+        .find(|m| matches!(m.role, crate::MessageRole::Assistant))
+    {
+        let mut text = String::new();
+        for block in &msg.blocks {
+            if let ContentBlock::Text { text: t } = block {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(t);
+            }
+        }
+        if !text.trim().is_empty() {
+            global_index(Role::Assistant, &text)?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Interactive CLI prompter. Prints tool name + a preview of the input,
