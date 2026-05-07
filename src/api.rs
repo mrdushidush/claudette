@@ -360,6 +360,124 @@ pub fn resolve_openai_compat() -> bool {
         .is_some_and(|v| !v.is_empty() && v != "0")
 }
 
+/// Strip Harmony / Qwen-3.6-style chat-template separators that occasionally
+/// leak through into the OpenAI-compat `content` field. Some LM Studio
+/// quants emit the channel/message markers (`<|channel|>thought<|message|>`,
+/// `<|channel>thought<channel|>`, `<|end|>`, …) that the chat template is
+/// supposed to consume internally. Without this strip, the markers show up
+/// as literal text in the user-visible response.
+///
+/// Conservative match rule: a token is treated as a separator only if it
+/// has the shape `<…>` AND contains at least one `|` adjacent to either
+/// angle bracket. So `<a>`, `<div>`, `<MyType>` etc. are left alone, while
+/// `<|x|>`, `<|x>`, and `<x|>` are stripped.
+///
+/// Fenced code blocks (lines starting with ```` ``` ````) are skipped
+/// entirely so a user asking about chat templates gets verbatim output
+/// inside their code samples.
+fn strip_harmony_separators(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_fence = false;
+
+    for line in text.split_inclusive('\n') {
+        if line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+            out.push_str(line);
+            continue;
+        }
+        if in_fence {
+            out.push_str(line);
+        } else {
+            out.push_str(&strip_harmony_from_segment(line));
+        }
+    }
+    out
+}
+
+/// Strip Harmony separator tokens from a single non-fenced segment. Operates
+/// on bytes for the scan (markers are pure ASCII) but slices the original
+/// `&str` at known-ASCII boundaries so multi-byte UTF-8 elsewhere in the
+/// segment is preserved untouched.
+fn strip_harmony_from_segment(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    let mut last_emit = 0;
+
+    while i < bytes.len() {
+        if bytes[i] == b'<' {
+            if let Some(end) = try_match_harmony_run(bytes, i) {
+                out.push_str(&s[last_emit..i]);
+                last_emit = end;
+                i = end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out.push_str(&s[last_emit..]);
+    out
+}
+
+/// Match a Harmony separator "run" starting at `<`: either a solo separator
+/// like `<|end|>`, or a `<marker>name<marker>` triplet like the Qwen-3.6
+/// channel pair `<|channel>thought<channel|>`. The triplet form treats the
+/// inner identifier as part of the markup so it gets stripped along with
+/// the brackets, fixing the leak where `thought` (the channel name) showed
+/// up as visible output.
+fn try_match_harmony_run(bytes: &[u8], start: usize) -> Option<usize> {
+    let after_first = try_match_harmony(bytes, start)?;
+
+    // Look for the triplet shape: identifier immediately after the first
+    // marker, followed by another marker. If both are present, swallow the
+    // whole triplet. Otherwise strip just the solo marker.
+    let mut i = after_first;
+    while i < bytes.len() && (bytes[i].is_ascii_lowercase() || bytes[i] == b'_') {
+        i += 1;
+    }
+    if i > after_first && i < bytes.len() && bytes[i] == b'<' {
+        if let Some(end) = try_match_harmony(bytes, i) {
+            return Some(end);
+        }
+    }
+
+    Some(after_first)
+}
+
+/// If `bytes[start..]` opens a Harmony separator, return the byte index just
+/// past its closing `>`. The accepted shape is `<` + optional `|` +
+/// `[a-z_]+` + optional `|` + `>` with at least one `|` present, so
+/// ordinary `<tag>` text is never matched.
+fn try_match_harmony(bytes: &[u8], start: usize) -> Option<usize> {
+    debug_assert_eq!(bytes[start], b'<');
+    let mut i = start + 1;
+    let mut has_pipe = false;
+
+    if i < bytes.len() && bytes[i] == b'|' {
+        has_pipe = true;
+        i += 1;
+    }
+
+    let name_start = i;
+    while i < bytes.len() && (bytes[i].is_ascii_lowercase() || bytes[i] == b'_') {
+        i += 1;
+    }
+    if i == name_start {
+        return None;
+    }
+
+    if i < bytes.len() && bytes[i] == b'|' {
+        has_pipe = true;
+        i += 1;
+    }
+
+    if i < bytes.len() && bytes[i] == b'>' && has_pipe {
+        Some(i + 1)
+    } else {
+        None
+    }
+}
+
 /// Returns true when the given URL's host is a loopback / localhost
 /// address. Used to warn users when `OLLAMA_HOST` points at a remote
 /// endpoint — the README tagline is "runs entirely on your hardware,"
@@ -589,7 +707,9 @@ impl OllamaApiClient {
     /// `Vec<AssistantEvent>` shape the runtime expects. The single-message
     /// JSON body is much simpler than Ollama's NDJSON stream — we just
     /// extract `choices[0].message.{content,tool_calls}` and the top-level
-    /// `usage` block.
+    /// `usage` block. Harmony / Qwen-3.6 chat-template separators that leak
+    /// into `content` are stripped via [`strip_harmony_separators`] before
+    /// the text reaches the runtime.
     ///
     /// **Tool call argument shape diff:** Ollama emits
     /// `function.arguments` as a JSON object; OpenAI emits it as a JSON
@@ -608,7 +728,14 @@ impl OllamaApiClient {
 
         let mut events = Vec::new();
 
-        let content = message.get("content").and_then(Value::as_str).unwrap_or("");
+        let content_raw = message.get("content").and_then(Value::as_str).unwrap_or("");
+        // Defence against Harmony / Qwen-3.6-style chat-template separators
+        // (`<|channel|>thought<|message|>`, `<|channel>thought<channel|>`, …)
+        // leaking into the assistant content. The chat template is supposed
+        // to consume them; some LM Studio quants don't. See P5 in the
+        // 2026-05-04 optimization queue.
+        let content_owned = strip_harmony_separators(content_raw);
+        let content = content_owned.as_str();
         if !content.is_empty() {
             // Compat mode is non-streaming, but the REPL/TUI text callback
             // still expects to see the assistant's prose at some point. Fire
@@ -1223,6 +1350,78 @@ fn role_str(role: MessageRole) -> &'static str {
 mod tests {
     use super::*;
     use crate::{ConversationMessage, MessageRole};
+
+    // ─── Harmony separator stripping (P5) ───────────────────────────────────
+
+    #[test]
+    fn strip_harmony_removes_qwen36_channel_pair() {
+        // The exact pattern reported on unsloth/qwen3.6-35b-a3b via LM Studio.
+        let input = "<|channel>thought<channel|>\nthe actual reply";
+        assert_eq!(strip_harmony_separators(input), "\nthe actual reply");
+    }
+
+    #[test]
+    fn strip_harmony_removes_symmetric_markers() {
+        // Triplet swallows the channel-name identifier between paired
+        // markers, then the trailing solo `<|end|>` is stripped on its own.
+        let input = "<|channel|>analysis<|message|>real content<|end|>";
+        assert_eq!(strip_harmony_separators(input), "real content");
+    }
+
+    #[test]
+    fn strip_harmony_handles_underscored_names() {
+        let input = "before <|tool_call|> after";
+        assert_eq!(strip_harmony_separators(input), "before  after");
+    }
+
+    #[test]
+    fn strip_harmony_leaves_html_tags_alone() {
+        // No `|` inside — looks like ordinary HTML/XML, leave it.
+        let input = "<a href=\"x\"><b>bold</b></a>";
+        assert_eq!(strip_harmony_separators(input), input);
+    }
+
+    #[test]
+    fn strip_harmony_leaves_plain_angle_brackets_alone() {
+        let input = "if x < y && y > z";
+        assert_eq!(strip_harmony_separators(input), input);
+    }
+
+    #[test]
+    fn strip_harmony_preserves_fenced_code() {
+        // A user asking about chat templates should see the markers verbatim
+        // inside their code block. Outside the block the markers are stripped.
+        let input = "<|end|> outside\n```\n<|channel|>thought<|message|>\n```\n<|end|> after";
+        let expected = " outside\n```\n<|channel|>thought<|message|>\n```\n after";
+        assert_eq!(strip_harmony_separators(input), expected);
+    }
+
+    #[test]
+    fn strip_harmony_handles_marker_at_start_of_line() {
+        let input = "<|end|>";
+        assert_eq!(strip_harmony_separators(input), "");
+    }
+
+    #[test]
+    fn strip_harmony_preserves_multibyte_utf8() {
+        // The scanner walks bytes but slices on `<` boundaries (always
+        // ASCII), so emoji and other multi-byte content must round-trip.
+        let input = "héllo 🦀 <|end|> wörld";
+        assert_eq!(strip_harmony_separators(input), "héllo 🦀  wörld");
+    }
+
+    #[test]
+    fn strip_harmony_unbalanced_marker_with_uppercase_is_left_alone() {
+        // Name must be `[a-z_]+`, so `<|Channel|>` is not recognised.
+        let input = "<|Channel|>";
+        assert_eq!(strip_harmony_separators(input), input);
+    }
+
+    #[test]
+    fn strip_harmony_no_op_on_clean_text() {
+        let input = "hello world\nthis is fine";
+        assert_eq!(strip_harmony_separators(input), input);
+    }
 
     #[test]
     fn is_local_ollama_url_recognises_loopback() {
