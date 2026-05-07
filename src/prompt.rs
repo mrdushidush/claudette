@@ -48,12 +48,16 @@ pub fn secretary_system_prompt_with_memory(memory: Option<&str>, concise: bool) 
 
     let group_hint = if concise {
         format!(
-            "Most tool groups are pre-loaded. Additional groups via enable_tools(group): {}.",
+            "Tool groups load on demand via enable_tools(group). Filesystem/shell/git \
+             ops live in enable_tools(\"advanced\") — call it before saying you can't. \
+             Groups: {}.",
             groups.join("; ")
         )
     } else {
         format!(
-            "For tools beyond your core set, call enable_tools(group) first. Available groups: {}.",
+            "For tools beyond your core set, call enable_tools(group) first. \
+             Filesystem/shell/git ops live in enable_tools(\"advanced\") — call it \
+             before declining a request. Available groups: {}.",
             groups.join("; ")
         )
     };
