@@ -13,6 +13,34 @@ use crate::usage::{TokenUsage, UsageTracker};
 const DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD: u32 = 200_000;
 const AUTO_COMPACTION_THRESHOLD_ENV_VAR: &str = "CLAUDE_CODE_AUTO_COMPACT_INPUT_TOKENS";
 
+/// One-sentence discipline reminder appended to the system prompt for any
+/// turn that carries an image attachment. The 35B brain on
+/// `unsloth/qwen3.6-35b-a3b` was observed citing prior-turn tool output
+/// (Technical Rating 0.4/1.0, RSI 56.37, …) as if those values came from
+/// the attached chart. Tracks P2 in the 2026-05-04 optimization queue.
+///
+/// Kept short on purpose: longer prompts suppress tool-calling on small
+/// brains (qwen3.5:9b notably). Only takes effect when an image is
+/// actually attached; image-less turns see the unmodified system prompt.
+const VISION_DISCIPLINE_HINT: &str = "User attached an image this turn. \
+    Cite features visible in the image (price level, candle pattern, \
+    chart indicators, text in screenshots) before referencing tool data \
+    from prior turns.";
+
+/// Append the vision-discipline hint to `base` when this turn has an image
+/// attached, otherwise return `base` unchanged. Pure function — separates
+/// the policy from the conversation loop so it can be unit-tested.
+fn build_turn_system_prompt(base: &[String], has_images: bool) -> Vec<String> {
+    if has_images {
+        let mut out = Vec::with_capacity(base.len() + 1);
+        out.extend_from_slice(base);
+        out.push(VISION_DISCIPLINE_HINT.to_string());
+        out
+    } else {
+        base.to_vec()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiRequest {
     pub system_prompt: Vec<String>,
@@ -208,10 +236,11 @@ where
         images: Vec<(String, String)>,
         mut prompter: Option<&mut dyn PermissionPrompter>,
     ) -> Result<TurnSummary, RuntimeError> {
-        let user_message = if images.is_empty() {
-            ConversationMessage::user_text(user_input.into())
-        } else {
+        let has_images = !images.is_empty();
+        let user_message = if has_images {
             ConversationMessage::user_with_images(user_input.into(), images)
+        } else {
+            ConversationMessage::user_text(user_input.into())
         };
         self.session.messages.push(user_message);
 
@@ -227,8 +256,14 @@ where
                 ));
             }
 
+            // P2 (2026-05-04): when an image is attached this turn, append a
+            // discipline reminder to the system prompt. Without it, real
+            // sessions on 35B brains showed the model echoing prior-turn
+            // tool data (Technical Rating 0.4/1.0, RSI 56.37, …) and
+            // pretending those came from the chart.
+            let system_prompt = build_turn_system_prompt(&self.system_prompt, has_images);
             let request = ApiRequest {
-                system_prompt: self.system_prompt.clone(),
+                system_prompt,
                 messages: self.session.messages.clone(),
             };
             let events = self.api_client.stream(request)?;
@@ -539,9 +574,10 @@ impl ToolExecutor for StaticToolExecutor {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_auto_compaction_threshold, ApiClient, ApiRequest, AssistantEvent,
-        AutoCompactionEvent, ConversationRuntime, RuntimeError, StaticToolExecutor,
-        DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD,
+        build_turn_system_prompt, parse_auto_compaction_threshold, ApiClient, ApiRequest,
+        AssistantEvent, AutoCompactionEvent, ConversationRuntime, RuntimeError,
+        StaticToolExecutor, DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD,
+        VISION_DISCIPLINE_HINT,
     };
     use crate::compact::CompactionConfig;
     use crate::config::{RuntimeFeatureConfig, RuntimeHookConfig};
@@ -1222,5 +1258,40 @@ mod tests {
             output.contains("\"did_you_mean\":[]"),
             "no-match case should still produce a structured response: {output}"
         );
+    }
+
+    // ─── Vision-discipline hint (P2) ────────────────────────────────────────
+
+    #[test]
+    fn build_turn_system_prompt_no_op_when_no_images() {
+        let base = vec!["base prompt".to_string()];
+        let result = build_turn_system_prompt(&base, false);
+        assert_eq!(result, base);
+    }
+
+    #[test]
+    fn build_turn_system_prompt_appends_hint_when_images_present() {
+        let base = vec!["base prompt".to_string()];
+        let result = build_turn_system_prompt(&base, true);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], "base prompt");
+        assert_eq!(result[1], VISION_DISCIPLINE_HINT);
+    }
+
+    #[test]
+    fn build_turn_system_prompt_preserves_multi_segment_base() {
+        let base = vec!["seg one".to_string(), "seg two".to_string()];
+        let result = build_turn_system_prompt(&base, true);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], "seg one");
+        assert_eq!(result[1], "seg two");
+        assert_eq!(result[2], VISION_DISCIPLINE_HINT);
+    }
+
+    #[test]
+    fn vision_discipline_hint_mentions_image() {
+        // Cheap sanity check that the constant didn't drift to an unrelated
+        // string during refactors.
+        assert!(VISION_DISCIPLINE_HINT.to_lowercase().contains("image"));
     }
 }
