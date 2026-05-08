@@ -1,7 +1,9 @@
-//! Git group — 8 tools that shell out to `git` as a subprocess. CWD is
-//! the workspace root (where claudette was launched). Safety:
-//! destructive flags (--force, reset --hard, clean -f, branch -D,
-//! --no-verify) are rejected before they reach the subprocess.
+//! Git group — 9 tools that shell out to `git` as a subprocess. Most run
+//! in the workspace root (where claudette was launched). `git_clone` is the
+//! exception: it writes a fresh tree under `~/.claudette/missions/<dest>/`,
+//! gated by URL-scheme + dest-slug validation. Safety: destructive flags
+//! (--force, reset --hard, clean -f, branch -D, --no-verify) are rejected
+//! before they reach the subprocess.
 //!
 //! Self-contained: all helpers (`resolve_git_path`, `run_git`,
 //! `reject_destructive`, `auto_commit_message`, `extract_stat_number`)
@@ -117,6 +119,22 @@ pub(super) fn schemas() -> Vec<Value> {
                 "parameters": { "type": "object", "properties": {}, "required": [] }
             }
         }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "git_clone",
+                "description": "Clone a remote repo into ~/.claudette/missions/<dest>/. Use for brownfield work on external repos.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url":   { "type": "string", "description": "Repo URL (https://, http://, git@, ssh://)" },
+                        "dest":  { "type": "string", "description": "Subdirectory name under ~/.claudette/missions/ (no slashes, no '..')" },
+                        "depth": { "type": "number", "description": "Optional shallow-clone depth. Omit for full history." }
+                    },
+                    "required": ["url", "dest"]
+                }
+            }
+        }),
     ]
 }
 
@@ -130,6 +148,7 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
         "git_branch" => run_git_branch(input),
         "git_checkout" => run_git_checkout(input),
         "git_push" => run_git_push(),
+        "git_clone" => run_git_clone(input),
         _ => return None,
     };
     Some(result)
@@ -442,6 +461,136 @@ fn run_git_checkout(input: &str) -> Result<String, String> {
     Ok(json!({ "ok": true, "checked_out": target, "output": output }).to_string())
 }
 
+/// Resolve `~/.claudette/missions/`. Mirrors the home-resolution pattern in
+/// `crate::secrets::secrets_dir`.
+fn missions_root() -> std::path::PathBuf {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| ".".to_string());
+    std::path::PathBuf::from(home)
+        .join(".claudette")
+        .join("missions")
+}
+
+/// Reject anything that isn't a clean http(s)/git/ssh URL. Don't let the
+/// model talk us into `file:///` or other surprise schemes.
+fn validate_clone_url(url: &str) -> Result<(), String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err("git_clone: empty url".to_string());
+    }
+    let ok = trimmed.starts_with("https://")
+        || trimmed.starts_with("http://")
+        || trimmed.starts_with("git@")
+        || trimmed.starts_with("ssh://");
+    if !ok {
+        return Err(format!(
+            "git_clone: unsupported url scheme — must start with https://, http://, git@, or ssh:// (got `{trimmed}`)"
+        ));
+    }
+    Ok(())
+}
+
+/// Validate the dest slug. Single path component, no traversal, no
+/// drive prefix, no leading/trailing whitespace.
+fn validate_dest_slug(dest: &str) -> Result<String, String> {
+    let trimmed = dest.trim();
+    if trimmed.is_empty() {
+        return Err("git_clone: empty dest".to_string());
+    }
+    if trimmed.contains("..") {
+        return Err(format!("git_clone: dest may not contain '..' ({trimmed})"));
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err(format!(
+            "git_clone: dest must be a single directory name, not a path ({trimmed})"
+        ));
+    }
+    // Reject drive prefixes like `C:` and stray colons that confuse Windows.
+    if trimmed.contains(':') {
+        return Err(format!("git_clone: dest may not contain ':' ({trimmed})"));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn run_git_clone(input: &str) -> Result<String, String> {
+    let v: Value = serde_json::from_str(input)
+        .map_err(|e| format!("git_clone: invalid JSON ({e}): {input}"))?;
+    let url = v
+        .get("url")
+        .and_then(Value::as_str)
+        .ok_or("git_clone: missing 'url'")?;
+    let dest_raw = v
+        .get("dest")
+        .and_then(Value::as_str)
+        .ok_or("git_clone: missing 'dest'")?;
+    let depth = v.get("depth").and_then(Value::as_u64);
+
+    validate_clone_url(url)?;
+    let dest = validate_dest_slug(dest_raw)?;
+
+    let root = missions_root();
+    std::fs::create_dir_all(&root).map_err(|e| {
+        format!(
+            "git_clone: failed to create missions root {}: {e}",
+            root.display()
+        )
+    })?;
+    let target = root.join(&dest);
+
+    if target.exists() {
+        return Err(format!(
+            "git_clone: target already exists at {} — pick a different dest or remove it first",
+            target.display()
+        ));
+    }
+
+    let target_str = target
+        .to_str()
+        .ok_or_else(|| format!("git_clone: target path is not utf-8: {}", target.display()))?
+        .to_string();
+
+    let depth_str;
+    let mut args: Vec<&str> = vec!["clone"];
+    if let Some(d) = depth {
+        depth_str = format!("{d}");
+        args.push("--depth");
+        args.push(&depth_str);
+    }
+    args.push("--");
+    args.push(url);
+    args.push(&target_str);
+
+    let git_exe = resolve_git_path();
+    let result = run_command_with_timeout(&git_exe, &args, 120, None);
+    if result.timed_out {
+        // Best-effort cleanup of any half-cloned tree.
+        let _ = std::fs::remove_dir_all(&target);
+        return Err(format!("git_clone: timed out after 120s for {url}"));
+    }
+    if !result.success {
+        let _ = std::fs::remove_dir_all(&target);
+        let stderr = if result.stderr.is_empty() {
+            result.stdout.clone()
+        } else {
+            result.stderr.clone()
+        };
+        return Err(format!(
+            "git_clone: failed (exit {:?}): {}",
+            result.exit_code,
+            stderr.chars().take(500).collect::<String>()
+        ));
+    }
+
+    Ok(json!({
+        "ok": true,
+        "url": url,
+        "path": target_str,
+        "dest": dest,
+    })
+    .to_string())
+}
+
 fn run_git_push() -> Result<String, String> {
     // Gate enforcement lives at the policy layer: `git_push` is registered
     // as `DangerFullAccess` in `run.rs::build_permission_policy` and in
@@ -500,9 +649,9 @@ mod tests {
     }
 
     #[test]
-    fn schemas_lists_eight_tools() {
+    fn schemas_lists_nine_tools() {
         let schemas = schemas();
-        assert_eq!(schemas.len(), 8);
+        assert_eq!(schemas.len(), 9);
         let names: Vec<&str> = schemas
             .iter()
             .filter_map(|v| v.pointer("/function/name").and_then(Value::as_str))
@@ -518,8 +667,63 @@ mod tests {
                 "git_branch",
                 "git_checkout",
                 "git_push",
+                "git_clone",
             ]
         );
+    }
+
+    #[test]
+    fn validate_clone_url_accepts_known_schemes() {
+        assert!(validate_clone_url("https://github.com/owner/repo.git").is_ok());
+        assert!(validate_clone_url("http://example.com/r.git").is_ok());
+        assert!(validate_clone_url("git@github.com:owner/repo.git").is_ok());
+        assert!(validate_clone_url("ssh://git@host/path").is_ok());
+    }
+
+    #[test]
+    fn validate_clone_url_rejects_other_schemes() {
+        assert!(validate_clone_url("file:///etc/passwd").is_err());
+        assert!(validate_clone_url("javascript:alert(1)").is_err());
+        assert!(validate_clone_url("").is_err());
+        assert!(validate_clone_url("github.com/owner/repo").is_err());
+    }
+
+    #[test]
+    fn validate_dest_slug_accepts_simple_name() {
+        assert_eq!(
+            validate_dest_slug("django__issue-12345").unwrap(),
+            "django__issue-12345"
+        );
+    }
+
+    #[test]
+    fn validate_dest_slug_rejects_traversal() {
+        assert!(validate_dest_slug("..").is_err());
+        assert!(validate_dest_slug("foo/../bar").is_err());
+        assert!(validate_dest_slug("a/b").is_err());
+        assert!(validate_dest_slug("a\\b").is_err());
+        assert!(validate_dest_slug("C:\\evil").is_err());
+        assert!(validate_dest_slug("").is_err());
+    }
+
+    #[test]
+    fn run_git_clone_rejects_bad_url() {
+        let err = run_git_clone(r#"{"url":"file:///etc/passwd","dest":"x"}"#).unwrap_err();
+        assert!(err.contains("scheme"), "got: {err}");
+    }
+
+    #[test]
+    fn run_git_clone_rejects_bad_dest() {
+        let err = run_git_clone(r#"{"url":"https://github.com/o/r","dest":"a/b"}"#).unwrap_err();
+        assert!(err.contains("single directory"), "got: {err}");
+    }
+
+    #[test]
+    fn run_git_clone_rejects_missing_fields() {
+        assert!(run_git_clone("{}").unwrap_err().contains("url"));
+        assert!(run_git_clone(r#"{"url":"https://github.com/o/r"}"#)
+            .unwrap_err()
+            .contains("dest"));
     }
 
     #[test]

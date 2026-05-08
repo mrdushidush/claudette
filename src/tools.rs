@@ -106,8 +106,10 @@ pub fn secretary_tools_json() -> Value {
         // Registry group (crate_info, crate_search, npm_info, npm_search)
         // lives in src/tools/registry.rs and is appended to this array below.
         // GitHub group (gh_list_my_prs, gh_list_assigned_issues, gh_get_issue,
-        // gh_create_issue, gh_comment_issue, gh_search_code) lives in
-        // src/tools/github.rs and is appended to this array below.
+        // gh_create_issue, gh_comment_issue, gh_search_code, plus the
+        // brownfield set: gh_list_repo_issues, gh_pr_status, gh_fork,
+        // gh_create_pr) lives in src/tools/github.rs and is appended to this
+        // array below.
         // Markets group (tv_get_quote, tv_technical_rating, tv_search_symbol,
         // tv_economic_calendar, vestige_asa_info, vestige_search_asa,
         // vestige_top_movers) lives in src/tools/markets.rs and is appended

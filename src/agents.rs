@@ -167,11 +167,19 @@ fn gitops_tools() -> BTreeSet<String> {
         "git_branch",
         "git_checkout",
         "git_push",
+        "git_clone",
         "bash",
         "read_file",
         "list_dir",
         "glob_search",
         "grep_search",
+        // Brownfield: full GitHub flow on a target repo.
+        "gh_get_issue",
+        "gh_search_code",
+        "gh_list_repo_issues",
+        "gh_pr_status",
+        "gh_fork",
+        "gh_create_pr",
     ]
     .into_iter()
     .map(String::from)
@@ -299,6 +307,10 @@ fn build_agent_permission_policy(allowed: &BTreeSet<String>) -> PermissionPolicy
         "git_diff",
         "git_log",
         "git_branch",
+        "gh_get_issue",
+        "gh_search_code",
+        "gh_list_repo_issues",
+        "gh_pr_status",
     ] {
         if allowed.contains(name) {
             policy = policy.with_tool_requirement(name, ReadOnly);
@@ -306,7 +318,13 @@ fn build_agent_permission_policy(allowed: &BTreeSet<String>) -> PermissionPolicy
     }
 
     // Workspace-write tools — auto-allowed.
-    for name in ["web_search", "web_fetch"] {
+    for name in [
+        "web_search",
+        "web_fetch",
+        "git_clone",
+        "gh_fork",
+        "gh_create_pr",
+    ] {
         if allowed.contains(name) {
             policy = policy.with_tool_requirement(name, WorkspaceWrite);
         }
@@ -494,6 +512,22 @@ mod tests {
         assert!(config.allowed_tools.contains("read_file"));
         assert!(!config.allowed_tools.contains("web_search"));
         assert!(!config.allowed_tools.contains("spawn_agent"));
+    }
+
+    #[test]
+    fn gitops_config_has_brownfield_tools() {
+        let config = AgentType::GitOps.config();
+        for name in [
+            "git_clone",
+            "gh_get_issue",
+            "gh_search_code",
+            "gh_list_repo_issues",
+            "gh_pr_status",
+            "gh_fork",
+            "gh_create_pr",
+        ] {
+            assert!(config.allowed_tools.contains(name), "gitops missing {name}");
+        }
     }
 
     #[test]

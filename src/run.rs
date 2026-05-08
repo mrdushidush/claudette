@@ -647,8 +647,12 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("gh_list_assigned_issues", ReadOnly)
         .with_tool_requirement("gh_get_issue", ReadOnly)
         .with_tool_requirement("gh_search_code", ReadOnly)
+        .with_tool_requirement("gh_list_repo_issues", ReadOnly)
+        .with_tool_requirement("gh_pr_status", ReadOnly)
         .with_tool_requirement("gh_create_issue", WorkspaceWrite)
         .with_tool_requirement("gh_comment_issue", WorkspaceWrite)
+        .with_tool_requirement("gh_fork", WorkspaceWrite)
+        .with_tool_requirement("gh_create_pr", WorkspaceWrite)
         // ── Sprint 9 Phase 0b: markets group (all read-only) ─────────
         .with_tool_requirement("tv_get_quote", ReadOnly)
         .with_tool_requirement("tv_technical_rating", ReadOnly)
@@ -690,6 +694,9 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("git_commit", DangerFullAccess)
         .with_tool_requirement("git_push", DangerFullAccess)
         .with_tool_requirement("git_checkout", DangerFullAccess)
+        // Brownfield: git_clone writes a fresh tree under the controlled
+        // ~/.claudette/missions/ root. Auto-allowed (WorkspaceWrite).
+        .with_tool_requirement("git_clone", WorkspaceWrite)
 }
 
 // ────────────────────────────────────────────────────────────────────────────

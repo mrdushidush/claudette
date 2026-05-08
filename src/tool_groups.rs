@@ -207,7 +207,7 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         "generate_code" => Some(ToolGroup::Code),
         "get_capabilities" => Some(ToolGroup::Meta),
         "git_status" | "git_diff" | "git_log" | "git_add" | "git_commit" | "git_branch"
-        | "git_checkout" | "git_push" => Some(ToolGroup::Git),
+        | "git_checkout" | "git_push" | "git_clone" => Some(ToolGroup::Git),
         "open_in_editor" | "reveal_in_explorer" | "open_url" => Some(ToolGroup::Ide),
         "glob_search" | "grep_search" | "web_fetch" | "web_search" => Some(ToolGroup::Search),
         "bash" | "edit_file" | "spawn_agent" => Some(ToolGroup::Advanced),
@@ -220,7 +220,11 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         | "gh_get_issue"
         | "gh_create_issue"
         | "gh_comment_issue"
-        | "gh_search_code" => Some(ToolGroup::Github),
+        | "gh_search_code"
+        | "gh_list_repo_issues"
+        | "gh_pr_status"
+        | "gh_fork"
+        | "gh_create_pr" => Some(ToolGroup::Github),
         "tv_get_quote"
         | "tv_technical_rating"
         | "tv_search_symbol"
@@ -650,8 +654,24 @@ mod tests {
         let git = reg.group_tool_names(ToolGroup::Git);
         assert!(git.contains(&"git_status".to_string()));
         assert!(git.contains(&"git_push".to_string()));
+        assert!(git.contains(&"git_clone".to_string()));
         // All Git group tools should be non-empty.
-        assert_eq!(git.len(), 8);
+        assert_eq!(git.len(), 9);
+    }
+
+    #[test]
+    fn github_group_includes_brownfield_tools() {
+        let reg = ToolRegistry::new();
+        let gh = reg.group_tool_names(ToolGroup::Github);
+        for name in [
+            "gh_list_repo_issues",
+            "gh_pr_status",
+            "gh_fork",
+            "gh_create_pr",
+        ] {
+            assert!(gh.contains(&name.to_string()), "missing {name} in {gh:?}");
+        }
+        assert_eq!(gh.len(), 10);
     }
 
     #[test]
