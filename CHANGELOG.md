@@ -10,6 +10,86 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-08
+
+Cross-session semantic recall — the headline feature. The agent can now
+query its own conversation history across sessions ("what did I tell you
+about Brian's contract last month?") instead of being a stranger every
+time you open it. Plus a tiered auto-compact threshold, vision-discipline
+nudges for image turns, and several LM Studio compat fixes.
+
+### Added
+
+- **Cross-session semantic recall (`recall` tool group + `/recall <query>`
+  slash command).** Every text message (user + assistant) is embedded with
+  `nomic-embed-text` on the way out and stored in
+  `~/.claudette/recall.sqlite`. At query time the brain (via the `recall`
+  tool) or the user (via the slash command) gets the top-k snippets by
+  cosine similarity from the entire history. Tool calls and tool results
+  are intentionally not indexed — too noisy. Storage caps at 50,000 rows
+  with FIFO eviction (~150MB ceiling at ~3KB/row).
+  - **Works with both Ollama and LM Studio.** With Ollama, the embed
+    model is lazy-pulled on first call (`ollama pull nomic-embed-text`,
+    ~270MB) with a status line. With LM Studio (`CLAUDETTE_OPENAI_COMPAT=1`),
+    recall hits `/v1/embeddings` directly — no separate Ollama install
+    needed; load an embedding model in LM Studio's Local Server tab and
+    point `CLAUDETTE_RECALL_MODEL` at its id (e.g.
+    `text-embedding-nomic-embed-text-v1.5`).
+  - **Escape hatches:** `CLAUDETTE_RECALL_DISABLE=1` turns off all
+    indexing (privacy / no-network mode); `CLAUDETTE_RECALL_DB` overrides
+    the sqlite path; `CLAUDETTE_RECALL_MODEL` overrides the embed model.
+- **Tiered auto-compact threshold via
+  `CLAUDETTE_SOFT_COMPACT_THRESHOLD`.** The existing
+  `CLAUDETTE_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD` stays as the hard
+  ceiling; the new soft threshold lets you compact earlier once the
+  conversation accumulates enough internal state to benefit, without
+  waiting to bump up against the hard limit. Disabled by default.
+- **Vision-discipline hint** on image-bearing turns. When the user
+  attaches an image, the system prompt grows a one-line nudge reminding
+  the brain to ground its response in what the image actually shows
+  rather than confabulating from the surrounding text.
+
+### Fixed
+
+- **Harmony / Qwen-3.6 chat-template separators leaking into output.**
+  Some LM Studio quants of Qwen 3.6 / GPT-OSS emit channel/message
+  marker tokens (`<|channel|>thought<|message|>`, `<|end|>`, etc.) that
+  the chat template is supposed to consume internally. They were
+  appearing verbatim in user-visible responses. The OpenAI-compat
+  content path now strips `<|…|>`-shaped tokens while leaving
+  `<a>`/`<div>`/`<MyType>`-style angle-bracket text alone, and skips
+  fenced code blocks entirely so template-related code samples render
+  verbatim.
+- **Empty `/v1/models` response treated as "LM Studio up".** The probe
+  now requires `data` to be a non-empty array — an LM Studio with no
+  models loaded used to slip past the probe and produce a confusing
+  500 on the first prompt instead of a clear "no models loaded" message.
+- **"Decline-instead-of-`enable_tools`" loop on the `advanced` group.**
+  When the brain needed a tool from `advanced`, some prompts had it
+  apologise and refuse rather than calling `enable_tools("advanced")`.
+  The system prompt now nudges toward the enable path explicitly.
+
+### Changed
+
+- **Codet swap dance: brain ↔ coder VRAM swap around every Codet
+  operation.** When the brain hands off to the coder for a Codet step,
+  the orchestrator actively evicts the brain from VRAM, runs the coder,
+  then reloads the brain — instead of relying on Ollama's keep-alive
+  eviction. Faster end-to-end on 16GB rigs where loading both
+  simultaneously would oversubscribe VRAM.
+
+### Internal
+
+- Permission-policy gate
+  (`every_advertised_tool_has_permission_requirement`) catches any new
+  tool added to the registry but forgotten in `build_permission_policy()`
+  — would have caught the v0.3.1 calendar/gmail/schedule miss before it
+  shipped.
+- `resolve_openai_compat` env-var test race fixed (env mutation moved
+  out of test bodies behind a pure predicate).
+- Dependency bumps: `ratatui` 0.29 → 0.30, `crossterm` 0.28 → 0.29,
+  `getrandom` 0.2 → 0.3, `toml` 0.8 → 1, `colored` 2 → 3.
+
 ## [0.3.1] - 2026-05-05
 
 Patch release: two real bugs that affect every Windows user who tries
