@@ -575,9 +575,8 @@ impl ToolExecutor for StaticToolExecutor {
 mod tests {
     use super::{
         build_turn_system_prompt, parse_auto_compaction_threshold, ApiClient, ApiRequest,
-        AssistantEvent, AutoCompactionEvent, ConversationRuntime, RuntimeError,
-        StaticToolExecutor, DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD,
-        VISION_DISCIPLINE_HINT,
+        AssistantEvent, AutoCompactionEvent, ConversationRuntime, RuntimeError, StaticToolExecutor,
+        DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD, VISION_DISCIPLINE_HINT,
     };
     use crate::compact::CompactionConfig;
     use crate::config::{RuntimeFeatureConfig, RuntimeHookConfig};

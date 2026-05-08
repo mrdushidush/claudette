@@ -700,7 +700,10 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
 /// privacy/perf escape hatch: `CLAUDETTE_RECALL_DISABLE=1`. Anything else
 /// (unset, "0", garbage) leaves indexing enabled.
 fn recall_disabled() -> bool {
-    matches!(std::env::var("CLAUDETTE_RECALL_DISABLE").as_deref(), Ok("1"))
+    matches!(
+        std::env::var("CLAUDETTE_RECALL_DISABLE").as_deref(),
+        Ok("1")
+    )
 }
 
 /// Index the user input string + the most recent assistant text-blocks
@@ -1111,7 +1114,10 @@ mod tests {
 
     #[test]
     fn pick_compact_preserve_returns_none_below_both_thresholds() {
-        assert_eq!(pick_compact_preserve(50_000, 1_000_000, Some(200_000)), None);
+        assert_eq!(
+            pick_compact_preserve(50_000, 1_000_000, Some(200_000)),
+            None
+        );
         assert_eq!(pick_compact_preserve(50_000, 1_000_000, None), None);
     }
 
