@@ -17,7 +17,9 @@
 //! The embed call is wrapped behind [`Embedder`] so the live tests can
 //! inject a deterministic mock without standing up Ollama. Production code
 //! goes through [`global_index`] / [`global_query`], which lazy-init a
-//! process-wide [`RecallStore`] backed by [`OllamaEmbedder`].
+//! process-wide [`RecallStore`] backed by either [`OllamaEmbedder`] (the
+//! default) or [`OpenAICompatEmbedder`] (when `CLAUDETTE_OPENAI_COMPAT=1`,
+//! e.g. against LM Studio's `/v1/embeddings`).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -25,7 +27,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 
-use crate::api::resolve_ollama_url;
+use crate::api::{resolve_ollama_url, resolve_openai_compat};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Public types
@@ -177,17 +179,14 @@ pub struct RecallStore {
 
 impl RecallStore {
     /// Open a store at `path`, creating the schema if missing.
-    pub fn open(
-        path: impl AsRef<Path>,
-        embedder: Box<dyn Embedder>,
-    ) -> Result<Self, String> {
+    pub fn open(path: impl AsRef<Path>, embedder: Box<dyn Embedder>) -> Result<Self, String> {
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("recall: create_dir_all {}: {e}", parent.display()))?;
         }
-        let conn = Connection::open(path)
-            .map_err(|e| format!("recall: open {}: {e}", path.display()))?;
+        let conn =
+            Connection::open(path).map_err(|e| format!("recall: open {}: {e}", path.display()))?;
         Self::init_schema(&conn)?;
         Ok(Self {
             conn,
@@ -300,7 +299,11 @@ impl RecallStore {
             });
         }
 
-        hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        hits.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         hits.truncate(k);
         Ok(hits)
     }
@@ -455,29 +458,117 @@ impl Embedder for OllamaEmbedder {
             .send()
             .map_err(|e| format!("recall: /api/embeddings request: {e}"))?;
         if !resp.status().is_success() {
-            return Err(format!(
-                "recall: /api/embeddings HTTP {}",
-                resp.status()
-            ));
+            return Err(format!("recall: /api/embeddings HTTP {}", resp.status()));
         }
         let body: Value = resp
             .json()
             .map_err(|e| format!("recall: /api/embeddings parse: {e}"))?;
-        let arr = body
-            .get("embedding")
-            .and_then(Value::as_array)
-            .ok_or_else(|| format!("recall: response missing 'embedding': {body}"))?;
-        let mut out = Vec::with_capacity(arr.len());
-        for v in arr {
-            let f = v
-                .as_f64()
-                .ok_or_else(|| "recall: non-numeric value in 'embedding'".to_string())?;
-            out.push(f as f32);
+        parse_ollama_embedding(&body)
+    }
+}
+
+/// Parse the Ollama-native `/api/embeddings` response shape:
+/// `{ "embedding": [f32, …] }`.
+fn parse_ollama_embedding(body: &Value) -> Result<Vec<f32>, String> {
+    let arr = body
+        .get("embedding")
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("recall: response missing 'embedding': {body}"))?;
+    json_array_to_f32s(arr)
+}
+
+/// Parse the OpenAI-compat `/v1/embeddings` response shape:
+/// `{ "data": [ { "embedding": [f32, …] }, … ] }`. Only the first element
+/// is used since we only ever embed one input per request.
+fn parse_openai_compat_embedding(body: &Value) -> Result<Vec<f32>, String> {
+    let arr = body
+        .get("data")
+        .and_then(Value::as_array)
+        .and_then(|d| d.first())
+        .and_then(|d| d.get("embedding"))
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("recall: response missing 'data[0].embedding': {body}"))?;
+    json_array_to_f32s(arr)
+}
+
+/// Convert a JSON array of numbers into `Vec<f32>`. Shared by both the
+/// Ollama-native and OpenAI-compat response parsers.
+fn json_array_to_f32s(arr: &[Value]) -> Result<Vec<f32>, String> {
+    let mut out = Vec::with_capacity(arr.len());
+    for v in arr {
+        let f = v
+            .as_f64()
+            .ok_or_else(|| "recall: non-numeric value in 'embedding'".to_string())?;
+        out.push(f as f32);
+    }
+    if out.is_empty() {
+        return Err("recall: empty embedding returned".to_string());
+    }
+    Ok(out)
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// OpenAICompatEmbedder — production embedder backed by /v1/embeddings
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Used when CLAUDETTE_OPENAI_COMPAT=1, e.g. against LM Studio. Unlike
+// OllamaEmbedder, no /api/show probe and no /api/pull auto-install — LM
+// Studio expects the user to load the embed model ahead of time from its
+// "Local Server" tab. A failed embed surfaces a clear hint to do so.
+
+pub struct OpenAICompatEmbedder {
+    client: reqwest::blocking::Client,
+    base_url: String,
+    model: String,
+}
+
+impl OpenAICompatEmbedder {
+    pub fn new() -> Result<Self, String> {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(60))
+            .build()
+            .map_err(|e| format!("recall: build http client: {e}"))?;
+        let model = std::env::var("CLAUDETTE_RECALL_MODEL")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| DEFAULT_EMBED_MODEL.to_string());
+        Ok(Self {
+            client,
+            base_url: resolve_ollama_url(),
+            model,
+        })
+    }
+}
+
+impl Embedder for OpenAICompatEmbedder {
+    fn embed(&mut self, text: &str) -> Result<Vec<f32>, String> {
+        let url = format!("{}/v1/embeddings", self.base_url);
+        let resp = self
+            .client
+            .post(&url)
+            .json(&json!({ "model": self.model, "input": text }))
+            .send()
+            .map_err(|e| {
+                format!(
+                    "recall: cannot reach OpenAI-compat server at {} ({e}). \
+                     Is LM Studio running on this port?",
+                    self.base_url
+                )
+            })?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().unwrap_or_default();
+            return Err(format!(
+                "recall: /v1/embeddings HTTP {status} — load `{}` in LM Studio's \
+                 Local Server tab (or set CLAUDETTE_RECALL_MODEL to a model id you have loaded). \
+                 Body: {body}",
+                self.model
+            ));
         }
-        if out.is_empty() {
-            return Err("recall: empty embedding returned".to_string());
-        }
-        Ok(out)
+        let body: Value = resp
+            .json()
+            .map_err(|e| format!("recall: /v1/embeddings parse: {e}"))?;
+        parse_openai_compat_embedding(&body)
     }
 }
 
@@ -500,7 +591,11 @@ fn ensure_store(guard: &mut MutexGuard<'static, Option<RecallStore>>) -> Result<
     if guard.is_some() {
         return Ok(());
     }
-    let embedder: Box<dyn Embedder> = Box::new(OllamaEmbedder::new()?);
+    let embedder: Box<dyn Embedder> = if resolve_openai_compat() {
+        Box::new(OpenAICompatEmbedder::new()?)
+    } else {
+        Box::new(OllamaEmbedder::new()?)
+    };
     let store = RecallStore::open(default_recall_db_path(), embedder)?;
     **guard = Some(store);
     Ok(())
@@ -642,8 +737,7 @@ mod tests {
 
     #[test]
     fn store_roundtrip_indexes_and_queries() {
-        let mut store =
-            RecallStore::open_in_memory(Box::new(HashEmbedder::new())).expect("open");
+        let mut store = RecallStore::open_in_memory(Box::new(HashEmbedder::new())).expect("open");
         store
             .index(Role::User, "the meeting with brian is on tuesday")
             .unwrap();
@@ -669,8 +763,7 @@ mod tests {
 
     #[test]
     fn store_skips_empty_snippets() {
-        let mut store =
-            RecallStore::open_in_memory(Box::new(HashEmbedder::new())).expect("open");
+        let mut store = RecallStore::open_in_memory(Box::new(HashEmbedder::new())).expect("open");
         store.index(Role::User, "").unwrap();
         store.index(Role::User, "   \t\n  ").unwrap();
         assert_eq!(store.count().unwrap(), 0);
@@ -678,8 +771,7 @@ mod tests {
 
     #[test]
     fn empty_query_returns_empty_results() {
-        let mut store =
-            RecallStore::open_in_memory(Box::new(HashEmbedder::new())).expect("open");
+        let mut store = RecallStore::open_in_memory(Box::new(HashEmbedder::new())).expect("open");
         store.index(Role::User, "hello").unwrap();
         assert!(store.query("", 5).unwrap().is_empty());
         assert!(store.query("   ", 5).unwrap().is_empty());
@@ -708,8 +800,7 @@ mod tests {
 
     #[test]
     fn long_snippet_is_truncated() {
-        let mut store =
-            RecallStore::open_in_memory(Box::new(HashEmbedder::new())).expect("open");
+        let mut store = RecallStore::open_in_memory(Box::new(HashEmbedder::new())).expect("open");
         let huge = "x".repeat(20_000);
         store.index(Role::User, &huge).unwrap();
         let hits = store.query("xxxx", 1).unwrap();
@@ -723,8 +814,7 @@ mod tests {
 
     #[test]
     fn results_are_sorted_descending_by_score() {
-        let mut store =
-            RecallStore::open_in_memory(Box::new(HashEmbedder::new())).expect("open");
+        let mut store = RecallStore::open_in_memory(Box::new(HashEmbedder::new())).expect("open");
         for snippet in [
             "the cat sat on the mat",
             "weather forecast for next tuesday",
@@ -755,5 +845,155 @@ mod tests {
             assert_eq!(Role::parse(r.as_str()), Some(r));
         }
         assert_eq!(Role::parse("system"), None);
+    }
+
+    #[test]
+    fn parse_ollama_embedding_happy_path() {
+        let body = json!({ "embedding": [0.1, 0.2, -0.3, 0.0, 1.5] });
+        let v = parse_ollama_embedding(&body).expect("parse");
+        assert_eq!(v.len(), 5);
+        assert!((v[0] - 0.1).abs() < 1e-6);
+        assert!((v[2] - -0.3).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_ollama_embedding_rejects_missing_field() {
+        let body = json!({ "data": [] });
+        let err = parse_ollama_embedding(&body).expect_err("should fail");
+        assert!(err.contains("missing 'embedding'"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_openai_compat_embedding_happy_path() {
+        // Real LM Studio shape — extra fields we don't care about included
+        // to make sure we tolerate them.
+        let body = json!({
+            "object": "list",
+            "data": [
+                {
+                    "object": "embedding",
+                    "index": 0,
+                    "embedding": [0.42, -0.17, 0.99]
+                }
+            ],
+            "model": "nomic-embed-text-v1.5",
+            "usage": { "prompt_tokens": 4, "total_tokens": 4 }
+        });
+        let v = parse_openai_compat_embedding(&body).expect("parse");
+        assert_eq!(v.len(), 3);
+        assert!((v[0] - 0.42).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_openai_compat_embedding_rejects_missing_data() {
+        let body = json!({ "embedding": [0.1, 0.2] });
+        let err = parse_openai_compat_embedding(&body).expect_err("should fail");
+        assert!(err.contains("'data[0].embedding'"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_openai_compat_embedding_rejects_empty_data_array() {
+        let body = json!({ "object": "list", "data": [] });
+        let err = parse_openai_compat_embedding(&body).expect_err("should fail");
+        assert!(err.contains("'data[0].embedding'"), "got: {err}");
+    }
+
+    #[test]
+    fn json_array_to_f32s_rejects_empty() {
+        let err = json_array_to_f32s(&[]).expect_err("should fail");
+        assert!(err.contains("empty embedding"), "got: {err}");
+    }
+
+    #[test]
+    fn json_array_to_f32s_rejects_non_numeric() {
+        let arr = vec![json!(0.5), json!("not a number")];
+        let err = json_array_to_f32s(&arr).expect_err("should fail");
+        assert!(err.contains("non-numeric"), "got: {err}");
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // Live smoke tests — #[ignore]'d so normal `cargo test` skips them.
+    // Run on-demand against a real LM Studio with the embed model loaded:
+    //
+    //   $env:OLLAMA_HOST = "http://localhost:1234"
+    //   $env:CLAUDETTE_RECALL_MODEL = "text-embedding-nomic-embed-text-v1.5"
+    //   cargo test --lib recall_live -- --ignored --test-threads=1
+    //
+    // These DO mutate process-wide env vars, so they must run serially —
+    // hence `--test-threads=1`. Both tests set the same values, but other
+    // tests in the binary may read OLLAMA_HOST and race.
+    // ────────────────────────────────────────────────────────────────────
+
+    #[test]
+    #[ignore = "requires live LM Studio with embed model loaded"]
+    fn recall_live_openai_compat_embed_is_deterministic() {
+        let mut e = OpenAICompatEmbedder::new().expect("construct embedder");
+        let v1 = e
+            .embed("hello from claudette recall smoke")
+            .expect("embed 1");
+        let v2 = e
+            .embed("hello from claudette recall smoke")
+            .expect("embed 2");
+        assert!(!v1.is_empty(), "got empty vector");
+        assert!(
+            v1.len() >= 256,
+            "expected an embedding ≥256 dims, got {}",
+            v1.len()
+        );
+        assert_eq!(v1.len(), v2.len(), "dim should be stable across calls");
+        let cos = cosine_similarity(&v1, &v2);
+        assert!(
+            (cos - 1.0).abs() < 1e-3,
+            "same input should produce ~identical vectors, cos={cos}"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires live LM Studio with embed model loaded"]
+    fn recall_live_full_index_query_roundtrip() {
+        let embedder: Box<dyn Embedder> =
+            Box::new(OpenAICompatEmbedder::new().expect("construct embedder"));
+        let mut store = RecallStore::open_in_memory(embedder).expect("open store");
+
+        store
+            .index(Role::User, "the meeting with brian is on tuesday at 3pm")
+            .unwrap();
+        store
+            .index(Role::Assistant, "got it — brian, tuesday 3pm noted")
+            .unwrap();
+        store
+            .index(
+                Role::User,
+                "completely unrelated content about the weather forecast for next week",
+            )
+            .unwrap();
+        store
+            .index(
+                Role::User,
+                "another tangent about currency exchange rates today",
+            )
+            .unwrap();
+
+        let hits = store.query("when is brian's meeting", 2).expect("query");
+        assert_eq!(hits.len(), 2, "asked for top-2: {hits:?}");
+        for h in &hits {
+            assert!(
+                !h.snippet.contains("weather") && !h.snippet.contains("currency"),
+                "off-topic snippet leaked into top-2: {h:?}"
+            );
+        }
+        // Top hit must be one of the brian/tuesday lines.
+        assert!(
+            hits[0].snippet.contains("brian") || hits[0].snippet.contains("tuesday"),
+            "top hit should be brian-related, got: {:?}",
+            hits[0]
+        );
+        // Real embedding scores should be meaningfully positive on a
+        // semantic match — not just barely-above-zero noise.
+        assert!(
+            hits[0].score > 0.5,
+            "top hit score too low ({}); embedder may be returning noise",
+            hits[0].score
+        );
     }
 }
