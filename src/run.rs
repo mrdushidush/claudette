@@ -698,17 +698,16 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         // ~/.claudette/missions/ root. Auto-allowed (WorkspaceWrite).
         .with_tool_requirement("git_clone", WorkspaceWrite)
         // ── T2 brownfield: mission_* tools ──────────────────────────────
-        // mission_status / mission_list only read state; mission_exit
-        // mutates session state (no FS writes); mission_start clones a
-        // repo; mission_submit stages/commits/pushes/opens a PR. We tag
-        // the read-only ones ReadOnly and the rest WorkspaceWrite — the
-        // tier mission_submit's worst action (`git push -u`) lives at,
-        // matching gh_create_pr which it ultimately calls.
+        // mission_status / mission_list only read state. mission_exit
+        // mutates session state (no FS writes). mission_start clones into
+        // ~/.claudette/missions/ (WorkspaceWrite, matching git_clone).
+        // mission_submit stages/commits/pushes/opens a PR — must be
+        // DangerFullAccess to match its worst action (`git push -u`).
         .with_tool_requirement("mission_start", WorkspaceWrite)
         .with_tool_requirement("mission_status", ReadOnly)
         .with_tool_requirement("mission_list", ReadOnly)
         .with_tool_requirement("mission_exit", WorkspaceWrite)
-        .with_tool_requirement("mission_submit", WorkspaceWrite)
+        .with_tool_requirement("mission_submit", DangerFullAccess)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
