@@ -22,8 +22,8 @@ use serde_json::{json, Value};
 
 use super::{extract_str, parse_json_input};
 use crate::missions::{
-    active_mission, clear_active, list_missions, load_marker, missions_root, save_marker,
-    set_active, validate_slug, Mission,
+    active_mission, clear_active, list_missions, list_orphan_slugs, load_marker, missions_root,
+    save_marker, set_active, validate_slug, Mission,
 };
 use crate::test_runner::run_command_with_timeout;
 
@@ -60,7 +60,7 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "mission_list",
-                "description": "List every mission registered under ~/.claudette/missions/ (active or not).",
+                "description": "List every mission registered under ~/.claudette/missions/ (active or not). Also reports 'orphans' — directories under that root with no marker (likely pre-T2 git_clone leftovers; mission_attach won't find them).",
                 "parameters": { "type": "object", "properties": {}, "required": [] }
             }
         }),
@@ -331,7 +331,20 @@ fn run_mission_list() -> Result<String, String> {
             })
         })
         .collect();
-    Ok(json!({ "count": items.len(), "items": items }).to_string())
+    let orphans = list_orphan_slugs()?;
+    let mut out = json!({
+        "count": items.len(),
+        "items": items,
+        "orphans": orphans,
+    });
+    if !orphans.is_empty() {
+        let n = orphans.len();
+        let plural = if n == 1 { "y" } else { "ies" };
+        out["note"] = Value::String(format!(
+            "{n} director{plural} under ~/.claudette/missions/ have no marker — likely pre-T2 git_clone leftovers; mission_attach won't find them. Investigate or remove."
+        ));
+    }
+    Ok(out.to_string())
 }
 
 fn run_mission_exit() -> Result<String, String> {
@@ -708,12 +721,37 @@ mod tests {
     #[test]
     fn run_mission_list_succeeds_even_when_root_absent() {
         // list_missions() returns Ok(empty) if missions_root doesn't exist;
-        // run_mission_list wraps that. Don't assert count because the
+        // run_mission_list wraps that. Don't assert counts because the
         // user's real ~/.claudette/missions/ may have entries.
         let out = run_mission_list().unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert!(v.get("count").is_some());
         assert!(v.get("items").and_then(Value::as_array).is_some());
+        assert!(
+            v.get("orphans").and_then(Value::as_array).is_some(),
+            "orphans field must always be present"
+        );
+    }
+
+    #[test]
+    fn run_mission_list_note_present_iff_orphans_nonempty() {
+        // Round-trip the JSON and verify the contract: `note` exists if
+        // and only if at least one orphan was found. Test reads the real
+        // missions root, so we assert the relationship rather than a
+        // specific count.
+        let out = run_mission_list().unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        let orphans = v
+            .get("orphans")
+            .and_then(Value::as_array)
+            .expect("orphans array");
+        let has_note = v.get("note").is_some();
+        assert_eq!(
+            has_note,
+            !orphans.is_empty(),
+            "note presence ({has_note}) must match orphans non-empty ({})",
+            !orphans.is_empty()
+        );
     }
 
     #[test]

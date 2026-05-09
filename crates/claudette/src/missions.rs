@@ -149,7 +149,7 @@ pub fn load_marker(mission_path: &Path) -> Result<Mission, String> {
 
 /// Enumerate every mission whose marker survives under
 /// `~/.claudette/missions/`. Directories without a marker are skipped
-/// (could be a half-finished clone or unrelated user content).
+/// (see `list_orphan_slugs` to surface those separately).
 pub fn list_missions() -> Result<Vec<Mission>, String> {
     let root = missions_root();
     if !root.exists() {
@@ -163,14 +163,44 @@ pub fn list_missions() -> Result<Vec<Mission>, String> {
         if !p.is_dir() {
             continue;
         }
-        // Silently skip directories without a marker — they're either
-        // half-finished clones or unrelated content. Listing should never
-        // fail because of a single broken entry.
+        // Silently skip directories without a marker — listing should
+        // never fail because of a single broken entry. `list_orphan_slugs`
+        // gives the user a way to see what got skipped.
         if let Ok(m) = load_marker(&p) {
             out.push(m);
         }
     }
     out.sort_by(|a, b| a.slug.cmp(&b.slug));
+    Ok(out)
+}
+
+/// Sibling to [`list_missions`]: directory names under
+/// `~/.claudette/missions/` that are *not* recognised as missions
+/// because they lack a valid `.claudette-mission.json` marker. Common
+/// causes: pre-T2 `git_clone` calls (markers didn't exist yet),
+/// half-finished clones, or unrelated user content the user dropped
+/// into the missions root by hand. Surfaced via `mission_list` so the
+/// brain can warn rather than silently ignore them.
+pub fn list_orphan_slugs() -> Result<Vec<String>, String> {
+    let root = missions_root();
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    let read = std::fs::read_dir(&root)
+        .map_err(|e| format!("mission: read {} failed: {e}", root.display()))?;
+    for entry in read.flatten() {
+        let p = entry.path();
+        if !p.is_dir() {
+            continue;
+        }
+        if load_marker(&p).is_err() {
+            if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
+                out.push(name.to_string());
+            }
+        }
+    }
+    out.sort();
     Ok(out)
 }
 
@@ -256,6 +286,26 @@ mod tests {
         let out = list_missions().expect("list_missions should not fail");
         for m in &out {
             assert!(!m.slug.is_empty(), "listed mission has empty slug");
+        }
+    }
+
+    #[test]
+    fn list_orphan_slugs_runs_cleanly() {
+        // Same constraint as list_missions_skips_dirs_without_markers:
+        // can't redirect missions_root() in-process, so just verify the
+        // function returns Ok against the real filesystem and that
+        // missions + orphans don't overlap.
+        let orphans = list_orphan_slugs().expect("list_orphan_slugs should not fail");
+        for s in &orphans {
+            assert!(!s.is_empty(), "orphan with empty name");
+        }
+        let missions = list_missions().expect("list_missions should not fail");
+        for m in &missions {
+            assert!(
+                !orphans.contains(&m.slug),
+                "{} listed as both mission and orphan",
+                m.slug
+            );
         }
     }
 
