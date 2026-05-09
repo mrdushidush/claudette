@@ -1255,4 +1255,30 @@ mod tests {
              entry."
         );
     }
+
+    /// Regression test: tools that internally invoke other DangerFullAccess
+    /// primitives (or take their actions directly) must themselves be
+    /// DangerFullAccess so the [y/N] confirmation reaches the user. The
+    /// companion test above is name-coverage; this one is tier-correctness.
+    /// Without it, downgrading a high-blast-radius tool silently lets a 4b
+    /// brain take an irreversible cross-org action.
+    #[test]
+    fn high_blast_radius_tools_require_danger_tier() {
+        let policy = build_permission_policy();
+        // (tool_name, why) — each must be DangerFullAccess. Add new entries
+        // here whenever a tool gains internal calls into git_push, edit_file,
+        // bash, gh_create_pr, or any other already-DangerFullAccess primitive.
+        let cases: &[(&str, &str)] = &[(
+            "mission_submit",
+            "calls git_push + gh_create_pr internally",
+        )];
+        for (name, why) in cases {
+            let actual = policy.required_mode_for(name);
+            assert_eq!(
+                actual,
+                PermissionMode::DangerFullAccess,
+                "{name} must be DangerFullAccess: {why}; got {actual:?}"
+            );
+        }
+    }
 }
