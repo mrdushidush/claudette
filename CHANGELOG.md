@@ -10,6 +10,52 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **Brownfield missions: clone a repo, work in it, and submit a PR — all
+  from the agent loop.** Two new tool groups, opt-in via
+  `enable_tools("github")`:
+  - **GitHub group (T1):** `git_clone`, `gh_list_repo_issues`,
+    `gh_pr_status`, `gh_fork`, `gh_create_pr`. `git_clone` writes into
+    `~/.claudette/missions/<dest>/` (URL-scheme allowlist, dest-slug
+    validation, 120s timeout). `gh_create_pr` accepts `head` as `branch`
+    for same-repo or `username:branch` for fork-based PRs.
+  - **Mission group (T2):** `mission_start`, `mission_status`,
+    `mission_list`, `mission_exit`, `mission_submit`. Starting a mission
+    drops a `~/.claudette/missions/<slug>/.claudette-mission.json` marker
+    and silently re-routes subsequent `git_status` / `glob_search` /
+    `grep_search` / `write_file` / `bash` calls into the mission tree —
+    the agent doesn't have to thread cwd through every tool. The
+    capstone is `mission_submit`: refuses on a clean tree, auto-branches
+    off `main` (or `master` on retry) to `claudette-mission/<slug>`,
+    stages, commits with an optional `Fixes #N` trailer, pushes, and
+    opens a PR via `gh_create_pr` in one tool call.
+- **`brownfield_abcc` example.** Multi-subcommand smoke harness that
+  drives the full T1 + T2 surface end-to-end. Capstone (real PR) gated
+  behind `CLAUDETTE_REAL_PR=1`.
+
+### Changed
+
+- **`mission_submit` is now `DangerFullAccess` (BREAKING for auto-allow
+  setups).** Was `WorkspaceWrite` in T2's first cut, which let the brain
+  open a real cross-org PR without ever seeing a `[y/N]` prompt — while
+  a literal `git_push` (also `DangerFullAccess`) would have bounced.
+  Now matches its worst-case action.
+
+### Internal
+
+- `voice.rs` env-var test race: `whisper_bin_*` and
+  `whisper_model_path_*` no longer mutate process env. Same fix pattern
+  as P7's `is_compat_value_truthy` (`api.rs:366`).
+- Tier-correctness regression test:
+  `high_blast_radius_tools_require_danger_tier` complements the existing
+  name-coverage test — adding a new tool with internal calls into
+  `git_push`/`gh_create_pr`/`bash`/`edit_file` requires either tagging
+  it `DangerFullAccess` or admitting in this test that it doesn't need
+  to be.
+- `tests/brain100_sandbox10.sh` tracked under git (was previously
+  untracked in the build dir).
+
 ## [0.4.0] - 2026-05-08
 
 Cross-session semantic recall — the headline feature. The agent can now
@@ -40,10 +86,10 @@ nudges for image turns, and several LM Studio compat fixes.
     the sqlite path; `CLAUDETTE_RECALL_MODEL` overrides the embed model.
 - **Tiered auto-compact threshold via
   `CLAUDETTE_SOFT_COMPACT_THRESHOLD`.** The existing
-  `CLAUDETTE_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD` stays as the hard
-  ceiling; the new soft threshold lets you compact earlier once the
-  conversation accumulates enough internal state to benefit, without
-  waiting to bump up against the hard limit. Disabled by default.
+  `CLAUDETTE_COMPACT_THRESHOLD` stays as the hard ceiling; the new soft
+  threshold lets you compact earlier once the conversation accumulates
+  enough internal state to benefit, without waiting to bump up against
+  the hard limit. Disabled by default.
 - **Vision-discipline hint** on image-bearing turns. When the user
   attaches an image, the system prompt grows a one-line nudge reminding
   the brain to ground its response in what the image actually shows
@@ -998,7 +1044,8 @@ Initial public release of Claudette as a standalone repository.
 
 ---
 
-[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/mrdushidush/claudette/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/mrdushidush/claudette/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/mrdushidush/claudette/compare/v0.2.3...v0.3.0
 [0.2.3]: https://github.com/mrdushidush/claudette/compare/v0.2.2...v0.2.3
