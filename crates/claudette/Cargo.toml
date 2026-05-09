@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.88"
 license = "Apache-2.0"
 description = "Local-first AI personal secretary for Ollama. Telegram bot, voice, persistent scheduler, Gmail and Calendar. Single-binary Rust."
-readme = "README.md"
+readme = "../../README.md"
 repository = "https://github.com/mrdushidush/claudette"
 homepage = "https://github.com/mrdushidush/claudette"
 documentation = "https://github.com/mrdushidush/claudette#readme"
@@ -92,15 +92,3 @@ uninlined_format_args = "allow"
 # Upstream (forked-runtime) style:
 doc_markdown = "allow"
 too_many_arguments = "allow"
-
-[profile.release]
-opt-level = "z"
-lto = true
-strip = true
-# Removes unwind landing pads from the release binary — smaller binary,
-# tighter security posture (panics never cross the FFI boundary into
-# attacker-controlled code), and matches what `panic_abort` workloads
-# actually do at runtime. The crate has no `#[should_panic]` integration
-# tests that depend on unwinding, and the runtime treats panics as
-# fatal anyway (the agent loop logs and exits the iteration).
-panic = "abort"
