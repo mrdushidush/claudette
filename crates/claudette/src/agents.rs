@@ -184,6 +184,7 @@ fn gitops_tools() -> BTreeSet<String> {
         "mission_start",
         "mission_status",
         "mission_list",
+        "mission_attach",
         "mission_exit",
         "mission_submit",
     ]
@@ -317,6 +318,9 @@ fn build_agent_permission_policy(allowed: &BTreeSet<String>) -> PermissionPolicy
         "gh_search_code",
         "gh_list_repo_issues",
         "gh_pr_status",
+        // T2: mission_attach reads a marker + flips an in-memory slot.
+        // Downstream cwd-routed writes still go through their own gates.
+        "mission_attach",
     ] {
         if allowed.contains(name) {
             policy = policy.with_tool_requirement(name, ReadOnly);

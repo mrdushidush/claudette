@@ -22,8 +22,8 @@ use serde_json::{json, Value};
 
 use super::{extract_str, parse_json_input};
 use crate::missions::{
-    active_mission, clear_active, list_missions, missions_root, save_marker, set_active,
-    validate_slug, Mission,
+    active_mission, clear_active, list_missions, load_marker, missions_root, save_marker,
+    set_active, validate_slug, Mission,
 };
 use crate::test_runner::run_command_with_timeout;
 
@@ -67,6 +67,20 @@ pub(super) fn schemas() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
+                "name": "mission_attach",
+                "description": "Re-attach to a mission previously started in another session by reading its on-disk marker. Use after restart to resume cwd-routing into the mission tree. Errors if a mission is already active or the slug has no marker.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "slug": { "type": "string", "description": "Mission slug (directory name under ~/.claudette/missions/) — same value mission_start returned." }
+                    },
+                    "required": ["slug"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
                 "name": "mission_exit",
                 "description": "Clear the active mission. The cloned tree is left intact for resumption.",
                 "parameters": { "type": "object", "properties": {}, "required": [] }
@@ -97,6 +111,7 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
         "mission_start" => run_mission_start(input),
         "mission_status" => run_mission_status(),
         "mission_list" => run_mission_list(),
+        "mission_attach" => run_mission_attach(input),
         "mission_exit" => run_mission_exit(),
         "mission_submit" => run_mission_submit(input),
         _ => return None,
@@ -324,6 +339,40 @@ fn run_mission_exit() -> Result<String, String> {
         Some(slug) => Ok(json!({ "ok": true, "exited": slug }).to_string()),
         None => Err("mission_exit: no active mission".to_string()),
     }
+}
+
+// ─── mission_attach ──────────────────────────────────────────────────────
+
+fn run_mission_attach(input: &str) -> Result<String, String> {
+    let v = parse_json_input(input, "mission_attach")?;
+    let slug_raw = extract_str(&v, "slug", "mission_attach")?;
+    let slug = validate_slug(slug_raw)?;
+
+    if let Some(active) = active_mission() {
+        return Err(format!(
+            "mission_attach: '{}' is already active — exit it first with mission_exit",
+            active.slug
+        ));
+    }
+
+    let path = missions_root().join(&slug);
+    if !path.is_dir() {
+        return Err(format!(
+            "mission_attach: no mission directory at {} — start one with mission_start or pick a different slug",
+            path.display()
+        ));
+    }
+    let mission = load_marker(&path).map_err(|e| format!("mission_attach: {e}"))?;
+    set_active(mission.clone())?;
+
+    Ok(json!({
+        "ok": true,
+        "slug": mission.slug,
+        "path": mission.path.display().to_string(),
+        "repo": mission.repo,
+        "note": "mission re-attached — git_*, bash, edit_file, read_file, write_file, and search now run in this tree",
+    })
+    .to_string())
 }
 
 // ─── mission_submit (capstone) ───────────────────────────────────────────
@@ -668,9 +717,9 @@ mod tests {
     }
 
     #[test]
-    fn schemas_lists_five_tools() {
+    fn schemas_lists_six_tools() {
         let schemas = schemas();
-        assert_eq!(schemas.len(), 5);
+        assert_eq!(schemas.len(), 6);
         let names: Vec<&str> = schemas
             .iter()
             .filter_map(|v| v.pointer("/function/name").and_then(Value::as_str))
@@ -681,9 +730,58 @@ mod tests {
                 "mission_start",
                 "mission_status",
                 "mission_list",
+                "mission_attach",
                 "mission_exit",
                 "mission_submit",
             ]
         );
+    }
+
+    #[test]
+    fn run_mission_attach_rejects_missing_slug() {
+        let err = run_mission_attach("{}").unwrap_err();
+        assert!(err.contains("missing"), "got: {err}");
+    }
+
+    #[test]
+    fn run_mission_attach_rejects_invalid_slug() {
+        // Path traversal — same validator as mission_start.
+        let err = run_mission_attach(r#"{"slug":"../etc"}"#).unwrap_err();
+        assert!(err.contains("..") || err.contains("slug"), "got: {err}");
+    }
+
+    #[test]
+    fn run_mission_attach_errors_when_marker_missing() {
+        // Must skip if another test left a mission active — the
+        // slot-occupied check fires before the path check, masking the
+        // assertion we want.
+        if active_mission().is_some() {
+            return;
+        }
+        // Use a slug that is highly unlikely to match a real mission dir
+        // under ~/.claudette/missions/. Validator passes; missions_root
+        // join → not a directory → clean error.
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let slug = format!("mission-attach-test-{nanos}");
+        let err = run_mission_attach(&format!(r#"{{"slug":"{slug}"}}"#)).unwrap_err();
+        assert!(
+            err.contains("no mission directory") || err.contains("read"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn run_mission_attach_errors_when_slot_occupied() {
+        // Only assert if a mission happens to already be active — we
+        // don't manufacture one here because that would leak into other
+        // tests (active_slot is process-global). When inactive, we have
+        // nothing to assert about the slot-occupied branch from this test.
+        if let Some(m) = active_mission() {
+            let payload = format!(r#"{{"slug":"{}"}}"#, m.slug);
+            let err = run_mission_attach(&payload).unwrap_err();
+            assert!(err.contains("already active"), "got: {err}");
+        }
     }
 }

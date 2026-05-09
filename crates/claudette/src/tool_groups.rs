@@ -228,6 +228,7 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         | "mission_start"
         | "mission_status"
         | "mission_list"
+        | "mission_attach"
         | "mission_exit"
         | "mission_submit" => Some(ToolGroup::Github),
         "tv_get_quote"
@@ -676,12 +677,13 @@ mod tests {
             "mission_start",
             "mission_status",
             "mission_list",
+            "mission_attach",
             "mission_exit",
             "mission_submit",
         ] {
             assert!(gh.contains(&name.to_string()), "missing {name} in {gh:?}");
         }
-        assert_eq!(gh.len(), 15);
+        assert_eq!(gh.len(), 16);
     }
 
     #[test]
