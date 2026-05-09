@@ -307,10 +307,13 @@ All variables are optional; defaults are shown. Set them in your shell environme
 | `CLAUDETTE_NUM_CTX` | `16384` | Brain context window in tokens. |
 | `CLAUDETTE_NUM_PREDICT` | `6144` | Max output tokens per request. |
 | `CLAUDETTE_COMPACT_THRESHOLD` | `1000000` | Auto-compaction trigger (estimated tokens). Default makes auto-compact a no-op for typical 16K–128K context windows; set to `12000` (or a fraction of your `num_ctx`) on tight contexts. |
+| `CLAUDETTE_SOFT_COMPACT_THRESHOLD` | unset | Optional intermediate compaction tier (estimated tokens). When set, fires below the hard threshold and preserves 12 recent messages instead of 4 — useful on long real-world sessions with 35B+ brains where the hard 1M default never triggers but turns are paying hundreds of K input tokens. Set e.g. `200000`. |
 | `CLAUDETTE_MAX_ITERATIONS` | `40` | Per-turn (model → tool → result) loop ceiling. Lower it (e.g. `15`) to fail-fast on small-model spirals; raise it for legitimate long tool chains. |
 | `CLAUDETTE_SESSION` | `~/.claudette/sessions/last.json` | Override the session file path. |
 | `CLAUDETTE_MEMORY` | `~/.claudette/CLAUDETTE.MD` | Override the path Claudette loads user-memory from. |
-| `CLAUDETTE_SKIP_OLLAMA_PROBE` | unset | Set to `1` to skip the startup probe (CI / offline). |
+| `CLAUDETTE_OPENAI_COMPAT` | unset | Set to `1` to talk to an OpenAI-compatible server (LM Studio, vLLM, llama.cpp's `--api`) instead of native Ollama. Brain calls switch to `/v1/chat/completions`; recall embeddings switch to `/v1/embeddings`. `OLLAMA_HOST` doubles as the compat-server URL. |
+| `CLAUDETTE_SKIP_OLLAMA_PROBE` | unset | Set to `1` to skip the Ollama startup probe (CI / offline). |
+| `CLAUDETTE_SKIP_LM_STUDIO_PROBE` | unset | Set to `1` to skip the LM Studio probe (only used when `CLAUDETTE_OPENAI_COMPAT=1`). The probe checks `/v1/models` returns a non-empty model list — set this if you load models post-launch. |
 | `CLAUDETTE_FALLBACK_BRAIN_MODEL` | `qwen3.5:9b` (Auto preset) | Brain to fall back to on stuck signals. |
 | `CLAUDETTE_LIVE_GOOGLE` | unset | Set to `1` to run live Google integration tests via `cargo test --ignored`. Never set in CI. |
 | `CLAUDETTE_WORKSPACE` | unset | Extra read roots outside `$HOME`, colon-separated on Unix, semicolon-separated on Windows. Example: `D:\dev\claudette` for developing Claudette itself. Reads under `$HOME` and under a `$HOME`-rooted CWD are always allowed regardless. |
@@ -343,6 +346,14 @@ All tokens also support file-based fallback: save them to `~/.claudette/secrets/
 |----------|---------|---------|
 | `CLAUDETTE_WHISPER_BIN` | `whisper-cli` on PATH | Path to the `whisper.cpp` binary. |
 | `CLAUDETTE_WHISPER_MODEL` | `~/.claudette/models/ggml-large-v3-turbo.bin` | Path to the Whisper GGML model file. |
+
+### Cross-session recall
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CLAUDETTE_RECALL_DISABLE` | unset | Set to `1` to disable post-turn recall indexing entirely (privacy / no embed model available). |
+| `CLAUDETTE_RECALL_MODEL` | `nomic-embed-text` | Embed model id. Under `CLAUDETTE_OPENAI_COMPAT=1`, set to whatever embedding model you've loaded in LM Studio (e.g. `text-embedding-nomic-embed-text-v1.5`). |
+| `CLAUDETTE_RECALL_DB` | `~/.claudette/recall.sqlite` | Override the recall DB path (mostly useful in tests). |
 
 ### Sub-agent tuning
 
