@@ -74,6 +74,10 @@ pub enum SlashCommand {
     /// matching the query. Bypasses the brain — runs the same lookup as the
     /// `recall` tool would, but prints results straight to the REPL.
     Recall(String),
+    /// Phase 2 brownfield shortcut: clone a target repo and make it the
+    /// active mission in one shot. Thin wrapper over the `mission_start`
+    /// tool — exposes it from the REPL without going through the brain.
+    Brownfield(String),
     /// Recognised as starting with `/` but unusable: unknown name, missing
     /// required argument, etc. Carries a human-readable error.
     Invalid(String),
@@ -184,6 +188,12 @@ pub fn parse_slash_command(line: &str) -> Option<SlashCommand> {
                 "/recall requires a query. Try: /recall meeting with brian".to_string(),
             ),
         },
+        "brownfield" => match arg.filter(|s| !s.is_empty()) {
+            Some(target) => SlashCommand::Brownfield(target),
+            None => SlashCommand::Invalid(
+                "/brownfield requires a target. Try: /brownfield owner/repo".to_string(),
+            ),
+        },
         "exit" | "quit" | "q" | "x" => SlashCommand::Exit,
         other => SlashCommand::Invalid(format!("unknown command: /{other} — try /help")),
     };
@@ -290,6 +300,10 @@ pub fn dispatch_slash_command(
             handle_recall(&mut err, &query);
             SlashOutcome::Continue
         }
+        SlashCommand::Brownfield(target) => {
+            handle_brownfield(&mut err, &target);
+            SlashOutcome::Continue
+        }
         SlashCommand::Exit => SlashOutcome::Exit,
         SlashCommand::Invalid(msg) => {
             let _ = writeln!(
@@ -345,6 +359,10 @@ fn print_help(out: &mut impl Write) {
         ("/coder <model>", "Pin coder model"),
         ("/models", "Show current model config"),
         ("/recall <query>", "Search cross-session memory"),
+        (
+            "/brownfield <target>",
+            "Clone a repo and make it the active mission",
+        ),
         ("/exit (quit, q, x)", "Leave the REPL"),
     ];
     let _ = writeln!(
@@ -917,6 +935,46 @@ fn short_ts(ts: &str) -> String {
         .map_or_else(|| ts.to_string(), |(date, _)| date.to_string())
 }
 
+fn handle_brownfield(out: &mut impl Write, target: &str) {
+    let _ = writeln!(
+        out,
+        "{} {} {}",
+        theme::ROBOT,
+        theme::accent("brownfield"),
+        theme::dim(target)
+    );
+    let payload = serde_json::json!({ "target": target }).to_string();
+    match crate::tools::dispatch_tool("mission_start", &payload) {
+        Ok(json) => match serde_json::from_str::<serde_json::Value>(&json) {
+            Ok(v) => {
+                let slug = v.get("slug").and_then(|x| x.as_str()).unwrap_or("?");
+                let path = v.get("path").and_then(|x| x.as_str()).unwrap_or("?");
+                let _ = writeln!(
+                    out,
+                    "  {} {} {}",
+                    theme::ok(theme::OK_GLYPH),
+                    theme::ok(&format!("mission active: {slug}")),
+                    theme::dim(path)
+                );
+            }
+            // mission_start always returns valid JSON on success, so this
+            // branch is defensive against future shape drift; print the
+            // raw payload so the user sees something useful either way.
+            Err(_) => {
+                let _ = writeln!(out, "  {} {}", theme::ok(theme::OK_GLYPH), json);
+            }
+        },
+        Err(e) => {
+            let _ = writeln!(
+                out,
+                "  {} {}",
+                theme::error(theme::ERR_GLYPH),
+                theme::error(&e)
+            );
+        }
+    }
+}
+
 fn print_models(out: &mut impl Write, cfg: &ModelConfig, just_switched: Option<Preset>) {
     let _ = writeln!(out, "{} {}", theme::ROBOT, theme::accent("models"));
     if let Some(p) = just_switched {
@@ -1425,6 +1483,47 @@ mod tests {
         assert!(matches!(parsed, Some(SlashCommand::Invalid(_))));
         let parsed = parse_slash_command("/recall   ");
         assert!(matches!(parsed, Some(SlashCommand::Invalid(_))));
+    }
+
+    #[test]
+    fn parse_brownfield_with_target() {
+        assert_eq!(
+            parse_slash_command("/brownfield octocat/Hello-World"),
+            Some(SlashCommand::Brownfield("octocat/Hello-World".to_string()))
+        );
+        // Full URL forms pass through untouched — mission_start does the
+        // canonicalisation.
+        assert_eq!(
+            parse_slash_command("/brownfield https://github.com/octocat/Hello-World.git"),
+            Some(SlashCommand::Brownfield(
+                "https://github.com/octocat/Hello-World.git".to_string()
+            ))
+        );
+        // ssh form preserved verbatim, including the colon.
+        assert_eq!(
+            parse_slash_command("/brownfield git@github.com:octocat/Hello-World.git"),
+            Some(SlashCommand::Brownfield(
+                "git@github.com:octocat/Hello-World.git".to_string()
+            ))
+        );
+        // Surrounding whitespace trimmed by the parser, like /save / /recall.
+        assert_eq!(
+            parse_slash_command("/brownfield   octocat/Hello-World  "),
+            Some(SlashCommand::Brownfield("octocat/Hello-World".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_brownfield_without_target_is_invalid() {
+        let parsed = parse_slash_command("/brownfield");
+        assert!(matches!(parsed, Some(SlashCommand::Invalid(_))));
+        let parsed = parse_slash_command("/brownfield   ");
+        assert!(matches!(parsed, Some(SlashCommand::Invalid(_))));
+        // Spot-check the error string mentions the command, so the user
+        // knows what they typed wrong rather than getting a generic hint.
+        if let Some(SlashCommand::Invalid(msg)) = parse_slash_command("/brownfield") {
+            assert!(msg.contains("/brownfield"), "got: {msg}");
+        }
     }
 
     #[test]
