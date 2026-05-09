@@ -20,9 +20,11 @@ claudette                                   # interactive REPL
 
 ## What Claudette does
 
-Claudette is a conversational agent built around **messaging-app access to a local LLM**. Four interfaces — REPL, fullscreen TUI, one-shot CLI, and a Telegram bot — all drive the same Ollama backend, so you can voice-note your own laptop from a bus stop and get a reply back. 70+ tools cover calendar, email, code generation, web research, and shell + git workflows, loaded on demand so the schema stays small.
+Claudette is a conversational agent built around **messaging-app access to a local LLM**. Four interfaces — REPL, fullscreen TUI, one-shot CLI, and a Telegram bot — all drive the same Ollama backend, so you can voice-note your own laptop from a bus stop and get a reply back. 80+ tools cover calendar, email, code generation, web research, brownfield git workflows, and cross-session memory — loaded on demand so the schema stays small.
 
 **What it's not:** a coding assistant competing with Cline or Aider on IDE integration, nor a general-purpose agent framework. Claudette is intentionally single-binary, single-machine, single-user — see [`docs/comparison.md`](docs/comparison.md) for an honest side-by-side against OpenHands, Aider, opencode, Cline, and Continue (Claudette isn't the winner in most of them).
+
+> **v0.4.0 — Recall + Brownfield (May 2026).** Cross-session semantic memory via `/recall <query>` and the `recall` tool group (works on Ollama or LM Studio — config under [`Cross-session recall`](#cross-session-recall)). Brownfield mission tools so the agent can clone a repo, edit it, and open a PR in one tool chain (`mission_start` → `mission_submit`). LM Studio users no longer need Ollama for embeddings — recall hits `/v1/embeddings` directly.
 
 > **v0.2.0 — the Life Agent.** Google Calendar and Gmail (read-only) tool groups, a persistent scheduler that fires prompts back at you, and a `/briefing` Telegram command (or `claudette --briefing` for a recurring 07:00 weekday briefing) that covers the day's calendar, weather, and unread email. See [`docs/life_agent.md`](docs/life_agent.md) and [`docs/google_setup.md`](docs/google_setup.md).
 
@@ -66,32 +68,33 @@ README markdown rendering.
 
 Each mode reuses the same conversation runtime, the same tool set, and the same session format. Switching modes is just a different entry point.
 
-### 70+ tools across 17 on-demand groups
+### 80+ tools across 18 on-demand groups
 
 Every tool except `enable_tools` and `get_current_time` lives in a group that the model has to opt into via `enable_tools(group)`. The base schema is ~680 chars (~170 tokens) regardless of how many tools exist; each group adds only the tools it owns when first enabled.
 
 | Group | Tools | What it does |
 |-------|-------|--------------|
-| **core** (always on) | 2 | `enable_tools` (the meta-tool), `get_current_time` |
+| **core** (always on) | 3 | `enable_tools` (the meta-tool), `get_current_time`, `load_workspace_rules` |
 | `notes` | 5 | Personal notes — create, list, read, update, delete |
 | `todos` | 5 | Todo list — add, list, complete, uncomplete, delete |
 | `files` | 3 | `read_file`, `write_file` (sandboxed under `~/.claudette/files/`), `list_dir` |
 | `code` | 1 | `generate_code` — routes through the Codet coder + validator pipeline |
 | `meta` | 1 | `get_capabilities` — config, tool inventory, limits |
-| `git` | 8 | status, diff, log, add, commit, branch, checkout, push |
+| `git` | 9 | status, diff, log, add, commit, branch, checkout, push, clone |
 | `ide` | 3 | Open in editor (`code`), reveal in file manager, open URL in browser |
 | `search` | 4 | `web_search` (Brave), `web_fetch`, `glob_search`, `grep_search` |
 | `advanced` | 3 | Bash shell, `edit_file` (find/replace), `spawn_agent` (delegate to a sub-agent) |
 | `facts` | 4 | Wikipedia search/summary, Open-Meteo weather (current/forecast) |
 | `registry` | 4 | crates.io info/search, npmjs info/search |
-| `github` | 6 | List PRs/issues, get/create/comment issues, code search |
+| `github` | 15 | PRs (list, status, fork, create), issues (get, create, comment, list-repo, list-assigned), code search, **brownfield missions** (start, status, list, exit, submit) |
 | `markets` | 7 | TradingView quotes/ratings/calendar, Algorand ASA stats via vestige.fi |
 | `telegram` | 3 | Bot messaging: send messages, poll updates, send photos |
 | `calendar` | 5 | Google Calendar: list / create / update / delete events, RSVP |
 | `schedule` | 4 | Proactive reminders: one-shot + recurring schedules that fire prompts back at you |
 | `gmail` | 4 | Gmail (read-only): list, search, read, list labels — with `<email>` provenance wrapping |
+| `recall` | 1 | Cross-session memory: semantic search over past conversation turns (`recall <query>`) |
 
-Schema cost: ~680 chars (~170 tokens) on every turn until the model enables a group; the full 17-group surface is ~26 KB only if every group is loaded at once. Pre-rewrite the TUI/Telegram modes auto-enabled five groups (~25 KB / ~6,300 tokens shipped per turn — even for a one-word "hey"), which the [Unreleased] tool-array slimming retired.
+Schema cost: ~680 chars (~170 tokens) on every turn until the model enables a group; the full 17-group surface is ~26 KB only if every group is loaded at once. Pre-rewrite the TUI/Telegram modes auto-enabled five groups (~25 KB / ~6,300 tokens shipped per turn — even for a one-word "hey"), which the v0.3.0 tool-array slimming retired.
 
 ### Three specialised sub-agents
 
@@ -276,6 +279,7 @@ Run `claudette --help` for the authoritative reference. Summary:
 /compact             Force context compaction now.
 /clear               Reset to a fresh session.
 /capabilities        Full configuration dump.
+/recall <query>      Search past conversations across sessions (semantic).
 /exit                Leave the REPL.
 ```
 
@@ -416,7 +420,7 @@ src/
 ├── executor.rs       — SecretaryToolExecutor: enable_tools meta-tool + dispatch
 ├── tools.rs          — Aggregates per-group schemas into secretary_tools_json() and routes dispatch_tool() through each sub-module's dispatch()
 ├── tools/            — One module per tool cluster (calendar, codegen, facts, file_ops, git, github, gmail, ide, markets, notes, registry, schedule, search, shell, telegram, todos, web_search); each exports schemas() + dispatch()
-├── tool_groups.rs    — ToolRegistry + the 12 on-demand tool-group definitions
+├── tool_groups.rs    — ToolRegistry + the 18 on-demand tool-group definitions
 ├── agents.rs         — AgentType, FilteredToolExecutor, spawn_agent orchestrator
 ├── codet.rs          — Code-generation sidecar (syntax check, surgical fix loop, tests)
 ├── test_runner.rs    — Python/Rust/JS/TS syntax + test runners
@@ -465,7 +469,7 @@ cargo clippy --all-targets --no-deps -- -D warnings
 cargo test --lib
 ```
 
-Tests: **521 passing, 4 ignored on Windows** (hook tests that use POSIX `printf`). Run `cargo fmt --all --check` before committing.
+Tests: **695 passing, 6 ignored** (4 POSIX-only hook tests, 2 live-recall smokes that need an LM Studio embedding server). Run `cargo fmt --all --check` before committing.
 
 ### Project layout rules
 
