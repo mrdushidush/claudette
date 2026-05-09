@@ -107,17 +107,34 @@ pub fn ogg_to_wav(ogg_path: &Path) -> Result<PathBuf, String> {
 
 /// Path to the whisper.cpp binary.
 fn whisper_bin() -> String {
-    std::env::var("CLAUDETTE_WHISPER_BIN").unwrap_or_else(|_| "whisper-cli".to_string())
+    whisper_bin_from(std::env::var("CLAUDETTE_WHISPER_BIN").ok().as_deref())
+}
+
+/// Pure predicate behind [`whisper_bin`]. Factored out so tests can pass
+/// explicit values instead of mutating process env (which is global and
+/// races between parallel test threads — same fix as P7's
+/// `is_compat_value_truthy` in api.rs).
+fn whisper_bin_from(value: Option<&str>) -> String {
+    value
+        .filter(|v| !v.is_empty())
+        .unwrap_or("whisper-cli")
+        .to_string()
 }
 
 /// Path to the GGML model file.
 fn whisper_model() -> PathBuf {
-    if let Ok(path) = std::env::var("CLAUDETTE_WHISPER_MODEL") {
-        return PathBuf::from(path);
-    }
+    let env_override = std::env::var("CLAUDETTE_WHISPER_MODEL").ok();
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_else(|_| ".".to_string());
+    whisper_model_from(env_override.as_deref(), &home)
+}
+
+/// Pure predicate behind [`whisper_model`]. See [`whisper_bin_from`].
+fn whisper_model_from(env_override: Option<&str>, home: &str) -> PathBuf {
+    if let Some(path) = env_override.filter(|v| !v.is_empty()) {
+        return PathBuf::from(path);
+    }
     PathBuf::from(home)
         .join(".claudette")
         .join("models")
@@ -289,51 +306,33 @@ mod tests {
 
     #[test]
     fn whisper_model_path_is_under_claudette() {
-        // Clear env to test default path.
-        let prev = std::env::var("CLAUDETTE_WHISPER_MODEL").ok();
-        std::env::remove_var("CLAUDETTE_WHISPER_MODEL");
-
-        let path = whisper_model();
+        let path = whisper_model_from(None, "C:\\Users\\test");
         assert!(
             path.to_string_lossy().contains(".claudette"),
             "default model path should be under .claudette: {}",
             path.display()
         );
         assert!(path.ends_with("ggml-medium.bin"));
-
-        // Restore.
-        if let Some(p) = prev {
-            std::env::set_var("CLAUDETTE_WHISPER_MODEL", p);
-        }
     }
 
     #[test]
     fn whisper_model_path_honors_env_var() {
-        std::env::set_var("CLAUDETTE_WHISPER_MODEL", "/custom/path/model.bin");
-        let path = whisper_model();
-        std::env::remove_var("CLAUDETTE_WHISPER_MODEL");
+        let path = whisper_model_from(Some("/custom/path/model.bin"), "/home/test");
         assert_eq!(path, PathBuf::from("/custom/path/model.bin"));
     }
 
     #[test]
     fn whisper_bin_defaults_to_whisper_cli() {
-        let prev = std::env::var("CLAUDETTE_WHISPER_BIN").ok();
-        std::env::remove_var("CLAUDETTE_WHISPER_BIN");
-
-        let bin = whisper_bin();
-        assert_eq!(bin, "whisper-cli");
-
-        if let Some(p) = prev {
-            std::env::set_var("CLAUDETTE_WHISPER_BIN", p);
-        }
+        assert_eq!(whisper_bin_from(None), "whisper-cli");
+        assert_eq!(whisper_bin_from(Some("")), "whisper-cli");
     }
 
     #[test]
     fn whisper_bin_honors_env_var() {
-        std::env::set_var("CLAUDETTE_WHISPER_BIN", "/opt/whisper-cpp/main");
-        let bin = whisper_bin();
-        std::env::remove_var("CLAUDETTE_WHISPER_BIN");
-        assert_eq!(bin, "/opt/whisper-cpp/main");
+        assert_eq!(
+            whisper_bin_from(Some("/opt/whisper-cpp/main")),
+            "/opt/whisper-cpp/main"
+        );
     }
 
     #[test]
