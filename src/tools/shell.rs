@@ -92,7 +92,12 @@ fn run_bash(input: &str) -> Result<String, String> {
     #[cfg(not(target_os = "windows"))]
     let (program, args) = ("sh", vec!["-c", command]);
 
-    let result = run_command_with_timeout(program, &args, 30, None);
+    // bash inherits the active-mission cwd (T2): when the brain is
+    // working a brownfield mission, `bash` runs inside that tree so
+    // shell-driven workflows (build, test, scripted edits) stay
+    // self-consistent with git_*. Falls back to process cwd otherwise.
+    let cwd = crate::missions::active_cwd();
+    let result = run_command_with_timeout(program, &args, 30, Some(&cwd));
 
     let stdout: String = result.stdout.chars().take(BASH_OUTPUT_MAX_CHARS).collect();
     let stderr: String = result.stderr.chars().take(BASH_OUTPUT_MAX_CHARS).collect();

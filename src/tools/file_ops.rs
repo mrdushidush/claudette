@@ -177,12 +177,14 @@ fn run_write_file(input: &str) -> Result<String, String> {
         ));
     }
 
-    // Bare relative paths get resolved under the sandbox dir, NOT against
-    // CWD. Reasoning: the model says "save it to dolphins-post.txt" and
-    // expects it to land somewhere reasonable; resolving against
-    // claudette's CWD (typically the workspace root) puts it outside
-    // the sandbox and the call fails. By rooting bare relative paths under
-    // ~/.claudette/files/ we make the most-common case Just Work.
+    // Bare relative paths get resolved under either the active mission
+    // tree (T2) or the scratch sandbox, NOT against the process CWD.
+    // Reasoning: the model says "save it to dolphins-post.txt" and
+    // expects it to land somewhere reasonable. Pre-T2 we rooted bare
+    // relative paths under ~/.claudette/files/. T2 keeps that fallback
+    // but routes to the mission tree when a brownfield mission is
+    // active — matching the brain's likely intent ("save README.md"
+    // means *the project's* README, not a copy in scratch).
     // Absolute and ~/-prefixed paths still flow through validate_write_path
     // unchanged so the user can still explicitly target a sub-folder.
     let resolved_input = if Path::new(path_str).is_absolute()
@@ -191,7 +193,12 @@ fn run_write_file(input: &str) -> Result<String, String> {
     {
         path_str.to_string()
     } else {
-        files_dir().join(path_str).display().to_string()
+        let base = if crate::missions::active_mission().is_some() {
+            crate::missions::active_cwd()
+        } else {
+            files_dir()
+        };
+        base.join(path_str).display().to_string()
     };
     let path = validate_write_path(&resolved_input)?;
 

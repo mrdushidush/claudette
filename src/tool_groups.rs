@@ -224,7 +224,12 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         | "gh_list_repo_issues"
         | "gh_pr_status"
         | "gh_fork"
-        | "gh_create_pr" => Some(ToolGroup::Github),
+        | "gh_create_pr"
+        | "mission_start"
+        | "mission_status"
+        | "mission_list"
+        | "mission_exit"
+        | "mission_submit" => Some(ToolGroup::Github),
         "tv_get_quote"
         | "tv_technical_rating"
         | "tv_search_symbol"
@@ -668,10 +673,15 @@ mod tests {
             "gh_pr_status",
             "gh_fork",
             "gh_create_pr",
+            "mission_start",
+            "mission_status",
+            "mission_list",
+            "mission_exit",
+            "mission_submit",
         ] {
             assert!(gh.contains(&name.to_string()), "missing {name} in {gh:?}");
         }
-        assert_eq!(gh.len(), 10);
+        assert_eq!(gh.len(), 15);
     }
 
     #[test]

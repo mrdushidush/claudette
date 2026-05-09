@@ -31,6 +31,7 @@ mod github;
 mod gmail;
 mod ide;
 mod markets;
+mod mission;
 mod notes;
 mod recall;
 mod registry;
@@ -129,6 +130,7 @@ pub fn secretary_tools_json() -> Value {
     tools.extend(gmail::schemas());
     tools.extend(ide::schemas());
     tools.extend(markets::schemas());
+    tools.extend(mission::schemas());
     tools.extend(notes::schemas());
     tools.extend(recall::schemas());
     tools.extend(registry::schemas());
@@ -174,6 +176,9 @@ pub fn dispatch_tool(name: &str, input: &str) -> Result<String, String> {
         return result;
     }
     if let Some(result) = markets::dispatch(name, input) {
+        return result;
+    }
+    if let Some(result) = mission::dispatch(name, input) {
         return result;
     }
     if let Some(result) = notes::dispatch(name, input) {
@@ -498,14 +503,23 @@ pub(super) fn normalize_path(path: &Path) -> PathBuf {
 }
 
 /// Normalize an input path string, expanding `~` and resolving `.`/`..`.
-/// Relative paths are made absolute by joining to the current working dir.
+/// Relative paths are made absolute by joining to **the active mission's
+/// cwd if one is active**, otherwise the process cwd. This is the single
+/// hook that makes `read_file`, `list_dir`, `edit_file`, and `grep_search`
+/// mission-aware — `glob_search` does its own bare-relative resolution and
+/// is updated separately.
+//
+// Returns Result purely to keep the call-site `?` ergonomics callers expect
+// (validate_*_path chain `?` from this); after T2 made cwd resolution
+// infallible (active_cwd has a "." fallback) the Err arm is no longer
+// reachable, but flipping every caller would be churn for no win.
+#[allow(clippy::unnecessary_wraps)]
 fn resolve_input_path(input: &str) -> Result<PathBuf, String> {
     let expanded = expand_tilde(input);
     let absolute = if expanded.is_absolute() {
         expanded
     } else {
-        let cwd = std::env::current_dir().map_err(|e| format!("get cwd: {e}"))?;
-        cwd.join(expanded)
+        crate::missions::active_cwd().join(expanded)
     };
     Ok(normalize_path(&absolute))
 }
@@ -710,13 +724,30 @@ fn path_is_allowed(path: &Path, roots: &WorkspaceRoots, canonical: bool) -> bool
 pub(super) fn validate_write_path(input: &str) -> Result<PathBuf, String> {
     let resolved = resolve_input_path(input)?;
     let scratch = normalize_path(&files_dir());
-    if !resolved.starts_with(&scratch) {
+    if resolved.starts_with(&scratch) {
+        return Ok(resolved);
+    }
+    // T2: while a brownfield mission is active the write sandbox auto-
+    // extends to the mission tree. Pre-mission behaviour was: writes only
+    // under ~/.claudette/files/. Once the brain has clone+attached a
+    // mission under policy, refusing subsequent file writes inside the
+    // tree is theatre — bash/edit_file already let the brain mutate it.
+    if let Some(mission) = crate::missions::active_mission() {
+        let mission_root = normalize_path(&mission.path);
+        if resolved.starts_with(&mission_root) {
+            return Ok(resolved);
+        }
         return Err(format!(
-            "writes are sandboxed to {}. Use a path under that directory.",
-            scratch.display()
+            "writes are sandboxed to {} or the active mission tree {}. \
+             Use a path under one of those directories.",
+            scratch.display(),
+            mission_root.display(),
         ));
     }
-    Ok(resolved)
+    Err(format!(
+        "writes are sandboxed to {}. Use a path under that directory.",
+        scratch.display()
+    ))
 }
 
 // File ops group (read_file, write_file, list_dir) lives in

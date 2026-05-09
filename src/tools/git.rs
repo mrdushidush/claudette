@@ -161,7 +161,7 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
 /// Strategy: try `where git` first (works if git IS in PATH), then probe
 /// known install locations. Caches the result via `OnceLock` so the
 /// filesystem scan runs at most once per process.
-fn resolve_git_path() -> String {
+pub(super) fn resolve_git_path() -> String {
     use std::sync::OnceLock;
     static GIT_PATH: OnceLock<String> = OnceLock::new();
     GIT_PATH
@@ -207,12 +207,20 @@ fn resolve_git_path() -> String {
 /// PATH like `D:\Program Files\Git\...`). Falls back to bare `git`.
 fn run_git(args: &[&str]) -> Result<String, String> {
     let git_exe = resolve_git_path();
+    // While a brownfield mission is active, every git_* call (status,
+    // diff, log, add, commit, branch, checkout, push) runs against the
+    // mission tree. Outside of a mission this resolves to the process
+    // cwd — i.e. exactly the pre-T2 behaviour.
+    let cwd = crate::missions::active_cwd();
     eprintln!(
         "  {} {}",
         crate::theme::dim("▸"),
-        crate::theme::dim(&format!("git: using {git_exe:?}, args={args:?}")),
+        crate::theme::dim(&format!(
+            "git: using {git_exe:?}, args={args:?}, cwd={}",
+            cwd.display()
+        )),
     );
-    let result = run_command_with_timeout(&git_exe, args, 30, None);
+    let result = run_command_with_timeout(&git_exe, args, 30, Some(&cwd));
     if !result.success {
         eprintln!(
             "  {} {}",

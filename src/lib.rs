@@ -44,6 +44,7 @@ pub mod executor;
 pub mod google_auth;
 pub mod image_attach;
 pub mod memory;
+pub mod missions;
 pub mod model_config;
 pub mod prompt;
 pub mod recall;

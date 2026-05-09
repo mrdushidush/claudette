@@ -32,9 +32,7 @@ fn show(label: &str, name: &str, input: &str) -> Result<String, String> {
 fn main() {
     println!("=== claudette brownfield smoke test ===");
 
-    if std::env::var("GITHUB_TOKEN").is_err()
-        && std::env::var("CLAUDETTE_GITHUB_TOKEN").is_err()
-    {
+    if std::env::var("GITHUB_TOKEN").is_err() && std::env::var("CLAUDETTE_GITHUB_TOKEN").is_err() {
         eprintln!(
             "GITHUB_TOKEN not set. Run:\n  \
              $env:GITHUB_TOKEN = (gh auth token); cargo run --example brownfield_smoke"

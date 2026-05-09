@@ -100,7 +100,15 @@ fn run_glob_search(input: &str) -> Result<String, String> {
     } else if Path::new(raw_pattern).is_absolute() {
         raw_pattern.to_string()
     } else {
-        user_home().join(raw_pattern).display().to_string()
+        // Bare-relative pattern: resolve under the active mission tree
+        // when one is active, else under $HOME (the pre-T2 default — keeps
+        // "find me PDFs" style ad-hoc searches working).
+        let base = if crate::missions::active_mission().is_some() {
+            crate::missions::active_cwd()
+        } else {
+            user_home()
+        };
+        base.join(raw_pattern).display().to_string()
     };
 
     // Sandbox check on the literal prefix (everything before the first glob
@@ -158,7 +166,21 @@ fn run_grep_search(input: &str) -> Result<String, String> {
     if pattern.is_empty() {
         return Err("grep_search: pattern is empty".to_string());
     }
-    let path_str = v.get("path").and_then(Value::as_str).unwrap_or("~");
+    // Default search root: the active mission tree when one is active
+    // (matches the brain's likely intent — grep within the project it's
+    // working on), else $HOME (pre-T2 default).
+    let default_path: String;
+    let path_str = match v.get("path").and_then(Value::as_str) {
+        Some(s) => s,
+        None => {
+            default_path = if crate::missions::active_mission().is_some() {
+                crate::missions::active_cwd().display().to_string()
+            } else {
+                "~".to_string()
+            };
+            default_path.as_str()
+        }
+    };
 
     let root = validate_read_path(path_str)?;
     let metadata = fs::metadata(&root)

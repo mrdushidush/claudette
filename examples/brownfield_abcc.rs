@@ -1,11 +1,18 @@
 //! Live brownfield exploration on agent-battle-command-center.
 //!
-//! Subcommands (all hit claudette's new tools — same code path as the LLM):
+//! T1 subcommands (each invokes a single brownfield primitive):
 //!   list                          → gh_list_repo_issues (default if no args)
 //!   body <n>                      → gh_get_issue
 //!   clone <dest>                  → git_clone the repo into ~/.claudette/missions/<dest>/
 //!   pr <head> <base> <title> <body>  → gh_create_pr on the same repo
 //!   status <number>               → gh_pr_status
+//!
+//! T2 subcommands (mission-driven — exercise the cwd-routed flow):
+//!   mission-start <dest>          → mission_start, then git_status from inside it
+//!   mission-status                → mission_status
+//!   mission-list                  → mission_list
+//!   mission-exit                  → mission_exit
+//!   mission-submit <title> [body] → capstone (real PR; requires CLAUDETTE_REAL_PR=1)
 //!
 //! Run with: $env:GITHUB_TOKEN = (gh auth token); cargo run --example brownfield_abcc -- <subcommand> [args]
 
@@ -34,16 +41,25 @@ fn run(name: &str, input: &str) {
     }
 }
 
+/// Subcommands that hit the GitHub REST API and therefore need a token.
+/// `mission-start`/`status`/`list`/`exit` and `clone` are pure git ops over
+/// HTTPS — public clone, no auth needed.
+const NEEDS_TOKEN: &[&str] = &["list", "body", "pr", "status", "mission-submit"];
+
 fn main() {
-    if std::env::var("GITHUB_TOKEN").is_err()
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let cmd = args.first().map_or("list", String::as_str);
+
+    if NEEDS_TOKEN.contains(&cmd)
+        && std::env::var("GITHUB_TOKEN").is_err()
         && std::env::var("CLAUDETTE_GITHUB_TOKEN").is_err()
     {
-        eprintln!("GITHUB_TOKEN not set — run: $env:GITHUB_TOKEN = (gh auth token)");
+        eprintln!(
+            "GITHUB_TOKEN not set — `{cmd}` hits the GitHub API. \
+             Run: $env:GITHUB_TOKEN = (gh auth token)"
+        );
         std::process::exit(1);
     }
-
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let cmd = args.first().map(String::as_str).unwrap_or("list");
 
     match cmd {
         "list" => {
@@ -98,10 +114,46 @@ fn main() {
             );
         }
         "status" => {
-            let number: i64 = args.get(1).and_then(|s| s.parse().ok()).expect("status <n>");
+            let number: i64 = args
+                .get(1)
+                .and_then(|s| s.parse().ok())
+                .expect("status <n>");
             run(
                 "gh_pr_status",
                 &json!({"owner": OWNER, "repo": REPO, "number": number}).to_string(),
+            );
+        }
+        "mission-start" => {
+            let dest = args.get(1).expect("mission-start <dest>");
+            // Use the bare owner/repo form so mission_submit later knows
+            // the canonical GitHub repo without re-parsing the URL.
+            run(
+                "mission_start",
+                &json!({"target": format!("{OWNER}/{REPO}"), "dest": dest}).to_string(),
+            );
+            // Prove the cwd-routing primitive is live: git_status now
+            // reads the just-cloned tree, not claudette's launch dir.
+            run("git_status", "{}");
+        }
+        "mission-status" => run("mission_status", "{}"),
+        "mission-list" => run("mission_list", "{}"),
+        "mission-exit" => run("mission_exit", "{}"),
+        "mission-submit" => {
+            // Capstone is destructive (opens a real PR). Gate behind an
+            // explicit env var so a stray smoke run doesn't add another
+            // open PR to the upstream repo on top of the v0.4.0 #177 leftover.
+            if std::env::var("CLAUDETTE_REAL_PR").ok().as_deref() != Some("1") {
+                eprintln!(
+                    "refusing to call mission_submit without CLAUDETTE_REAL_PR=1 — \
+                     this opens a real PR. Set the env var if that's what you want."
+                );
+                std::process::exit(2);
+            }
+            let title = args.get(1).expect("mission-submit <title> [body]");
+            let body = args.get(2).cloned().unwrap_or_default();
+            run(
+                "mission_submit",
+                &json!({"title": title, "body": body}).to_string(),
             );
         }
         other => {

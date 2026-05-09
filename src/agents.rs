@@ -180,6 +180,12 @@ fn gitops_tools() -> BTreeSet<String> {
         "gh_pr_status",
         "gh_fork",
         "gh_create_pr",
+        // T2: mission_* drives the brownfield clone→submit loop.
+        "mission_start",
+        "mission_status",
+        "mission_list",
+        "mission_exit",
+        "mission_submit",
     ]
     .into_iter()
     .map(String::from)
@@ -324,6 +330,11 @@ fn build_agent_permission_policy(allowed: &BTreeSet<String>) -> PermissionPolicy
         "git_clone",
         "gh_fork",
         "gh_create_pr",
+        // T2: clone-and-PR live in this tier; mission_status/list are
+        // read-only and stay in the loop above.
+        "mission_start",
+        "mission_exit",
+        "mission_submit",
     ] {
         if allowed.contains(name) {
             policy = policy.with_tool_requirement(name, WorkspaceWrite);
