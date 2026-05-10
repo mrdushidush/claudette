@@ -33,6 +33,23 @@ bumps are non-breaking bugfixes only.
 - **`brownfield_abcc` example.** Multi-subcommand smoke harness that
   drives the full T1 + T2 surface end-to-end. Capstone (real PR) gated
   behind `CLAUDETTE_REAL_PR=1`.
+- **`mission_attach` — cross-session mission resume.** Sixth tool in the
+  Mission group (`ReadOnly`). T2 deliberately shipped without
+  auto-attach: markers persist on disk but a fresh process starts with
+  no active slot, so the user (or brain) gets to choose whether to
+  resume. `mission_attach` is the opt-in verb that flips the in-memory
+  slot to an existing
+  `~/.claudette/missions/<slug>/.claudette-mission.json`. Every
+  downstream cwd-routed write still goes through its own
+  `DangerFullAccess` / `WorkspaceWrite` gate, so attach itself can't
+  escalate beyond what the user already authorized.
+- **`/brownfield <target>` REPL slash command.** One-shot keyboard
+  shortcut to clone a repo and make it the active mission without
+  round-tripping through the brain. Thin wrapper over `mission_start`,
+  so the same target surface (bare `owner/repo`, https/http/git@/ssh)
+  works. Mirrors how `/recall` front-runs the recall tool from the
+  keyboard for things the user does often enough that going through the
+  model is friction.
 
 ### Changed
 
@@ -41,9 +58,37 @@ bumps are non-breaking bugfixes only.
   open a real cross-org PR without ever seeing a `[y/N]` prompt — while
   a literal `git_push` (also `DangerFullAccess`) would have bounced.
   Now matches its worst-case action.
+- **`mission_list` surfaces orphan directories.** Previously silently
+  skipped any directory under `~/.claudette/missions/` that lacked a
+  marker — fine when those were rare half-clones, but Phase 2 makes
+  `mission_attach` the way back into a mission, and an attach against
+  an orphan slug fails confusingly. Pre-T2 `git_clone` calls also
+  produced exactly these orphans (the marker was a T2 addition), so
+  existing users have a real chance of having one or two. Orphans now
+  appear in the listing tagged as such.
 
 ### Internal
 
+- **Workspace conversion (0.4.1 Phase 1).** Root `Cargo.toml` is now a
+  virtual workspace with members `["crates/claudette", "crates/forge"]`;
+  the claudette crate moves to `crates/claudette/` (name, bin, lib, and
+  version 0.4.0 unchanged so `cargo install claudette` keeps working).
+  Companion file-rename commit captured the 76-file move
+  (`src/`, `tests/`, `examples/`, manifest).
+- **Forge novelties absorbed as dormant plumbing in `crates/forge/`
+  (`publish = false`).** Ported verbatim from the standalone
+  `claudettes-forge` repo at the rc1-final tag: `personas.rs` (TOML
+  frontmatter + markdown body loader, 13 unit tests including a CRLF
+  regression), `models_toml.rs` (role → (model, provider) resolution
+  chain with serial env-var mutex), and skeletons `pipeline.rs` /
+  `types.rs`. No `--persona` flag, no router invocation, no surfacing
+  in the 0.4.1 CLI — carried forward for the eventual forge-mode work
+  (Theme D, future sprint). One toml-1.0-API fix on the way in:
+  `frontmatter.parse::<toml::Value>()` →
+  `toml::from_str::<toml::Table>(frontmatter)` because the v1 release
+  dropped the document-as-Value parse path. The four bundled persona
+  files (codex7, cto, eva, sentinel9) live in `personas/` at the
+  workspace root.
 - `voice.rs` env-var test race: `whisper_bin_*` and
   `whisper_model_path_*` no longer mutate process env. Same fix pattern
   as P7's `is_compat_value_truthy` (`api.rs:366`).
