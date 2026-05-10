@@ -16,6 +16,10 @@ claudette                                   # interactive REPL
 [![Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 
+![Claudette TUI — chat + live tool-call panel side-by-side, one turn covering notes, weather, BTC price, and calendar](docs/images/claudette-tui.png)
+
+> One turn driving four tool groups (`note_list`, `weather_forecast`, `tv_get_quote`, `calendar_list_events`) — visible in the Tools panel as the brain enables groups on demand and dispatches calls. The TUI tabs along the top are `[1]Chat [2]Tools [3]Notes [4]Todos [5]HW`.
+
 ---
 
 ## What Claudette does
@@ -23,6 +27,8 @@ claudette                                   # interactive REPL
 Claudette is a conversational agent built around **messaging-app access to a local LLM**. Four interfaces — REPL, fullscreen TUI, one-shot CLI, and a Telegram bot — all drive the same Ollama backend, so you can voice-note your own laptop from a bus stop and get a reply back. 80+ tools cover calendar, email, code generation, web research, brownfield git workflows, and cross-session memory — loaded on demand so the schema stays small.
 
 **What it's not:** a coding assistant competing with Cline or Aider on IDE integration, nor a general-purpose agent framework. Claudette is intentionally single-binary, single-machine, single-user — see [`docs/comparison.md`](docs/comparison.md) for an honest side-by-side against OpenHands, Aider, opencode, Cline, and Continue (Claudette isn't the winner in most of them).
+
+> **v0.4.1 — Brownfield Phase 2 (May 2026).** `mission_attach` reattaches a previously-cloned mission across sessions (clone today, resume tomorrow), and `/brownfield <target>` is a one-shot REPL keystroke that clones a repo and makes it active without round-tripping through the brain. `mission_submit` is now `DangerFullAccess` so opening a cross-org PR matches `git_push`'s confirmation prompt; `mission_list` now surfaces orphan directories (under `~/.claudette/missions/` without a marker) so attach failures are diagnosable. Internally, Claudette became a Cargo workspace with a dormant `forge` crate carrying persona + role-map plumbing for upcoming pipeline work.
 
 > **v0.4.0 — Recall + Brownfield (May 2026).** Cross-session semantic memory via `/recall <query>` and the `recall` tool group (works on Ollama or LM Studio — config under [`Cross-session recall`](#cross-session-recall)). Brownfield mission tools so the agent can clone a repo, edit it, and open a PR in one tool chain (`mission_start` → `mission_submit`). LM Studio users no longer need Ollama for embeddings — recall hits `/v1/embeddings` directly.
 
@@ -68,6 +74,8 @@ README markdown rendering.
 
 Each mode reuses the same conversation runtime, the same tool set, and the same session format. Switching modes is just a different entry point.
 
+![Claudette running in a real desktop workflow — TUI on the right, an editor / dev terminal on the left](docs/images/claudette-tui-desktop.png)
+
 ### 80+ tools across 18 on-demand groups
 
 Every tool except `enable_tools` and `get_current_time` lives in a group that the model has to opt into via `enable_tools(group)`. The base schema is ~680 chars (~170 tokens) regardless of how many tools exist; each group adds only the tools it owns when first enabled.
@@ -86,7 +94,7 @@ Every tool except `enable_tools` and `get_current_time` lives in a group that th
 | `advanced` | 3 | Bash shell, `edit_file` (find/replace), `spawn_agent` (delegate to a sub-agent) |
 | `facts` | 4 | Wikipedia search/summary, Open-Meteo weather (current/forecast) |
 | `registry` | 4 | crates.io info/search, npmjs info/search |
-| `github` | 15 | PRs (list, status, fork, create), issues (get, create, comment, list-repo, list-assigned), code search, **brownfield missions** (start, status, list, exit, submit) |
+| `github` | 16 | PRs (list, status, fork, create), issues (get, create, comment, list-repo, list-assigned), code search, **brownfield missions** (start, status, list, attach, exit, submit) |
 | `markets` | 7 | TradingView quotes/ratings/calendar, Algorand ASA stats via vestige.fi |
 | `telegram` | 3 | Bot messaging: send messages, poll updates, send photos |
 | `calendar` | 5 | Google Calendar: list / create / update / delete events, RSVP |
@@ -94,7 +102,7 @@ Every tool except `enable_tools` and `get_current_time` lives in a group that th
 | `gmail` | 4 | Gmail (read-only): list, search, read, list labels — with `<email>` provenance wrapping |
 | `recall` | 1 | Cross-session memory: semantic search over past conversation turns (`recall <query>`) |
 
-Schema cost: ~680 chars (~170 tokens) on every turn until the model enables a group; the full 17-group surface is ~26 KB only if every group is loaded at once. Pre-rewrite the TUI/Telegram modes auto-enabled five groups (~25 KB / ~6,300 tokens shipped per turn — even for a one-word "hey"), which the v0.3.0 tool-array slimming retired.
+Schema cost: ~680 chars (~170 tokens) on every turn until the model enables a group; the full 18-group surface is ~26 KB only if every group is loaded at once. Pre-rewrite the TUI/Telegram modes auto-enabled five groups (~25 KB / ~6,300 tokens shipped per turn — even for a one-word "hey"), which the v0.3.0 tool-array slimming retired.
 
 ### Three specialised sub-agents
 
@@ -280,6 +288,7 @@ Run `claudette --help` for the authoritative reference. Summary:
 /clear               Reset to a fresh session.
 /capabilities        Full configuration dump.
 /recall <query>      Search past conversations across sessions (semantic).
+/brownfield <target> Clone a repo and make it the active mission (one-shot).
 /exit                Leave the REPL.
 ```
 
@@ -400,6 +409,8 @@ Nothing outside `~/.claudette/` is written without explicit permission.
 
 ## Architecture
 
+The repo is a Cargo workspace: the published `claudette` crate lives at `crates/claudette/`, and a workspace-internal `crates/forge/` carries dormant plumbing (persona loader, role-map, pipeline skeletons) for upcoming forge-mode work — `publish = false`, not surfaced from the CLI in 0.4.1. Path references below are inside `crates/claudette/`.
+
 ```
 src/
 ├── main.rs           — Binary entry point (arg parsing, Ollama probe, mode dispatch)
@@ -459,23 +470,25 @@ Codet is invoked exclusively through the `generate_code` tool. The main conversa
 ### Build
 
 ```bash
-cargo build --release
+cargo build --release -p claudette       # only the published binary
+cargo build --release                    # whole workspace (claudette + dormant forge)
 ```
 
 ### Verify
 
 ```bash
+cargo fmt --all --check
 cargo clippy --all-targets --no-deps -- -D warnings
 cargo test --lib
 ```
 
-Tests: **695 passing, 6 ignored** (4 POSIX-only hook tests, 2 live-recall smokes that need an LM Studio embedding server). Run `cargo fmt --all --check` before committing.
+Tests: **703 passing, 6 ignored** (4 POSIX-only hook tests, 2 live-recall smokes that need an LM Studio embedding server). Run `cargo fmt --all --check` before committing.
 
 ### Project layout rules
 
-- Runtime modules (`src/runtime/*.rs`) are mounted at the crate root via `#[path = "runtime/..."]` attributes. Their internal `use crate::session::X` paths resolve without rewriting. Don't move these files or add `mod` declarations in `runtime/mod.rs`.
-- Single binary, single library. Both are named `claudette` and live in the same crate.
-- No `workspace = true` in dependencies — this is a standalone repo.
+- Runtime modules (`crates/claudette/src/runtime/*.rs`) are mounted at the crate root via `#[path = "runtime/..."]` attributes. Their internal `use crate::session::X` paths resolve without rewriting. Don't move these files or add `mod` declarations in `runtime/mod.rs`.
+- Cargo workspace with two members: `crates/claudette` (the published binary + library, both named `claudette`) and `crates/forge` (`publish = false`, dormant plumbing). All workspace-shared lints live in `crates/*/Cargo.toml` per-crate; the root `Cargo.toml` is a virtual manifest.
+- Build the published crate explicitly with `cargo build -p claudette` (or `cargo build` for the whole workspace); `cargo test --lib` already runs against every workspace member.
 
 ### Adding a new tool
 
