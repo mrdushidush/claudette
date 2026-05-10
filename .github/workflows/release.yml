@@ -55,11 +55,11 @@ jobs:
         # release prep — fail fast rather than publish a wrong version.
         run: |
           tag="${GITHUB_REF#refs/tags/v}"
-          ver="$(grep -E '^version = ' Cargo.toml | head -1 | sed -E 's/^version = "([^"]+)".*/\1/')"
+          ver="$(grep -E '^version = ' crates/claudette/Cargo.toml | head -1 | sed -E 's/^version = "([^"]+)".*/\1/')"
           echo "tag = $tag"
-          echo "Cargo.toml version = $ver"
+          echo "crates/claudette/Cargo.toml version = $ver"
           if [ "$tag" != "$ver" ]; then
-            echo "::error::tag $tag does not match Cargo.toml version $ver"
+            echo "::error::tag $tag does not match crates/claudette/Cargo.toml version $ver"
             exit 1
           fi
 
@@ -82,7 +82,7 @@ jobs:
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        run: cargo publish --locked
+        run: cargo publish --locked -p claudette
       - name: Create GitHub Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3.0.0
         with:
