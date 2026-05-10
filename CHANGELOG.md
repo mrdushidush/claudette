@@ -10,6 +10,8 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-10
+
 ### Added
 
 - **Brownfield missions: clone a repo, work in it, and submit a PR — all
