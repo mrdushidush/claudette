@@ -34,8 +34,8 @@ const MAX_LIST_ENTRIES: usize = 200;
 /// coder + Codet validation entirely. Sprint 13.3 v3 task #55 collapsed to a
 /// 747-byte 2-function stub of a 12-function module via this exact path.
 const CODE_EXTENSIONS: &[&str] = &[
-    "py", "rs", "js", "mjs", "cjs", "jsx", "ts", "tsx", "html", "htm", "css", "go", "java", "c",
-    "cpp", "cc", "cxx", "h", "hpp", "rb", "php", "sh", "bash", "sql",
+    "py", "rs", "js", "mjs", "cjs", "jsx", "ts", "tsx", "go", "java", "c", "cpp", "cc", "cxx", "h",
+    "hpp", "rb", "php", "sh", "bash", "sql",
 ];
 
 fn is_code_extension(filename: &str) -> bool {
@@ -68,7 +68,7 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "write_file",
-                "description": "Write text/config/data to ~/.claudette/files/. Refuses code files (.py/.rs/.js/.ts/etc) — use generate_code for those.",
+                "description": "Write text/config/data/markup to ~/.claudette/files/. Allowed: .txt, .md, .json, .toml, .yaml, .xml, .ini, .html, .htm, .css. Refused (use generate_code instead): real programming languages — .py, .rs, .js, .ts, .go, .c, .cpp, .java, .rb, .php, .sh, .sql.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -163,7 +163,8 @@ fn run_write_file(input: &str) -> Result<String, String> {
     if is_code_extension(path_str) {
         return Err(format!(
             "write_file refuses code files (extension on '{path_str}'). \
-             Use `generate_code` instead — it routes through the specialised \
+             First call `enable_tools(\"code\")` if you haven't already, then \
+             use `generate_code` instead — it routes through the specialised \
              coder model and validates syntax+tests. Pass any existing files \
              the new code should match in `reference_files` so the coder \
              reads the real API."
@@ -322,14 +323,19 @@ mod tests {
     #[test]
     fn is_code_extension_classifies_correctly() {
         // Pure code → refuse.
-        for ext in ["py", "rs", "js", "ts", "html", "css", "go", "sh"] {
+        for ext in ["py", "rs", "js", "ts", "go", "sh"] {
             assert!(
                 is_code_extension(&format!("file.{ext}")),
                 "{ext} should be classified as code"
             );
         }
-        // Config/data → allow.
-        for ext in ["json", "toml", "yaml", "md", "txt", "xml", "ini"] {
+        // Config/data + markup/style → allow. HTML and CSS are markup the
+        // brain writes coherently even at small parameter counts, so they
+        // stay on write_file (vs. real programming languages where small
+        // brains produce stub-quality output that bypasses Codet).
+        for ext in [
+            "json", "toml", "yaml", "md", "txt", "xml", "ini", "html", "htm", "css",
+        ] {
             assert!(
                 !is_code_extension(&format!("file.{ext}")),
                 "{ext} should NOT be classified as code"
@@ -405,7 +411,7 @@ mod tests {
     #[test]
     fn write_file_refuses_uppercase_code_extension() {
         // Extension matching is case-insensitive.
-        let input = json!({ "path": "App.HTML", "content": "<p>x</p>" }).to_string();
+        let input = json!({ "path": "user.PY", "content": "x = 1\n" }).to_string();
         let err = run_write_file(&input).unwrap_err();
         assert!(err.contains("refuses code"), "got: {err}");
     }

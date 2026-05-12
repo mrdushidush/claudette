@@ -96,7 +96,28 @@ bumps are non-breaking bugfixes only.
   including code-fenced output, trailing prose, missing fields,
   out-of-range scores).
 
-## [0.4.1] - 2026-05-10
+### Fixed
+
+- **`write_file` no longer refuses HTML / HTM / CSS files.** The Sprint 13.3
+  "force code through `generate_code` + Codet validation" defense over-fired
+  on markup and styling, which the brain writes coherently even at small
+  parameter counts. Surfaced during v0.3.0 testing on gemma-4-26b-a4b-it: a
+  request to write a hello-world.html sent the brain bouncing between four
+  broken `bash` heredoc / here-string / chained-echo attempts (burning ~17k
+  tokens) instead of one `write_file` call. `CODE_EXTENSIONS` now lists
+  real programming languages only — `.py`, `.rs`, `.js`, `.mjs`, `.cjs`,
+  `.jsx`, `.ts`, `.tsx`, `.go`, `.java`, `.c`, `.cpp`, `.cc`, `.cxx`, `.h`,
+  `.hpp`, `.rb`, `.php`, `.sh`, `.bash`, `.sql`. Markup/style/config/data
+  stays on `write_file`.
+- **`write_file` schema description enumerates exact allowed and refused
+  extensions** instead of `(.py/.rs/.js/.ts/etc)`. The trailing "etc" was
+  letting tool-aware brains extrapolate the refuse set (qwen-3.6 was
+  inferring `.html` from "etc" and bypassing `write_file` before ever
+  trying it).
+- **`write_file` refuse message now leads with `enable_tools("code")`.**
+  When a brain hits the refuse path it was being told to "Use
+  `generate_code` instead" — but `generate_code` lives in the `code` group,
+  which is opt-in. The redirect now spells out the enable step first.
 
 ### Added
 
