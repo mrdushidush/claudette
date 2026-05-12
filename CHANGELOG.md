@@ -10,6 +10,24 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **Forge-mode v0a — `--forge "<prompt>"` CLI flag and `/forge <prompt>`
+  REPL slash command.** First wired-in slice of Theme D (forge-mode-as-
+  brownfield). Runs the prompt as a single brain turn against the active
+  brownfield mission with `files`, `search`, `git`, `advanced`, and
+  `github` tool groups pre-enabled, ending at `mission_submit` (auto-PR).
+  A new `forge_system_prompt` declares the mission tree path and instructs
+  the brain to call `mission_submit` then stop, so a successful run lands
+  the PR in one model invocation. Errors before launching the runtime if
+  no mission is active — start one with `/brownfield <repo>` first.
+
+  v0a is intentionally single-stage: no Planner, no Verifier, no fix-loop,
+  no `models.toml` role-routing, no persona overlay. Those are v0b/v0c.
+  The point of v0a is to surface every integration point exactly once
+  (CLI flag, slash command, mission gate, forge runtime construction)
+  so later slices land as pure additions.
+
 ## [0.4.1] - 2026-05-10
 
 ### Added

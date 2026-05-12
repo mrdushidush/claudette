@@ -67,10 +67,12 @@ pub mod voice;
 pub use api::{probe_ollama, resolve_ollama_url, OllamaApiClient};
 pub use executor::SecretaryToolExecutor;
 pub use memory::{default_memory_path, try_load_memory, try_load_memory_at, MAX_MEMORY_CHARS};
-pub use prompt::{secretary_system_prompt, secretary_system_prompt_with_memory};
+pub use prompt::{
+    forge_system_prompt, secretary_system_prompt, secretary_system_prompt_with_memory,
+};
 pub use run::{
-    default_session_path, run_secretary, run_secretary_repl, save_session, save_session_at,
-    try_load_session, try_load_session_at, SessionOptions,
+    default_session_path, run_forge_mission, run_secretary, run_secretary_repl, save_session,
+    save_session_at, try_load_session, try_load_session_at, SessionOptions,
 };
 pub use tools::{secretary_tools_json, workspace_startup_diagnostics};
 

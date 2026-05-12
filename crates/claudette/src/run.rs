@@ -16,7 +16,7 @@ use crate::commands::{dispatch_slash_command, parse_slash_command, ReplState, Sl
 use crate::executor::SecretaryToolExecutor;
 use crate::memory::try_load_memory;
 use crate::model_config;
-use crate::prompt::secretary_system_prompt_with_memory;
+use crate::prompt::{forge_system_prompt, secretary_system_prompt_with_memory};
 use crate::theme;
 use crate::tool_groups::{ToolGroup, ToolRegistry};
 
@@ -231,6 +231,61 @@ pub fn run_secretary(user_input: &str, opts: SessionOptions) -> Result<TurnSumma
 
     // Same session-size trigger as the REPL — fire after the turn so the
     // session we autosave (when --resume is set) is already trimmed.
+    if let Some(removed) = maybe_compact_session(&mut runtime, false) {
+        eprintln!("[auto-compacted {removed} older message(s)]");
+    }
+
+    if opts.autosave {
+        save_session(runtime.session())?;
+    }
+    Ok(summary)
+}
+
+/// Run a single forge-mode turn inside the active brownfield mission and
+/// return the turn summary. Errors immediately if no mission is active —
+/// forge-mode without a mission has no tree to edit and no PR target.
+///
+/// Forge-mode v0a: the brain is given a prompt + a pre-enabled toolset
+/// (files, search, git, advanced, github) and runs to completion in one
+/// `run_turn` call. The system prompt instructs it to call `mission_submit`
+/// at the end, so on a successful run the PR is open by the time this
+/// returns. Streaming is on so the user watches progress.
+///
+/// `opts.resume` and `opts.autosave` behave as in [`run_secretary`]: forge
+/// turns are part of the same session log when `--resume` was passed; a
+/// one-off forge invocation without `--resume` doesn't clobber the REPL
+/// session.
+pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnSummary> {
+    let mission = crate::missions::active_mission().ok_or_else(|| {
+        anyhow::anyhow!(
+            "forge-mode requires an active brownfield mission. Run `/brownfield <repo>` \
+             (in the REPL) or `claudette` then `/brownfield <repo>` first to clone a \
+             target tree, then re-run with --forge."
+        )
+    })?;
+
+    let session = if opts.resume {
+        try_load_session()?.ok_or_else(|| {
+            anyhow::anyhow!("no saved session at {}", default_session_path().display())
+        })?
+    } else {
+        Session::default()
+    };
+
+    let mut runtime = build_forge_runtime(session, &mission);
+    crate::tools::set_current_turn_paths(crate::tools::extract_user_prompt_paths(user_input));
+
+    // Forge-mode is interactive (the user typed --forge from a terminal), so
+    // route DangerFullAccess tools (mission_submit, git_push, gh_create_pr…)
+    // through the CLI prompter for [y/N]. Without this, the brain would call
+    // mission_submit at the end of a successful run and the policy would
+    // silently deny — the PR would never open.
+    let mut prompter = CliPrompter;
+    let mut prompter_opt: Option<&mut dyn PermissionPrompter> = Some(&mut prompter);
+    let summary =
+        crate::brain_selector::run_turn_with_fallback(&mut runtime, user_input, &mut prompter_opt)
+            .map_err(|e| anyhow::anyhow!("forge turn failed: {e}"))?;
+
     if let Some(removed) = maybe_compact_session(&mut runtime, false) {
         eprintln!("[auto-compacted {removed} older message(s)]");
     }
@@ -572,6 +627,62 @@ pub(crate) fn build_runtime_with_brain(
             // Poisoned-lock recovery: another thread held the lock and
             // panicked. Continue with the inner state — the hinter is a
             // best-effort suggestion, not a correctness path.
+            let reg = match hinter_registry.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            reg.group_tool_names(group)
+        })
+    })
+}
+
+/// Forge-mode runtime: same plumbing as [`build_runtime_with_brain`] but with
+/// a forge-specific system prompt and the tool groups the brain needs
+/// pre-enabled (files, search, git, advanced, github) so it doesn't burn
+/// turns on `enable_tools`.
+///
+/// The mission path is threaded into the system prompt so the model has
+/// accurate cwd context; the `tools::active_cwd()` routing primitive ensures
+/// tools land in the mission tree regardless.
+fn build_forge_runtime(
+    session: Session,
+    mission: &crate::missions::Mission,
+) -> ConversationRuntime<OllamaApiClient, SecretaryToolExecutor> {
+    let brain = model_config::active().brain;
+
+    let mut reg = ToolRegistry::new();
+    for group in [
+        ToolGroup::Files,
+        ToolGroup::Search,
+        ToolGroup::Git,
+        ToolGroup::Advanced,
+        ToolGroup::Github,
+    ] {
+        reg.enable(group);
+    }
+    let registry = Arc::new(Mutex::new(reg));
+
+    let api_client = OllamaApiClient::with_registry(brain.model.clone(), registry.clone())
+        .with_context(brain.num_ctx)
+        .with_max_predict(brain.num_predict)
+        .with_text_callback(stdout_text_callback());
+
+    let hinter_registry = Arc::clone(&registry);
+    let executor = SecretaryToolExecutor::with_registry(registry);
+    let policy = build_permission_policy();
+    let memory = try_load_memory();
+
+    ConversationRuntime::new(
+        session,
+        api_client,
+        executor,
+        policy,
+        forge_system_prompt(&mission.path.to_string_lossy(), memory.as_deref()),
+    )
+    .with_max_iterations(max_iterations())
+    .with_auto_compaction_input_tokens_threshold(u32::MAX)
+    .with_unknown_tool_hinter(move |name: &str| {
+        ToolGroup::parse(name).map_or_else(Vec::new, |group| {
             let reg = match hinter_registry.lock() {
                 Ok(g) => g,
                 Err(p) => p.into_inner(),

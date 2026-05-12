@@ -20,8 +20,9 @@
 use std::process::ExitCode;
 
 use claudette::{
-    briefing, clock, google_auth, probe_ollama, run_secretary, run_secretary_repl, scheduler,
-    secrets, telegram_mode, theme, try_load_session, workspace_startup_diagnostics, SessionOptions,
+    briefing, clock, google_auth, probe_ollama, run_forge_mission, run_secretary,
+    run_secretary_repl, scheduler, secrets, telegram_mode, theme, try_load_session,
+    workspace_startup_diagnostics, SessionOptions,
 };
 use claudette::{ContentBlock, Session};
 
@@ -59,6 +60,12 @@ struct CliArgs {
     /// previous "run --telegram and accidentally expose the bot to
     /// anyone who guesses the username" footgun.
     allow_any_chat: bool,
+    /// `--forge`: run the trailing prompt in forge-mode inside the active
+    /// brownfield mission. Errors if no mission is active. v0a is single-
+    /// stage: one model turn against a pre-enabled toolset, ending at
+    /// `mission_submit` (auto-PR). The prompt text is taken from
+    /// `prompt_words`.
+    forge: bool,
 }
 
 /// Help text printed on `--help` / `-h`. One source of truth; the README
@@ -79,6 +86,11 @@ MODES (pick one; default is interactive REPL):
     --telegram, -t       Run as a Telegram bot. Requires TELEGRAM_BOT_TOKEN.
     --tui                Launch the fullscreen ratatui TUI (Chat / Tools /
                          Notes / Todos / HW tabs).
+    --forge \"<prompt>\"   Run the prompt in forge-mode inside the active
+                         brownfield mission. Errors if no mission is active —
+                         start one with /brownfield <repo> first. v0a runs a
+                         single brain turn with file/search/git/advanced/github
+                         tools pre-enabled and exits at mission_submit (auto-PR).
 
 TELEGRAM OPTIONS:
     --chat <id>          Restrict the Telegram bot to chat ID <id>.
@@ -196,6 +208,7 @@ fn main() -> ExitCode {
         help: _,
         version: _,
         allow_any_chat,
+        forge,
     } = args;
 
     // ── Google OAuth flow ─────────────────────────────────────────────
@@ -247,6 +260,51 @@ fn main() -> ExitCode {
     if let Err(msg) = probe_ollama() {
         eprintln!("{} {}", theme::error(theme::ERR_GLYPH), theme::error(&msg));
         return ExitCode::FAILURE;
+    }
+
+    // ── Forge-mode (single-stage v0a) ─────────────────────────────────
+    // Runs the trailing prompt against the active brownfield mission and
+    // exits when the brain finishes (typically after `mission_submit`
+    // returns). Errors before touching the runtime if no mission is active
+    // or the prompt is empty.
+    if forge {
+        if prompt_args.is_empty() {
+            eprintln!(
+                "{} {}",
+                theme::error(theme::ERR_GLYPH),
+                theme::error(
+                    "--forge requires a prompt. Try: claudette --forge \"fix the parser bug\""
+                )
+            );
+            return ExitCode::FAILURE;
+        }
+        let opts = SessionOptions {
+            resume,
+            autosave: resume,
+        };
+        let prompt = prompt_args.join(" ");
+        return match run_forge_mission(&prompt, opts) {
+            Ok(summary) => {
+                eprintln!();
+                eprintln!(
+                    "{} {}",
+                    theme::BOLT,
+                    theme::info(&format!(
+                        "forge iter={} in={} out={}",
+                        summary.iterations, summary.usage.input_tokens, summary.usage.output_tokens,
+                    ))
+                );
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!(
+                    "{} {}",
+                    theme::error(theme::ERR_GLYPH),
+                    theme::error(&format!("{e:#}"))
+                );
+                ExitCode::FAILURE
+            }
+        };
     }
 
     // ── TUI mode ──────────────────────────────────────────────────────
@@ -435,6 +493,7 @@ fn parse_args(args: &[String]) -> CliArgs {
             "--briefing" => out.briefing = true,
             "--time" => expect = ExpectNext::Time,
             "--days" => expect = ExpectNext::Days,
+            "--forge" => out.forge = true,
             _ => out.prompt_words.push(arg.clone()),
         }
     }
