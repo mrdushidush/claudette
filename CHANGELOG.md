@@ -10,6 +10,8 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-12
+
 ### Added
 
 - **Forge-mode v0a — `--forge "<prompt>"` CLI flag and `/forge <prompt>`
