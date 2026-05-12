@@ -16,7 +16,10 @@ use crate::commands::{dispatch_slash_command, parse_slash_command, ReplState, Sl
 use crate::executor::SecretaryToolExecutor;
 use crate::memory::try_load_memory;
 use crate::model_config;
-use crate::prompt::{forge_system_prompt, secretary_system_prompt_with_memory};
+use crate::prompt::{
+    forge_planner_system_prompt, forge_system_prompt, forge_verifier_system_prompt,
+    secretary_system_prompt_with_memory,
+};
 use crate::theme;
 use crate::tool_groups::{ToolGroup, ToolRegistry};
 
@@ -241,15 +244,44 @@ pub fn run_secretary(user_input: &str, opts: SessionOptions) -> Result<TurnSumma
     Ok(summary)
 }
 
-/// Run a single forge-mode turn inside the active brownfield mission and
-/// return the turn summary. Errors immediately if no mission is active —
-/// forge-mode without a mission has no tree to edit and no PR target.
+/// Maximum number of Coder→Verifier fix-loop rounds in v0c forge-mode.
+/// Round 0 is the initial Coder pass; up to `MAX_FIX_ROUNDS` additional
+/// rounds run if the Verifier rejects. Empirically two rounds is the
+/// sweet spot — a local 8b coder model that didn't get it after two
+/// passes usually won't on a third, and burning more rounds just runs
+/// the user's context budget into the ground.
+const MAX_FIX_ROUNDS: u32 = 2;
+
+/// One Verifier judgement. `pass` is the authoritative gate (a Verifier
+/// can score 8 and still mark fail if it spotted a security bug); `score`
+/// is advisory and shown to the user but not compared against a threshold
+/// in [`run_forge_mission`].
+#[derive(Debug, Clone)]
+pub(crate) struct VerifierResult {
+    pub score: u8,
+    pub pass: bool,
+    pub feedback: String,
+}
+
+/// Run a forge-mode mission inside the active brownfield mission and
+/// return the cumulative summary. Errors immediately if no mission is
+/// active — forge-mode without a mission has no tree to edit and no PR
+/// target.
 ///
-/// Forge-mode v0a: the brain is given a prompt + a pre-enabled toolset
-/// (files, search, git, advanced, github) and runs to completion in one
-/// `run_turn` call. The system prompt instructs it to call `mission_submit`
-/// at the end, so on a successful run the PR is open by the time this
-/// returns. Streaming is on so the user watches progress.
+/// **v0c pipeline (current):**
+/// 1. **Planner** — tool-less brain turn that decomposes the request into
+///    a 3-5 step numbered plan. Output is prepended to the Coder's input.
+/// 2. **Coder** — forge runtime with files/search/git/advanced/github
+///    pre-enabled and `should_submit=false`. Commits the change but does
+///    NOT call `mission_submit` so the Verifier can review first.
+/// 3. **Verifier** — tool-less brain turn that scores the `git diff HEAD`
+///    against the original request. Returns `{score, pass, feedback}`.
+///    On parse failure, treated as pass (advisory mode).
+/// 4. **Fix-loop** — if Verifier `pass=false` and `round < MAX_FIX_ROUNDS`,
+///    re-runs Coder with the Verifier's feedback prepended. Up to two
+///    rounds.
+/// 5. **Submitter** — final Coder turn with `should_submit=true` that only
+///    calls `mission_submit` (PR opens here, not earlier).
 ///
 /// `opts.resume` and `opts.autosave` behave as in [`run_secretary`]: forge
 /// turns are part of the same session log when `--resume` was passed; a
@@ -272,28 +304,269 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
         Session::default()
     };
 
-    let mut runtime = build_forge_runtime(session, &mission);
-    crate::tools::set_current_turn_paths(crate::tools::extract_user_prompt_paths(user_input));
-
-    // Forge-mode is interactive (the user typed --forge from a terminal), so
-    // route DangerFullAccess tools (mission_submit, git_push, gh_create_pr…)
-    // through the CLI prompter for [y/N]. Without this, the brain would call
-    // mission_submit at the end of a successful run and the policy would
-    // silently deny — the PR would never open.
     let mut prompter = CliPrompter;
     let mut prompter_opt: Option<&mut dyn PermissionPrompter> = Some(&mut prompter);
-    let summary =
-        crate::brain_selector::run_turn_with_fallback(&mut runtime, user_input, &mut prompter_opt)
-            .map_err(|e| anyhow::anyhow!("forge turn failed: {e}"))?;
 
-    if let Some(removed) = maybe_compact_session(&mut runtime, false) {
+    // ── Phase 1: Planner ────────────────────────────────────────────
+    eprintln!("{} {}", theme::BOLT, theme::accent("forge: planner"));
+    let plan = run_planner(session.clone(), &mission, user_input, &mut prompter_opt)
+        .unwrap_or_else(|e| {
+            eprintln!("  {} {}", theme::dim("∘"), theme::dim(&format!("planner skipped: {e}")));
+            String::new()
+        });
+    if !plan.trim().is_empty() {
+        eprintln!("{}", theme::dim(plan.trim()));
+    }
+
+    let augmented_input = if plan.trim().is_empty() {
+        user_input.to_string()
+    } else {
+        format!("Plan:\n{}\n\nTask: {user_input}", plan.trim())
+    };
+
+    // ── Phase 2 + 3 + 4: Coder ↔ Verifier fix-loop ───────────────────
+    let mut feedback: Option<String> = None;
+    let mut round: u32 = 0;
+    loop {
+        eprintln!(
+            "{} {} (round {})",
+            theme::BOLT,
+            theme::accent("forge: coder"),
+            round
+        );
+        let coder_input = match &feedback {
+            None => augmented_input.clone(),
+            Some(f) => format!(
+                "The Verifier rejected your previous attempt with this feedback:\n{f}\n\n\
+                 Revise your work — add additional commits to the same branch as needed. \
+                 Do NOT push or call mission_submit yet; the Verifier will review again.\n\n\
+                 Original task: {user_input}"
+            ),
+        };
+        let mut coder_runtime = build_forge_runtime(session.clone(), &mission, false);
+        crate::tools::set_current_turn_paths(crate::tools::extract_user_prompt_paths(&coder_input));
+        let _ = crate::brain_selector::run_turn_with_fallback(
+            &mut coder_runtime,
+            &coder_input,
+            &mut prompter_opt,
+        )
+        .map_err(|e| anyhow::anyhow!("forge coder turn failed (round {round}): {e}"))?;
+
+        // Verifier
+        eprintln!("{} {}", theme::BOLT, theme::accent("forge: verifier"));
+        let diff = capture_git_diff(&mission.path).unwrap_or_default();
+        let verifier =
+            run_verifier(session.clone(), &mission, user_input, &diff, &mut prompter_opt)
+                .unwrap_or_else(|e| {
+                    eprintln!(
+                        "  {} {}",
+                        theme::dim("∘"),
+                        theme::dim(&format!("verifier skipped: {e}"))
+                    );
+                    VerifierResult {
+                        score: 10,
+                        pass: true,
+                        feedback: String::new(),
+                    }
+                });
+        let feedback_display: &str = if verifier.feedback.is_empty() {
+            "(no feedback)"
+        } else {
+            verifier.feedback.as_str()
+        };
+        eprintln!(
+            "  {} {}",
+            theme::BOLT,
+            theme::info(&format!(
+                "score={} pass={} {feedback_display}",
+                verifier.score, verifier.pass,
+            ))
+        );
+
+        if verifier.pass {
+            break;
+        }
+        if round >= MAX_FIX_ROUNDS {
+            eprintln!(
+                "  {} {}",
+                theme::dim("∘"),
+                theme::dim(&format!(
+                    "verifier still failing after {round} round(s); submitting anyway"
+                ))
+            );
+            break;
+        }
+        feedback = Some(verifier.feedback);
+        round += 1;
+    }
+
+    // ── Phase 5: Submitter ──────────────────────────────────────────
+    eprintln!("{} {}", theme::BOLT, theme::accent("forge: submit"));
+    let mut submit_runtime = build_forge_runtime(session, &mission, true);
+    let submit_input =
+        "All quality checks passed. Now call mission_submit with a short PR title that \
+         summarises the change. Do nothing else.";
+    crate::tools::set_current_turn_paths(crate::tools::extract_user_prompt_paths(submit_input));
+    let submit_summary = crate::brain_selector::run_turn_with_fallback(
+        &mut submit_runtime,
+        submit_input,
+        &mut prompter_opt,
+    )
+    .map_err(|e| anyhow::anyhow!("forge submitter turn failed: {e}"))?;
+
+    if let Some(removed) = maybe_compact_session(&mut submit_runtime, false) {
         eprintln!("[auto-compacted {removed} older message(s)]");
     }
-
     if opts.autosave {
-        save_session(runtime.session())?;
+        save_session(submit_runtime.session())?;
     }
-    Ok(summary)
+
+    // Report the Submitter's summary as the canonical one — it's the turn
+    // that opened the PR. Earlier Coder/Verifier iterations are visible
+    // from the user's terminal stream but don't roll into the returned
+    // counter; the user sees per-phase progress as it happens.
+    Ok(submit_summary)
+}
+
+/// v0c: capture `git diff HEAD` from the mission tree. Used to feed the
+/// Verifier a snapshot of what the Coder just did. Returns `None` on any
+/// failure — the Verifier silently falls back to "no diff captured" mode
+/// (which usually scores well since there's nothing to fault) so a
+/// transient `git` failure can't deadlock the pipeline.
+fn capture_git_diff(mission_path: &std::path::Path) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .args(["diff", "HEAD"])
+        .current_dir(mission_path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// v0c: run a tool-less Planner turn. The Planner sees the user's request,
+/// emits a 3-5 step numbered plan, then exits. Output is the plan as plain
+/// text; an empty/whitespace-only response is returned as `Ok("")`
+/// (caller treats that as "no plan, skip prepending").
+///
+/// Uses the `Planner` role model from `~/.claudettes-forge/models.toml` if
+/// configured; otherwise falls back to claudette's active brain.
+fn run_planner(
+    session: Session,
+    mission: &crate::missions::Mission,
+    user_input: &str,
+    prompter: &mut Option<&mut dyn PermissionPrompter>,
+) -> Result<String> {
+    let mut runtime = build_forge_role_runtime(
+        session,
+        mission,
+        forge::types::Role::Planner,
+        forge_planner_system_prompt(&mission.path.to_string_lossy()),
+        &[], // no tool groups
+    );
+    let summary = crate::brain_selector::run_turn_with_fallback(&mut runtime, user_input, prompter)
+        .map_err(|e| anyhow::anyhow!("planner turn failed: {e}"))?;
+    Ok(extract_assistant_text(&summary))
+}
+
+/// v0c: run a tool-less Verifier turn. The Verifier sees the original
+/// request plus the captured `git diff` and returns a JSON object that's
+/// parsed into [`VerifierResult`]. Unparseable responses fall through to a
+/// permissive default (pass=true, score=10) so a poorly-behaved Verifier
+/// model can't deadlock a working Coder.
+fn run_verifier(
+    session: Session,
+    mission: &crate::missions::Mission,
+    user_input: &str,
+    diff: &str,
+    prompter: &mut Option<&mut dyn PermissionPrompter>,
+) -> Result<VerifierResult> {
+    let mut runtime = build_forge_role_runtime(
+        session,
+        mission,
+        forge::types::Role::Verifier,
+        forge_verifier_system_prompt(&mission.path.to_string_lossy()),
+        &[],
+    );
+    let payload = format!(
+        "Original request: {user_input}\n\n--- git diff HEAD ---\n{diff}\n--- end diff ---"
+    );
+    let summary = crate::brain_selector::run_turn_with_fallback(&mut runtime, &payload, prompter)
+        .map_err(|e| anyhow::anyhow!("verifier turn failed: {e}"))?;
+    let text = extract_assistant_text(&summary);
+    Ok(parse_verifier_response(&text))
+}
+
+/// Concatenate the assistant text blocks from a `TurnSummary`. Forge
+/// Planner/Verifier turns produce a single assistant message with text
+/// content; this helper centralises the unwrapping.
+fn extract_assistant_text(summary: &TurnSummary) -> String {
+    use crate::ContentBlock;
+    let mut out = String::new();
+    for msg in &summary.assistant_messages {
+        for block in &msg.blocks {
+            if let ContentBlock::Text { text } = block {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(text);
+            }
+        }
+    }
+    out
+}
+
+/// Parse a Verifier JSON response. Resilient to (a) the model wrapping the
+/// JSON in ```code fences, (b) trailing prose after the closing brace, and
+/// (c) malformed JSON — in cases (b) and (c) we fall through to a
+/// permissive pass=true default rather than blocking the pipeline.
+fn parse_verifier_response(text: &str) -> VerifierResult {
+    let default = VerifierResult {
+        score: 10,
+        pass: true,
+        feedback: String::new(),
+    };
+    let trimmed = text.trim();
+    // Strip ```json … ``` fences if present.
+    let stripped = trimmed
+        .strip_prefix("```json")
+        .or_else(|| trimmed.strip_prefix("```"))
+        .map_or(trimmed, |s| s.trim_start())
+        .strip_suffix("```")
+        .map_or(trimmed, |s| s.trim_end());
+    // Match the JSON object — find the first `{` and the last `}`.
+    let Some(start) = stripped.find('{') else {
+        return default;
+    };
+    let Some(end) = stripped.rfind('}') else {
+        return default;
+    };
+    if end <= start {
+        return default;
+    }
+    let json_slice = &stripped[start..=end];
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json_slice) else {
+        return default;
+    };
+    let score = v
+        .get("score")
+        .and_then(serde_json::Value::as_u64)
+        .map_or(10, |n| n.clamp(0, 10) as u8);
+    let pass = v
+        .get("pass")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true);
+    let feedback = v
+        .get("feedback")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    VerifierResult {
+        score,
+        pass,
+        feedback,
+    }
 }
 
 /// Run an interactive REPL against a single long-lived `ConversationRuntime`.
@@ -647,32 +920,69 @@ pub(crate) fn build_runtime_with_brain(
 fn build_forge_runtime(
     session: Session,
     mission: &crate::missions::Mission,
+    should_submit: bool,
 ) -> ConversationRuntime<OllamaApiClient, SecretaryToolExecutor> {
-    let mut brain = model_config::active().brain;
-
-    // v0b: models.toml role-routing. If the user has a Coder model configured
-    // in ~/.claudettes-forge/models.toml (or env-overridden), use it instead
-    // of the active claudette brain model. num_ctx/num_predict aren't
-    // tracked in models.toml so they carry over from claudette's config.
-    if let Some(coder_model) = forge_coder_model() {
-        brain.model = coder_model;
-    }
-
     // v0b: persona overlay. Auto-load the bundled `codex7` coder persona for
     // forge mode. The persona's voice + backstory get woven into the system
     // prompt via `forge_system_prompt`. Lookup failures fall back to an
     // unpersonified prompt — persona overlay is best-effort, never required.
     let persona = forge_default_coder_persona();
+    let memory = try_load_memory();
+    let persona_overlay = persona
+        .as_ref()
+        .map(|p| (p.voice.as_str(), p.backstory.as_str()));
+
+    let system = forge_system_prompt(
+        &mission.path.to_string_lossy(),
+        memory.as_deref(),
+        persona_overlay,
+        should_submit,
+    );
+
+    // Coder rounds get the full forge toolset. The Submitter phase (v0c)
+    // calls back in with `should_submit=true` and uses the same toolset —
+    // restricting it to just github tools is tempting but the brain may
+    // still need to look at files (e.g. to compose a PR title from the diff).
+    build_forge_role_runtime(
+        session,
+        mission,
+        forge::types::Role::Coder,
+        system,
+        &[
+            ToolGroup::Files,
+            ToolGroup::Search,
+            ToolGroup::Git,
+            ToolGroup::Advanced,
+            ToolGroup::Github,
+        ],
+    )
+}
+
+/// v0c: phase-aware forge runtime builder. Used by the Coder runtime (full
+/// toolset, `Role::Coder` model from `models.toml`) and by the Planner /
+/// Verifier turns (no tool groups, different role-routing). Centralises the
+/// `OllamaApiClient` + `SecretaryToolExecutor` + permission policy + hinter
+/// setup that every forge phase needs.
+fn build_forge_role_runtime(
+    session: Session,
+    _mission: &crate::missions::Mission,
+    role: forge::types::Role,
+    system_prompt: Vec<String>,
+    tool_groups: &[ToolGroup],
+) -> ConversationRuntime<OllamaApiClient, SecretaryToolExecutor> {
+    let mut brain = model_config::active().brain;
+
+    // v0b/v0c: models.toml role-routing. If the user has the requested role
+    // configured in `~/.claudettes-forge/models.toml` (or env-overridden),
+    // use it for this phase. num_ctx/num_predict aren't in models.toml so
+    // they carry over from claudette's config.
+    if let Some(role_model) = forge_role_model(role) {
+        brain.model = role_model;
+    }
 
     let mut reg = ToolRegistry::new();
-    for group in [
-        ToolGroup::Files,
-        ToolGroup::Search,
-        ToolGroup::Git,
-        ToolGroup::Advanced,
-        ToolGroup::Github,
-    ] {
-        reg.enable(group);
+    for group in tool_groups {
+        reg.enable(*group);
     }
     let registry = Arc::new(Mutex::new(reg));
 
@@ -684,44 +994,32 @@ fn build_forge_runtime(
     let hinter_registry = Arc::clone(&registry);
     let executor = SecretaryToolExecutor::with_registry(registry);
     let policy = build_permission_policy();
-    let memory = try_load_memory();
 
-    let persona_overlay = persona
-        .as_ref()
-        .map(|p| (p.voice.as_str(), p.backstory.as_str()));
-
-    ConversationRuntime::new(
-        session,
-        api_client,
-        executor,
-        policy,
-        forge_system_prompt(
-            &mission.path.to_string_lossy(),
-            memory.as_deref(),
-            persona_overlay,
-        ),
-    )
-    .with_max_iterations(max_iterations())
-    .with_auto_compaction_input_tokens_threshold(u32::MAX)
-    .with_unknown_tool_hinter(move |name: &str| {
-        ToolGroup::parse(name).map_or_else(Vec::new, |group| {
-            let reg = match hinter_registry.lock() {
-                Ok(g) => g,
-                Err(p) => p.into_inner(),
-            };
-            reg.group_tool_names(group)
+    ConversationRuntime::new(session, api_client, executor, policy, system_prompt)
+        .with_max_iterations(max_iterations())
+        .with_auto_compaction_input_tokens_threshold(u32::MAX)
+        .with_unknown_tool_hinter(move |name: &str| {
+            ToolGroup::parse(name).map_or_else(Vec::new, |group| {
+                let reg = match hinter_registry.lock() {
+                    Ok(g) => g,
+                    Err(p) => p.into_inner(),
+                };
+                reg.group_tool_names(group)
+            })
         })
-    })
 }
 
-/// v0b helper: resolve the forge-mode Coder model from `~/.claudettes-forge/
+/// v0b helper: resolve any forge role's model from `~/.claudettes-forge/
 /// models.toml` (or env overrides). Returns `None` on any failure — the
 /// caller falls back to claudette's active brain model. Best-effort; a
 /// missing/malformed config never blocks forge mode from running.
-fn forge_coder_model() -> Option<String> {
+///
+/// v0b only consumed this for `Role::Coder`; v0c extends it to the Planner
+/// and Verifier role-routed turns.
+fn forge_role_model(role: forge::types::Role) -> Option<String> {
     forge::types::ModelMap::load()
         .ok()?
-        .resolve(forge::types::Role::Coder)
+        .resolve(role)
         .map(|(_, name)| name.to_string())
 }
 
@@ -1455,17 +1753,84 @@ mod tests {
         assert!(!p.backstory.is_empty(), "codex7 should have backstory");
     }
 
-    /// `forge_coder_model` is best-effort: a missing `~/.claudettes-forge/
-    /// models.toml` returns the built-in default (qwen3-coder:30b), env
-    /// overrides win when set. The smoke test here verifies the helper
-    /// returns *some* non-empty string in a clean environment (defaults
-    /// from `forge::models_toml::default_model_map`).
+    /// `forge_role_model` is best-effort: a missing `~/.claudettes-forge/
+    /// models.toml` returns the built-in default (qwen3-coder:30b for Coder,
+    /// qwen3.5:14b for Planner/Verifier), env overrides win when set. The
+    /// smoke test asserts each forge role returns *some* non-empty string
+    /// in a clean environment (defaults from
+    /// `forge::models_toml::default_model_map`).
     #[test]
-    fn forge_coder_model_returns_a_default_when_no_config() {
-        // Guard against this test running in an env where the user has set
-        // CLAUDETTES_FORGE_CODER_PROVIDER to something weird — we only assert
-        // a non-empty model name is returned.
-        let model = forge_coder_model().expect("forge default coder model");
-        assert!(!model.is_empty(), "coder model name must be non-empty");
+    fn forge_role_model_returns_a_default_for_each_role() {
+        for role in [
+            forge::types::Role::Coder,
+            forge::types::Role::Planner,
+            forge::types::Role::Verifier,
+        ] {
+            let model = forge_role_model(role)
+                .unwrap_or_else(|| panic!("forge default model for {role:?}"));
+            assert!(
+                !model.is_empty(),
+                "{role:?} model name must be non-empty"
+            );
+        }
+    }
+
+    // ─── Forge v0c: Verifier JSON parsing ─────────────────────────────
+
+    #[test]
+    fn verifier_parses_clean_json() {
+        let r = parse_verifier_response(
+            r#"{"score": 9, "pass": true, "feedback": "looks good"}"#,
+        );
+        assert_eq!(r.score, 9);
+        assert!(r.pass);
+        assert_eq!(r.feedback, "looks good");
+    }
+
+    #[test]
+    fn verifier_parses_json_in_code_fence() {
+        let r = parse_verifier_response(
+            "```json\n{\"score\": 5, \"pass\": false, \"feedback\": \"missing tests\"}\n```",
+        );
+        assert_eq!(r.score, 5);
+        assert!(!r.pass);
+        assert_eq!(r.feedback, "missing tests");
+    }
+
+    #[test]
+    fn verifier_parses_json_with_trailing_prose() {
+        let r = parse_verifier_response(
+            "Here is my evaluation:\n{\"score\": 7, \"pass\": true, \"feedback\": \"ok\"}\nDone.",
+        );
+        assert_eq!(r.score, 7);
+        assert!(r.pass);
+    }
+
+    #[test]
+    fn verifier_unparseable_falls_through_to_pass() {
+        // Garbage in → permissive default. This prevents a flaky local model
+        // from deadlocking the forge pipeline.
+        let r = parse_verifier_response("I don't know how to format JSON");
+        assert!(r.pass);
+        assert_eq!(r.score, 10);
+        assert!(r.feedback.is_empty());
+    }
+
+    #[test]
+    fn verifier_clamps_out_of_range_scores() {
+        // A model that returns score=42 (or any value > 10) gets clamped to
+        // 10 rather than overflowing or rejecting the response.
+        let r = parse_verifier_response(r#"{"score": 42, "pass": false, "feedback": "x"}"#);
+        assert_eq!(r.score, 10);
+        assert!(!r.pass);
+    }
+
+    #[test]
+    fn verifier_missing_fields_use_permissive_defaults() {
+        // Only `score` present → pass defaults to true, feedback empty.
+        let r = parse_verifier_response(r#"{"score": 6}"#);
+        assert_eq!(r.score, 6);
+        assert!(r.pass);
+        assert!(r.feedback.is_empty());
     }
 }

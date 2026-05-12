@@ -53,6 +53,49 @@ bumps are non-breaking bugfixes only.
   dormant crate live in the dependency graph (it was `members = […]` but
   unused), unblocking v0c.
 
+- **Forge-mode v0c — Planner / Verifier / fix-loop pipeline.** Replaces
+  v0a/v0b's single-turn flow with a five-phase pipeline orchestrated by
+  `run_forge_mission`:
+  1. **Planner** — tool-less brain turn (`Role::Planner` from
+     `models.toml`) decomposes the user's request into a 3-5 step
+     numbered plan. The plan is prepended to the Coder's input as
+     context. Planner failures are logged and skipped — the Coder runs
+     with the original prompt unchanged.
+  2. **Coder (round 0)** — same forge runtime as v0a/v0b but constructed
+     with `should_submit=false`. Brain commits its change but the
+     system prompt forbids `mission_submit`/`git_push` so the PR
+     doesn't open before review.
+  3. **Verifier** — tool-less brain turn (`Role::Verifier`) reads the
+     captured `git diff HEAD` and emits one-line JSON:
+     `{"score": <1-10>, "pass": <bool>, "feedback": "<reason>"}`.
+     Parsing is resilient to ```code fences``` and trailing prose;
+     unparseable responses fall through to a permissive default
+     (pass=true) so a flaky local model can't deadlock the pipeline.
+  4. **Fix-loop** — if `pass=false` and `round < MAX_FIX_ROUNDS` (2),
+     re-runs the Coder with the Verifier's feedback prepended to the
+     prompt. Cap of 2 rounds is empirical: a local 8b coder that
+     didn't get it after two passes usually won't on a third.
+  5. **Submitter** — final Coder turn with `should_submit=true` that
+     just calls `mission_submit`. PR opens here, never earlier.
+
+  Supporting changes:
+  - `forge_system_prompt` grew a `should_submit: bool` arg controlling
+    the closing instruction.
+  - New `forge_planner_system_prompt` / `forge_verifier_system_prompt`
+    in `prompt.rs`.
+  - New `build_forge_role_runtime` builder takes a `Role` for
+    `models.toml` lookup and a tool-group slice (empty for
+    Planner/Verifier, full forge set for Coder/Submitter).
+  - `forge_role_model(role)` replaces v0b's coder-only helper.
+  - `capture_git_diff(mission_path)` shells out to `git diff HEAD` in
+    the mission tree and returns `Option<String>` (failures silently
+    yield no-diff mode rather than blocking).
+
+  Tests: 7 new in `prompt.rs` (planner/verifier prompt shapes,
+  should_submit variants) and 7 new in `run.rs` (JSON parsing variants
+  including code-fenced output, trailing prose, missing fields,
+  out-of-range scores).
+
 ## [0.4.1] - 2026-05-10
 
 ### Added
