@@ -311,7 +311,11 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
     eprintln!("{} {}", theme::BOLT, theme::accent("forge: planner"));
     let plan = run_planner(session.clone(), &mission, user_input, &mut prompter_opt)
         .unwrap_or_else(|e| {
-            eprintln!("  {} {}", theme::dim("∘"), theme::dim(&format!("planner skipped: {e}")));
+            eprintln!(
+                "  {} {}",
+                theme::dim("∘"),
+                theme::dim(&format!("planner skipped: {e}"))
+            );
             String::new()
         });
     if !plan.trim().is_empty() {
@@ -355,20 +359,25 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
         // Verifier
         eprintln!("{} {}", theme::BOLT, theme::accent("forge: verifier"));
         let diff = capture_git_diff(&mission.path).unwrap_or_default();
-        let verifier =
-            run_verifier(session.clone(), &mission, user_input, &diff, &mut prompter_opt)
-                .unwrap_or_else(|e| {
-                    eprintln!(
-                        "  {} {}",
-                        theme::dim("∘"),
-                        theme::dim(&format!("verifier skipped: {e}"))
-                    );
-                    VerifierResult {
-                        score: 10,
-                        pass: true,
-                        feedback: String::new(),
-                    }
-                });
+        let verifier = run_verifier(
+            session.clone(),
+            &mission,
+            user_input,
+            &diff,
+            &mut prompter_opt,
+        )
+        .unwrap_or_else(|e| {
+            eprintln!(
+                "  {} {}",
+                theme::dim("∘"),
+                theme::dim(&format!("verifier skipped: {e}"))
+            );
+            VerifierResult {
+                score: 10,
+                pass: true,
+                feedback: String::new(),
+            }
+        });
         let feedback_display: &str = if verifier.feedback.is_empty() {
             "(no feedback)"
         } else {
@@ -1768,10 +1777,7 @@ mod tests {
         ] {
             let model = forge_role_model(role)
                 .unwrap_or_else(|| panic!("forge default model for {role:?}"));
-            assert!(
-                !model.is_empty(),
-                "{role:?} model name must be non-empty"
-            );
+            assert!(!model.is_empty(), "{role:?} model name must be non-empty");
         }
     }
 
@@ -1779,9 +1785,7 @@ mod tests {
 
     #[test]
     fn verifier_parses_clean_json() {
-        let r = parse_verifier_response(
-            r#"{"score": 9, "pass": true, "feedback": "looks good"}"#,
-        );
+        let r = parse_verifier_response(r#"{"score": 9, "pass": true, "feedback": "looks good"}"#);
         assert_eq!(r.score, 9);
         assert!(r.pass);
         assert_eq!(r.feedback, "looks good");

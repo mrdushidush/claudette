@@ -161,8 +161,7 @@ pub fn parse_persona_content(raw: &str, label: &str) -> Result<Persona, String> 
         .get("role")
         .and_then(|v| v.as_str())
         .ok_or_else(|| format!("{label}: missing 'role' field"))?;
-    let role = parse_role(role_str)
-        .ok_or_else(|| format!("{label}: unknown role '{role_str}'"))?;
+    let role = parse_role(role_str).ok_or_else(|| format!("{label}: unknown role '{role_str}'"))?;
 
     let voice = tbl
         .get("voice")
