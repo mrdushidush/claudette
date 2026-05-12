@@ -28,6 +28,31 @@ bumps are non-breaking bugfixes only.
   (CLI flag, slash command, mission gate, forge runtime construction)
   so later slices land as pure additions.
 
+- **Forge-mode v0b — `models.toml` role-routing + bundled persona overlay.**
+  Pure runtime additions to `build_forge_runtime`; no new flags, no new
+  slash commands. Two integrations land at once:
+  - **Role-routing:** the dormant `forge::types::ModelMap::load()` reader
+    is now called at forge-runtime construction. If the user has a `Coder`
+    role configured in `~/.claudettes-forge/models.toml` (or via env vars
+    like `CLAUDETTES_FORGE_CODER_MODEL=…`), that model overrides
+    claudette's active brain for forge turns only. `num_ctx` and
+    `num_predict` aren't in `models.toml`, so they carry over from
+    claudette's config. Missing/malformed file → silent fallback to the
+    active brain.
+  - **Persona overlay:** the bundled `personas/codex7.md` (the Coder
+    persona) is baked into the binary via `include_str!` and parsed at
+    startup through a new `forge::personas::parse_persona_content`
+    helper. The persona's `voice` one-liner and backstory prose are
+    appended to the forge-mode system prompt so the brain adopts a
+    consistent code-review/code-write style. Best-effort: if the bundled
+    persona stops parsing, forge-mode runs without an overlay (caught at
+    test time by `forge_default_coder_persona_parses_bundled_codex7`).
+
+  v0b deliberately doesn't add new CLI surface — the dependencies on
+  `forge::types::ModelMap` and `forge::personas` make the previously-
+  dormant crate live in the dependency graph (it was `members = […]` but
+  unused), unblocking v0c.
+
 ## [0.4.1] - 2026-05-10
 
 ### Added

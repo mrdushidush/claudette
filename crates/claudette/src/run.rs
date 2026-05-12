@@ -648,7 +648,21 @@ fn build_forge_runtime(
     session: Session,
     mission: &crate::missions::Mission,
 ) -> ConversationRuntime<OllamaApiClient, SecretaryToolExecutor> {
-    let brain = model_config::active().brain;
+    let mut brain = model_config::active().brain;
+
+    // v0b: models.toml role-routing. If the user has a Coder model configured
+    // in ~/.claudettes-forge/models.toml (or env-overridden), use it instead
+    // of the active claudette brain model. num_ctx/num_predict aren't
+    // tracked in models.toml so they carry over from claudette's config.
+    if let Some(coder_model) = forge_coder_model() {
+        brain.model = coder_model;
+    }
+
+    // v0b: persona overlay. Auto-load the bundled `codex7` coder persona for
+    // forge mode. The persona's voice + backstory get woven into the system
+    // prompt via `forge_system_prompt`. Lookup failures fall back to an
+    // unpersonified prompt — persona overlay is best-effort, never required.
+    let persona = forge_default_coder_persona();
 
     let mut reg = ToolRegistry::new();
     for group in [
@@ -672,12 +686,20 @@ fn build_forge_runtime(
     let policy = build_permission_policy();
     let memory = try_load_memory();
 
+    let persona_overlay = persona
+        .as_ref()
+        .map(|p| (p.voice.as_str(), p.backstory.as_str()));
+
     ConversationRuntime::new(
         session,
         api_client,
         executor,
         policy,
-        forge_system_prompt(&mission.path.to_string_lossy(), memory.as_deref()),
+        forge_system_prompt(
+            &mission.path.to_string_lossy(),
+            memory.as_deref(),
+            persona_overlay,
+        ),
     )
     .with_max_iterations(max_iterations())
     .with_auto_compaction_input_tokens_threshold(u32::MAX)
@@ -690,6 +712,30 @@ fn build_forge_runtime(
             reg.group_tool_names(group)
         })
     })
+}
+
+/// v0b helper: resolve the forge-mode Coder model from `~/.claudettes-forge/
+/// models.toml` (or env overrides). Returns `None` on any failure — the
+/// caller falls back to claudette's active brain model. Best-effort; a
+/// missing/malformed config never blocks forge mode from running.
+fn forge_coder_model() -> Option<String> {
+    forge::types::ModelMap::load()
+        .ok()?
+        .resolve(forge::types::Role::Coder)
+        .map(|(_, name)| name.to_string())
+}
+
+/// v0b helper: load the bundled `codex7` Coder persona, parsed at runtime
+/// from content baked in via `include_str!`. Returns `None` if the bundled
+/// content fails to parse, which should only happen if the personas file is
+/// edited into invalid TOML/markdown — caught by
+/// `forge::personas::bundled_personas_all_parse`.
+///
+/// Bundled rather than disk-resolved because claudette is shipped as a
+/// single binary (no `cargo install`-side `personas/` directory).
+fn forge_default_coder_persona() -> Option<forge::personas::Persona> {
+    const CODEX7: &str = include_str!("../../../personas/codex7.md");
+    forge::personas::parse_persona_content(CODEX7, "bundled:codex7").ok()
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1392,5 +1438,34 @@ mod tests {
                 "{name} must be DangerFullAccess: {why}; got {actual:?}"
             );
         }
+    }
+
+    // ─── Forge v0b: persona overlay + models.toml role-routing ────────
+
+    /// The bundled `codex7` persona is baked into the binary via
+    /// `include_str!`. If the file is edited into invalid TOML or stripped of
+    /// its frontmatter, `forge_default_coder_persona` returns `None` and
+    /// forge-mode silently runs without a persona. Catch that at build time.
+    #[test]
+    fn forge_default_coder_persona_parses_bundled_codex7() {
+        let p = forge_default_coder_persona().expect("bundled codex7 must parse");
+        assert_eq!(p.name, "CodeX-7");
+        assert_eq!(p.role, forge::types::Role::Coder);
+        assert!(!p.voice.is_empty(), "codex7 should have a voice");
+        assert!(!p.backstory.is_empty(), "codex7 should have backstory");
+    }
+
+    /// `forge_coder_model` is best-effort: a missing `~/.claudettes-forge/
+    /// models.toml` returns the built-in default (qwen3-coder:30b), env
+    /// overrides win when set. The smoke test here verifies the helper
+    /// returns *some* non-empty string in a clean environment (defaults
+    /// from `forge::models_toml::default_model_map`).
+    #[test]
+    fn forge_coder_model_returns_a_default_when_no_config() {
+        // Guard against this test running in an env where the user has set
+        // CLAUDETTES_FORGE_CODER_PROVIDER to something weird — we only assert
+        // a non-empty model name is returned.
+        let model = forge_coder_model().expect("forge default coder model");
+        assert!(!model.is_empty(), "coder model name must be non-empty");
     }
 }

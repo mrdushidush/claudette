@@ -119,6 +119,19 @@ fn load_dir_into(dir: &Path, map: &mut PersonaMap) -> Result<(), String> {
 /// declares an unknown `role`, or is empty.
 pub fn parse_persona_file(path: &Path) -> Result<Persona, String> {
     let raw = std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    parse_persona_content(&raw, &path.display().to_string())
+}
+
+/// Parse persona content from a raw string. Same parser as
+/// [`parse_persona_file`], but the source isn't a real path — `label` is
+/// used in error messages and can be anything that identifies the source
+/// for a human reader (e.g. `"bundled:codex7"` for `include_str!`-baked
+/// content).
+///
+/// # Errors
+/// Returns `Err` when the content has no frontmatter, malformed TOML,
+/// an unknown `role`, or is empty.
+pub fn parse_persona_content(raw: &str, label: &str) -> Result<Persona, String> {
     // Normalise CRLF → LF so the "\n---" delimiter match and the TOML parser
     // both work on Windows checkouts (git autocrlf=true turns committed LF
     // into CRLF on disk).
@@ -127,29 +140,29 @@ pub fn parse_persona_file(path: &Path) -> Result<Persona, String> {
     // Strip leading "---" then match the closing "\n---" delimiter.
     let after_open = raw
         .strip_prefix("---")
-        .ok_or_else(|| format!("{}: missing leading --- frontmatter", path.display()))?
+        .ok_or_else(|| format!("{label}: missing leading --- frontmatter"))?
         .trim_start_matches('\n');
     let end_idx = after_open
         .find("\n---")
-        .ok_or_else(|| format!("{}: no closing --- after frontmatter", path.display()))?;
+        .ok_or_else(|| format!("{label}: no closing --- after frontmatter"))?;
     let frontmatter = &after_open[..end_idx];
     let body = after_open[end_idx + "\n---".len()..].trim_start_matches('\n');
 
     let tbl: toml::Table =
-        toml::from_str(frontmatter).map_err(|e| format!("{}: toml parse: {e}", path.display()))?;
+        toml::from_str(frontmatter).map_err(|e| format!("{label}: toml parse: {e}"))?;
 
     let name = tbl
         .get("name")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("{}: missing 'name' field", path.display()))?
+        .ok_or_else(|| format!("{label}: missing 'name' field"))?
         .to_string();
 
     let role_str = tbl
         .get("role")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| format!("{}: missing 'role' field", path.display()))?;
+        .ok_or_else(|| format!("{label}: missing 'role' field"))?;
     let role = parse_role(role_str)
-        .ok_or_else(|| format!("{}: unknown role '{role_str}'", path.display()))?;
+        .ok_or_else(|| format!("{label}: unknown role '{role_str}'"))?;
 
     let voice = tbl
         .get("voice")

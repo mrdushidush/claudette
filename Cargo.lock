@@ -153,6 +153,7 @@ dependencies = [
  "cron",
  "crossterm",
  "dotenvy",
+ "forge",
  "getrandom 0.4.2",
  "glob",
  "image",

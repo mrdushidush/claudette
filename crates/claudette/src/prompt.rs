@@ -113,8 +113,17 @@ pub fn secretary_system_prompt_with_memory(memory: Option<&str>, concise: bool) 
 /// `mission_path` is the absolute path of the active mission tree, threaded
 /// through from `crate::missions::active_cwd()` at build time. Empty memory
 /// is treated as no memory.
+///
+/// `persona` is an optional `(voice, backstory)` overlay (v0b). When set, the
+/// voice one-liner and backstory prose are appended to the base prompt so the
+/// brain adopts the persona's style. Currently sourced from the bundled
+/// `personas/codex7.md` (the Coder persona) baked in via `include_str!`.
 #[must_use]
-pub fn forge_system_prompt(mission_path: &str, memory: Option<&str>) -> Vec<String> {
+pub fn forge_system_prompt(
+    mission_path: &str,
+    memory: Option<&str>,
+    persona: Option<(&str, &str)>,
+) -> Vec<String> {
     let base = format!(
         "You are claudette in forge-mode, executing inside an active brownfield mission. \
          Mission tree: {mission_path}. All file, shell, and git tools route to that \
@@ -126,6 +135,19 @@ pub fn forge_system_prompt(mission_path: &str, memory: Option<&str>) -> Vec<Stri
     );
 
     let mut prompt = base;
+
+    if let Some((voice, backstory)) = persona {
+        use std::fmt::Write;
+        let voice_t = voice.trim();
+        let backstory_t = backstory.trim();
+        if !voice_t.is_empty() {
+            let _ = write!(prompt, "\n\nVoice: {voice_t}");
+        }
+        if !backstory_t.is_empty() {
+            let _ = write!(prompt, "\n\nBackstory:\n{backstory_t}");
+        }
+    }
+
     if let Some(m) = memory {
         let trimmed = m.trim();
         if !trimmed.is_empty() {
@@ -285,5 +307,51 @@ mod tests {
         assert!(concise[0].contains("concise"));
         // Base prompt should still be present.
         assert!(concise[0].starts_with("You are an AI personal secretary"));
+    }
+
+    // ─── forge_system_prompt (v0a/v0b) ─────────────────────────────────
+
+    #[test]
+    fn forge_prompt_declares_mission_path() {
+        let p = forge_system_prompt("/tmp/m/abcc", None, None);
+        assert!(p[0].contains("/tmp/m/abcc"));
+        assert!(p[0].contains("mission_submit"));
+    }
+
+    #[test]
+    fn forge_prompt_appends_memory() {
+        let p = forge_system_prompt("/m", Some("user likes terse output"), None);
+        assert!(p[0].contains("user likes terse output"));
+    }
+
+    #[test]
+    fn forge_prompt_ignores_blank_memory() {
+        let with_blank = forge_system_prompt("/m", Some("   \n\t  "), None);
+        let without = forge_system_prompt("/m", None, None);
+        assert_eq!(with_blank, without);
+    }
+
+    #[test]
+    fn forge_prompt_with_persona_includes_voice_and_backstory() {
+        let p = forge_system_prompt(
+            "/m",
+            None,
+            Some(("clipped-tactical", "Eight years of incident-response work.")),
+        );
+        assert!(p[0].contains("Voice: clipped-tactical"));
+        assert!(p[0].contains("Backstory:"));
+        assert!(p[0].contains("incident-response"));
+    }
+
+    #[test]
+    fn forge_prompt_skips_blank_persona_fields() {
+        // Empty voice + non-empty backstory: only backstory appears.
+        let p = forge_system_prompt("/m", None, Some(("   ", "Just backstory.")));
+        assert!(!p[0].contains("Voice:"));
+        assert!(p[0].contains("Backstory:"));
+        // Both blank: neither header appears.
+        let p2 = forge_system_prompt("/m", None, Some(("", "")));
+        assert!(!p2[0].contains("Voice:"));
+        assert!(!p2[0].contains("Backstory:"));
     }
 }
