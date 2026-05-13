@@ -449,12 +449,10 @@ Flag anything over 50 lines.
     // files from the repo here.
 
     fn workspace_personas_dir() -> PathBuf {
-        // CARGO_MANIFEST_DIR is `crates/claudette`; personas live two levels up.
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(Path::parent)
-            .expect("crates/claudette should have a grandparent")
-            .join("personas")
+        // CARGO_MANIFEST_DIR is `crates/claudette`; bundled personas live
+        // alongside the crate at `crates/claudette/personas/` so they ship
+        // inside the cargo-published tarball.
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("personas")
     }
 
     #[test]

@@ -1042,7 +1042,7 @@ fn forge_role_model(role: forge::types::Role) -> Option<String> {
 /// Bundled rather than disk-resolved because claudette is shipped as a
 /// single binary (no `cargo install`-side `personas/` directory).
 fn forge_default_coder_persona() -> Option<forge::personas::Persona> {
-    const CODEX7: &str = include_str!("../../../personas/codex7.md");
+    const CODEX7: &str = include_str!("../personas/codex7.md");
     forge::personas::parse_persona_content(CODEX7, "bundled:codex7").ok()
 }
 
