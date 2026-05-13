@@ -10,6 +10,25 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-05-13
+
+### Fixed
+
+- **Publish to crates.io.** v0.5.0 was tagged but never published because
+  the v0b commit (`282a478`) wired claudette to `forge = { path = "../forge" }`
+  — a path-only workspace dependency, which `cargo publish` rejects with
+  `failed to verify manifest … dependency 'forge' does not specify a
+  version`. v0.4.1 published cleanly because it didn't depend on `forge`
+  at all; the workspace member just compiled alongside.
+
+  Fix: fold the dormant `forge` plumbing into `crates/claudette/src/forge/`
+  and drop `crates/forge/` from the workspace. The `forge::types`,
+  `forge::personas`, and `forge::models_toml` modules carry over verbatim
+  (only `use crate::types::*` → `use super::types::*` inside the sub-
+  module). `crates/forge/src/pipeline.rs` was empty `pub mod` stubs and
+  did not carry over. v0.5.0's tag is left in place as a "published commit,
+  blocked publish" record; v0.5.1 supersedes it.
+
 ## [0.5.0] - 2026-05-12
 
 ### Added

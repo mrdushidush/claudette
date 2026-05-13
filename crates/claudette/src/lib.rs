@@ -41,6 +41,7 @@ pub mod clock;
 pub mod codet;
 pub mod commands;
 pub mod executor;
+pub mod forge;
 pub mod google_auth;
 pub mod image_attach;
 pub mod memory;

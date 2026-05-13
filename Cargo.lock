@@ -144,7 +144,7 @@ dependencies = [
 
 [[package]]
 name = "claudette"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -153,7 +153,6 @@ dependencies = [
  "cron",
  "crossterm",
  "dotenvy",
- "forge",
  "getrandom 0.4.2",
  "glob",
  "image",
@@ -450,15 +449,6 @@ name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
-
-[[package]]
-name = "forge"
-version = "0.0.0"
-dependencies = [
- "serde",
- "serde_json",
- "toml",
-]
 
 [[package]]
 name = "form_urlencoded"

@@ -2,12 +2,12 @@
 resolver = "2"
 members = [
     "crates/claudette",
-    "crates/forge",
 ]
 
-# `claudette` is the only published crate. `forge` is workspace-internal
-# plumbing — see crates/forge/Cargo.toml `publish = false` and the 0.4.1
-# sprint plan (Phase 1: Forge fold).
+# `claudette` is the only crate. The dormant `forge` plumbing was folded
+# into `crates/claudette/src/forge/` in v0.5.1 so the published manifest no
+# longer carries a path-only workspace dependency (cargo rejects those at
+# `cargo publish` time).
 
 [profile.release]
 opt-level = "z"

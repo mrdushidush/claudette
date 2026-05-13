@@ -14,6 +14,7 @@ use anyhow::{Context, Result};
 use crate::api::{stdout_text_callback, telegram_text_callback, OllamaApiClient};
 use crate::commands::{dispatch_slash_command, parse_slash_command, ReplState, SlashOutcome};
 use crate::executor::SecretaryToolExecutor;
+use crate::forge;
 use crate::memory::try_load_memory;
 use crate::model_config;
 use crate::prompt::{

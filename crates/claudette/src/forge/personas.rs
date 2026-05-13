@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::types::Role;
+use super::types::Role;
 
 /// A loaded persona, parsed from a markdown file with TOML frontmatter.
 #[derive(Debug, Clone)]
@@ -449,11 +449,11 @@ Flag anything over 50 lines.
     // files from the repo here.
 
     fn workspace_personas_dir() -> PathBuf {
-        // CARGO_MANIFEST_DIR is `crates/forge`; personas live two levels up.
+        // CARGO_MANIFEST_DIR is `crates/claudette`; personas live two levels up.
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .and_then(Path::parent)
-            .expect("crates/forge should have a grandparent")
+            .expect("crates/claudette should have a grandparent")
             .join("personas")
     }
 

@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::types::{ModelMap, ProviderKind, Role};
+use super::types::{ModelMap, ProviderKind, Role};
 
 // ─── Error ───────────────────────────────────────────────────────────────────
 
