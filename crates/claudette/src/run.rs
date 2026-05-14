@@ -99,6 +99,39 @@ const HARD_COMPACT_PRESERVE: usize = 4;
 /// trade summary aggressiveness for continuity.
 const SOFT_COMPACT_PRESERVE: usize = 12;
 
+/// Which compaction tier fired in a given pass. Carried back out of
+/// [`maybe_compact_session`] so the callsite's log message names the right
+/// threshold and tier — without this, soft-tier compactions were reported
+/// as "session was over <hard>-token threshold", which made test 8 of the
+/// 2026-05-12 sprint impossible to interpret.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompactionTier {
+    /// Hit [`compact_threshold`] (the default 1M hard ceiling).
+    Hard,
+    /// Hit [`soft_compact_threshold`] but stayed below the hard ceiling.
+    Soft,
+}
+
+impl CompactionTier {
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::Hard => "hard",
+            Self::Soft => "soft",
+        }
+    }
+}
+
+/// What happened in one auto-compaction pass: how many messages were
+/// summarised, which tier fired, and the threshold token-count that gated
+/// it. Used by the REPL/single-shot log lines to surface tier-aware status
+/// instead of always naming the hard threshold.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CompactionOutcome {
+    pub removed: usize,
+    pub tier: CompactionTier,
+    pub threshold: usize,
+}
+
 /// Default REPL/TUI max iterations per turn — how many (model → tool → result)
 /// cycles a single user prompt is allowed to drive before the runtime aborts
 /// with "conversation loop exceeded the maximum number of iterations".
@@ -235,8 +268,13 @@ pub fn run_secretary(user_input: &str, opts: SessionOptions) -> Result<TurnSumma
 
     // Same session-size trigger as the REPL — fire after the turn so the
     // session we autosave (when --resume is set) is already trimmed.
-    if let Some(removed) = maybe_compact_session(&mut runtime, false) {
-        eprintln!("[auto-compacted {removed} older message(s)]");
+    if let Some(outcome) = maybe_compact_session(&mut runtime, false) {
+        eprintln!(
+            "[auto-compacted {} older message(s) — {} tier @ {} tokens]",
+            outcome.removed,
+            outcome.tier.name(),
+            outcome.threshold,
+        );
     }
 
     if opts.autosave {
@@ -424,8 +462,13 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
     )
     .map_err(|e| anyhow::anyhow!("forge submitter turn failed: {e}"))?;
 
-    if let Some(removed) = maybe_compact_session(&mut submit_runtime, false) {
-        eprintln!("[auto-compacted {removed} older message(s)]");
+    if let Some(outcome) = maybe_compact_session(&mut submit_runtime, false) {
+        eprintln!(
+            "[auto-compacted {} older message(s) — {} tier @ {} tokens]",
+            outcome.removed,
+            outcome.tier.name(),
+            outcome.threshold,
+        );
     }
     if opts.autosave {
         save_session(submit_runtime.session())?;
@@ -639,6 +682,13 @@ pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
         theme::SAVE,
         theme::dim(&format!("session: {}", default_session_path().display()))
     );
+
+    // Pre-flight the recall embedder so a missing embed model (the typical
+    // LM Studio first-run state) surfaces a clean warn line here, not as
+    // per-turn noise after the user starts asking questions. Honors
+    // CLAUDETTE_RECALL_DISABLE — opting out skips the probe too.
+    probe_recall_at_startup();
+
     eprintln!();
 
     loop {
@@ -679,7 +729,10 @@ pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
         }
 
         if let Some(cmd) = parse_slash_command(trimmed) {
-            match dispatch_slash_command(cmd, &mut runtime, &state) {
+            let stderr = std::io::stderr();
+            let mut err = stderr.lock();
+            let rebuild = |s: Session| build_runtime_streaming(s, false);
+            match dispatch_slash_command(cmd, &mut runtime, &state, &mut err, &rebuild) {
                 SlashOutcome::Continue => continue,
                 SlashOutcome::Exit => break,
             }
@@ -747,44 +800,24 @@ pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
                 );
 
                 // Cross-session recall: index the user input + the assistant
-                // text from this turn. Best-effort — a transient Ollama
-                // outage or a missing embed model emits a single warn line
-                // without breaking the REPL. Disable with
-                // `CLAUDETTE_RECALL_DISABLE=1` (e.g., privacy, no Ollama).
-                if !recall_disabled() {
+                // text from this turn. Best-effort — the FIRST failure (e.g.
+                // a missing embed model in LM Studio) emits one warn line
+                // and then sticky-disables indexing for the rest of this
+                // process, so the user isn't spammed turn-after-turn. They
+                // can fix the underlying issue and restart claudette to
+                // re-enable recall. The hard kill-switch
+                // `CLAUDETTE_RECALL_DISABLE=1` still wins.
+                if recall_index_allowed() {
                     if let Err(e) = index_turn_for_recall(trimmed, &runtime) {
+                        mark_recall_index_broken();
                         eprintln!(
                             "{} {}",
                             theme::warn(theme::WARN_GLYPH),
-                            theme::warn(&format!("recall: {e}"))
-                        );
-                    }
-                }
-
-                // the runtime's built-in trigger is disabled (see
-                // build_runtime_inner) — we fire our own session-size trigger
-                // here instead, AFTER the turn so the model never sees a
-                // mid-turn rebuild.
-                if let Some(removed) = maybe_compact_session(&mut runtime, false) {
-                    eprintln!(
-                        "{} {}",
-                        theme::SAVE,
-                        theme::ok(&format!(
-                            "auto-compacted {removed} older message(s) — session was over {}-token threshold",
-                            compact_threshold(),
-                        ))
-                    );
-                }
-
-                if opts.autosave {
-                    if let Err(e) = save_session(runtime.session()) {
-                        // Surface the error but don't drop the REPL — the
-                        // session in memory is still valid; only persistence
-                        // is broken.
-                        eprintln!(
-                            "{} {}",
-                            theme::warn(theme::WARN_GLYPH),
-                            theme::warn(&format!("session save failed: {e:#}"))
+                            theme::warn(&format!(
+                                "recall: {e} — disabling recall indexing for this session \
+                                 (set CLAUDETTE_RECALL_DISABLE=1 to silence, or fix the \
+                                 embed model and restart)"
+                            ))
                         );
                     }
                 }
@@ -794,6 +827,38 @@ pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
                     "{} {}",
                     theme::error(theme::ERR_GLYPH),
                     theme::error(&format!("turn failed: {e}"))
+                );
+            }
+        }
+
+        // Post-turn housekeeping: runs regardless of success/failure so a
+        // bloated session doesn't keep paying its context tax across retries.
+        // Pre-2026-05-12 this was inside the Ok arm; a `Brain HTTP 400 Model
+        // reloaded` error during sprint Test 8 demonstrated that skipping
+        // compaction on failure makes the next attempt strictly more likely
+        // to OOM. The runtime's built-in trigger is disabled (see
+        // `build_runtime_inner`) — this is the live trigger.
+        if let Some(outcome) = maybe_compact_session(&mut runtime, false) {
+            eprintln!(
+                "{} {}",
+                theme::SAVE,
+                theme::ok(&format!(
+                    "auto-compacted {} older message(s) — {} tier crossed at {} tokens",
+                    outcome.removed,
+                    outcome.tier.name(),
+                    outcome.threshold,
+                ))
+            );
+        }
+
+        if opts.autosave {
+            if let Err(e) = save_session(runtime.session()) {
+                // Surface the error but don't drop the REPL — the session
+                // in memory is still valid; only persistence is broken.
+                eprintln!(
+                    "{} {}",
+                    theme::warn(theme::WARN_GLYPH),
+                    theme::warn(&format!("session save failed: {e:#}"))
                 );
             }
         }
@@ -1185,11 +1250,53 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
 /// Whether the post-turn recall indexing is disabled. Off-by-default
 /// privacy/perf escape hatch: `CLAUDETTE_RECALL_DISABLE=1`. Anything else
 /// (unset, "0", garbage) leaves indexing enabled.
-fn recall_disabled() -> bool {
+pub(crate) fn recall_disabled() -> bool {
     matches!(
         std::env::var("CLAUDETTE_RECALL_DISABLE").as_deref(),
         Ok("1")
     )
+}
+
+/// Sticky session-scoped flag: once recall indexing fails (e.g. LM Studio
+/// has no embed model loaded), every subsequent turn would re-fail with
+/// identical noise. After the first failure we set this and silently skip
+/// the indexing call until the process restarts. The user gets ONE warning
+/// at the first failure with instructions for fixing it (load the model
+/// or set `CLAUDETTE_RECALL_DISABLE=1`).
+static RECALL_INDEX_BROKEN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn recall_index_allowed() -> bool {
+    !recall_disabled() && !RECALL_INDEX_BROKEN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub(crate) fn mark_recall_index_broken() {
+    RECALL_INDEX_BROKEN.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Pre-flight the recall embedder by running a tiny embed call at REPL/TUI
+/// startup. On failure (e.g. LM Studio's "No models loaded" 400), set the
+/// sticky-disable flag and print one clear warn line. Silent on success so
+/// healthy startups stay quiet.
+///
+/// Called once per process. Honors `CLAUDETTE_RECALL_DISABLE=1` — if recall
+/// is already opted out, the probe is a no-op (we don't want to wake the
+/// store at all in privacy mode).
+pub(crate) fn probe_recall_at_startup() {
+    if recall_disabled() {
+        return;
+    }
+    if let Err(e) = crate::recall::probe() {
+        mark_recall_index_broken();
+        eprintln!(
+            "{} {}",
+            theme::warn(theme::WARN_GLYPH),
+            theme::warn(&format!(
+                "recall: probe failed — {e}. Indexing disabled for this session \
+                 (load an embed model and restart, or set CLAUDETTE_RECALL_DISABLE=1 to silence)."
+            ))
+        );
+    }
 }
 
 /// Index the user input string + the most recent assistant text-blocks
@@ -1200,10 +1307,14 @@ fn recall_disabled() -> bool {
 /// nudge user-message into the session (see [`run_turn_with_retry`]). The
 /// raw `trimmed` REPL line is what the human actually typed, so we index
 /// that and skip the synthetic.
-fn index_turn_for_recall(
+pub(crate) fn index_turn_for_recall<C, T>(
     user_input: &str,
-    runtime: &ConversationRuntime<OllamaApiClient, SecretaryToolExecutor>,
-) -> Result<(), String> {
+    runtime: &ConversationRuntime<C, T>,
+) -> Result<(), String>
+where
+    C: crate::ApiClient,
+    T: crate::ToolExecutor,
+{
     use crate::recall::{global_index, Role};
     use crate::ContentBlock;
 
@@ -1352,9 +1463,11 @@ pub(crate) fn run_turn_with_retry(
 pub(crate) fn maybe_compact_session(
     runtime: &mut ConversationRuntime<OllamaApiClient, SecretaryToolExecutor>,
     telegram: bool,
-) -> Option<usize> {
+) -> Option<CompactionOutcome> {
     let estimated = estimate_session_tokens(runtime.session());
-    let preserve = pick_compact_preserve(estimated, compact_threshold(), soft_compact_threshold())?;
+    let hard = compact_threshold();
+    let soft = soft_compact_threshold();
+    let (tier, preserve, threshold) = pick_compact_plan(estimated, hard, soft)?;
     let result = compact_session(
         runtime.session(),
         CompactionConfig {
@@ -1369,28 +1482,32 @@ pub(crate) fn maybe_compact_session(
     }
     let removed = result.removed_message_count;
     *runtime = build_runtime_streaming(result.compacted_session, telegram);
-    Some(removed)
+    Some(CompactionOutcome {
+        removed,
+        tier,
+        threshold,
+    })
 }
 
-/// Choose how many recent messages to preserve based on the session's
-/// estimated token count and the two thresholds. Returns `None` when
-/// neither threshold is crossed (no compaction).
+/// Decide what compaction (if any) the session needs. Returns
+/// `(tier, preserve_recent_messages, threshold_that_fired)` or `None` when
+/// neither threshold is crossed.
 ///
 /// Pure function — separates the tiering policy from the runtime-mutating
 /// half of `maybe_compact_session` so it can be unit-tested without
 /// constructing a runtime.
 #[must_use]
-fn pick_compact_preserve(
+pub(crate) fn pick_compact_plan(
     estimated: usize,
     hard_threshold: usize,
     soft_threshold: Option<usize>,
-) -> Option<usize> {
+) -> Option<(CompactionTier, usize, usize)> {
     if estimated >= hard_threshold {
-        return Some(HARD_COMPACT_PRESERVE);
+        return Some((CompactionTier::Hard, HARD_COMPACT_PRESERVE, hard_threshold));
     }
     if let Some(soft) = soft_threshold {
         if estimated >= soft {
-            return Some(SOFT_COMPACT_PRESERVE);
+            return Some((CompactionTier::Soft, SOFT_COMPACT_PRESERVE, soft));
         }
     }
     None
@@ -1568,8 +1685,14 @@ mod tests {
         let messages_before = runtime.session().messages.len();
 
         let result = maybe_compact_session(&mut runtime, false);
-        let removed = result.expect("expected compaction to fire");
-        assert!(removed > 0, "should remove at least one message");
+        let outcome = result.expect("expected compaction to fire");
+        assert!(outcome.removed > 0, "should remove at least one message");
+        assert_eq!(
+            outcome.tier,
+            CompactionTier::Hard,
+            "10-token hard threshold should fire the hard tier"
+        );
+        assert_eq!(outcome.threshold, 10);
         // After compaction the runtime is rebuilt around the compacted
         // session. The replacement carries the System summary message
         // plus the preserved tail, so total < before.
@@ -1599,45 +1722,51 @@ mod tests {
     // ─── Tiered compaction policy (P3) ──────────────────────────────────────
 
     #[test]
-    fn pick_compact_preserve_returns_none_below_both_thresholds() {
-        assert_eq!(
-            pick_compact_preserve(50_000, 1_000_000, Some(200_000)),
-            None
-        );
-        assert_eq!(pick_compact_preserve(50_000, 1_000_000, None), None);
+    fn pick_compact_plan_returns_none_below_both_thresholds() {
+        assert_eq!(pick_compact_plan(50_000, 1_000_000, Some(200_000)), None);
+        assert_eq!(pick_compact_plan(50_000, 1_000_000, None), None);
     }
 
     #[test]
-    fn pick_compact_preserve_returns_soft_when_only_soft_crossed() {
+    fn pick_compact_plan_returns_soft_when_only_soft_crossed() {
         assert_eq!(
-            pick_compact_preserve(250_000, 1_000_000, Some(200_000)),
-            Some(SOFT_COMPACT_PRESERVE)
+            pick_compact_plan(250_000, 1_000_000, Some(200_000)),
+            Some((CompactionTier::Soft, SOFT_COMPACT_PRESERVE, 200_000))
         );
     }
 
     #[test]
-    fn pick_compact_preserve_returns_hard_when_hard_crossed() {
+    fn pick_compact_plan_returns_hard_when_hard_crossed() {
         assert_eq!(
-            pick_compact_preserve(1_500_000, 1_000_000, Some(200_000)),
-            Some(HARD_COMPACT_PRESERVE)
+            pick_compact_plan(1_500_000, 1_000_000, Some(200_000)),
+            Some((CompactionTier::Hard, HARD_COMPACT_PRESERVE, 1_000_000))
         );
     }
 
     #[test]
-    fn pick_compact_preserve_prefers_hard_over_soft_when_both_crossed() {
+    fn pick_compact_plan_prefers_hard_over_soft_when_both_crossed() {
         // At >= hard, the soft tier is skipped — we want maximally aggressive
         // summarisation when the session is genuinely huge.
         assert_eq!(
-            pick_compact_preserve(2_000_000, 1_000_000, Some(200_000)),
-            Some(HARD_COMPACT_PRESERVE)
+            pick_compact_plan(2_000_000, 1_000_000, Some(200_000)),
+            Some((CompactionTier::Hard, HARD_COMPACT_PRESERVE, 1_000_000))
         );
     }
 
     #[test]
-    fn pick_compact_preserve_skips_soft_when_threshold_unset() {
+    fn pick_compact_plan_skips_soft_when_threshold_unset() {
         // No CLAUDETTE_SOFT_COMPACT_THRESHOLD set → only the hard threshold
         // gates compaction, preserving the historical one-tier behaviour.
-        assert_eq!(pick_compact_preserve(500_000, 1_000_000, None), None);
+        assert_eq!(pick_compact_plan(500_000, 1_000_000, None), None);
+    }
+
+    #[test]
+    fn compaction_tier_names_are_lowercase_for_logs() {
+        // The log message format expects bare lowercase names ("soft tier
+        // @ 200000 tokens") — any change here is a user-visible log break,
+        // so pin the strings.
+        assert_eq!(CompactionTier::Soft.name(), "soft");
+        assert_eq!(CompactionTier::Hard.name(), "hard");
     }
 
     #[test]

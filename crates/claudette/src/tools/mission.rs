@@ -22,8 +22,8 @@ use serde_json::{json, Value};
 
 use super::{extract_str, parse_json_input};
 use crate::missions::{
-    active_mission, clear_active, list_missions, list_orphan_slugs, load_marker, missions_root,
-    save_marker, set_active, validate_slug, Mission,
+    active_mission, add_marker_to_git_exclude, clear_active, list_missions, list_orphan_slugs,
+    load_marker, missions_root, save_marker, set_active, validate_slug, Mission,
 };
 use crate::test_runner::run_command_with_timeout;
 
@@ -277,6 +277,11 @@ fn run_mission_start(input: &str) -> Result<String, String> {
         repo: parsed.repo.clone(),
         created_at: now,
     };
+    // Add the marker filename to `.git/info/exclude` BEFORE writing the
+    // marker so `mission_submit`'s `git add -A` never sees it as a tracked
+    // change. Best-effort: errors here don't fail mission_start (the worst
+    // case is the pre-fix behaviour where the marker landed in the PR).
+    let _ = add_marker_to_git_exclude(&mission.path);
     save_marker(&mission)?;
     set_active(mission)?;
 

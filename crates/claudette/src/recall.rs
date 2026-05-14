@@ -644,6 +644,25 @@ pub fn global_query(query: &str, k: usize) -> Result<Vec<RecallHit>, String> {
         .query(query, k)
 }
 
+/// Pre-flight the recall embedder: do a tiny embed call and discard the
+/// result. Lazy-inits the store on first use. Returns the upstream embed
+/// error string on failure (e.g. LM Studio's "No models loaded" 400),
+/// otherwise `Ok(())`.
+///
+/// The REPL and TUI call this once at startup so the user discovers a
+/// missing embed model BEFORE their first turn, instead of after, with
+/// noise on every subsequent turn until the sticky-disable layer kicks in.
+pub fn probe() -> Result<(), String> {
+    let mut guard = lock_store()?;
+    ensure_store(&mut guard)?;
+    guard
+        .as_mut()
+        .expect("ensure_store left store None")
+        .embedder
+        .embed("probe")
+        .map(|_| ())
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Tests
 // ────────────────────────────────────────────────────────────────────────────
@@ -693,6 +712,43 @@ mod tests {
         fn embed(&mut self, _text: &str) -> Result<Vec<f32>, String> {
             Ok(vec![1.0, 0.0, 0.0, 0.0])
         }
+    }
+
+    /// Embedder that always fails — for probe-failure tests. Mimics the
+    /// shape of LM Studio's "No models loaded" 400 response.
+    struct FailingEmbedder;
+    impl Embedder for FailingEmbedder {
+        fn embed(&mut self, _text: &str) -> Result<Vec<f32>, String> {
+            Err(
+                "recall: /v1/embeddings HTTP 400 — load `nomic-embed-text` in LM Studio's \
+                 Local Server tab"
+                    .to_string(),
+            )
+        }
+    }
+
+    #[test]
+    fn embedder_failure_propagates_as_error_string() {
+        // This is what `recall::probe` relies on: a failing embed must
+        // surface the upstream error message intact, not swallow it. Pins
+        // the contract since startup-probe diagnostics depend on the
+        // user being able to read the LM Studio hint.
+        let mut e = FailingEmbedder;
+        let err = e.embed("probe").expect_err("FailingEmbedder must fail");
+        assert!(err.contains("Local Server tab"), "got: {err}");
+    }
+
+    #[test]
+    fn probe_through_store_returns_err_on_embedder_failure() {
+        // Exercise the same code path `recall::probe` takes through the
+        // store layer: ensure_store → embedder.embed → discard the vector.
+        // Uses an in-memory store so we don't touch the global singleton.
+        let mut store = RecallStore::open_in_memory(Box::new(FailingEmbedder)).expect("open");
+        let err = store
+            .embedder
+            .embed("probe")
+            .expect_err("FailingEmbedder must fail");
+        assert!(err.contains("HTTP 400"), "got: {err}");
     }
 
     #[test]

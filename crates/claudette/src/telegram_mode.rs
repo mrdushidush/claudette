@@ -495,9 +495,14 @@ pub fn run_telegram_bot(
                                 .to_string(),
                         ),
                         "/compact" => match maybe_compact_session(&mut runtime, true) {
-                            Some(removed) => {
+                            Some(outcome) => {
                                 let _ = save_session(runtime.session());
-                                Some(format!("Compacted {removed} older messages."))
+                                Some(format!(
+                                    "Compacted {} older message(s) — {} tier @ {} tokens.",
+                                    outcome.removed,
+                                    outcome.tier.name(),
+                                    outcome.threshold,
+                                ))
                             }
                             None => Some("Nothing to compact yet.".to_string()),
                         },
@@ -659,11 +664,16 @@ pub fn run_telegram_bot(
                         }
 
                         // Auto-compact if needed.
-                        if let Some(removed) = maybe_compact_session(&mut runtime, true) {
+                        if let Some(outcome) = maybe_compact_session(&mut runtime, true) {
                             eprintln!(
                                 "  {} {}",
                                 theme::SAVE,
-                                theme::ok(&format!("auto-compacted {removed} older message(s)"))
+                                theme::ok(&format!(
+                                    "auto-compacted {} older message(s) — {} tier @ {} tokens",
+                                    outcome.removed,
+                                    outcome.tier.name(),
+                                    outcome.threshold,
+                                ))
                             );
                         }
 

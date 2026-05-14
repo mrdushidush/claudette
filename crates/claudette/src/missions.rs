@@ -138,6 +138,49 @@ pub fn save_marker(mission: &Mission) -> Result<(), String> {
     Ok(())
 }
 
+/// Add the mission-marker filename to the mission tree's
+/// `.git/info/exclude` so `git add -A` (used by `mission_submit`) doesn't
+/// pull it into commits. Using the per-repo exclude file — rather than the
+/// tracked `.gitignore` — keeps the rule local to claudette's clone without
+/// modifying anything the upstream repo owns.
+///
+/// Idempotent: if the line is already present (e.g. from a re-attach to an
+/// existing tree), this is a no-op. Best-effort — if `.git/info/` doesn't
+/// look like a normal git directory (e.g. a worktree pointer file rather
+/// than a directory), the function returns Ok without touching anything;
+/// the caller's `save_marker` step proceeds and the worst case is the
+/// pre-fix behaviour of the marker landing in the PR.
+pub fn add_marker_to_git_exclude(mission_path: &Path) -> Result<(), String> {
+    let info_dir = mission_path.join(".git").join("info");
+    if !info_dir.is_dir() {
+        // Try to create it — fresh clones always have `.git/` as a real
+        // directory, but `info/` is sometimes absent on minimal templates.
+        // If creation fails (e.g. `.git` is a worktree pointer file),
+        // silently skip: we'd rather leak the marker than fail mission
+        // start over a cosmetic cleanup.
+        if std::fs::create_dir_all(&info_dir).is_err() {
+            return Ok(());
+        }
+    }
+    let exclude_path = info_dir.join("exclude");
+    let existing = std::fs::read_to_string(&exclude_path).unwrap_or_default();
+    if existing
+        .lines()
+        .any(|l| l.trim() == MARKER_FILENAME || l.trim() == format!("/{MARKER_FILENAME}"))
+    {
+        return Ok(());
+    }
+    let mut updated = existing;
+    if !updated.is_empty() && !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    updated.push_str(MARKER_FILENAME);
+    updated.push('\n');
+    std::fs::write(&exclude_path, updated)
+        .map_err(|e| format!("mission: write {} failed: {e}", exclude_path.display()))?;
+    Ok(())
+}
+
 /// Read a marker JSON back into a `Mission`. Used by `mission_list` and
 /// (later) `mission_attach`.
 pub fn load_marker(mission_path: &Path) -> Result<Mission, String> {
@@ -338,5 +381,72 @@ mod tests {
         // doesn't show up in `ls` of the cloned tree, doesn't get added
         // by accident via `git add <path>`, and is harmless if committed.
         assert!(MARKER_FILENAME.starts_with('.'));
+    }
+
+    fn unique_tmp(prefix: &str) -> PathBuf {
+        // System clock granularity on Windows is ~15.6ms in some configs, so
+        // nanos alone isn't unique under parallel `cargo test`. Add a
+        // monotonic per-process counter as a second axis so collisions
+        // across parallel test threads are impossible.
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("{prefix}-{nanos}-{seq}"))
+    }
+
+    #[test]
+    fn add_marker_to_git_exclude_writes_into_fresh_repo() {
+        let tmp = unique_tmp("claudette-exclude-fresh");
+        std::fs::create_dir_all(tmp.join(".git").join("info")).unwrap();
+        add_marker_to_git_exclude(&tmp).expect("should succeed");
+        let body = std::fs::read_to_string(tmp.join(".git").join("info").join("exclude")).unwrap();
+        assert!(
+            body.lines().any(|l| l.trim() == MARKER_FILENAME),
+            "marker not written into exclude file:\n{body}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn add_marker_to_git_exclude_preserves_existing_rules() {
+        let tmp = unique_tmp("claudette-exclude-preserve");
+        let info = tmp.join(".git").join("info");
+        std::fs::create_dir_all(&info).unwrap();
+        std::fs::write(info.join("exclude"), "# user rules\n*.log\nnotes/\n").unwrap();
+        add_marker_to_git_exclude(&tmp).expect("should succeed");
+        let body = std::fs::read_to_string(info.join("exclude")).unwrap();
+        assert!(body.contains("*.log"), "preexisting rules dropped: {body}");
+        assert!(body.contains("notes/"), "preexisting rules dropped: {body}");
+        assert!(
+            body.lines().any(|l| l.trim() == MARKER_FILENAME),
+            "marker not appended: {body}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn add_marker_to_git_exclude_is_idempotent() {
+        let tmp = unique_tmp("claudette-exclude-idem");
+        std::fs::create_dir_all(tmp.join(".git").join("info")).unwrap();
+        add_marker_to_git_exclude(&tmp).unwrap();
+        add_marker_to_git_exclude(&tmp).unwrap();
+        let body = std::fs::read_to_string(tmp.join(".git").join("info").join("exclude")).unwrap();
+        let count = body.lines().filter(|l| l.trim() == MARKER_FILENAME).count();
+        assert_eq!(count, 1, "marker line written more than once:\n{body}");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn add_marker_to_git_exclude_creates_info_dir_if_missing() {
+        let tmp = unique_tmp("claudette-exclude-noinfo");
+        // Make `.git` but not `.git/info`.
+        std::fs::create_dir_all(tmp.join(".git")).unwrap();
+        add_marker_to_git_exclude(&tmp).expect("should succeed");
+        let body = std::fs::read_to_string(tmp.join(".git").join("info").join("exclude")).unwrap();
+        assert!(body.lines().any(|l| l.trim() == MARKER_FILENAME));
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

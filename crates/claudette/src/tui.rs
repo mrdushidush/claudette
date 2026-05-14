@@ -352,13 +352,18 @@ impl App {
                 self.all_tool_records.clear();
                 self.chat_scroll = 0;
                 self.estimated_tokens = 0;
-                self.history.push(Message {
-                    role: "System".to_string(),
-                    text: "Session cleared.".to_string(),
-                });
             }
 
             TuiEvent::Saved => {}
+
+            TuiEvent::Info(text) => {
+                if !text.trim().is_empty() {
+                    self.history.push(Message {
+                        role: "System".to_string(),
+                        text,
+                    });
+                }
+            }
         }
     }
 }

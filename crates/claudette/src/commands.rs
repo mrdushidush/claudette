@@ -14,27 +14,23 @@
 //! 4. Add the one-liner to [`print_help`] so `/help` lists it.
 //! 5. Add a parser test in `mod tests`.
 //!
-//! All output goes to stderr — never stdout — so piping the assistant's
-//! actual replies into a file still works cleanly.
+//! All REPL output goes to stderr — never stdout — so piping the assistant's
+//! actual replies into a file still works cleanly. From the TUI, callers pass
+//! a `Vec<u8>` buffer instead and ship it as a `TuiEvent::Info` message.
 
-use std::io::{self, Write};
+use std::io::Write;
 
-use crate::{compact_session, CompactionConfig, ConversationRuntime, Session};
+use crate::{
+    compact_session, ApiClient, CompactionConfig, ConversationRuntime, Session, ToolExecutor,
+};
 
-use crate::api::{current_num_ctx, OllamaApiClient};
-use crate::executor::SecretaryToolExecutor;
+use crate::api::current_num_ctx;
 use crate::memory::{default_memory_path, try_load_memory, MAX_MEMORY_CHARS};
 use crate::model_config::{self, ModelConfig, Preset};
-use crate::run::{
-    build_runtime_streaming, compact_threshold, current_model, default_session_path, sessions_dir,
-};
+use crate::run::{compact_threshold, current_model, default_session_path, sessions_dir};
 use crate::theme;
 use crate::tool_groups::{ToolGroup, ToolRegistry};
 use crate::tools::secretary_tools_json;
-
-/// Type alias for the concrete runtime the dispatcher mutates. Saves a lot of
-/// horizontal space in the handler signatures.
-type SecretaryRuntime = ConversationRuntime<OllamaApiClient, SecretaryToolExecutor>;
 
 // === Public types ============================================================
 
@@ -45,6 +41,15 @@ pub enum SlashCommand {
     Clear,
     Compact,
     Sessions,
+    /// Remove a saved session from `~/.claudette/sessions/`. Slash form is
+    /// `/sessions delete <name>` (mirrors git/docker subcommand pattern).
+    SessionsDelete(String),
+    /// Rename a saved session. Slash form is `/sessions rename <old> <new>`.
+    /// Carries both names already sanitised by the parser.
+    SessionsRename {
+        old: String,
+        new: String,
+    },
     Save(String),
     Load(String),
     Status,
@@ -148,7 +153,7 @@ pub fn parse_slash_command(line: &str) -> Option<SlashCommand> {
         "help" | "h" | "?" => SlashCommand::Help,
         "clear" | "cl" => SlashCommand::Clear,
         "compact" => SlashCommand::Compact,
-        "sessions" | "ls" => SlashCommand::Sessions,
+        "sessions" | "ls" => parse_sessions_subcommand(arg.as_deref()),
         "save" => match arg.filter(|s| !s.is_empty()) {
             Some(name) => SlashCommand::Save(name),
             None => SlashCommand::Invalid("/save requires a name. Try: /save my-work".to_string()),
@@ -212,28 +217,82 @@ pub fn parse_slash_command(line: &str) -> Option<SlashCommand> {
     Some(parsed)
 }
 
+/// Sub-parser for the `/sessions` family. Today this covers the bare
+/// "list" form and `/sessions delete <name>`. Centralised so the main
+/// parser arm stays a one-liner.
+fn parse_sessions_subcommand(arg: Option<&str>) -> SlashCommand {
+    let arg = arg.unwrap_or("").trim();
+    if arg.is_empty() {
+        return SlashCommand::Sessions;
+    }
+    let mut parts = arg.splitn(2, char::is_whitespace);
+    let verb = parts.next().unwrap_or("").to_lowercase();
+    let rest = parts.next().map_or("", str::trim);
+    match verb.as_str() {
+        "delete" | "rm" | "remove" => {
+            if rest.is_empty() {
+                SlashCommand::Invalid(
+                    "/sessions delete requires a name. Try: /sessions delete my-work".to_string(),
+                )
+            } else {
+                SlashCommand::SessionsDelete(rest.to_string())
+            }
+        }
+        "rename" | "mv" => {
+            let mut split = rest.splitn(2, char::is_whitespace);
+            let old = split.next().unwrap_or("").trim();
+            let new = split.next().map_or("", str::trim);
+            if old.is_empty() || new.is_empty() {
+                SlashCommand::Invalid(
+                    "/sessions rename requires two names. Try: /sessions rename old new"
+                        .to_string(),
+                )
+            } else {
+                SlashCommand::SessionsRename {
+                    old: old.to_string(),
+                    new: new.to_string(),
+                }
+            }
+        }
+        other => SlashCommand::Invalid(format!(
+            "unknown /sessions subcommand: {other} — try /sessions, /sessions delete <name>, \
+             or /sessions rename <old> <new>"
+        )),
+    }
+}
+
 // === Dispatcher ==============================================================
 
-/// Run a parsed slash command. Mutates `runtime` for `/clear`, `/compact`,
-/// `/load`, `/reload` (which all rebuild the runtime around a different
-/// session). Returns whether the REPL should continue or exit.
-pub fn dispatch_slash_command(
+/// Run a parsed slash command. Generic over the concrete runtime so both the
+/// REPL (`ConversationRuntime<OllamaApiClient, SecretaryToolExecutor>`) and
+/// the TUI (`ConversationRuntime<OllamaApiClient, TuiToolExecutor>`) can use
+/// the same dispatcher. `out` is where human-readable output is written —
+/// stderr for the REPL, a buffer shipped via `TuiEvent::Info` for the TUI.
+/// `rebuild` is the callback that produces a fresh runtime from a session;
+/// it's used by commands that swap the conversation context (`/clear`,
+/// `/load`, `/reload`, `/compact`, `/preset`, `/brain`).
+pub fn dispatch_slash_command<C, T, W, R>(
     cmd: SlashCommand,
-    runtime: &mut SecretaryRuntime,
+    runtime: &mut ConversationRuntime<C, T>,
     state: &ReplState,
-) -> SlashOutcome {
-    let stderr = io::stderr();
-    let mut err = stderr.lock();
-
+    out: &mut W,
+    rebuild: &R,
+) -> SlashOutcome
+where
+    C: ApiClient,
+    T: ToolExecutor,
+    W: Write,
+    R: Fn(Session) -> ConversationRuntime<C, T>,
+{
     let outcome = match cmd {
         SlashCommand::Help => {
-            print_help(&mut err);
+            print_help(out);
             SlashOutcome::Continue
         }
         SlashCommand::Clear => {
-            *runtime = build_runtime_streaming(Session::default(), false);
+            *runtime = rebuild(Session::default());
             let _ = writeln!(
-                err,
+                out,
                 "{} {}",
                 theme::ok(theme::OK_GLYPH),
                 theme::ok("session cleared (saved files on disk untouched)")
@@ -241,89 +300,97 @@ pub fn dispatch_slash_command(
             SlashOutcome::Continue
         }
         SlashCommand::Compact => {
-            handle_compact(&mut err, runtime);
+            handle_compact(out, runtime, rebuild);
             SlashOutcome::Continue
         }
         SlashCommand::Sessions => {
-            handle_sessions(&mut err);
+            handle_sessions(out);
+            SlashOutcome::Continue
+        }
+        SlashCommand::SessionsDelete(name) => {
+            handle_sessions_delete(out, &name);
+            SlashOutcome::Continue
+        }
+        SlashCommand::SessionsRename { old, new } => {
+            handle_sessions_rename(out, &old, &new);
             SlashOutcome::Continue
         }
         SlashCommand::Save(name) => {
-            handle_save(&mut err, runtime, &name);
+            handle_save(out, runtime, &name);
             SlashOutcome::Continue
         }
         SlashCommand::Load(name) => {
-            handle_load(&mut err, runtime, &name);
+            handle_load(out, runtime, &name, rebuild);
             SlashOutcome::Continue
         }
         SlashCommand::Status => {
-            handle_status(&mut err, runtime, state);
+            handle_status(out, runtime, state);
             SlashOutcome::Continue
         }
         SlashCommand::Cost => {
-            handle_cost(&mut err, runtime, state);
+            handle_cost(out, runtime, state);
             SlashOutcome::Continue
         }
         SlashCommand::Tools => {
-            handle_tools(&mut err);
+            handle_tools(out);
             SlashOutcome::Continue
         }
         SlashCommand::Model => {
-            handle_model(&mut err);
+            handle_model(out);
             SlashOutcome::Continue
         }
         SlashCommand::Memory => {
-            handle_memory(&mut err);
+            handle_memory(out);
             SlashOutcome::Continue
         }
         SlashCommand::Reload => {
-            handle_reload(&mut err, runtime);
+            handle_reload(out, runtime, rebuild);
             SlashOutcome::Continue
         }
         SlashCommand::Capabilities => {
-            handle_capabilities(&mut err);
+            handle_capabilities(out);
             SlashOutcome::Continue
         }
         SlashCommand::Validate(path) => {
-            handle_validate(&mut err, &path);
+            handle_validate(out, &path);
             SlashOutcome::Continue
         }
         SlashCommand::Agents => {
-            handle_agents(&mut err);
+            handle_agents(out);
             SlashOutcome::Continue
         }
         SlashCommand::PresetSwitch(preset) => {
-            handle_preset(&mut err, runtime, preset);
+            handle_preset(out, runtime, preset, rebuild);
             SlashOutcome::Continue
         }
         SlashCommand::Brain(model) => {
-            handle_brain(&mut err, runtime, &model);
+            handle_brain(out, runtime, &model, rebuild);
             SlashOutcome::Continue
         }
         SlashCommand::Coder(model) => {
-            handle_coder(&mut err, &model);
+            handle_coder(out, &model);
             SlashOutcome::Continue
         }
         SlashCommand::Models => {
-            handle_models(&mut err);
+            handle_models(out);
             SlashOutcome::Continue
         }
         SlashCommand::Recall(query) => {
-            handle_recall(&mut err, &query);
+            handle_recall(out, &query);
             SlashOutcome::Continue
         }
         SlashCommand::Brownfield(target) => {
-            handle_brownfield(&mut err, &target);
+            handle_brownfield(out, &target);
             SlashOutcome::Continue
         }
         SlashCommand::Forge(prompt) => {
-            handle_forge(&mut err, &prompt);
+            handle_forge(out, &prompt);
             SlashOutcome::Continue
         }
         SlashCommand::Exit => SlashOutcome::Exit,
         SlashCommand::Invalid(msg) => {
             let _ = writeln!(
-                err,
+                out,
                 "{} {}",
                 theme::error(theme::ERR_GLYPH),
                 theme::error(&msg)
@@ -332,71 +399,119 @@ pub fn dispatch_slash_command(
         }
     };
 
-    let _ = err.flush();
+    let _ = out.flush();
     outcome
 }
 
 // === Handlers ================================================================
 
 fn print_help(out: &mut impl Write) {
-    let lines: &[(&str, &str)] = &[
-        ("/help (h, ?)", "Show this list"),
+    // Grouped by purpose so the user can scan visually instead of skimming
+    // a 23-line flat list. The first section header doubles as the title.
+    let sections: &[(&str, &[(&str, &str)])] = &[
         (
-            "/clear (cl)",
-            "Wipe in-memory session — saved files untouched",
-        ),
-        ("/compact", "Force a context compaction now"),
-        (
-            "/sessions (ls)",
-            "List saved sessions in ~/.claudette/sessions/",
-        ),
-        ("/save <name>", "Snapshot the current session under a name"),
-        ("/load <name>", "Replace current session with a saved one"),
-        ("/status (st)", "Turns, tokens, model, context window"),
-        ("/cost", "Cumulative token usage for this REPL"),
-        ("/tools", "List the secretary's tools"),
-        ("/model", "Show the active Ollama model"),
-        ("/memory (mem)", "Show CLAUDETTE.MD memory in use"),
-        ("/reload", "Re-read CLAUDETTE.MD without losing history"),
-        ("/capabilities (cap)", "Full configuration dump"),
-        (
-            "/validate (val) <path>",
-            "Run Codet code validator on a file",
-        ),
-        ("/agents", "List available agent types"),
-        (
-            "/preset <fast|auto|smart>",
-            "Switch brain preset (swap 4b/9b/fallback)",
-        ),
-        (
-            "/brain <model|auto>",
-            "Pin brain model (or 'auto' to restore preset fallback)",
-        ),
-        ("/coder <model>", "Pin coder model"),
-        ("/models", "Show current model config"),
-        ("/recall <query>", "Search cross-session memory"),
-        (
-            "/brownfield <target>",
-            "Clone a repo and make it the active mission",
+            "session",
+            &[
+                (
+                    "/clear (cl)",
+                    "Wipe in-memory session — saved files untouched",
+                ),
+                ("/compact", "Force a context compaction now"),
+                (
+                    "/sessions (ls)",
+                    "List saved sessions in ~/.claudette/sessions/",
+                ),
+                ("/save <name>", "Snapshot the current session under a name"),
+                ("/load <name>", "Replace current session with a saved one"),
+                (
+                    "/sessions delete <name>",
+                    "Remove a saved session (alias: rm, remove)",
+                ),
+                (
+                    "/sessions rename <old> <new>",
+                    "Rename a saved session (alias: mv)",
+                ),
+                ("/status (st)", "Turns, tokens, model, context window"),
+                ("/cost", "Cumulative token usage for this REPL"),
+            ],
         ),
         (
-            "/forge <prompt>",
-            "Run prompt in forge-mode against the active mission (auto-PR)",
+            "tools & memory",
+            &[
+                ("/tools", "List the secretary's tools"),
+                ("/memory (mem)", "Show CLAUDETTE.MD memory in use"),
+                ("/reload", "Re-read CLAUDETTE.MD without losing history"),
+                (
+                    "/validate (val) <path>",
+                    "Run Codet code validator on a file",
+                ),
+                ("/agents", "List available agent types"),
+                ("/recall <query>", "Search cross-session memory"),
+            ],
         ),
-        ("/exit (quit, q, x)", "Leave the REPL"),
+        (
+            "models",
+            &[
+                ("/model", "Show the active brain model"),
+                (
+                    "/preset <fast|auto|smart>",
+                    "Switch brain preset (swap 4b/9b/fallback)",
+                ),
+                (
+                    "/brain <model|auto>",
+                    "Pin brain model (or 'auto' to restore preset fallback)",
+                ),
+                ("/coder <model>", "Pin coder model"),
+                ("/models", "Show current model config"),
+            ],
+        ),
+        (
+            "brownfield & forge",
+            &[
+                (
+                    "/brownfield <target>",
+                    "Clone a repo and make it the active mission",
+                ),
+                (
+                    "/forge <prompt>",
+                    "Run prompt in forge-mode against the active mission (auto-PR)",
+                ),
+            ],
+        ),
+        (
+            "meta",
+            &[
+                ("/help (h, ?)", "Show this list"),
+                ("/capabilities (cap)", "Full configuration dump"),
+                ("/exit (quit, q, x)", "Leave the REPL"),
+            ],
+        ),
     ];
+
     let _ = writeln!(
         out,
         "{} {}",
         theme::SPARKLES,
         theme::accent("claudette slash commands")
     );
-    for (cmd, desc) in lines {
-        let _ = writeln!(out, "  {}  {}", theme::accent(cmd), theme::dim(desc));
+    for (heading, entries) in sections {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "  {}", theme::accent(heading));
+        for (cmd, desc) in *entries {
+            let _ = writeln!(out, "    {}  {}", theme::accent(cmd), theme::dim(desc));
+        }
     }
 }
 
-fn handle_compact(out: &mut impl Write, runtime: &mut SecretaryRuntime) {
+fn handle_compact<C, T, R>(
+    out: &mut impl Write,
+    runtime: &mut ConversationRuntime<C, T>,
+    rebuild: &R,
+) where
+    C: ApiClient,
+    T: ToolExecutor,
+    R: Fn(Session) -> ConversationRuntime<C, T>,
+{
     // Force compaction by setting `max_estimated_tokens = 0` so the
     // should-compact gate is satisfied as long as the session has more than
     // `preserve_recent_messages` (=4) entries.
@@ -417,7 +532,7 @@ fn handle_compact(out: &mut impl Write, runtime: &mut SecretaryRuntime) {
         return;
     }
     let removed = result.removed_message_count;
-    *runtime = build_runtime_streaming(result.compacted_session, false);
+    *runtime = rebuild(result.compacted_session);
     let _ = writeln!(
         out,
         "{} {}",
@@ -435,35 +550,244 @@ fn handle_sessions(out: &mut impl Write) {
         theme::accent("sessions"),
         theme::dim(&dir.display().to_string())
     );
-    let names = list_session_names(&dir);
-    if names.is_empty() {
-        let _ = writeln!(out, "  {}", theme::dim("(none)"));
+    let entries = list_session_entries(&dir);
+    if entries.is_empty() {
+        let _ = writeln!(out, "  {}", theme::dim("(none yet)"));
+        let _ = writeln!(
+            out,
+            "  {}",
+            theme::dim("save your current conversation with: /save <name>")
+        );
         return;
     }
-    for name in names {
-        let _ = writeln!(out, "  {} {}", theme::ok(theme::OK_GLYPH), name);
+    for entry in entries {
+        let _ = writeln!(
+            out,
+            "  {} {}  {}",
+            theme::ok(theme::OK_GLYPH),
+            theme::accent(&entry.name),
+            theme::dim(&entry.metadata_str())
+        );
+    }
+    let _ = writeln!(
+        out,
+        "\n  {}",
+        theme::dim("delete with: /sessions delete <name>")
+    );
+}
+
+fn handle_sessions_rename(out: &mut impl Write, old: &str, new: &str) {
+    let safe_old = match sanitize_session_name(old) {
+        Ok(n) => n,
+        Err(e) => {
+            let _ = writeln!(
+                out,
+                "{} {}",
+                theme::error(theme::ERR_GLYPH),
+                theme::error(&format!("old name: {e}"))
+            );
+            return;
+        }
+    };
+    let safe_new = match sanitize_session_name(new) {
+        Ok(n) => n,
+        Err(e) => {
+            let _ = writeln!(
+                out,
+                "{} {}",
+                theme::error(theme::ERR_GLYPH),
+                theme::error(&format!("new name: {e}"))
+            );
+            return;
+        }
+    };
+    if safe_old == safe_new {
+        let _ = writeln!(
+            out,
+            "{} {}",
+            theme::dim("○"),
+            theme::dim("old and new names are the same — nothing to do")
+        );
+        return;
+    }
+    let from = sessions_dir().join(format!("{safe_old}.json"));
+    let to = sessions_dir().join(format!("{safe_new}.json"));
+    if !from.exists() {
+        let _ = writeln!(
+            out,
+            "{} {}",
+            theme::error(theme::ERR_GLYPH),
+            theme::error(&format!("no session at {}", from.display()))
+        );
+        return;
+    }
+    if to.exists() {
+        // Refuse to clobber — the user can /sessions delete the target
+        // first if they really mean to overwrite. Cheaper than a
+        // confirmation prompt in a CLI we want to stay non-interactive.
+        let _ = writeln!(
+            out,
+            "{} {}",
+            theme::error(theme::ERR_GLYPH),
+            theme::error(&format!(
+                "refusing to overwrite existing session at {}",
+                to.display()
+            ))
+        );
+        return;
+    }
+    match std::fs::rename(&from, &to) {
+        Ok(()) => {
+            let _ = writeln!(
+                out,
+                "{} {} {}",
+                theme::ok(theme::OK_GLYPH),
+                theme::ok(&format!("renamed '{safe_old}' → '{safe_new}'")),
+                theme::dim(&to.display().to_string())
+            );
+        }
+        Err(e) => {
+            let _ = writeln!(
+                out,
+                "{} {}",
+                theme::error(theme::ERR_GLYPH),
+                theme::error(&format!("rename failed: {e}"))
+            );
+        }
     }
 }
 
-fn list_session_names(dir: &std::path::Path) -> Vec<String> {
+fn handle_sessions_delete(out: &mut impl Write, name: &str) {
+    let safe_name = match sanitize_session_name(name) {
+        Ok(n) => n,
+        Err(e) => {
+            let _ = writeln!(
+                out,
+                "{} {}",
+                theme::error(theme::ERR_GLYPH),
+                theme::error(&e)
+            );
+            return;
+        }
+    };
+    let path = sessions_dir().join(format!("{safe_name}.json"));
+    if !path.exists() {
+        let _ = writeln!(
+            out,
+            "{} {}",
+            theme::error(theme::ERR_GLYPH),
+            theme::error(&format!("no session at {}", path.display()))
+        );
+        return;
+    }
+    match std::fs::remove_file(&path) {
+        Ok(()) => {
+            let _ = writeln!(
+                out,
+                "{} {} {}",
+                theme::ok(theme::OK_GLYPH),
+                theme::ok(&format!("deleted session '{safe_name}'")),
+                theme::dim(&path.display().to_string())
+            );
+        }
+        Err(e) => {
+            let _ = writeln!(
+                out,
+                "{} {}",
+                theme::error(theme::ERR_GLYPH),
+                theme::error(&format!("delete failed: {e}"))
+            );
+        }
+    }
+}
+
+/// One row in the `/sessions` listing — name plus the file metadata we
+/// surface to help the user pick the right session to load or delete.
+struct SessionEntry {
+    name: String,
+    size_bytes: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+impl SessionEntry {
+    fn metadata_str(&self) -> String {
+        let size = format_bytes_short(self.size_bytes);
+        let when = self
+            .modified
+            .and_then(format_relative_age)
+            .unwrap_or_else(|| "?".to_string());
+        format!("({size}, {when})")
+    }
+}
+
+fn list_session_entries(dir: &std::path::Path) -> Vec<SessionEntry> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
-    let mut names: Vec<String> = entries
+    let mut out: Vec<SessionEntry> = entries
         .filter_map(Result::ok)
         .filter_map(|e| {
             let p = e.path();
             if p.extension().and_then(|s| s.to_str())? != "json" {
                 return None;
             }
-            p.file_stem().and_then(|s| s.to_str()).map(String::from)
+            let name = p.file_stem().and_then(|s| s.to_str())?.to_string();
+            let meta = e.metadata().ok();
+            Some(SessionEntry {
+                name,
+                size_bytes: meta.as_ref().map_or(0, std::fs::Metadata::len),
+                modified: meta.as_ref().and_then(|m| m.modified().ok()),
+            })
         })
         .collect();
-    names.sort();
-    names
+    // Newest first — by mtime if present, falling back to name asc.
+    out.sort_by(|a, b| match (a.modified, b.modified) {
+        (Some(x), Some(y)) => y.cmp(&x),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => a.name.cmp(&b.name),
+    });
+    out
 }
 
-fn handle_save(out: &mut impl Write, runtime: &SecretaryRuntime, name: &str) {
+/// Human-friendly byte size: 1234 → "1.2 KB", 42_000_000 → "42.0 MB".
+fn format_bytes_short(n: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    if n < KB {
+        format!("{n} B")
+    } else if n < MB {
+        format!("{:.1} KB", n as f64 / KB as f64)
+    } else if n < GB {
+        format!("{:.1} MB", n as f64 / MB as f64)
+    } else {
+        format!("{:.1} GB", n as f64 / GB as f64)
+    }
+}
+
+/// "5 seconds ago", "3 minutes ago", "2 hours ago", "4 days ago".
+/// Returns None on clock-skew (modified-time in the future or unmeasurable).
+fn format_relative_age(when: std::time::SystemTime) -> Option<String> {
+    let elapsed = std::time::SystemTime::now().duration_since(when).ok()?;
+    let secs = elapsed.as_secs();
+    let s = if secs < 60 {
+        format!("{secs}s ago")
+    } else if secs < 60 * 60 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 60 * 60 * 24 {
+        format!("{}h ago", secs / 3600)
+    } else {
+        format!("{}d ago", secs / 86_400)
+    };
+    Some(s)
+}
+
+fn handle_save<C: ApiClient, T: ToolExecutor>(
+    out: &mut impl Write,
+    runtime: &ConversationRuntime<C, T>,
+    name: &str,
+) {
     let safe_name = match sanitize_session_name(name) {
         Ok(n) => n,
         Err(e) => {
@@ -509,7 +833,16 @@ fn handle_save(out: &mut impl Write, runtime: &SecretaryRuntime, name: &str) {
     }
 }
 
-fn handle_load(out: &mut impl Write, runtime: &mut SecretaryRuntime, name: &str) {
+fn handle_load<C, T, R>(
+    out: &mut impl Write,
+    runtime: &mut ConversationRuntime<C, T>,
+    name: &str,
+    rebuild: &R,
+) where
+    C: ApiClient,
+    T: ToolExecutor,
+    R: Fn(Session) -> ConversationRuntime<C, T>,
+{
     let safe_name = match sanitize_session_name(name) {
         Ok(n) => n,
         Err(e) => {
@@ -535,7 +868,7 @@ fn handle_load(out: &mut impl Write, runtime: &mut SecretaryRuntime, name: &str)
     match Session::load_from_path(&path) {
         Ok(session) => {
             let count = session.messages.len();
-            *runtime = build_runtime_streaming(session, false);
+            *runtime = rebuild(session);
             let _ = writeln!(
                 out,
                 "{} {} {}",
@@ -555,7 +888,11 @@ fn handle_load(out: &mut impl Write, runtime: &mut SecretaryRuntime, name: &str)
     }
 }
 
-fn handle_status(out: &mut impl Write, runtime: &SecretaryRuntime, state: &ReplState) {
+fn handle_status<C: ApiClient, T: ToolExecutor>(
+    out: &mut impl Write,
+    runtime: &ConversationRuntime<C, T>,
+    state: &ReplState,
+) {
     let session = runtime.session();
     let memory_marker = if try_load_memory().is_some() {
         theme::ok("loaded")
@@ -569,6 +906,12 @@ fn handle_status(out: &mut impl Write, runtime: &SecretaryRuntime, state: &ReplS
         "  {} model: {}",
         theme::dim("•"),
         theme::ok(&current_model())
+    );
+    let _ = writeln!(
+        out,
+        "  {} preset: {}",
+        theme::dim("•"),
+        theme::ok(&model_config::active().preset.to_string())
     );
     let _ = writeln!(
         out,
@@ -597,6 +940,26 @@ fn handle_status(out: &mut impl Write, runtime: &SecretaryRuntime, state: &ReplS
         compact_threshold()
     );
     let _ = writeln!(out, "  {} memory: {}", theme::dim("•"), memory_marker);
+    // Recall status — only show when not in the silent-healthy state so
+    // the line doesn't add noise for the typical case where recall is
+    // working. Surfaces both the explicit kill-switch and the sticky-
+    // disable triggered by a failing embed model.
+    let recall_marker = recall_status_marker();
+    if let Some(text) = recall_marker {
+        let _ = writeln!(out, "  {} recall: {}", theme::dim("•"), text);
+    }
+    // Brownfield mission marker — shows up only when a mission is active,
+    // so users can tell at a glance which working tree their git/bash/file
+    // tools are routed to.
+    if let Some(mission) = crate::missions::active_mission() {
+        let _ = writeln!(
+            out,
+            "  {} mission: {} {}",
+            theme::dim("•"),
+            theme::ok(&mission.slug),
+            theme::dim(&mission.path.display().to_string())
+        );
+    }
     let _ = writeln!(
         out,
         "  {} session file: {}",
@@ -605,7 +968,27 @@ fn handle_status(out: &mut impl Write, runtime: &SecretaryRuntime, state: &ReplS
     );
 }
 
-fn handle_cost(out: &mut impl Write, runtime: &SecretaryRuntime, state: &ReplState) {
+/// Build a one-liner describing the recall subsystem's current state, or
+/// `None` if recall is fully functional (so the `/status` line stays quiet
+/// for the typical case). Surfaces both the env-var kill-switch and the
+/// sticky-disable flag set after a failed embed probe.
+fn recall_status_marker() -> Option<colored::ColoredString> {
+    if crate::run::recall_disabled() {
+        return Some(theme::dim("disabled via CLAUDETTE_RECALL_DISABLE"));
+    }
+    if !crate::run::recall_index_allowed() {
+        return Some(theme::warn(
+            "disabled this session — embed probe failed at startup",
+        ));
+    }
+    None
+}
+
+fn handle_cost<C: ApiClient, T: ToolExecutor>(
+    out: &mut impl Write,
+    runtime: &ConversationRuntime<C, T>,
+    state: &ReplState,
+) {
     let usage = runtime.usage().cumulative_usage();
     let avg_in = if state.turn_count > 0 {
         state.cumulative_input_tokens / u64::from(state.turn_count)
@@ -786,9 +1169,17 @@ fn handle_memory(out: &mut impl Write) {
     }
 }
 
-fn handle_reload(out: &mut impl Write, runtime: &mut SecretaryRuntime) {
+fn handle_reload<C, T, R>(
+    out: &mut impl Write,
+    runtime: &mut ConversationRuntime<C, T>,
+    rebuild: &R,
+) where
+    C: ApiClient,
+    T: ToolExecutor,
+    R: Fn(Session) -> ConversationRuntime<C, T>,
+{
     let session = runtime.session().clone();
-    *runtime = build_runtime_streaming(session, false);
+    *runtime = rebuild(session);
     if try_load_memory().is_some() {
         let _ = writeln!(
             out,
@@ -838,17 +1229,35 @@ fn handle_agents(out: &mut impl Write) {
     );
 }
 
-fn handle_preset(out: &mut impl Write, runtime: &mut SecretaryRuntime, preset: Preset) {
+fn handle_preset<C, T, R>(
+    out: &mut impl Write,
+    runtime: &mut ConversationRuntime<C, T>,
+    preset: Preset,
+    rebuild: &R,
+) where
+    C: ApiClient,
+    T: ToolExecutor,
+    R: Fn(Session) -> ConversationRuntime<C, T>,
+{
     // Start from a fresh preset-defaults config, then reapply the TOML +
     // env overlays so we don't silently lose per-role customisations the
     // user had in `~/.claudette/models.toml` or env vars.
     let new_cfg = ModelConfig::resolve(preset);
     model_config::set_active(new_cfg);
-    rebuild_after_model_swap(runtime);
+    rebuild_after_model_swap(runtime, rebuild);
     print_models(out, &model_config::active(), Some(preset));
 }
 
-fn handle_brain(out: &mut impl Write, runtime: &mut SecretaryRuntime, model: &str) {
+fn handle_brain<C, T, R>(
+    out: &mut impl Write,
+    runtime: &mut ConversationRuntime<C, T>,
+    model: &str,
+    rebuild: &R,
+) where
+    C: ApiClient,
+    T: ToolExecutor,
+    R: Fn(Session) -> ConversationRuntime<C, T>,
+{
     // Special case: `/brain auto` is the inverse of a pin — restores the
     // current preset's fallback policy. Any other value pins the brain
     // and clears the fallback so the next turn doesn't silently swap.
@@ -856,7 +1265,7 @@ fn handle_brain(out: &mut impl Write, runtime: &mut SecretaryRuntime, model: &st
         let preset = model_config::active().preset;
         let new_cfg = ModelConfig::resolve(preset);
         model_config::set_active(new_cfg);
-        rebuild_after_model_swap(runtime);
+        rebuild_after_model_swap(runtime, rebuild);
         let _ = writeln!(
             out,
             "{} {}",
@@ -878,7 +1287,7 @@ fn handle_brain(out: &mut impl Write, runtime: &mut SecretaryRuntime, model: &st
         c.brain.model = model.to_string();
         c.fallback_brain = None;
     });
-    rebuild_after_model_swap(runtime);
+    rebuild_after_model_swap(runtime, rebuild);
     let _ = writeln!(
         out,
         "{} {}",
@@ -1120,9 +1529,14 @@ fn last_fallback_event() -> Option<String> {
 /// Rebuild the runtime in place so the next turn uses the updated brain
 /// model. Preserves the full message history. Matches the pattern
 /// `/clear` / `/reload` / `/load` already use.
-fn rebuild_after_model_swap(runtime: &mut SecretaryRuntime) {
+fn rebuild_after_model_swap<C, T, R>(runtime: &mut ConversationRuntime<C, T>, rebuild: &R)
+where
+    C: ApiClient,
+    T: ToolExecutor,
+    R: Fn(Session) -> ConversationRuntime<C, T>,
+{
     let session = runtime.session().clone();
-    *runtime = build_runtime_streaming(session, false);
+    *runtime = rebuild(session);
 }
 
 fn handle_validate(out: &mut impl Write, path_str: &str) {
@@ -1623,6 +2037,166 @@ mod tests {
             Some(SlashCommand::Invalid(msg)) => assert!(msg.contains("/whatever")),
             other => panic!("expected Invalid, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_sessions_bare_is_list() {
+        assert_eq!(
+            parse_slash_command("/sessions"),
+            Some(SlashCommand::Sessions)
+        );
+        assert_eq!(parse_slash_command("/ls"), Some(SlashCommand::Sessions));
+        // Trailing whitespace also routes to the list form.
+        assert_eq!(
+            parse_slash_command("/sessions   "),
+            Some(SlashCommand::Sessions)
+        );
+    }
+
+    #[test]
+    fn parse_sessions_delete_with_name() {
+        assert_eq!(
+            parse_slash_command("/sessions delete my-work"),
+            Some(SlashCommand::SessionsDelete("my-work".to_string()))
+        );
+        // `rm` and `remove` are accepted aliases — match the unix idiom and
+        // the user's mental model from `git rm` / `docker rm`.
+        assert_eq!(
+            parse_slash_command("/sessions rm scratch"),
+            Some(SlashCommand::SessionsDelete("scratch".to_string()))
+        );
+        assert_eq!(
+            parse_slash_command("/sessions remove pinned"),
+            Some(SlashCommand::SessionsDelete("pinned".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_sessions_delete_without_name_is_invalid() {
+        let parsed = parse_slash_command("/sessions delete");
+        match parsed {
+            Some(SlashCommand::Invalid(msg)) => {
+                assert!(msg.contains("requires a name"), "got: {msg}");
+            }
+            other => panic!("expected Invalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_sessions_unknown_subcommand_is_invalid() {
+        let parsed = parse_slash_command("/sessions fly");
+        match parsed {
+            Some(SlashCommand::Invalid(msg)) => {
+                assert!(msg.contains("fly"), "got: {msg}");
+                assert!(msg.contains("subcommand"), "got: {msg}");
+            }
+            other => panic!("expected Invalid, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_sessions_rename_with_both_names() {
+        assert_eq!(
+            parse_slash_command("/sessions rename old new"),
+            Some(SlashCommand::SessionsRename {
+                old: "old".to_string(),
+                new: "new".to_string(),
+            })
+        );
+        // `mv` alias from the unix idiom.
+        assert_eq!(
+            parse_slash_command("/sessions mv scratch saved"),
+            Some(SlashCommand::SessionsRename {
+                old: "scratch".to_string(),
+                new: "saved".to_string(),
+            })
+        );
+        // Extra whitespace inside the args is trimmed.
+        assert_eq!(
+            parse_slash_command("/sessions rename   alpha    beta"),
+            Some(SlashCommand::SessionsRename {
+                old: "alpha".to_string(),
+                new: "beta".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn parse_sessions_rename_with_missing_arg_is_invalid() {
+        for input in [
+            "/sessions rename",
+            "/sessions rename solo",
+            "/sessions mv just-one",
+        ] {
+            let parsed = parse_slash_command(input);
+            match parsed {
+                Some(SlashCommand::Invalid(msg)) => {
+                    assert!(
+                        msg.contains("two names"),
+                        "expected 'two names' hint for {input}, got: {msg}"
+                    );
+                }
+                other => panic!("for {input}, expected Invalid, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn handle_sessions_rename_rejects_when_source_missing() {
+        let mut buf: Vec<u8> = Vec::new();
+        handle_sessions_rename(&mut buf, "missing-source-zzz", "missing-dest-zzz");
+        let out = String::from_utf8_lossy(&buf);
+        assert!(out.contains("no session at"), "got: {out}");
+    }
+
+    #[test]
+    fn handle_sessions_rename_noop_when_old_eq_new() {
+        let mut buf: Vec<u8> = Vec::new();
+        handle_sessions_rename(&mut buf, "same", "same");
+        let out = String::from_utf8_lossy(&buf);
+        assert!(
+            out.contains("nothing to do"),
+            "expected the same-name short-circuit, got: {out}"
+        );
+    }
+
+    #[test]
+    fn format_bytes_short_covers_each_unit() {
+        assert_eq!(format_bytes_short(0), "0 B");
+        assert_eq!(format_bytes_short(512), "512 B");
+        assert_eq!(format_bytes_short(1024), "1.0 KB");
+        assert_eq!(format_bytes_short(1024 * 1024), "1.0 MB");
+        assert_eq!(format_bytes_short(1024_u64.pow(3)), "1.0 GB");
+    }
+
+    #[test]
+    fn format_relative_age_buckets_match_user_expectations() {
+        // Build a SystemTime in the past for each unit boundary and check
+        // the bucket label. None means clock skew (future timestamps); we
+        // don't synthesise those here.
+        let now = std::time::SystemTime::now();
+        let cases = [
+            (5_u64, "s ago"),
+            (90, "m ago"),     // 1 minute boundary
+            (3700, "h ago"),   // 1 hour boundary
+            (90_000, "d ago"), // 1 day boundary
+        ];
+        for (secs, suffix) in cases {
+            let when = now - std::time::Duration::from_secs(secs);
+            let s = format_relative_age(when).unwrap_or_else(|| panic!("got None for {secs}s"));
+            assert!(s.ends_with(suffix), "for {secs}s got: {s}");
+        }
+        // Future timestamps (clock skew) return None.
+        assert!(format_relative_age(now + std::time::Duration::from_secs(60)).is_none());
+    }
+
+    #[test]
+    fn handle_sessions_delete_rejects_unknown_session() {
+        // No file at that name → error message naming the path.
+        let mut buf: Vec<u8> = Vec::new();
+        handle_sessions_delete(&mut buf, "definitely-does-not-exist-zzz");
+        let out = String::from_utf8_lossy(&buf);
+        assert!(out.contains("no session at"), "got: {out}");
     }
 
     #[test]

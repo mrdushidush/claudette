@@ -34,6 +34,9 @@ pub enum TuiEvent {
     TokensUpdate { estimated: usize, threshold: usize },
     /// Worker rebuilt the runtime from a fresh session (response to /clear).
     SessionReset,
+    /// Informational text from a slash command (e.g. /help, /status, /tools).
+    /// Rendered as a non-error system message in the chat history.
+    Info(String),
 }
 
 /// One image attached to a user turn — base64-encoded payload paired with

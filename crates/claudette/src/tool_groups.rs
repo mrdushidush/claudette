@@ -115,7 +115,7 @@ impl ToolGroup {
             Self::Advanced => "power tools: bash, edit_file, spawn_agent (delegation)",
             Self::Facts => "reference lookups: wikipedia, weather (no API key needed)",
             Self::Registry => "package registries: crates.io and npmjs metadata",
-            Self::Github => "github PRs/issues/code search (requires GITHUB_TOKEN)",
+            Self::Github => "github + brownfield missions: PRs, issues, code search, clone/fork, mission_start/attach/submit (requires GITHUB_TOKEN)",
             Self::Markets => "market data: TradingView quotes/ratings/economic calendar, vestige.fi Algorand ASAs",
             Self::Telegram => "telegram bot: send messages, poll updates, send photos (requires TELEGRAM_BOT_TOKEN)",
             Self::Calendar => "google calendar: list/create/update/delete events, RSVP (requires claudette --auth-google)",

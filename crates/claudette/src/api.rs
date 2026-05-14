@@ -662,21 +662,7 @@ impl ApiClient for OllamaApiClient {
         };
         let url = format!("{}{}", self.base_url, path);
 
-        let resp = self
-            .http
-            .post(&url)
-            .json(&body)
-            .send()
-            .map_err(|e| RuntimeError::new(format!("Brain request failed: {e}")))?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().unwrap_or_default();
-            return Err(RuntimeError::new(format!(
-                "Brain HTTP {status}: {}",
-                text.chars().take(400).collect::<String>()
-            )));
-        }
+        let resp = self.post_with_model_reload_retry(&url, &body)?;
 
         if self.openai_compat {
             // Non-streaming for now — single JSON response, no SSE parsing.
@@ -696,7 +682,94 @@ impl ApiClient for OllamaApiClient {
     }
 }
 
+/// Default sleep before the one-shot `Model reloaded` retry. LM Studio's
+/// reload window is typically 200–800ms on warm SSDs; 750ms is a balance
+/// between catching the reload and not stalling the REPL when the error is
+/// actually some other 400. Override via `CLAUDETTE_MODEL_RELOAD_RETRY_MS`.
+const MODEL_RELOAD_RETRY_DEFAULT_MS: u64 = 750;
+
+/// Detect LM Studio's `{"error":"Model reloaded."}` 400 (and the closely
+/// related "Model is loading" / "Model not loaded" surface forms). Matches
+/// case-insensitively on the body since the wording has drifted slightly
+/// across LM Studio versions. Returns false for everything else — most
+/// 4xx responses are genuine client errors that won't be fixed by retry.
+fn is_model_reload_transient(status: reqwest::StatusCode, body: &str) -> bool {
+    if status.as_u16() != 400 {
+        return false;
+    }
+    let lower = body.to_ascii_lowercase();
+    lower.contains("model reloaded")
+        || lower.contains("model is loading")
+        || lower.contains("model not loaded")
+}
+
 impl OllamaApiClient {
+    /// POST `body` to `url`, with a one-shot retry on LM Studio's transient
+    /// `Model reloaded` 400 (and equivalent reload-window errors). On
+    /// success returns the live response; on permanent failure returns the
+    /// formatted RuntimeError. Disable the retry via
+    /// `CLAUDETTE_DISABLE_MODEL_RELOAD_RETRY=1` if you want to see the raw
+    /// 400 for diagnostics.
+    fn post_with_model_reload_retry(
+        &self,
+        url: &str,
+        body: &Value,
+    ) -> Result<reqwest::blocking::Response, RuntimeError> {
+        let attempt = || {
+            self.http
+                .post(url)
+                .json(body)
+                .send()
+                .map_err(|e| RuntimeError::new(format!("Brain request failed: {e}")))
+        };
+
+        let resp = attempt()?;
+        if resp.status().is_success() {
+            return Ok(resp);
+        }
+
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+
+        let retry_disabled = std::env::var("CLAUDETTE_DISABLE_MODEL_RELOAD_RETRY")
+            .ok()
+            .is_some_and(|v| !v.is_empty() && v != "0");
+
+        if retry_disabled || !is_model_reload_transient(status, &text) {
+            return Err(RuntimeError::new(format!(
+                "Brain HTTP {status}: {}",
+                text.chars().take(400).collect::<String>()
+            )));
+        }
+
+        let sleep_ms = std::env::var("CLAUDETTE_MODEL_RELOAD_RETRY_MS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(MODEL_RELOAD_RETRY_DEFAULT_MS);
+        eprintln!(
+            "[brain] HTTP {status} '{}' — retrying once after {}ms",
+            text.lines()
+                .next()
+                .unwrap_or("")
+                .chars()
+                .take(80)
+                .collect::<String>(),
+            sleep_ms,
+        );
+        std::thread::sleep(Duration::from_millis(sleep_ms));
+
+        let resp = attempt()?;
+        if resp.status().is_success() {
+            return Ok(resp);
+        }
+        let status = resp.status();
+        let text = resp.text().unwrap_or_default();
+        Err(RuntimeError::new(format!(
+            "Brain HTTP {status} (after retry): {}",
+            text.chars().take(400).collect::<String>()
+        )))
+    }
+
     fn build_chat_body(&self, request: &ApiRequest) -> Value {
         // Resolve `tools` ONCE per request and pass the same value to both
         // `history_budget_chars` (which subtracts its char cost) and the
@@ -1401,6 +1474,57 @@ fn role_str(role: MessageRole) -> &'static str {
 mod tests {
     use super::*;
     use crate::{ConversationMessage, MessageRole};
+
+    // ─── LM Studio "Model reloaded" transient detection ─────────────────────
+
+    #[test]
+    fn model_reload_transient_matches_lm_studio_400() {
+        use reqwest::StatusCode;
+        // Exact wire body LM Studio sent during the 2026-05-12 Test 8 OOM.
+        assert!(is_model_reload_transient(
+            StatusCode::BAD_REQUEST,
+            r#"{"error":"Model reloaded."}"#
+        ));
+        // Drift-forms surfaced in LM Studio changelog.
+        assert!(is_model_reload_transient(
+            StatusCode::BAD_REQUEST,
+            r#"{"error":"Model is loading, please retry"}"#
+        ));
+        assert!(is_model_reload_transient(
+            StatusCode::BAD_REQUEST,
+            r#"{"error":"model not loaded"}"#
+        ));
+    }
+
+    #[test]
+    fn model_reload_transient_rejects_non_400() {
+        use reqwest::StatusCode;
+        // Same body, wrong status → not a reload-window transient.
+        assert!(!is_model_reload_transient(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            r#"{"error":"Model reloaded."}"#
+        ));
+        assert!(!is_model_reload_transient(
+            StatusCode::OK,
+            r#"{"error":"Model reloaded."}"#
+        ));
+    }
+
+    #[test]
+    fn model_reload_transient_rejects_genuine_400_bodies() {
+        use reqwest::StatusCode;
+        // Real LM Studio 400s we should NOT retry blindly — payload errors,
+        // bad tool schemas, unknown model name, etc.
+        assert!(!is_model_reload_transient(
+            StatusCode::BAD_REQUEST,
+            r#"{"error":"Unknown model: foo"}"#
+        ));
+        assert!(!is_model_reload_transient(
+            StatusCode::BAD_REQUEST,
+            r#"{"error":"Invalid tools schema"}"#
+        ));
+        assert!(!is_model_reload_transient(StatusCode::BAD_REQUEST, ""));
+    }
 
     // ─── Harmony separator stripping (P5) ───────────────────────────────────
 
