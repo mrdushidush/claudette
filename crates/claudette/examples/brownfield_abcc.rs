@@ -14,10 +14,19 @@
 //!   mission-exit                  → mission_exit
 //!   mission-submit <title> [body] → capstone (real PR; requires CLAUDETTE_REAL_PR=1)
 //!
+//! Lifecycle subcommand (single process — mission active-state is in-memory
+//! only, so mission_status/exit/submit cannot be validated by separate
+//! cargo-run invocations; this chains them):
+//!   pipeline [dest]               → mission_start → mission_status → mission_list
+//!                                   → write_file (stage a trivial edit) →
+//!                                   mission_submit (gated on CLAUDETTE_REAL_PR=1) →
+//!                                   mission_exit
+//!
 //! Run with: $env:GITHUB_TOKEN = (gh auth token); cargo run --example brownfield_abcc -- <subcommand> [args]
 
 use claudette::tools::dispatch_tool;
 use serde_json::{json, Value};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const OWNER: &str = "mrdushidush";
 const REPO: &str = "agent-battle-command-center";
@@ -44,7 +53,7 @@ fn run(name: &str, input: &str) {
 /// Subcommands that hit the GitHub REST API and therefore need a token.
 /// `mission-start`/`status`/`list`/`exit` and `clone` are pure git ops over
 /// HTTPS — public clone, no auth needed.
-const NEEDS_TOKEN: &[&str] = &["list", "body", "pr", "status", "mission-submit"];
+const NEEDS_TOKEN: &[&str] = &["list", "body", "pr", "status", "mission-submit", "pipeline"];
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -155,6 +164,48 @@ fn main() {
                 "mission_submit",
                 &json!({"title": title, "body": body}).to_string(),
             );
+        }
+        "pipeline" => {
+            let ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            let dest = args
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| format!("pipeline_{ts}"));
+
+            run(
+                "mission_start",
+                &json!({"target": format!("{OWNER}/{REPO}"), "dest": &dest}).to_string(),
+            );
+            run("mission_status", "{}");
+            run("mission_list", "{}");
+
+            let marker = format!("CLAUDETTE_PIPELINE_TEST_{ts}.txt");
+            let content = format!(
+                "Automated brownfield_abcc pipeline run at unix-{ts}.\nSafe to revert / close branch.\n"
+            );
+            run(
+                "write_file",
+                &json!({"path": &marker, "content": content}).to_string(),
+            );
+
+            if std::env::var("CLAUDETTE_REAL_PR").ok().as_deref() == Some("1") {
+                let title = format!("test(brownfield): pipeline capstone {ts}");
+                let body = "Automated capstone PR from `brownfield_abcc pipeline`. \
+                    Validates `mission_submit` end-to-end (auto-branch + commit + push + gh_create_pr). \
+                    Safe to close and delete the branch.";
+                run(
+                    "mission_submit",
+                    &json!({"title": title, "body": body}).to_string(),
+                );
+            } else {
+                println!(
+                    "── (skipping mission_submit — set CLAUDETTE_REAL_PR=1 to open the real PR)\n"
+                );
+            }
+
+            run("mission_exit", "{}");
         }
         other => {
             eprintln!("unknown subcommand: {other}");
