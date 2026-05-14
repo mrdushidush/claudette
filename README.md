@@ -1,15 +1,13 @@
 # Claudette
 
-**Local-first AI personal secretary.** Runs entirely on your own hardware — no cloud brain, no subscription, no telemetry from Claudette itself. Powered by [Ollama](https://ollama.com) and a Rust agent loop. The default brain (`qwen3.5:4b`) fits comfortably on an 8 GB GPU; the optional Codet code-generation sidecar wants 32 GB RAM + a bigger coder model (see [Hardware requirements](#hardware-requirements) below). TTS voice replies use Microsoft's public edge-tts endpoint when `/voice` is enabled — everything else stays on-device.
+**A local-first AI secretary that runs on your own 8 GB GPU.** REPL, fullscreen TUI, one-shot CLI, and a Telegram bot — all driving the same [Ollama](https://ollama.com) backend. No cloud brain, no subscription, no telemetry. Single Rust binary.
 
 ```bash
-cargo install claudette                     # from crates.io
-ollama serve &                              # in another shell
-claudette "what time is it?"                # 30-second smoke test
-claudette                                   # interactive REPL
+ollama pull qwen3.5:4b      # 3.4 GB brain
+cargo install claudette
+ollama serve &
+claudette "what time is it?"
 ```
-
-**Works zero-config out of the box**: notes, todos, files, time, weather, Wikipedia, and code search. Brave, GitHub, Google Calendar, and Gmail tools light up when you set the relevant API key — see [Tokens (per-tool)](#tokens-per-tool) below.
 
 [![Crates.io](https://img.shields.io/crates/v/claudette.svg)](https://crates.io/crates/claudette)
 [![CI](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml/badge.svg)](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml)
@@ -18,365 +16,114 @@ claudette                                   # interactive REPL
 
 ![Claudette TUI — chat + live tool-call panel side-by-side, one turn covering notes, weather, BTC price, and calendar](docs/images/claudette-tui.png)
 
-> One turn driving four tool groups (`note_list`, `weather_forecast`, `tv_get_quote`, `calendar_list_events`) — visible in the Tools panel as the brain enables groups on demand and dispatches calls. The TUI tabs along the top are `[1]Chat [2]Tools [3]Notes [4]Todos [5]HW`.
+> One turn driving four tool groups (`note_list`, `weather_forecast`, `tv_get_quote`, `calendar_list_events`) — the brain enables groups on demand and dispatches calls. TUI tabs: `[1]Chat [2]Tools [3]Notes [4]Todos [5]HW`.
 
 ---
 
-## What Claudette does
+## Why Claudette
 
-Claudette is a conversational agent built around **messaging-app access to a local LLM**. Four interfaces — REPL, fullscreen TUI, one-shot CLI, and a Telegram bot — all drive the same Ollama backend, so you can voice-note your own laptop from a bus stop and get a reply back. 80+ tools cover calendar, email, code generation, web research, brownfield git workflows, and cross-session memory — loaded on demand so the schema stays small.
+The open-source AI agent space is crowded with coding-focused tools (Aider, Cline, OpenHands, opencode). Claudette is aimed at a different slot: **a general-purpose personal assistant you can voice-note from a bus stop, that runs entirely on your own laptop GPU, with no cloud brain in the loop.**
 
-**What it's not:** a coding assistant competing with Cline or Aider on IDE integration, nor a general-purpose agent framework. Claudette is intentionally single-binary, single-machine, single-user — see [`docs/comparison.md`](docs/comparison.md) for an honest side-by-side against OpenHands, Aider, opencode, Cline, and Continue (Claudette isn't the winner in most of them).
+- **Truly local.** No cloud-brain code path exists. Ollama on `localhost` is the only required dependency. Voice TTS is the only optional outbound network call (Microsoft edge-tts) and lives behind `/voice on`.
+- **Fits a single 3060-class GPU.** The default `qwen3.5:4b` brain uses ~3.4 GB VRAM; auto-fallback to `qwen3.5:9b` only fires on stuck signals. No 32 GB-VRAM hidden requirement.
+- **Messaging-first.** None of the comparable tools ship a Telegram bot interface — voice in (Whisper), voice out (edge-tts), and full agent control from your phone.
+- **Personal, not just code.** Tool groups cover Google Calendar, Gmail, scheduler/briefings, notes, todos, markets, weather, web search — code-gen is *one* capability (via the Codet sidecar), not the whole point.
 
-> **v0.4.1 — Brownfield Phase 2 (May 2026).** `mission_attach` reattaches a previously-cloned mission across sessions (clone today, resume tomorrow), and `/brownfield <target>` is a one-shot REPL keystroke that clones a repo and makes it active without round-tripping through the brain. `mission_submit` is now `DangerFullAccess` so opening a cross-org PR matches `git_push`'s confirmation prompt; `mission_list` now surfaces orphan directories (under `~/.claudette/missions/` without a marker) so attach failures are diagnosable. Internally, Claudette became a Cargo workspace with a dormant `forge` crate carrying persona + role-map plumbing for upcoming pipeline work.
-
-> **v0.4.0 — Recall + Brownfield (May 2026).** Cross-session semantic memory via `/recall <query>` and the `recall` tool group (works on Ollama or LM Studio — config under [`Cross-session recall`](#cross-session-recall)). Brownfield mission tools so the agent can clone a repo, edit it, and open a PR in one tool chain (`mission_start` → `mission_submit`). LM Studio users no longer need Ollama for embeddings — recall hits `/v1/embeddings` directly.
-
-> **v0.2.0 — the Life Agent.** Google Calendar and Gmail (read-only) tool groups, a persistent scheduler that fires prompts back at you, and a `/briefing` Telegram command (or `claudette --briefing` for a recurring 07:00 weekday briefing) that covers the day's calendar, weather, and unread email. See [`docs/life_agent.md`](docs/life_agent.md) and [`docs/google_setup.md`](docs/google_setup.md).
-
-Short walkthroughs (quick tour, Telegram setup, morning briefing, code generation, the brain100 harness) live in [`examples/`](examples/).
-
-<!--
-ASCIINEMA SLOT — replace this comment with the embed once recorded.
-
-Suggested demo path (~60s, run after `cargo install claudette &&
-ollama serve`):
-  $ claudette
-  > what time is it?
-  > take a note: pick up bread tomorrow
-  > what's on my todo list?
-  > /briefing
-  > /quit
-
-Record:  asciinema rec claudette-demo.cast
-Upload:  asciinema upload claudette-demo.cast    (returns a URL like https://asciinema.org/a/123456)
-Replace: this comment with:
-
-  [![asciicast](https://asciinema.org/a/123456.svg)](https://asciinema.org/a/123456)
-
-The `.svg` form renders inline on GitHub as a static thumbnail; clicking
-it opens the asciinema player. No autoplay, no JS — works inside the
-README markdown rendering.
--->
+Honest side-by-side vs. OpenHands, Aider, opencode, Cline, Continue: [`docs/comparison.md`](docs/comparison.md). Claudette isn't the winner in most of them — it's the only one aimed at this specific slot.
 
 ---
 
-## Feature tour
+## Highlights
 
-### Four interfaces, same brain
-
+### Four interfaces, one brain
 | Mode | Command | What it's for |
 |------|---------|---------------|
-| **REPL** | `claudette` | Conversational shell. Autosaves after every turn. |
-| **One-shot** | `claudette "your question"` | Print a reply and exit. Great for scripts and shell pipelines. |
-| **TUI** | `claudette --tui` | Fullscreen ratatui UI with 5 tabs: Chat, Tools, Notes, Todos, HW. |
-| **Telegram bot** | `claudette --telegram` | Remote-chat access with voice input (Whisper) and voice output (TTS). |
+| **REPL** | `claudette` | Conversational shell. Autosaves every turn. |
+| **One-shot** | `claudette "your question"` | Print a reply and exit. Pipe-friendly. |
+| **TUI** | `claudette --tui` | Ratatui fullscreen UI with 5 tabs. |
+| **Telegram bot** | `claudette --telegram` | Voice-capable remote chat. |
 
-Each mode reuses the same conversation runtime, the same tool set, and the same session format. Switching modes is just a different entry point.
+### 80+ tools, ~170 token base schema
+Every tool except `enable_tools` and `get_current_time` lives in a group the model opts into via `enable_tools(group)`. 18 groups (notes, todos, files, code, git, github, ide, search, advanced, facts, registry, markets, telegram, calendar, schedule, gmail, recall, meta) — schema cost stays flat until the model actually needs the surface.
 
-![Claudette running in a real desktop workflow — TUI on the right, an editor / dev terminal on the left](docs/images/claudette-tui-desktop.png)
+### Brownfield missions: clone, edit, ship a PR — in one tool chain
+`mission_start("owner/repo")` clones into `~/.claudette/missions/<slug>/` and silently re-routes `git_status` / `glob_search` / `grep_search` / `write_file` / `bash` into the mission tree. `mission_submit` auto-branches, commits, pushes, and opens the PR via `gh_create_pr`. Resumable across sessions via `mission_attach`.
 
-### 80+ tools across 18 on-demand groups
-
-Every tool except `enable_tools` and `get_current_time` lives in a group that the model has to opt into via `enable_tools(group)`. The base schema is ~680 chars (~170 tokens) regardless of how many tools exist; each group adds only the tools it owns when first enabled.
-
-| Group | Tools | What it does |
-|-------|-------|--------------|
-| **core** (always on) | 3 | `enable_tools` (the meta-tool), `get_current_time`, `load_workspace_rules` |
-| `notes` | 5 | Personal notes — create, list, read, update, delete |
-| `todos` | 5 | Todo list — add, list, complete, uncomplete, delete |
-| `files` | 3 | `read_file`, `write_file` (sandboxed under `~/.claudette/files/`), `list_dir` |
-| `code` | 1 | `generate_code` — routes through the Codet coder + validator pipeline |
-| `meta` | 1 | `get_capabilities` — config, tool inventory, limits |
-| `git` | 9 | status, diff, log, add, commit, branch, checkout, push, clone |
-| `ide` | 3 | Open in editor (`code`), reveal in file manager, open URL in browser |
-| `search` | 4 | `web_search` (Brave), `web_fetch`, `glob_search`, `grep_search` |
-| `advanced` | 3 | Bash shell, `edit_file` (find/replace), `spawn_agent` (delegate to a sub-agent) |
-| `facts` | 4 | Wikipedia search/summary, Open-Meteo weather (current/forecast) |
-| `registry` | 4 | crates.io info/search, npmjs info/search |
-| `github` | 16 | PRs (list, status, fork, create), issues (get, create, comment, list-repo, list-assigned), code search, **brownfield missions** (start, status, list, attach, exit, submit) |
-| `markets` | 7 | TradingView quotes/ratings/calendar, Algorand ASA stats via vestige.fi |
-| `telegram` | 3 | Bot messaging: send messages, poll updates, send photos |
-| `calendar` | 5 | Google Calendar: list / create / update / delete events, RSVP |
-| `schedule` | 4 | Proactive reminders: one-shot + recurring schedules that fire prompts back at you |
-| `gmail` | 4 | Gmail (read-only): list, search, read, list labels — with `<email>` provenance wrapping |
-| `recall` | 1 | Cross-session memory: semantic search over past conversation turns (`recall <query>`) |
-
-Schema cost: ~680 chars (~170 tokens) on every turn until the model enables a group; the full 18-group surface is ~26 KB only if every group is loaded at once. Pre-rewrite the TUI/Telegram modes auto-enabled five groups (~25 KB / ~6,300 tokens shipped per turn — even for a one-word "hey"), which the v0.3.0 tool-array slimming retired.
-
-### Three specialised sub-agents
-
-Claudette can delegate complex tasks to sub-agents via the `spawn_agent` tool. Each agent gets its own isolated conversation context — only the final text comes back to Claudette.
-
-| Agent | What it does | Max turns |
-|-------|--------------|-----------|
-| **Researcher** | Web search + file read + code search. For open-ended investigations. | 10 |
-| **GitOps** | Git workflows with bash. For "rebase this, squash that, push it." | 8 |
-| **Code Reviewer** | Read-only. Spots bugs, security issues, style problems. | 5 |
-
-### Codet: dedicated code-generation sidecar
-
-Every call to `generate_code` goes through **Codet** — a separate LLM pipeline that:
-
-1. Writes the code with a dedicated coder model (default `qwen3-coder:30b`, fallback `qwen2.5-coder:14b`).
-2. Runs a syntax check (`python -m py_compile`, `rustc --emit=metadata`, `tsc --noEmit`, etc. — 5 languages).
-3. On failure, runs a **surgical SEARCH/REPLACE fix loop** (Aider-style patches, ~50 output tokens per attempt) before falling back to full-file regeneration.
-4. Optionally runs associated pytest/cargo-test/jest suites.
-5. Retries up to 3 times, then reports honestly if it can't fix the file.
-
-Codet is **hot-swapped into VRAM on demand** — the main brain model is evicted first on memory-constrained machines, then restored after Codet finishes. Swap cost is ~5–10 seconds on a 3060 Ti.
+### Forge-mode: autonomous code-change pipeline
+`claudette --forge "<prompt>"` or `/forge <prompt>` runs a Planner → Coder → Verifier loop against the active mission, with a configurable fix-loop (default 2 rounds) before the PR opens. Roles are routable via `~/.claudettes-forge/models.toml` so you can pin a stronger model to Verifier and keep a cheap model on Coder.
 
 ### Tiered-brain auto-fallback
+Three presets (Fast / Auto / Smart). Auto runs `qwen3.5:4b` and escalates to `qwen3.5:9b` on stuck signals (empty response after retry, max-iterations hit with no text, ≥ 3 consecutive tool errors). Per-turn revert — not session-sticky.
 
-Claudette ships with three presets:
+### Voice in, voice out, and vision in
+Whisper transcription for Telegram voice notes, edge-tts for replies (English or Hebrew). Image attachments in the TUI/REPL via Alt+V (clipboard), drag-drop, or `@/path/to/img.png` when the loaded brain is multimodal.
 
-- **Fast**: brain is `qwen3.5:4b` (fast, 3.4 GB VRAM), no fallback.
-- **Auto** (default): `qwen3.5:4b` with an auto-escalation to `qwen3.5:9b` on stuck signals (empty response after retry, max iterations hit with no text, ≥ 3 consecutive tool errors). Reverts to 4b after the failed turn — per-turn revert, not session-sticky.
-- **Smart**: brain is `qwen3.5:9b`, no fallback.
+### Codet sidecar for code generation
+`generate_code` routes through a dedicated coder model (default `qwen3-coder:30b`, fallback `qwen2.5-coder:14b`). Runs a real syntax check (`py_compile`, `rustc --emit=metadata`, `tsc --noEmit`, etc. — 5 languages), then an Aider-style SEARCH/REPLACE fix loop on failure, then optional pytest/cargo-test/jest. Hot-swaps into VRAM on demand on memory-constrained boxes.
 
-Switch at runtime with `/preset fast | auto | smart`, or pin a specific brain with `/brain <model>`.
+### Cross-session semantic recall
+`/recall <query>` searches past conversation turns across sessions via an embedding index (works on Ollama or LM Studio's `/v1/embeddings`). Drops fragments of relevant past turns straight into the current context.
 
-### Permissions: three tiers, enforced per-tool
+### Three sub-agents
+`spawn_agent` delegates to a Researcher (web + file + code search, 10 turn cap), GitOps (rebase/squash/push, 8 turn cap), or Code Reviewer (read-only, 5 turn cap). Only the final text comes back — sub-agent chatter doesn't pollute the main context.
 
-| Tier | Behaviour | Example tools |
-|------|-----------|---------------|
-| **ReadOnly** | Auto-allowed | time, note_list, file reads, git status, all external APIs |
-| **WorkspaceWrite** | Auto-allowed | note_create, note_update, todo_add, web_search, generate_code, github comment |
-| **DangerFullAccess** | Prompts `[y/N]` every time | bash, edit_file, git add/commit/push/checkout |
+### Per-tool permission gating
+ReadOnly tools auto-allow, WorkspaceWrite tools auto-allow, DangerFullAccess prompts `[y/N]` every time (bash, `edit_file`, `git add/commit/push/checkout`, cross-org PRs). Telegram default-denies DangerFullAccess (no TTY).
 
-The REPL prompter is interactive. The TUI renders the permission dialog in its tool pane. Telegram bot denies DangerFullAccess by default (no TTY to confirm with).
+---
 
-### Sessions and auto-compaction
+## Hardware
 
-- **Autosave** after every REPL turn to `~/.claudette/sessions/last.json`.
-- **Resume** with `--resume` or `-r`.
-- **Named sessions** via `/save <name>` and `/load <name>` (stored at `~/.claudette/sessions/<name>.json`).
-- **Auto-compaction** is effectively off by default (1 M estimated tokens) — opt in for tight context windows via `CLAUDETTE_COMPACT_THRESHOLD=12000`. When it does fire, it summarises old turns, keeps recent ones verbatim, and preserves tool-result anchoring so the runtime never ends up in a broken state.
-- **Sliding-window truncator** acts as a safety net inside the API client.
+| Component | Minimum | Recommended | Tested on |
+|-----------|---------|-------------|-----------|
+| GPU | 6 GB VRAM | 8 GB VRAM | RTX 3060 Ti 8 GB |
+| RAM | 16 GB | 32 GB | 32 GB DDR4 |
+| Disk | ~3 GB (brain only) | ~27 GB (brain + fallback + 30b coder) | NVMe SSD |
+| OS | Windows 10+, Linux, macOS | Windows 11 / Ubuntu 24.04 / macOS 14+ | Windows 11 Pro |
 
-### Voice in, voice out
-
-Telegram voice messages are transcribed end-to-end locally via [Whisper](https://github.com/ggerganov/whisper.cpp) (default model `ggml-large-v3-turbo`). The reply can be spoken back via [edge-tts](https://github.com/rany2/edge-tts) in English (`en-US-AriaNeural`) or Hebrew (`he-IL-HilaNeural`). Toggle voice output with `/voice`.
-
-### Vision input
-
-Image attachments work in both the TUI and the REPL when the loaded brain is multimodal (e.g. Qwen 3.6 35B-A3B with the `mmproj-F32` sidecar in LM Studio). Three input paths:
-
-| How | Where | What it does |
-|-----|-------|--------------|
-| **Alt+V** | TUI only | Reads the OS clipboard. A bitmap (e.g. `Win+Shift+S` snip) is re-encoded to PNG and base64'd; clipboard text is treated as a possible image-file path. |
-| **Drag-drop a file** | TUI + REPL | Windows Terminal pastes the path as text — the TUI's bracketed-paste handler attaches it instantly; the REPL detects it on submit. |
-| **Type `@/path/to/img.png`** | TUI + REPL | Tokens with `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, or `.bmp` extensions that resolve to a real file are attached on Enter. |
-
-Each turn shows explicit feedback (`📎 image attached` / `image-path detected but couldn't attach: <reason>`) so a missed attachment can never be silent. Per-image hard cap: 20 MiB. Both transports are supported on the wire — Ollama's `images: [b64,…]` array and the OpenAI-compat `image_url` parts shape (`data:<mime>;base64,…` URLs).
-
-### On-demand tool enablement
-
-The `enable_tools(group)` meta-tool lets the model pull in capability groups when it realises it needs them. Every group costs zero context until the model actually calls one — the trick that lets a 70-tool surface ship a ~170-token base schema.
-
-No mode (REPL, single-shot, TUI, Telegram) pre-loads groups any more. The first tool use in a session costs one extra round-trip (`enable_tools(group)` then the tool itself), which amortises to nothing across a multi-turn conversation while saving ~6,000 tokens per turn for chats that don't need tools at all (e.g. "hey", "what time is it"). For sessions that always reach for the same group, you can always call `enable_tools` from the system prompt or from your first message.
+Full model footprint table and the 30b-coder-on-8GB-VRAM env recipe: [`docs/hardware.md`](docs/hardware.md).
 
 ---
 
 ## Quick start
 
 ```bash
-# 1. Pull the required models with Ollama.
+# 1. Pull models with Ollama.
 ollama pull qwen3.5:4b           # brain (default Auto preset)
-ollama pull qwen3.5:9b           # fallback brain (optional but recommended)
-ollama pull qwen3-coder:30b      # Codet coder (best quality; needs 32 GB RAM)
+ollama pull qwen3.5:9b           # fallback brain (optional)
+ollama pull qwen3-coder:30b      # Codet coder, only if you'll use generate_code
 
-# Or smaller coders if you're disk/RAM-constrained:
-ollama pull qwen2.5-coder:14b    # Codet fallback (~9 GB)
-ollama pull qwen2.5-coder:7b     # lightweight coder (~4.5 GB); fine for
-                                 # routine Python/Rust/TS generation
-
-# 2. Install Claudette onto your PATH.
+# 2. Install.
 cargo install claudette
-# (Or build from source: `cargo install --path .` inside a clone, or
-# `cargo build --release` for a local binary at ./target/release/claudette.)
 
-# 3. (Optional) Set secrets for tool groups that need them.
+# 3. (Optional) Tokens for tools that need them.
 export BRAVE_API_KEY=...         # web_search
 export GITHUB_TOKEN=ghp_...      # github group
-export TELEGRAM_BOT_TOKEN=...    # telegram bot mode
+export TELEGRAM_BOT_TOKEN=...    # --telegram mode
 
 # 4. Run.
 claudette                        # REPL
-claudette --tui                  # fullscreen TUI
+claudette --tui                  # TUI
 claudette "what time is it?"     # one-shot
 claudette --resume               # resume last session
 claudette --telegram             # Telegram bot
 ```
 
-On first launch Claudette auto-creates `~/.claudette/` and probes `http://localhost:11434` for Ollama. If Ollama isn't running it prints a friendly error and exits. Bypass the probe with `CLAUDETTE_SKIP_OLLAMA_PROBE=1` for offline sessions that only hit saved state.
+First launch auto-creates `~/.claudette/` and probes `http://localhost:11434`. Bypass the probe with `CLAUDETTE_SKIP_OLLAMA_PROBE=1` for offline sessions.
+
+Out of the box: notes, todos, files, time, weather, Wikipedia, code search. Brave / GitHub / Google Calendar / Gmail tools light up when you set the relevant token — full table in [`docs/configuration.md`](docs/configuration.md).
 
 ---
 
-## Hardware requirements
+## Docs
 
-| Component | Minimum | Recommended | Tested on |
-|-----------|---------|-------------|-----------|
-| GPU | 6 GB VRAM (CUDA or Metal) | 8 GB VRAM | RTX 3060 Ti 8 GB |
-| RAM | 16 GB | 32 GB | 32 GB DDR4 |
-| Disk | ~3 GB (brain only) — or ~8 GB with the lightweight 7b coder | ~27 GB (brain + fallback + 30b coder) | NVMe SSD |
-| OS | Windows 10+, Linux, macOS | Windows 11 / Ubuntu 24.04 / macOS 14+ | Windows 11 Pro |
-
-### Model footprint summary
-
-| Model | Role | VRAM | Throughput (3060 Ti) |
-|-------|------|------|----------------------|
-| `qwen3.5:4b` | Brain (default) | ~3.4 GB | ~55 t/s |
-| `qwen3.5:9b` | Fallback brain | ~5.5 GB | ~30 t/s |
-| `qwen3-coder:30b` | Codet coder (quality) | ~19 GB total (MoE, partial RAM spill) | ~20 t/s effective |
-| `qwen2.5-coder:14b` | Codet coder (fallback) | ~9 GB | ~8 t/s with partial spill |
-| `qwen2.5-coder:7b` | Codet coder (lightweight) | ~4.5 GB | ~30 t/s |
-
-The 4b brain alone is viable as a standalone setup — it handles tool-calling, note-taking, calendar, and conversation perfectly fine on its own. Add the 9b only when you want better multi-step reasoning. Add a coder only when you use `generate_code`; the 7b fits happily alongside the 4b on 8 GB VRAM.
-
-**For the 30b coder on 8 GB VRAM / 32 GB RAM,** set these Ollama env vars:
-
-```bash
-OLLAMA_MAX_LOADED_MODELS=1    # forces brain eviction before coder loads
-OLLAMA_FLASH_ATTENTION=1      # halves the KV cache
-OLLAMA_KV_CACHE_TYPE=q8_0     # quantised KV cache
-```
-
----
-
-## Usage
-
-### CLI flags
-
-Run `claudette --help` for the authoritative reference. Summary:
-
-| Flag | Effect |
-|------|--------|
-| `--resume`, `-r` | Continue the most recent saved session. |
-| `--telegram`, `-t` | Run as a Telegram bot (needs `TELEGRAM_BOT_TOKEN`). |
-| `--tui` | Launch the fullscreen TUI. |
-| `--chat <id>` | Restrict Telegram bot to a specific chat ID. Repeatable, or set `CLAUDETTE_TELEGRAM_CHAT` to a comma-separated list. The bot **default-denies** when no allowlist is provided. |
-| `--chat any` | Explicit accept-all: serve every incoming Telegram chat. Required to start the bot with no allowlist. Prints a loud warning. |
-| `--auth-google [scope]` | Run the loopback OAuth flow. Scope is `calendar` (default) or `gmail`. Stores tokens under `~/.claudette/secrets/`. |
-| `--revoke` | Pair with `--auth-google` to revoke consent and delete the local token file. |
-| `--briefing` | Write a recurring morning-briefing schedule entry and exit. See [examples/04-morning-briefing.md](examples/04-morning-briefing.md). |
-| `--time HH:MM` | Modifier for `--briefing`. Default `07:00`. |
-| `--days <spec>` | Modifier for `--briefing`. One of `weekdays` (default), `daily`, or a single weekday name. |
-| `--help`, `-h` | Show the flag reference and exit. |
-| `--version`, `-V` | Show the claudette version and exit. |
-
-### Slash commands (REPL + TUI)
-
-```
-/help                Show this list.
-/agents              List available sub-agent types.
-/validate <path>     Run Codet on an existing code file.
-/status              Session info + token counts.
-/cost                Lifetime token usage.
-/tools               List all tools grouped by capability.
-/model               Show the active brain and coder models.
-/models              Alias for /model.
-/preset fast|auto|smart  Switch model preset.
-/brain <model>       Pin the brain model (or "auto" to re-enable fallback).
-/coder <model>       Pin the coder model.
-/memory              Show CLAUDETTE.MD contents.
-/reload              Re-read CLAUDETTE.MD into the system prompt.
-/sessions, /ls       List saved sessions.
-/save <name>         Save the current session under <name>.
-/load <name>         Load a named session.
-/compact             Force context compaction now.
-/clear               Reset to a fresh session.
-/capabilities        Full configuration dump.
-/recall <query>      Search past conversations across sessions (semantic).
-/brownfield <target> Clone a repo and make it the active mission (one-shot).
-/exit                Leave the REPL.
-```
-
-### Telegram-mode slash commands
-
-A subset of the REPL commands works identically inside Telegram chats: `/help`, `/status`, `/compact`, `/clear`, `/save`, `/load`. `/exit` and the destructive DangerFullAccess commands are blocked.
-
-Three additional commands are **Telegram-only** (they have no effect in the REPL or TUI):
-
-```
-/voice               Toggle voice output (edge-tts on / off).
-/lang he|en          Switch voice transcription + TTS language.
-/briefing            Run the morning briefing now (calendar + weather + VIP unread).
-```
-
----
-
-## Environment variables
-
-All variables are optional; defaults are shown. Set them in your shell environment, or at `~/.claudette/.env` (the canonical persistent location). Claudette intentionally does **not** auto-load `.env` from the current working directory or its parents — that would let a shared project smuggle `OLLAMA_HOST`, `GITHUB_TOKEN`, etc. into the agent without the user noticing. For per-project overrides, use `direnv` or `source path/to/.env` before invoking.
-
-### Core
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint. Honoured exactly like Ollama itself. |
-| `CLAUDETTE_ALLOW_REMOTE_OLLAMA` | unset | Set to `1` to silence the startup warning when `OLLAMA_HOST` is non-loopback. Default posture is local-only. |
-| `CLAUDETTE_MODEL` | `qwen3.5:4b` (Auto preset) | Brain model override. |
-| `CLAUDETTE_NUM_CTX` | `16384` | Brain context window in tokens. |
-| `CLAUDETTE_NUM_PREDICT` | `6144` | Max output tokens per request. |
-| `CLAUDETTE_COMPACT_THRESHOLD` | `1000000` | Auto-compaction trigger (estimated tokens). Default makes auto-compact a no-op for typical 16K–128K context windows; set to `12000` (or a fraction of your `num_ctx`) on tight contexts. |
-| `CLAUDETTE_SOFT_COMPACT_THRESHOLD` | unset | Optional intermediate compaction tier (estimated tokens). When set, fires below the hard threshold and preserves 12 recent messages instead of 4 — useful on long real-world sessions with 35B+ brains where the hard 1M default never triggers but turns are paying hundreds of K input tokens. Set e.g. `200000`. |
-| `CLAUDETTE_MAX_ITERATIONS` | `40` | Per-turn (model → tool → result) loop ceiling. Lower it (e.g. `15`) to fail-fast on small-model spirals; raise it for legitimate long tool chains. |
-| `CLAUDETTE_SESSION` | `~/.claudette/sessions/last.json` | Override the session file path. |
-| `CLAUDETTE_MEMORY` | `~/.claudette/CLAUDETTE.MD` | Override the path Claudette loads user-memory from. |
-| `CLAUDETTE_OPENAI_COMPAT` | unset | Set to `1` to talk to an OpenAI-compatible server (LM Studio, vLLM, llama.cpp's `--api`) instead of native Ollama. Brain calls switch to `/v1/chat/completions`; recall embeddings switch to `/v1/embeddings`. `OLLAMA_HOST` doubles as the compat-server URL. |
-| `CLAUDETTE_SKIP_OLLAMA_PROBE` | unset | Set to `1` to skip the Ollama startup probe (CI / offline). |
-| `CLAUDETTE_SKIP_LM_STUDIO_PROBE` | unset | Set to `1` to skip the LM Studio probe (only used when `CLAUDETTE_OPENAI_COMPAT=1`). The probe checks `/v1/models` returns a non-empty model list — set this if you load models post-launch. |
-| `CLAUDETTE_FALLBACK_BRAIN_MODEL` | `qwen3.5:9b` (Auto preset) | Brain to fall back to on stuck signals. |
-| `CLAUDETTE_LIVE_GOOGLE` | unset | Set to `1` to run live Google integration tests via `cargo test --ignored`. Never set in CI. |
-| `CLAUDETTE_WORKSPACE` | unset | Extra read roots outside `$HOME`, colon-separated on Unix, semicolon-separated on Windows. Example: `D:\dev\claudette` for developing Claudette itself. Reads under `$HOME` and under a `$HOME`-rooted CWD are always allowed regardless. |
-
-### Codet (code-generation sidecar)
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `CLAUDETTE_CODER_MODEL` | `qwen3-coder:30b` | Coder model. Set to `qwen2.5-coder:14b` on RAM-constrained hosts. |
-| `CLAUDETTE_CODER_NUM_CTX` | `49152` | Coder context window. Drop to `16384` on 32 GB RAM boxes. |
-| `CLAUDETTE_CODER_NUM_PREDICT` | `12288` | Max output tokens the coder can emit in one call. |
-| `CLAUDETTE_VALIDATE_CODE` | `true` | Enable/disable Codet auto-validation after `generate_code`. |
-
-### Tokens (per-tool)
-
-| Variable | Purpose |
-|----------|---------|
-| `BRAVE_API_KEY` | Brave Search API key — required for `web_search`. |
-| `GITHUB_TOKEN` | GitHub PAT — required for the `github` tool group. Falls back to `CLAUDETTE_GITHUB_TOKEN` if unset. |
-| `TELEGRAM_BOT_TOKEN` | Bot token from `@BotFather` — required for `--telegram`. |
-| `CLAUDETTE_GOOGLE_CLIENT_ID` | Google OAuth client ID — required for `--auth-google` + the Calendar / Gmail tool groups. Falls back to `GOOGLE_CLIENT_ID`, or to `~/.claudette/secrets/google_oauth_client.json`. |
-| `CLAUDETTE_GOOGLE_CLIENT_SECRET` | Google OAuth client secret. Same fallback chain as the client ID. |
-| `VESTIGE_API_BASE` | Override for the vestige.fi Algorand API (`markets` group). |
-
-All tokens also support file-based fallback: save them to `~/.claudette/secrets/<name>.token` (for example `github.token`, `telegram.token`, `brave.token`). Environment variables win over files when both are present.
-
-### Voice
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `CLAUDETTE_WHISPER_BIN` | `whisper-cli` on PATH | Path to the `whisper.cpp` binary. |
-| `CLAUDETTE_WHISPER_MODEL` | `~/.claudette/models/ggml-large-v3-turbo.bin` | Path to the Whisper GGML model file. |
-
-### Cross-session recall
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `CLAUDETTE_RECALL_DISABLE` | unset | Set to `1` to disable post-turn recall indexing entirely (privacy / no embed model available). |
-| `CLAUDETTE_RECALL_MODEL` | `nomic-embed-text` | Embed model id. Under `CLAUDETTE_OPENAI_COMPAT=1`, set to whatever embedding model you've loaded in LM Studio (e.g. `text-embedding-nomic-embed-text-v1.5`). |
-| `CLAUDETTE_RECALL_DB` | `~/.claudette/recall.sqlite` | Override the recall DB path (mostly useful in tests). |
-
-### Sub-agent tuning
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `CLAUDETTE_RESEARCHER_MODEL` | inherits brain | Override the Researcher agent's model. |
-| `CLAUDETTE_GITOPS_MODEL` | inherits brain | Override the GitOps agent's model. |
-| `CLAUDETTE_RESEARCHER_MAX_ITER` | `10` | Hard cap on Researcher tool calls per delegation. |
-| `CLAUDETTE_GITOPS_MAX_ITER` | `8` | Hard cap on GitOps tool calls per delegation. |
-| `CLAUDETTE_TELEGRAM_CHAT` | unset | Comma-separated chat-ID allowlist for Telegram bot. |
+- [`docs/quickstart.md`](docs/quickstart.md) — 30-second start, common flows
+- [`docs/configuration.md`](docs/configuration.md) — every env var, token file fallbacks, recall settings
+- [`docs/hardware.md`](docs/hardware.md) — VRAM/RAM/disk by preset, 30b-on-8GB env recipe
+- [`docs/usage.md`](docs/usage.md) — CLI flags, slash commands, Telegram-only commands
+- [`docs/architecture.md`](docs/architecture.md) — module layout, tool-group contract, Codet sidecar contract
+- [`docs/comparison.md`](docs/comparison.md) — honest side-by-side vs. opencode / Aider / OpenHands / Cline / Continue
+- [`docs/google_setup.md`](docs/google_setup.md) — Calendar + Gmail OAuth walkthrough
 
 ---
 
@@ -384,155 +131,46 @@ All tokens also support file-based fallback: save them to `~/.claudette/secrets/
 
 ```
 ~/.claudette/
-├── notes/                       # Markdown notes (ISO-timestamped, optional tags)
-├── files/                       # Sandboxed scratch dir for write_file/generate_code
-├── sessions/
-│   ├── last.json                # Auto-saved REPL session
-│   └── <name>.json              # Named sessions via /save
-├── secrets/
-│   ├── github.token             # GitHub PAT (plain text)
-│   ├── telegram.token           # Telegram bot token
-│   ├── brave.token              # Brave Search API key
-│   └── telegram_chat.id         # Auto-persisted Telegram chat IDs (one per line)
-├── models/
-│   └── ggml-large-v3-turbo.bin  # Whisper model (download separately)
-├── todos.json                   # Task list
-├── models.toml                  # Optional model-config overlay (preset + per-role overrides)
-├── fallback.jsonl               # Auto-fallback event log (one JSON line per escalation)
-├── .env                         # Persistent env-var overrides
-└── CLAUDETTE.MD                 # Optional user memory (800-char cap, loaded into system prompt)
+├── notes/            # Markdown notes (ISO-timestamped, optional tags)
+├── files/            # Sandboxed scratch dir for write_file/generate_code
+├── sessions/         # Auto-saved + named sessions
+├── secrets/          # Token files (github.token, telegram.token, brave.token, …)
+├── missions/         # Brownfield mission clones
+├── models/           # Whisper model (download separately)
+├── recall.sqlite     # Cross-session semantic-recall index
+├── todos.json        # Task list
+├── models.toml       # Optional model-config overlay
+├── fallback.jsonl    # Auto-fallback event log
+├── .env              # Persistent env-var overrides
+└── CLAUDETTE.MD      # Optional user memory (800-char cap)
 ```
 
 Nothing outside `~/.claudette/` is written without explicit permission.
 
 ---
 
-## Architecture
-
-The repo is a Cargo workspace: the published `claudette` crate lives at `crates/claudette/`, and a workspace-internal `crates/forge/` carries dormant plumbing (persona loader, role-map, pipeline skeletons) for upcoming forge-mode work — `publish = false`, not surfaced from the CLI in 0.4.1. Path references below are inside `crates/claudette/`.
-
-```
-src/
-├── main.rs           — Binary entry point (arg parsing, Ollama probe, mode dispatch)
-├── lib.rs            — Module declarations + public re-exports
-├── runtime/          — Embedded agent-loop kernel (~2K LOC, vendored)
-│   ├── conversation.rs — Turn loop, tool dispatch, hook integration, ApiClient trait
-│   ├── session.rs      — Session / ConversationMessage / ContentBlock types
-│   ├── compact.rs      — Auto-compaction + token estimation
-│   ├── permissions.rs  — Three-tier permission policy
-│   ├── usage.rs        — TokenUsage tracker + pricing lookup (Ollama = free)
-│   ├── hooks.rs        — Pre/post tool-use hooks (shell snippets)
-│   ├── prompt.rs       — ProjectContext discovery (cwd, git status, instruction files)
-│   ├── config.rs       — Optional configuration loaders
-│   ├── json.rs         — Hand-rolled JSON for the no-serde-dep runtime paths
-│   └── sandbox.rs      — Sandbox config types (Linux-only sandbox runner)
-├── api.rs            — OllamaApiClient: /api/chat streamer, truncation, budget math, probe
-├── run.rs            — Runtime builder, REPL loop, autosave, session compaction
-├── executor.rs       — SecretaryToolExecutor: enable_tools meta-tool + dispatch
-├── tools.rs          — Aggregates per-group schemas into secretary_tools_json() and routes dispatch_tool() through each sub-module's dispatch()
-├── tools/            — One module per tool cluster (calendar, codegen, facts, file_ops, git, github, gmail, ide, markets, notes, registry, schedule, search, shell, telegram, todos, web_search); each exports schemas() + dispatch()
-├── tool_groups.rs    — ToolRegistry + the 18 on-demand tool-group definitions
-├── agents.rs         — AgentType, FilteredToolExecutor, spawn_agent orchestrator
-├── codet.rs          — Code-generation sidecar (syntax check, surgical fix loop, tests)
-├── test_runner.rs    — Python/Rust/JS/TS syntax + test runners
-├── commands.rs       — 22 slash-command parsers and handlers
-├── prompt.rs         — Claudette system prompt builder
-├── model_config.rs   — Preset + RoleConfig + TOML overlay
-├── brain_selector.rs — Tiered-brain fallback + stuck diagnostics
-├── memory.rs         — CLAUDETTE.MD loader
-├── secrets.rs        — File-backed token storage + Telegram chat-ID persistence
-├── google_auth.rs    — Google OAuth loopback flow (per-scope token files under ~/.claudette/secrets/)
-├── clock.rs          — Clock trait (SystemClock in prod, MockClock for deterministic scheduler tests)
-├── scheduler.rs      — Persistent jsonl scheduler with catch-up policies + natural-language expression parsing
-├── briefing.rs       — Morning-briefing prompt (shared by /briefing command and the --briefing scheduled entry)
-├── telegram_mode.rs  — Telegram bot loop (polling, voice, slash commands)
-├── voice.rs          — Whisper transcription pipeline
-├── tts.rs            — edge-tts TTS integration
-├── theme.rs          — Colored output, emoji glyphs, TTY detection
-├── tui.rs            — Ratatui TUI app, 5 tabs, render loop
-├── tui_events.rs     — TUI event enums (worker ↔ render channel)
-├── tui_executor.rs   — ToolExecutor wrapper that fires TUI events
-└── tui_worker.rs     — Worker thread that owns the ConversationRuntime
-```
-
-### The on-demand tool-group contract
-
-`ToolRegistry` lives behind an `Arc<Mutex<_>>`. The `OllamaApiClient` reads it on every `/api/chat` request, so when the model calls `enable_tools("markets")`, the executor mutates the shared registry and the next API call advertises the expanded tool list. Adding a new tool group is a three-step change (add enum variant, register tool set, document the group) and costs zero context until first use.
-
-### Codet sidecar contract
-
-Codet is invoked exclusively through the `generate_code` tool. The main conversation never sees Codet's internal fix-loop exchanges — only the one-line summary + file path on disk. This is deliberate: Codet's iteration chatter would otherwise fill 20 KB of context per coding task.
-
----
-
-## Development
-
-### Build
+## Build from source
 
 ```bash
-cargo build --release -p claudette       # only the published binary
-cargo build --release                    # whole workspace (claudette + dormant forge)
+git clone https://github.com/mrdushidush/claudette
+cd claudette
+cargo build --release -p claudette
+./target/release/claudette --help
 ```
 
-### Verify
-
-```bash
-cargo fmt --all --check
-cargo clippy --all-targets --no-deps -- -D warnings
-cargo test --lib
-```
-
-Tests: **703 passing, 6 ignored** (4 POSIX-only hook tests, 2 live-recall smokes that need an LM Studio embedding server). Run `cargo fmt --all --check` before committing.
-
-### Project layout rules
-
-- Runtime modules (`crates/claudette/src/runtime/*.rs`) are mounted at the crate root via `#[path = "runtime/..."]` attributes. Their internal `use crate::session::X` paths resolve without rewriting. Don't move these files or add `mod` declarations in `runtime/mod.rs`.
-- Cargo workspace with two members: `crates/claudette` (the published binary + library, both named `claudette`) and `crates/forge` (`publish = false`, dormant plumbing). All workspace-shared lints live in `crates/*/Cargo.toml` per-crate; the root `Cargo.toml` is a virtual manifest.
-- Build the published crate explicitly with `cargo build -p claudette` (or `cargo build` for the whole workspace); `cargo test --lib` already runs against every workspace member.
-
-### Adding a new tool
-
-1. Add a JSON schema entry to the relevant `src/tools/<group>.rs` (or create a new group module if none fits).
-2. Add a `run_my_tool(input: &str) -> Result<String, String>` handler in the same module.
-3. Wire it into the `dispatch` match at the top of the module.
-4. For a new group: add a `ToolGroup` variant in `src/tool_groups.rs`, then register the group's `schemas()` and `dispatch()` in `src/tools.rs` (follow the existing groups as templates).
-5. Add at least one unit test for the happy path and one for a known failure mode.
-
-### Coding standards
-
-- `#![forbid(unsafe_code)]` in the crate root — no unsafe.
-- Clippy pedantic is on workspace-wide. Allow-list lives in `Cargo.toml` and covers ergonomic exceptions.
-- `#[must_use]` on any function returning a non-trivial value.
-- No `panic!` in production paths — every `Result` returns a typed error. Panics are only acceptable inside `#[cfg(test)] mod tests` blocks.
-- Tests that mutate environment variables must acquire `crate::test_env_lock()` to avoid parallel-test races.
-
----
-
-## Roadmap
-
-Short-term (things being actively evaluated):
-
-- Threshold tuning for the tiered-brain fallback, using real `fallback.jsonl` data from the field.
-- A runnable brownfield correctness check (not just syntax smoke-testing) for the `generate_code` pipeline.
-- Module-level quality polish for the speculative tool groups (markets, github).
-
-Longer-term vision:
-
-- A vision sidecar (`analyze_screenshot`) once a multimodal model with strong tool calling fits 8 GB VRAM.
-- Continuous ambient mode (watch-and-interrupt).
+Tests: **703 passing, 6 ignored** (4 POSIX-only hook tests, 2 live-recall smokes that need an LM Studio embedding server). Before committing: `cargo fmt --all && cargo clippy --all-targets --no-deps -- -D warnings && cargo test --lib`.
 
 ---
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full guide. Quick summary:
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). Quick version:
 
 - File bugs at <https://github.com/mrdushidush/claudette/issues>.
-- Run `cargo fmt --all --check`, `cargo clippy --all-targets --no-deps -- -D warnings`, and `cargo test --lib` before opening a PR.
-- Follow Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `style:`, `ci:`.
+- Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `style:`, `ci:`.
 - By contributing, you agree your work is licensed under Apache 2.0.
 
-Security issues: please use the private advisory flow described in [`SECURITY.md`](SECURITY.md) — don't open a public issue.
+Security issues: please use the private advisory flow in [`SECURITY.md`](SECURITY.md) — don't open a public issue.
 
 Be kind — [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) has the short version.
 
@@ -540,6 +178,6 @@ Be kind — [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) has the short version.
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE). You can use, modify, and redistribute Claudette commercially or personally. No trademark grant; don't imply endorsement.
+Apache License 2.0 — see [LICENSE](LICENSE). Use, modify, redistribute commercially or personally. No trademark grant; don't imply endorsement.
 
 Copyright © 2026 [mrdushidush](https://github.com/mrdushidush).

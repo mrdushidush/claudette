@@ -31,8 +31,7 @@ cargo build --release
 ```
 
 You'll need Ollama running locally for any end-to-end testing. See
-the main [`README.md`](README.md#hardware-requirements) for model
-requirements.
+[`docs/hardware.md`](docs/hardware.md) for model requirements.
 
 ## Before you open a PR
 
@@ -45,9 +44,10 @@ cargo clippy --all-targets --no-deps -- -D warnings
 cargo test --lib --bins
 ```
 
-All must pass. Tests currently sit at **521 lib + 24 bin passing, 4
-ignored on Windows** (hook tests that use POSIX `printf`) — a PR that
-drops the pass count needs a justification in the description.
+All must pass. Tests currently sit at **703 passing, 6 ignored** (4
+POSIX-only hook tests, 2 live-recall smokes that need an LM Studio
+embedding server) — a PR that drops the pass count needs a
+justification in the description.
 
 ## Commit style
 
@@ -76,13 +76,13 @@ existing history is the style guide.
 3. Wire it into the `dispatch` match at the top of the module.
 4. For a new group: add a `ToolGroup` variant in
    `src/tool_groups.rs`, register the group's schemas and dispatcher
-   in `src/tools.rs` (follow the 12 existing groups as templates).
+   in `src/tools.rs` (follow the 18 existing groups as templates).
 5. Add at least one unit test covering the happy path and one
    covering a known failure mode (missing parameter, invalid JSON,
    boundary condition).
 
-Document the group in the README's "70+ tools across 12 on-demand
-groups" table so users can discover it.
+Document the group in [`docs/architecture.md`](docs/architecture.md)'s
+"Tool groups" table so users can discover it.
 
 ## Adding a new tool group — permission tier
 
