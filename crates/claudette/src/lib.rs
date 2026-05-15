@@ -40,6 +40,7 @@ pub mod briefing;
 pub mod clock;
 pub mod codet;
 pub mod commands;
+pub mod doctor;
 pub mod executor;
 pub mod forge;
 pub mod google_auth;

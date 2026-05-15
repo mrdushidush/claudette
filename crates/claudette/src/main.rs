@@ -66,6 +66,11 @@ struct CliArgs {
     /// `mission_submit` (auto-PR). The prompt text is taken from
     /// `prompt_words`.
     forge: bool,
+    /// `--doctor`: run flat diagnostic probes (Ollama reachable, brain
+    /// pulled, recall embed model loaded, OAuth tokens valid, voice deps,
+    /// secrets dir). Exits before any interactive mode starts. Non-zero
+    /// exit code if any probe was a hard failure (warnings tolerated).
+    doctor: bool,
 }
 
 /// Help text printed on `--help` / `-h`. One source of truth; the README
@@ -103,6 +108,10 @@ TELEGRAM OPTIONS:
                          username can DM and get a full assistant.
 
 ONE-SHOT SETUP COMMANDS (each exits after doing its one job):
+    --doctor             Probe every dependency (Ollama, embed model, OAuth
+                         tokens, voice deps, secrets dir) and print a
+                         green/red diagnostic report. Useful when a tool
+                         fails inside the REPL and you don't yet know why.
     --auth-google [scope]
                          Run the loopback OAuth flow for Google APIs. <scope>
                          is 'calendar' (default) or 'gmail'. Stores tokens
@@ -209,7 +218,22 @@ fn main() -> ExitCode {
         version: _,
         allow_any_chat,
         forge,
+        doctor,
     } = args;
+
+    // ── --doctor: full diagnostic probe ──────────────────────────────
+    // Runs before every other branch because it's the command the user
+    // reaches for when something is already broken — it must work even
+    // if the Ollama probe in [`probe_ollama`] below would otherwise
+    // refuse to start. Exits with the doctor module's own status code.
+    if doctor {
+        let code = claudette::doctor::run();
+        return if code == 0 {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        };
+    }
 
     // ── Google OAuth flow ─────────────────────────────────────────────
     // Runs before the Ollama probe because it's a one-shot setup command —
@@ -494,6 +518,7 @@ fn parse_args(args: &[String]) -> CliArgs {
             "--time" => expect = ExpectNext::Time,
             "--days" => expect = ExpectNext::Days,
             "--forge" => out.forge = true,
+            "--doctor" => out.doctor = true,
             _ => out.prompt_words.push(arg.clone()),
         }
     }

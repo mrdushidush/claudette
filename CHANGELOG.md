@@ -10,6 +10,33 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **`claudette --doctor` — flat diagnostic probe.** New top-level CLI flag
+  that prints green/red status for every external dependency in a single
+  pass: Ollama / LM Studio reachable, the configured brain in the
+  `/api/tags` (or `/v1/models`) listing, recall embed model loaded
+  (`recall::probe()`), each Google OAuth scope verified with a live
+  read call (`calendar/v3/.../events?maxResults=1` and `gmail/v1/users/me/labels`),
+  `ffmpeg` / `whisper-cli` on PATH, the `~/.claudette/secrets/` directory
+  contents, and the set of resolved `CLAUDETTE_*` env vars (values masked
+  when the variable name looks like a secret). Exits non-zero only when a
+  probe is a hard failure — warnings (e.g. voice deps absent on a
+  text-only setup) are tolerated.
+
+### Changed
+
+- **Tool registry: collapse hand-synced lists into a single `GROUPS` table
+  and cache the assembled schema array.** `tools.rs` had two parallel
+  19-entry lists — one calling `<module>::schemas()`, the other calling
+  `<module>::dispatch()` — that drifted independently if a contributor
+  forgot to update either half. Both are now a single `GROUPS: &[(SchemasFn,
+  DispatchFn)]` array. The assembled `secretary_tools_json()` Value is
+  cached in a `OnceLock`, so every `ToolRegistry::new()` (one per
+  compaction, `/clear`, fallback swap, agent spawn, fresh REPL boot)
+  clones a pre-built Value instead of rebuilding the ~12 KB schema. No
+  behavioural change.
+
 ## [0.5.1] - 2026-05-13
 
 ### Fixed

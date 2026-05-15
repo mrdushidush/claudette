@@ -17,6 +17,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use serde_json::{json, Value};
 
@@ -51,13 +52,60 @@ mod web_search;
 pub use codegen::{extract_user_prompt_paths, set_current_turn_paths};
 
 // ────────────────────────────────────────────────────────────────────────────
+// Group registry — single source of truth for schemas + dispatch
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Each entry pairs a module's `schemas()` constructor with its `dispatch()`
+// handler. Adding a new tool group is now a one-line change in both halves
+// here, eliminating the prior drift class where a module could be wired into
+// dispatch but forgotten in the schema list (or vice versa).
+//
+// Schemas are concatenated once per process via the `TOOLS_JSON` cache —
+// rebuilding the ~12 KB Value on every `ToolRegistry::new()` (every
+// compaction, /clear, fallback swap) was wasted work.
+
+type SchemasFn = fn() -> Vec<Value>;
+type DispatchFn = fn(&str, &str) -> Option<Result<String, String>>;
+
+const GROUPS: &[(SchemasFn, DispatchFn)] = &[
+    (calendar::schemas, calendar::dispatch),
+    (codegen::schemas, codegen::dispatch),
+    (facts::schemas, facts::dispatch),
+    (file_ops::schemas, file_ops::dispatch),
+    (git::schemas, git::dispatch),
+    (github::schemas, github::dispatch),
+    (gmail::schemas, gmail::dispatch),
+    (ide::schemas, ide::dispatch),
+    (markets::schemas, markets::dispatch),
+    (mission::schemas, mission::dispatch),
+    (notes::schemas, notes::dispatch),
+    (recall::schemas, recall::dispatch),
+    (registry::schemas, registry::dispatch),
+    (schedule::schemas, schedule::dispatch),
+    (search::schemas, search::dispatch),
+    (shell::schemas, shell::dispatch),
+    (telegram::schemas, telegram::dispatch),
+    (todos::schemas, todos::dispatch),
+    (web_search::schemas, web_search::dispatch),
+];
+
+// ────────────────────────────────────────────────────────────────────────────
 // Tool registry — advertised to the model on every request
 // ────────────────────────────────────────────────────────────────────────────
 
-#[must_use]
-pub fn secretary_tools_json() -> Value {
+/// Process-wide cache for the assembled tool-schema array. The contents are
+/// static — schemas don't depend on session or env state — so we build them
+/// once on first call and clone the Value on subsequent calls. Eliminates
+/// ~5–15ms × N rebuilds (one per `ToolRegistry::new`) on every compaction,
+/// `/clear`, and fallback swap.
+fn tools_json_cached() -> &'static Value {
+    static TOOLS_JSON: OnceLock<Value> = OnceLock::new();
+    TOOLS_JSON.get_or_init(build_tools_json)
+}
+
+fn build_tools_json() -> Value {
     let mut tools: Vec<Value> = json!([
-        // ── Core ────────────────────────────────────────────────────────
+        // ── Core (not gated to a group) ─────────────────────────────────
         {
             "type": "function",
             "function": {
@@ -74,12 +122,6 @@ pub fn secretary_tools_json() -> Value {
                 "parameters": { "type": "object", "properties": {}, "required": [] }
             }
         },
-        // Notes group (note_create, note_list, note_read, note_delete)
-        // lives in src/tools/notes.rs and is appended to this array below.
-        // Todos group (todo_add, todo_list, todo_complete, todo_uncomplete,
-        // todo_delete) lives in src/tools/todos.rs and is appended below.
-        // File ops group (read_file, write_file, list_dir) lives in
-        // src/tools/file_ops.rs and is appended to this array below.
         {
             "type": "function",
             "function": {
@@ -88,59 +130,21 @@ pub fn secretary_tools_json() -> Value {
                 "parameters": { "type": "object", "properties": {}, "required": [] }
             }
         },
-        // Web-search group (web_search — Brave API) lives in
-        // src/tools/web_search.rs and is appended to this array below.
-        // Search group (web_fetch, glob_search, grep_search) lives in
-        // src/tools/search.rs and is appended to this array below.
-        // IDE group (open_in_editor, reveal_in_explorer, open_url) lives
-        // in src/tools/ide.rs and is appended to this array below.
-        // Git group (git_status, git_diff, git_log, git_add, git_commit,
-        // git_branch, git_checkout, git_push) lives in src/tools/git.rs
-        // and is appended to this array below.
-        // Shell + edit group (bash, edit_file — DangerFullAccess) lives
-        // in src/tools/shell.rs and is appended to this array below.
-        // Codegen group (generate_code, spawn_agent — plus reference-file
-        // extraction infrastructure) lives in src/tools/codegen.rs and is
-        // appended to this array below.
-        // Facts group (wikipedia_search, wikipedia_summary, weather_current,
-        // weather_forecast) lives in src/tools/facts.rs and is appended below.
-        // Registry group (crate_info, crate_search, npm_info, npm_search)
-        // lives in src/tools/registry.rs and is appended to this array below.
-        // GitHub group (gh_list_my_prs, gh_list_assigned_issues, gh_get_issue,
-        // gh_create_issue, gh_comment_issue, gh_search_code, plus the
-        // brownfield set: gh_list_repo_issues, gh_pr_status, gh_fork,
-        // gh_create_pr) lives in src/tools/github.rs and is appended to this
-        // array below.
-        // Markets group (tv_get_quote, tv_technical_rating, tv_search_symbol,
-        // tv_economic_calendar, vestige_asa_info, vestige_search_asa,
-        // vestige_top_movers) lives in src/tools/markets.rs and is appended
-        // to this array below.
-        // Telegram group (tg_send, tg_get_updates, tg_send_photo) lives in
-        // src/tools/telegram.rs and is appended to this array below.
+        // All other tools live in the GROUPS table above (one entry per
+        // group module) and are appended below.
     ])
     .as_array()
     .cloned()
     .unwrap_or_default();
-    tools.extend(calendar::schemas());
-    tools.extend(codegen::schemas());
-    tools.extend(facts::schemas());
-    tools.extend(file_ops::schemas());
-    tools.extend(git::schemas());
-    tools.extend(github::schemas());
-    tools.extend(gmail::schemas());
-    tools.extend(ide::schemas());
-    tools.extend(markets::schemas());
-    tools.extend(mission::schemas());
-    tools.extend(notes::schemas());
-    tools.extend(recall::schemas());
-    tools.extend(registry::schemas());
-    tools.extend(schedule::schemas());
-    tools.extend(search::schemas());
-    tools.extend(shell::schemas());
-    tools.extend(telegram::schemas());
-    tools.extend(todos::schemas());
-    tools.extend(web_search::schemas());
+    for (schemas_fn, _) in GROUPS {
+        tools.extend(schemas_fn());
+    }
     Value::Array(tools)
+}
+
+#[must_use]
+pub fn secretary_tools_json() -> Value {
+    tools_json_cached().clone()
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -149,99 +153,22 @@ pub fn secretary_tools_json() -> Value {
 
 pub fn dispatch_tool(name: &str, input: &str) -> Result<String, String> {
     // Per-group dispatchers get first crack; each returns Some(_) if it owns
-    // the tool, None otherwise. The `match` below handles everything that
-    // hasn't migrated to a sub-module yet.
-    if let Some(result) = calendar::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = codegen::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = facts::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = file_ops::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = git::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = github::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = gmail::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = ide::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = markets::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = mission::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = notes::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = recall::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = registry::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = schedule::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = search::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = shell::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = telegram::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = todos::dispatch(name, input) {
-        return result;
-    }
-    if let Some(result) = web_search::dispatch(name, input) {
-        return result;
+    // the tool, None otherwise. The `match` below handles the three core
+    // tools that don't belong to any group.
+    for (_, dispatch_fn) in GROUPS {
+        if let Some(result) = dispatch_fn(name, input) {
+            return result;
+        }
     }
 
     match name {
         "get_current_time" => Ok(run_get_current_time()),
         "load_workspace_rules" => Ok(run_load_workspace_rules()),
-        // add_numbers removed from registry (model can do arithmetic).
-        // Dispatch kept so old sessions with tool_calls still work.
-        "add_numbers" => run_add_numbers(input),
-        // Notes group (note_*) handled by the early-return above via
-        // notes::dispatch.
-        // Todos group (todo_*) handled by the early-return above via
-        // todos::dispatch.
-        // File ops group (read_file, write_file, list_dir) handled by
-        // the early-return above via file_ops::dispatch.
         "get_capabilities" => Ok(run_get_capabilities()),
-        // Web-search group (web_search) handled by the early-return above
-        // via web_search::dispatch.
-        // Search group (glob_search, grep_search, web_fetch) is handled by
-        // the early-return above via search::dispatch.
-        // Git group (git_*) handled by the early-return above via
-        // git::dispatch.
-        // Shell + edit group (bash, edit_file) handled by the early-return
-        // above via shell::dispatch.
-        // Codegen group (generate_code, spawn_agent) handled by the
-        // early-return above via codegen::dispatch.
-        // Facts group (wikipedia_*, weather_*) handled by the early-return
-        // above via facts::dispatch.
-        // Registry group (crate_info, crate_search, npm_info, npm_search)
-        // is handled by the early-return above via registry::dispatch.
-        // GitHub group (gh_*) handled by the early-return above via
-        // github::dispatch.
-        // Markets group (tv_*, vestige_*) handled by the early-return
-        // above via markets::dispatch.
-        // Telegram group (tg_*) handled by the early-return above via
-        // telegram::dispatch.
+        // add_numbers removed from the schema (the model can do arithmetic),
+        // but the dispatch arm stays so resumed sessions with old tool_calls
+        // still parse.
+        "add_numbers" => run_add_numbers(input),
         other => Err(format!("unknown tool: {other}")),
     }
 }
