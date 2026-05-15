@@ -119,10 +119,11 @@ jobs:
       - name: Package archive + SHA256
         id: pkg
         shell: bash
-        # Run under bash on every runner — Windows runners ship Git Bash
-        # which provides `tar`, `7z`, and `shasum -a 256`. Output naming
-        # (`claudette-v0.5.2-x86_64-unknown-linux-gnu.tar.gz`) matches the
-        # convention install.sh / install.ps1 expect from /latest/download/.
+        # Run under bash on every runner. Windows runners ship Git Bash
+        # which provides `tar` and `7z` but only `sha256sum` (no `shasum`);
+        # macOS ships `shasum` (perl-based) but no `sha256sum`; Linux ships
+        # both. Try `shasum` first, fall back to `sha256sum` — output
+        # format ("<hash>  <filename>") is identical between the two.
         run: |
           set -euo pipefail
           version="${GITHUB_REF#refs/tags/v}"
@@ -136,7 +137,13 @@ jobs:
             chmod +x "staging/claudette"
             tar -C staging -czf "dist/${stem}.tar.gz" claudette
           fi
-          (cd dist && shasum -a 256 "${stem}.${{ matrix.ext }}" > "${stem}.${{ matrix.ext }}.sha256")
+          archive="${stem}.${{ matrix.ext }}"
+          cd dist
+          if command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 "$archive" > "$archive.sha256"
+          else
+            sha256sum "$archive" > "$archive.sha256"
+          fi
           echo "stem=${stem}" >> "$GITHUB_OUTPUT"
       - name: Upload archive artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
