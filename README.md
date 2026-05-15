@@ -1,13 +1,33 @@
 # Claudette
 
-**A local-first AI secretary that runs on your own 8 GB GPU.** REPL, fullscreen TUI, one-shot CLI, and a Telegram bot — all driving the same [Ollama](https://ollama.com) backend. No cloud brain, no subscription, no telemetry. Single Rust binary.
+**A local-first AI secretary that runs on your own laptop.** REPL, fullscreen TUI, one-shot CLI, and a Telegram bot — all driving the same [Ollama](https://ollama.com) backend. No cloud brain, no subscription, no [telemetry](PRIVACY.md). Single Rust binary.
 
-```bash
-ollama pull qwen3.5:4b      # 3.4 GB brain
-cargo install claudette
-ollama serve &
+### Install in 30 seconds
+
+**Linux / macOS:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/mrdushidush/claudette/main/install.sh | sh
+```
+
+**Windows (PowerShell):**
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/mrdushidush/claudette/main/install.ps1 | iex
+```
+
+Then pull a brain and talk:
+
+```sh
+ollama pull qwen3.5:4b           # 3.4 GB brain — one-time download
 claudette "what time is it?"
 ```
+
+> Prefer not to pipe the network into a shell? Grab a signed archive from [Releases](https://github.com/mrdushidush/claudette/releases/latest) and unzip `claudette` (or `claudette.exe`) onto your `PATH`. SHA256 sidecar on every artifact.
+>
+> **Rust user?** `cargo install claudette` still works.
+> **Don't have a GPU?** See [CPU-only mode](docs/hardware.md#no-gpu-cpu-only-mode) — the 4b brain runs on plain CPU, just slower.
+> **First time?** Open [`docs/show-me.md`](docs/show-me.md) for plain-English examples — calendar, notes, weather, screenshots, voice from your phone.
 
 [![Crates.io](https://img.shields.io/crates/v/claudette.svg)](https://crates.io/crates/claudette)
 [![CI](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml/badge.svg)](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml)
@@ -22,9 +42,9 @@ claudette "what time is it?"
 
 ## Why Claudette
 
-The open-source AI agent space is crowded with coding-focused tools (Aider, Cline, OpenHands, opencode). Claudette is aimed at a different slot: **a general-purpose personal assistant you can voice-note from a bus stop, that runs entirely on your own laptop GPU, with no cloud brain in the loop.**
+The open-source AI agent space is crowded with coding-focused tools (Aider, Cline, OpenHands, opencode). Claudette is aimed at a different slot: **a general-purpose personal assistant you can voice-note from a bus stop, that runs entirely on your own laptop, with no cloud brain in the loop.**
 
-- **Truly local.** No cloud-brain code path exists. Ollama on `localhost` is the only required dependency. Voice TTS is the only optional outbound network call (Microsoft edge-tts) and lives behind `/voice on`.
+- **Truly local by default.** No cloud-brain code path exists. Ollama on `localhost` is the only required dependency. Every outbound network call (voice TTS, Telegram, web search, GitHub, Google Calendar/Gmail) is opt-in and gated behind a feature you have to turn on. Full inventory in [`PRIVACY.md`](PRIVACY.md).
 - **Fits a single 3060-class GPU.** The default `qwen3.5:4b` brain uses ~3.4 GB VRAM; auto-fallback to `qwen3.5:9b` only fires on stuck signals. No 32 GB-VRAM hidden requirement.
 - **Messaging-first.** None of the comparable tools ship a Telegram bot interface — voice in (Whisper), voice out (edge-tts), and full agent control from your phone.
 - **Personal, not just code.** Tool groups cover Google Calendar, Gmail, scheduler/briefings, notes, todos, markets, weather, web search — code-gen is *one* capability (via the Codet sidecar), not the whole point.
@@ -74,18 +94,20 @@ ReadOnly tools auto-allow, WorkspaceWrite tools auto-allow, DangerFullAccess pro
 
 ## Hardware
 
-| Component | Minimum | Recommended | Tested on |
-|-----------|---------|-------------|-----------|
-| GPU | 6 GB VRAM | 8 GB VRAM | RTX 3060 Ti 8 GB |
+The numbers below describe the *comfortable* setup. **You don't need a GPU** — Ollama runs on plain CPU (slower, but viable for a 1b/3b brain). See [`docs/hardware.md#no-gpu-cpu-only-mode`](docs/hardware.md#no-gpu-cpu-only-mode) if you don't have one.
+
+| Component | Comfortable minimum | Recommended | Tested on |
+|-----------|---------------------|-------------|-----------|
+| GPU | 6 GB VRAM (or CPU-only with a smaller brain) | 8 GB VRAM | RTX 3060 Ti 8 GB |
 | RAM | 16 GB | 32 GB | 32 GB DDR4 |
 | Disk | ~3 GB (brain only) | ~27 GB (brain + fallback + 30b coder) | NVMe SSD |
 | OS | Windows 10+, Linux, macOS | Windows 11 / Ubuntu 24.04 / macOS 14+ | Windows 11 Pro |
 
-Full model footprint table and the 30b-coder-on-8GB-VRAM env recipe: [`docs/hardware.md`](docs/hardware.md).
+Full model footprint table, CPU-only recipes, and the 30b-coder-on-8GB-VRAM env recipe: [`docs/hardware.md`](docs/hardware.md).
 
 ---
 
-## Quick start
+## Quick start (full setup)
 
 ```bash
 # 1. Pull models with Ollama.
@@ -93,8 +115,11 @@ ollama pull qwen3.5:4b           # brain (default Auto preset)
 ollama pull qwen3.5:9b           # fallback brain (optional)
 ollama pull qwen3-coder:30b      # Codet coder, only if you'll use generate_code
 
-# 2. Install.
-cargo install claudette
+# 2. Install Claudette — pick one.
+curl -fsSL https://raw.githubusercontent.com/mrdushidush/claudette/main/install.sh | sh   # Linux/macOS
+iwr -useb https://raw.githubusercontent.com/mrdushidush/claudette/main/install.ps1 | iex  # Windows
+cargo install claudette                                                                    # Rust users
+# Or download an archive from https://github.com/mrdushidush/claudette/releases/latest
 
 # 3. (Optional) Tokens for tools that need them.
 export BRAVE_API_KEY=...         # web_search
@@ -107,24 +132,30 @@ claudette --tui                  # TUI
 claudette "what time is it?"     # one-shot
 claudette --resume               # resume last session
 claudette --telegram             # Telegram bot
+claudette --doctor               # diagnose Ollama, models, tokens, permissions
 ```
 
 First launch auto-creates `~/.claudette/` and probes `http://localhost:11434`. Bypass the probe with `CLAUDETTE_SKIP_OLLAMA_PROBE=1` for offline sessions.
 
-Out of the box: notes, todos, files, time, weather, Wikipedia, code search. Brave / GitHub / Google Calendar / Gmail tools light up when you set the relevant token — full table in [`docs/configuration.md`](docs/configuration.md).
+Out of the box: notes, todos, files, time, weather, Wikipedia, code search. Brave / GitHub / Google Calendar / Gmail tools light up when you set the relevant token — full table in [`docs/configuration.md`](docs/configuration.md). Want to see what to actually type? Open [`docs/show-me.md`](docs/show-me.md).
 
 ---
 
 ## Docs
 
+- [`docs/show-me.md`](docs/show-me.md) — **start here:** plain-English example prompts (notes, calendar, vision, voice, code)
 - [`docs/quickstart.md`](docs/quickstart.md) — 30-second start, common flows
 - [`docs/configuration.md`](docs/configuration.md) — every env var, token file fallbacks, recall settings
-- [`docs/hardware.md`](docs/hardware.md) — VRAM/RAM/disk by preset, 30b-on-8GB env recipe
+- [`docs/power-user.md`](docs/power-user.md) — LM Studio recipe, brain pinning, forge knobs, context tuning
+- [`docs/hardware.md`](docs/hardware.md) — VRAM/RAM/disk by preset, CPU-only mode, 30b-on-8GB env recipe
 - [`docs/usage.md`](docs/usage.md) — CLI flags, slash commands, Telegram-only commands
 - [`docs/architecture.md`](docs/architecture.md) — module layout, tool-group contract, Codet sidecar contract
 - [`docs/forge.md`](docs/forge.md) — forge-mode pipeline, Submitter contract, `models.toml` schema, auto-bootstrap
 - [`docs/comparison.md`](docs/comparison.md) — honest side-by-side vs. opencode / Aider / OpenHands / Cline / Continue
 - [`docs/google_setup.md`](docs/google_setup.md) — Calendar + Gmail OAuth walkthrough
+- [`docs/deploy.md`](docs/deploy.md) — Pi / VPS / home-server deploy via docker-compose
+- [`editor/vscode/`](editor/vscode/README.md) — VS Code extension (REPL/TUI/forge/"ask about selection" commands)
+- [`PRIVACY.md`](PRIVACY.md) — every place data can leave your machine, and the conditions for each
 
 ---
 

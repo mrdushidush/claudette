@@ -283,13 +283,33 @@ pub fn run_secretary(user_input: &str, opts: SessionOptions) -> Result<TurnSumma
     Ok(summary)
 }
 
-/// Maximum number of Coder→Verifier fix-loop rounds in v0c forge-mode.
-/// Round 0 is the initial Coder pass; up to `MAX_FIX_ROUNDS` additional
-/// rounds run if the Verifier rejects. Empirically two rounds is the
-/// sweet spot — a local 8b coder model that didn't get it after two
-/// passes usually won't on a third, and burning more rounds just runs
-/// the user's context budget into the ground.
-const MAX_FIX_ROUNDS: u32 = 2;
+/// Default cap on Coder→Verifier fix-loop rounds in v0c forge-mode.
+/// Round 0 is the initial Coder pass; up to this many additional rounds
+/// run if the Verifier rejects. Empirically two rounds is the sweet spot
+/// — a local 8b coder model that didn't get it after two passes usually
+/// won't on a third, and burning more rounds runs the user's context
+/// budget into the ground.
+const DEFAULT_MAX_FIX_ROUNDS: u32 = 2;
+
+/// Hard upper bound on fix-loop rounds, even if `CLAUDETTE_MAX_FIX_ROUNDS`
+/// is set higher. Past ~10 rounds the brain is reliably stuck in a local
+/// minimum and the right move is to bail and let the user re-prompt.
+const FIX_ROUNDS_HARD_CAP: u32 = 10;
+
+/// Resolve the active fix-loop round cap. Honors `CLAUDETTE_MAX_FIX_ROUNDS`
+/// (parsed as u32, clamped to `FIX_ROUNDS_HARD_CAP`) and falls back to
+/// `DEFAULT_MAX_FIX_ROUNDS` on missing or unparseable input. Read on every
+/// call — the forge loop fires a few times per mission so the cost is
+/// negligible, and re-reading makes the knob hot-pluggable across sessions.
+fn max_fix_rounds() -> u32 {
+    match std::env::var("CLAUDETTE_MAX_FIX_ROUNDS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+    {
+        Some(n) => n.min(FIX_ROUNDS_HARD_CAP),
+        None => DEFAULT_MAX_FIX_ROUNDS,
+    }
+}
 
 /// One Verifier judgement. `pass` is the authoritative gate (a Verifier
 /// can score 8 and still mark fail if it spotted a security bug); `score`
@@ -316,9 +336,9 @@ pub(crate) struct VerifierResult {
 /// 3. **Verifier** — tool-less brain turn that scores the `git diff HEAD`
 ///    against the original request. Returns `{score, pass, feedback}`.
 ///    On parse failure, treated as pass (advisory mode).
-/// 4. **Fix-loop** — if Verifier `pass=false` and `round < MAX_FIX_ROUNDS`,
-///    re-runs Coder with the Verifier's feedback prepended. Up to two
-///    rounds.
+/// 4. **Fix-loop** — if Verifier `pass=false` and `round < max_fix_rounds()`,
+///    re-runs Coder with the Verifier's feedback prepended. Default two
+///    rounds; override with `CLAUDETTE_MAX_FIX_ROUNDS` (clamped to 10).
 /// 5. **Submitter** — final Coder turn with `should_submit=true` that only
 ///    calls `mission_submit` (PR opens here, not earlier).
 ///
@@ -468,7 +488,7 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
         if verifier.pass {
             break;
         }
-        if round >= MAX_FIX_ROUNDS {
+        if round >= max_fix_rounds() {
             eprintln!(
                 "  {} {}",
                 theme::dim("∘"),

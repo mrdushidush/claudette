@@ -1,9 +1,15 @@
 name: Release
 
 # Triggered by pushing a v-prefix tag (e.g. `git tag v0.2.3 && git push --tags`).
-# Runs the test suite once on the tagged commit, then publishes to crates.io
-# using a short-lived OIDC token exchanged via crates-io-auth-action — no
-# CARGO_REGISTRY_TOKEN secret is stored in this repo.
+# Three things happen, in order:
+#   1. `verify`           — full test/clippy/fmt gate on the tagged commit.
+#   2. `tag-version-match`— guards against forgot-to-bump in release prep.
+#   3. `publish`          — `cargo publish` to crates.io via OIDC (no stored
+#                           token); `build-binaries` matrix produces prebuilt
+#                           archives for win/linux/macos in parallel.
+#   4. `release`          — once publish + every matrix leg is green, attach
+#                           all binary archives + their SHA256 sidecars to a
+#                           GitHub Release with auto-generated notes.
 #
 # One-time setup on crates.io (UI):
 #   1. Visit https://crates.io/crates/claudette/settings (logged in as
@@ -67,11 +73,10 @@ jobs:
     name: cargo publish (crates.io)
     runs-on: ubuntu-latest
     needs: [verify, tag-version-match]
-    # OIDC exchange needs id-token:write; contents:write needed for the
-    # GitHub Release that softprops/action-gh-release creates after publish.
+    # OIDC exchange needs id-token:write.
     permissions:
       id-token: write
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
       - uses: dtolnay/rust-toolchain@stable
@@ -83,8 +88,93 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
         run: cargo publish --locked -p claudette
-      - name: Create GitHub Release
+
+  build-binaries:
+    name: build ${{ matrix.target }}
+    needs: [verify, tag-version-match]
+    # Build the release binary natively on each platform — no cross-compile.
+    # Five archives total: win-x64, linux-x64, linux-arm64, macos-x64,
+    # macos-arm64. linux-arm64 uses GitHub's free arm64 runner; macos-x64
+    # uses macos-13 because macos-latest moved to Apple Silicon.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,     target: x86_64-unknown-linux-gnu,  ext: tar.gz }
+          - { os: ubuntu-24.04-arm,  target: aarch64-unknown-linux-gnu, ext: tar.gz }
+          - { os: macos-latest,      target: aarch64-apple-darwin,      ext: tar.gz }
+          - { os: macos-13,          target: x86_64-apple-darwin,       ext: tar.gz }
+          - { os: windows-latest,    target: x86_64-pc-windows-msvc,    ext: zip    }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2.9.1
+        with:
+          key: release-${{ matrix.target }}
+      - name: cargo build --release --locked
+        run: cargo build --release --locked -p claudette --target ${{ matrix.target }}
+      - name: Package archive + SHA256
+        id: pkg
+        shell: bash
+        # Run under bash on every runner — Windows runners ship Git Bash
+        # which provides `tar`, `7z`, and `shasum -a 256`. Output naming
+        # (`claudette-v0.5.2-x86_64-unknown-linux-gnu.tar.gz`) matches the
+        # convention install.sh / install.ps1 expect from /latest/download/.
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF#refs/tags/v}"
+          stem="claudette-v${version}-${{ matrix.target }}"
+          mkdir -p dist staging
+          if [ "${{ matrix.ext }}" = "zip" ]; then
+            cp "target/${{ matrix.target }}/release/claudette.exe" staging/
+            (cd staging && 7z a "../dist/${stem}.zip" claudette.exe >/dev/null)
+          else
+            cp "target/${{ matrix.target }}/release/claudette" staging/
+            chmod +x "staging/claudette"
+            tar -C staging -czf "dist/${stem}.tar.gz" claudette
+          fi
+          (cd dist && shasum -a 256 "${stem}.${{ matrix.ext }}" > "${stem}.${{ matrix.ext }}.sha256")
+          echo "stem=${stem}" >> "$GITHUB_OUTPUT"
+      - name: Upload archive artifact
+        # TODO(release): SHA-pin actions/upload-artifact and download-artifact
+        # to match the repo's third-party-action pinning policy (see ci.yml).
+        # Left at @v4 for now so dependabot can promote them to a pinned SHA.
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pkg.outputs.stem }}
+          path: |
+            dist/${{ steps.pkg.outputs.stem }}.${{ matrix.ext }}
+            dist/${{ steps.pkg.outputs.stem }}.${{ matrix.ext }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: GitHub Release (attach binaries)
+    runs-on: ubuntu-latest
+    needs: [publish, build-binaries]
+    # Creating the release + attaching files needs contents:write.
+    permissions:
+      contents: write
+    steps:
+      # TODO(release): SHA-pin actions/download-artifact (see note in
+      # build-binaries above).
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Inspect collected artifacts
+        run: ls -la dist
+      - name: Create GitHub Release with binaries attached
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3.0.0
         with:
+          files: |
+            dist/claudette-v*.tar.gz
+            dist/claudette-v*.tar.gz.sha256
+            dist/claudette-v*.zip
+            dist/claudette-v*.zip.sha256
           generate_release_notes: true
           make_latest: true
+          fail_on_unmatched_files: true

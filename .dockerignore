@@ -1,0 +1,37 @@
+# Build artifacts — never copied into the image. Keeps `docker build`
+# context small (the Rust target dir is several GB on a warm checkout).
+target/
+**/target/
+
+# IDE / editor scratch
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Local secrets and per-user config that should never bake into an image
+.env
+.env.local
+*.token
+secrets/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Anything not needed at build time
+docs/
+launch-drafts/
+target/package/
+CHANGELOG.md
+README.md
+PRIVACY.md
+SECURITY.md
+CODE_OF_CONDUCT.md
+CONTRIBUTING.md
+install.sh
+install.ps1

@@ -34,6 +34,12 @@ Claudette intentionally does **not** auto-load `.env` from the current working d
 | `CLAUDETTE_CODER_NUM_PREDICT` | `12288` | Max output tokens the coder can emit in one call. |
 | `CLAUDETTE_VALIDATE_CODE` | `true` | Enable/disable Codet auto-validation after `generate_code`. |
 
+## Forge mode
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CLAUDETTE_MAX_FIX_ROUNDS` | `2` | Cap on Coder→Verifier fix-loop rounds in `--forge`. Default 2 is the empirical sweet spot for local 8b coders. Raise to 4–6 if you've pinned a stronger Verifier model and want it to keep pushing back. Clamped at 10. |
+
 ## Tokens (per-tool)
 
 | Variable | Purpose |

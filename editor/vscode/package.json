@@ -1,0 +1,120 @@
+{
+    "name": "claudette",
+    "displayName": "Claudette",
+    "description": "Run Claudette — the local-first AI secretary — from VS Code. Adds commands for REPL, TUI, forge mode, doctor, and 'ask about selection'.",
+    "version": "0.1.0",
+    "publisher": "mrdushidush",
+    "license": "Apache-2.0",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/mrdushidush/claudette.git",
+        "directory": "editor/vscode"
+    },
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "categories": [
+        "Other",
+        "Programming Languages"
+    ],
+    "keywords": [
+        "ollama",
+        "ai",
+        "assistant",
+        "local",
+        "agent"
+    ],
+    "activationEvents": [
+        "onCommand:claudette.repl",
+        "onCommand:claudette.tui",
+        "onCommand:claudette.doctor",
+        "onCommand:claudette.resume",
+        "onCommand:claudette.askSelection",
+        "onCommand:claudette.forge"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "claudette.repl",
+                "title": "Claudette: Open REPL",
+                "category": "Claudette"
+            },
+            {
+                "command": "claudette.tui",
+                "title": "Claudette: Open TUI",
+                "category": "Claudette"
+            },
+            {
+                "command": "claudette.doctor",
+                "title": "Claudette: Doctor (diagnose Ollama/models/tokens)",
+                "category": "Claudette"
+            },
+            {
+                "command": "claudette.resume",
+                "title": "Claudette: Resume Last Session",
+                "category": "Claudette"
+            },
+            {
+                "command": "claudette.askSelection",
+                "title": "Claudette: Ask About Selection",
+                "category": "Claudette"
+            },
+            {
+                "command": "claudette.forge",
+                "title": "Claudette: Forge Mode (Planner → Coder → Verifier on the current repo)",
+                "category": "Claudette"
+            }
+        ],
+        "menus": {
+            "editor/context": [
+                {
+                    "command": "claudette.askSelection",
+                    "when": "editorHasSelection",
+                    "group": "navigation@99"
+                }
+            ]
+        },
+        "keybindings": [
+            {
+                "command": "claudette.askSelection",
+                "key": "ctrl+alt+c",
+                "mac": "cmd+alt+c",
+                "when": "editorHasSelection"
+            }
+        ],
+        "configuration": {
+            "title": "Claudette",
+            "properties": {
+                "claudette.binary": {
+                    "type": "string",
+                    "default": "claudette",
+                    "description": "Path to the claudette binary. Leave as 'claudette' if it's on your PATH; otherwise an absolute path."
+                },
+                "claudette.terminalName": {
+                    "type": "string",
+                    "default": "Claudette",
+                    "description": "Name of the integrated terminal Claudette uses. Reusing one terminal keeps the VS Code panel tidy."
+                },
+                "claudette.reuseTerminal": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Reuse the same Claudette terminal across commands. Turn off if you prefer one terminal per invocation."
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "package": "vsce package",
+        "lint": "tsc --noEmit"
+    },
+    "devDependencies": {
+        "@types/node": "^20.11.0",
+        "@types/vscode": "^1.85.0",
+        "@vscode/vsce": "^3.0.0",
+        "typescript": "^5.3.3"
+    }
+}
