@@ -139,10 +139,7 @@ jobs:
           (cd dist && shasum -a 256 "${stem}.${{ matrix.ext }}" > "${stem}.${{ matrix.ext }}.sha256")
           echo "stem=${stem}" >> "$GITHUB_OUTPUT"
       - name: Upload archive artifact
-        # TODO(release): SHA-pin actions/upload-artifact and download-artifact
-        # to match the repo's third-party-action pinning policy (see ci.yml).
-        # Left at @v4 for now so dependabot can promote them to a pinned SHA.
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: ${{ steps.pkg.outputs.stem }}
           path: |
@@ -159,9 +156,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      # TODO(release): SHA-pin actions/download-artifact (see note in
-      # build-binaries above).
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           path: dist
           merge-multiple: true
