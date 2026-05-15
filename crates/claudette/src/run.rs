@@ -859,27 +859,18 @@ pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
                     ))
                 );
 
-                // Cross-session recall: index the user input + the assistant
-                // text from this turn. Best-effort — the FIRST failure (e.g.
-                // a missing embed model in LM Studio) emits one warn line
-                // and then sticky-disables indexing for the rest of this
-                // process, so the user isn't spammed turn-after-turn. They
-                // can fix the underlying issue and restart claudette to
-                // re-enable recall. The hard kill-switch
+                // Cross-session recall: enqueue the user input + the
+                // assistant text from this turn for the async indexer
+                // thread (see [`index_turn_for_recall`] / [`recall_index_sender`]).
+                // Best-effort — the FIRST failure on the worker thread
+                // (e.g. a missing embed model in LM Studio) emits one
+                // warn line and then sticky-disables indexing for the
+                // rest of this process, so the user isn't spammed turn-
+                // after-turn. They can run `/recall reprobe` to retry
+                // after loading the embed model. The hard kill-switch
                 // `CLAUDETTE_RECALL_DISABLE=1` still wins.
                 if recall_index_allowed() {
-                    if let Err(e) = index_turn_for_recall(trimmed, &runtime) {
-                        mark_recall_index_broken();
-                        eprintln!(
-                            "{} {}",
-                            theme::warn(theme::WARN_GLYPH),
-                            theme::warn(&format!(
-                                "recall: {e} — disabling recall indexing for this session \
-                                 (set CLAUDETTE_RECALL_DISABLE=1 to silence, or fix the \
-                                 embed model and restart)"
-                            ))
-                        );
-                    }
+                    index_turn_for_recall(trimmed, &runtime);
                 }
             }
             Err(e) => {
@@ -1334,6 +1325,17 @@ pub(crate) fn mark_recall_index_broken() {
     RECALL_INDEX_BROKEN.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Clear the sticky `RECALL_INDEX_BROKEN` flag and re-run the startup
+/// embed probe. Exposed via the `/recall reprobe` slash command so the
+/// user can recover from a mid-session embed failure (e.g. LM Studio
+/// just loaded the embed model) without restarting the process. Returns
+/// the probe's own `Result` so the slash handler can format a success/
+/// failure message.
+pub fn reprobe_recall() -> Result<(), String> {
+    RECALL_INDEX_BROKEN.store(false, std::sync::atomic::Ordering::Relaxed);
+    crate::recall::probe()
+}
+
 /// Pre-flight the recall embedder by running a tiny embed call at REPL/TUI
 /// startup. On failure (e.g. LM Studio's "No models loaded" 400), set the
 /// sticky-disable flag and print one clear warn line. Silent on success so
@@ -1359,30 +1361,27 @@ pub(crate) fn probe_recall_at_startup() {
     }
 }
 
-/// Index the user input string + the most recent assistant text-blocks
-/// into the cross-session recall store. Skips empty or tool-only messages.
+/// Extract the (user, assistant) snippets for one turn — pure CPU,
+/// returns owned strings so callers can enqueue them onto the async
+/// indexer channel without holding a borrow on the runtime. Empty
+/// snippets stay empty (the indexer thread skips them).
 ///
-/// Why we use `user_input` directly instead of walking back to find the
+/// Why we pass `user_input` directly instead of walking back to find the
 /// "latest user message": on retries, the runtime injects a synthetic
 /// nudge user-message into the session (see [`run_turn_with_retry`]). The
-/// raw `trimmed` REPL line is what the human actually typed, so we index
-/// that and skip the synthetic.
-pub(crate) fn index_turn_for_recall<C, T>(
+/// raw `trimmed` REPL line is what the human actually typed, so we
+/// index that and skip the synthetic.
+fn extract_turn_snippets<C, T>(
     user_input: &str,
     runtime: &ConversationRuntime<C, T>,
-) -> Result<(), String>
+) -> (String, String)
 where
     C: crate::ApiClient,
     T: crate::ToolExecutor,
 {
-    use crate::recall::{global_index, Role};
     use crate::ContentBlock;
-
-    let user_text = user_input.trim();
-    if !user_text.is_empty() {
-        global_index(Role::User, user_text)?;
-    }
-
+    let user_text = user_input.trim().to_string();
+    let mut asst_text = String::new();
     if let Some(msg) = runtime
         .session()
         .messages
@@ -1390,21 +1389,94 @@ where
         .rev()
         .find(|m| matches!(m.role, crate::MessageRole::Assistant))
     {
-        let mut text = String::new();
         for block in &msg.blocks {
             if let ContentBlock::Text { text: t } = block {
-                if !text.is_empty() {
-                    text.push('\n');
+                if !asst_text.is_empty() {
+                    asst_text.push('\n');
                 }
-                text.push_str(t);
+                asst_text.push_str(t);
             }
         }
-        if !text.trim().is_empty() {
-            global_index(Role::Assistant, &text)?;
-        }
     }
+    (user_text, asst_text)
+}
 
-    Ok(())
+/// One job for the background recall indexer.
+struct IndexJob {
+    role: crate::recall::Role,
+    snippet: String,
+}
+
+/// Lazily-spawned mpsc channel for the recall indexer thread. The Sender
+/// is cloned on every push; the Receiver is owned by the one worker
+/// thread spawned on first use. Channel-close (last Sender dropped at
+/// process exit) terminates the thread cleanly.
+fn recall_index_sender() -> &'static std::sync::mpsc::Sender<IndexJob> {
+    use std::sync::OnceLock;
+    static SENDER: OnceLock<std::sync::mpsc::Sender<IndexJob>> = OnceLock::new();
+    SENDER.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<IndexJob>();
+        std::thread::Builder::new()
+            .name("recall-indexer".to_string())
+            .spawn(move || {
+                // Drain until the channel closes. Each failed embed call
+                // sets the sticky-disable flag and logs once; subsequent
+                // jobs that slip through (in flight before the flag flipped)
+                // also fail-fast on the same flag check.
+                while let Ok(job) = rx.recv() {
+                    if !recall_index_allowed() {
+                        continue;
+                    }
+                    if job.snippet.trim().is_empty() {
+                        continue;
+                    }
+                    if let Err(e) = crate::recall::global_index(job.role, &job.snippet) {
+                        mark_recall_index_broken();
+                        eprintln!(
+                            "{} {}",
+                            theme::warn(theme::WARN_GLYPH),
+                            theme::warn(&format!(
+                                "recall: {e} — disabling recall indexing for this session \
+                                 (run /recall reprobe to retry after loading the embed model)"
+                            ))
+                        );
+                    }
+                }
+            })
+            .expect("spawn recall-indexer thread");
+        tx
+    })
+}
+
+/// Enqueue this turn's (user, assistant) snippets for async indexing.
+/// Cheap (one channel push per snippet) — the embed call itself happens
+/// on the background thread spawned by [`recall_index_sender`]. This is
+/// the foreground entry point the REPL/TUI/Telegram all hit after a
+/// successful turn.
+///
+/// Pre-2026-05-15 the embed call ran synchronously here, blocking the
+/// REPL ~100 ms typical and seconds on a cold embed model. Moving it
+/// behind a channel restores per-turn latency to what the user sees on
+/// the streamed brain text.
+pub(crate) fn index_turn_for_recall<C, T>(user_input: &str, runtime: &ConversationRuntime<C, T>)
+where
+    C: crate::ApiClient,
+    T: crate::ToolExecutor,
+{
+    let (user_text, asst_text) = extract_turn_snippets(user_input, runtime);
+    let tx = recall_index_sender();
+    if !user_text.is_empty() {
+        let _ = tx.send(IndexJob {
+            role: crate::recall::Role::User,
+            snippet: user_text,
+        });
+    }
+    if !asst_text.trim().is_empty() {
+        let _ = tx.send(IndexJob {
+            role: crate::recall::Role::Assistant,
+            snippet: asst_text,
+        });
+    }
 }
 
 /// Interactive CLI prompter. Prints tool name + a preview of the input,

@@ -10,7 +10,28 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Changed
+
+- **Cross-session recall indexing is now non-blocking.** Each REPL/TUI/
+  forge turn used to block on `/api/embeddings` for ~100 ms (seconds on a
+  cold embed) after the brain text finished streaming. `index_turn_for_recall`
+  now extracts the (user, assistant) snippets synchronously and pushes them
+  onto a process-wide mpsc channel; one background thread spawned by
+  `recall_index_sender` drains the channel into `recall::global_index`.
+  The sticky-disable semantics moved to the worker — the FIRST failed
+  embed call there sets `RECALL_INDEX_BROKEN` and prints a single warn
+  line to stderr, so the next turn's foreground gate skips the alloc + push
+  entirely. No behavioural change for callers; turn latency drops by
+  the per-turn embed cost.
+
 ### Added
+
+- **`/recall reprobe` slash command.** Clears the session-sticky
+  `RECALL_INDEX_BROKEN` flag and re-runs `recall::probe()`. Lets the user
+  recover indexing mid-session after fixing the underlying issue (e.g.
+  loading the embed model in LM Studio's Local Server tab), without
+  restarting the process. New public `crate::run::reprobe_recall`
+  function backs the slash; surfaced in `/help` under "tools & memory".
 
 - **Forge-mode auto-bootstrap.** `--forge "<prompt>"` and `/forge <prompt>`
   no longer require an explicit `/brownfield` step when invoked from inside

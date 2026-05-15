@@ -24,7 +24,7 @@ use crate::memory::try_load_memory;
 use crate::prompt::secretary_system_prompt_with_memory;
 use crate::run::{
     build_permission_policy, compact_threshold, current_model, index_turn_for_recall,
-    mark_recall_index_broken, probe_recall_at_startup, recall_index_allowed, save_session,
+    probe_recall_at_startup, recall_index_allowed, save_session,
 };
 use crate::tool_groups::{ToolGroup, ToolRegistry};
 use crate::tui_events::{TuiEvent, UserInput};
@@ -250,16 +250,18 @@ pub fn spawn_worker(
                                 out_tok: summary.usage.output_tokens,
                             });
 
-                            // Cross-session recall indexing — same sticky-
-                            // disable semantics as the REPL: first failure
-                            // emits one Info message, then silently skipped.
+                            // Cross-session recall indexing — non-blocking
+                            // hand-off to the process-wide async indexer
+                            // thread (see `run::recall_index_sender`). The
+                            // worker thread holds the sticky-disable
+                            // semantics; the foreground gate skips the
+                            // alloc + push when broken/disabled. Errors are
+                            // logged to stderr by the worker, so the TUI
+                            // Info channel stays quiet (the previous per-
+                            // turn TuiEvent::Info path is gone with the
+                            // blocking embed call).
                             if recall_index_allowed() {
-                                if let Err(e) = index_turn_for_recall(&text, &runtime) {
-                                    mark_recall_index_broken();
-                                    let _ = tui_tx.send(TuiEvent::Info(format!(
-                                        "recall: {e} — disabling recall indexing for this session"
-                                    )));
-                                }
+                                index_turn_for_recall(&text, &runtime);
                             }
                         }
                         Err(e) => {

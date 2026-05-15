@@ -79,6 +79,10 @@ pub enum SlashCommand {
     /// matching the query. Bypasses the brain — runs the same lookup as the
     /// `recall` tool would, but prints results straight to the REPL.
     Recall(String),
+    /// Clear the sticky `RECALL_INDEX_BROKEN` flag and re-run the embed
+    /// probe. Used when the user's loaded the embed model in LM Studio
+    /// mid-session and wants recall back without restarting the process.
+    RecallReprobe,
     /// Phase 2 brownfield shortcut: clone a target repo and make it the
     /// active mission in one shot. Thin wrapper over the `mission_start`
     /// tool — exposes it from the REPL without going through the brain.
@@ -194,9 +198,12 @@ pub fn parse_slash_command(line: &str) -> Option<SlashCommand> {
         },
         "models" => SlashCommand::Models,
         "recall" => match arg.filter(|s| !s.is_empty()) {
+            Some(arg) if arg.eq_ignore_ascii_case("reprobe") => SlashCommand::RecallReprobe,
             Some(query) => SlashCommand::Recall(query),
             None => SlashCommand::Invalid(
-                "/recall requires a query. Try: /recall meeting with brian".to_string(),
+                "/recall requires a query (or `reprobe` to retry the embed probe). \
+                 Try: /recall meeting with brian"
+                    .to_string(),
             ),
         },
         "brownfield" => match arg.filter(|s| !s.is_empty()) {
@@ -379,6 +386,10 @@ where
             handle_recall(out, &query);
             SlashOutcome::Continue
         }
+        SlashCommand::RecallReprobe => {
+            handle_recall_reprobe(out);
+            SlashOutcome::Continue
+        }
         SlashCommand::Brownfield(target) => {
             handle_brownfield(out, &target);
             SlashOutcome::Continue
@@ -447,6 +458,10 @@ fn print_help(out: &mut impl Write) {
                 ),
                 ("/agents", "List available agent types"),
                 ("/recall <query>", "Search cross-session memory"),
+                (
+                    "/recall reprobe",
+                    "Retry the embed probe + re-enable indexing",
+                ),
             ],
         ),
         (
@@ -1356,6 +1371,38 @@ fn handle_recall(out: &mut impl Write, query: &str) {
     }
 }
 
+/// `/recall reprobe`: clear the sticky-disable flag and re-run the embed
+/// probe. Surfaces a clear OK / fail message so the user can verify the
+/// embed model is now answering before relying on indexing again.
+fn handle_recall_reprobe(out: &mut impl Write) {
+    let _ = writeln!(
+        out,
+        "{} {}",
+        theme::BRAIN,
+        theme::accent("recall: re-running embed probe")
+    );
+    match crate::run::reprobe_recall() {
+        Ok(()) => {
+            let _ = writeln!(
+                out,
+                "  {} {}",
+                theme::ok(theme::OK_GLYPH),
+                theme::ok("recall ready — indexing re-enabled for this session")
+            );
+        }
+        Err(e) => {
+            let _ = writeln!(
+                out,
+                "  {} {}",
+                theme::error(theme::ERR_GLYPH),
+                theme::error(&format!(
+                    "recall probe failed: {e} — indexing stays disabled"
+                ))
+            );
+        }
+    }
+}
+
 /// Trim an RFC3339 timestamp to its calendar-date prefix for display.
 /// `2026-05-08T14:33:21+00:00` → `2026-05-08`. Falls back to the full
 /// string if there's no `T`.
@@ -1958,6 +2005,24 @@ mod tests {
         assert!(matches!(parsed, Some(SlashCommand::Invalid(_))));
         let parsed = parse_slash_command("/recall   ");
         assert!(matches!(parsed, Some(SlashCommand::Invalid(_))));
+    }
+
+    #[test]
+    fn parse_recall_reprobe_subcommand() {
+        assert_eq!(
+            parse_slash_command("/recall reprobe"),
+            Some(SlashCommand::RecallReprobe)
+        );
+        assert_eq!(
+            parse_slash_command("/recall REPROBE"),
+            Some(SlashCommand::RecallReprobe),
+            "should accept case-insensitive subcommand"
+        );
+        assert_eq!(
+            parse_slash_command("/recall   reprobe  "),
+            Some(SlashCommand::RecallReprobe),
+            "should tolerate whitespace around the reprobe keyword"
+        );
     }
 
     #[test]
