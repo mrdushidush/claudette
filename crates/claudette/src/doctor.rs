@@ -428,49 +428,13 @@ fn probe_google_oauth() -> Status {
     worst
 }
 
+/// Shared live-verify with the `--auth-google` post-grant check —
+/// `crate::google_auth::verify_scope_live` is the single source of truth
+/// for "does this token actually work against the API". Keeps the doctor
+/// and the OAuth flow in lockstep so a passing `--doctor` row implies
+/// the same thing as the "OK: ... verified" line the auth flow prints.
 fn verify_scope(ctx: crate::google_auth::AuthContext, token: &str) -> Result<String, String> {
-    use crate::google_auth::AuthContext;
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| format!("http client: {e}"))?;
-    let url = match ctx {
-        AuthContext::Calendar => {
-            "https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=1"
-        }
-        AuthContext::GmailRead => "https://gmail.googleapis.com/gmail/v1/users/me/labels",
-    };
-    let resp = client
-        .get(url)
-        .bearer_auth(token)
-        .send()
-        .map_err(|e| format!("request: {e}"))?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body = resp.text().unwrap_or_default();
-        return Err(format!(
-            "HTTP {} — {}",
-            status.as_u16(),
-            body.chars().take(160).collect::<String>()
-        ));
-    }
-    let body: Value = resp.json().map_err(|e| format!("parse: {e}"))?;
-    match ctx {
-        AuthContext::Calendar => {
-            let n = body
-                .get("items")
-                .and_then(Value::as_array)
-                .map_or(0, Vec::len);
-            Ok(format!("calendar events.list OK ({n} returned)"))
-        }
-        AuthContext::GmailRead => {
-            let n = body
-                .get("labels")
-                .and_then(Value::as_array)
-                .map_or(0, Vec::len);
-            Ok(format!("gmail labels.list OK ({n} labels visible)"))
-        }
-    }
+    crate::google_auth::verify_scope_live(ctx, token)
 }
 
 // ─── Voice deps ──────────────────────────────────────────────────────────

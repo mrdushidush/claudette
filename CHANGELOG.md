@@ -12,6 +12,31 @@ bumps are non-breaking bugfixes only.
 
 ### Changed
 
+- **OAuth refresh diagnostics: branch invalid_grant vs transient 5xx.**
+  `refresh_tokens` used to return the same `refresh HTTP 400` string for
+  `invalid_grant` (revoked / expired refresh token — needs `--revoke` then
+  re-auth) and for 5xx transients (Google's token endpoint having a
+  moment). New `classify_refresh_failure` parses the response JSON and
+  routes to one of three messages: a `invalid_grant` line that literally
+  names the recovery commands (`claudette --auth-google <scope> --revoke`
+  then `claudette --auth-google <scope>`), a 5xx line that says
+  "transient" and links the status page, or the generic 4xx form with
+  the structured error code preserved. The `AuthContext` is threaded
+  through so the recovery hint names the right scope (e.g. `--auth-google
+  gmail --revoke`, not the generic `<scope>` placeholder).
+
+- **`claudette --auth-google <scope>` now live-verifies the granted token.**
+  Successful consent + token storage is followed by one read call
+  (`calendar/v3/.../events?maxResults=1` for Calendar,
+  `gmail/v1/users/me/messages?maxResults=1` for Gmail) and a printed
+  `OK: calendar access verified` / `OK: gmail access verified
+  (N messages visible)` line — the user discovers a broken grant at auth
+  time, not mid-prompt later. A failed verify is a warning, not a hard
+  error: tokens stayed saved, and a transient outage shouldn't force the
+  full consent flow again. Shared with `claudette --doctor` via a new
+  `google_auth::verify_scope_live` so both probes use the same definition
+  of "access works".
+
 - **Cross-session recall indexing is now non-blocking.** Each REPL/TUI/
   forge turn used to block on `/api/embeddings` for ~100 ms (seconds on a
   cold embed) after the brain text finished streaming. `index_turn_for_recall`

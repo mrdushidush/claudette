@@ -223,13 +223,18 @@ fn http_client() -> Result<reqwest::blocking::Client, String> {
 pub fn access_token(ctx: AuthContext) -> Result<String, String> {
     let mut tokens = load_tokens(ctx)?;
     if tokens.expires_at - now_unix() < 60 {
-        refresh_tokens(&mut tokens)?;
+        refresh_tokens(&mut tokens, Some(ctx))?;
         save_tokens(ctx, &tokens)?;
     }
     Ok(tokens.access_token)
 }
 
-fn refresh_tokens(tokens: &mut GoogleTokens) -> Result<(), String> {
+/// Refresh `tokens` against Google's `/token` endpoint. The optional
+/// [`AuthContext`] threads through to [`classify_refresh_failure`] so the
+/// "run `claudette --auth-google <scope>`" recovery hint in error
+/// messages can name the right scope; `None` falls back to a generic
+/// "<scope>" placeholder.
+fn refresh_tokens(tokens: &mut GoogleTokens, ctx: Option<AuthContext>) -> Result<(), String> {
     let creds = load_client_creds()?;
     let client = http_client()?;
     let params = [
@@ -249,10 +254,7 @@ fn refresh_tokens(tokens: &mut GoogleTokens) -> Result<(), String> {
         .json()
         .map_err(|e| format!("google_auth: refresh parse failed: {e}"))?;
     if !status.is_success() {
-        return Err(format!(
-            "google_auth: refresh HTTP {status}: {}",
-            body.to_string().chars().take(300).collect::<String>()
-        ));
+        return Err(classify_refresh_failure(status, &body, ctx));
     }
 
     let access = body
@@ -270,6 +272,108 @@ fn refresh_tokens(tokens: &mut GoogleTokens) -> Result<(), String> {
     tokens.access_token = access.to_string();
     tokens.expires_at = now_unix() + expires_in;
     Ok(())
+}
+
+/// Branch on the body of a non-success refresh-token response to give the
+/// user an actionable next step instead of the opaque `HTTP 400` we used
+/// to emit for both invalid_grant (permanent — revoke + re-auth) and 5xx
+/// (transient — retry).
+///
+/// Google's documented shape for invalid_grant:
+/// `{"error":"invalid_grant","error_description":"Token has been expired or revoked."}`
+fn classify_refresh_failure(
+    status: reqwest::StatusCode,
+    body: &Value,
+    ctx: Option<AuthContext>,
+) -> String {
+    let error_code = body.get("error").and_then(Value::as_str).unwrap_or("");
+    let description = body
+        .get("error_description")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let scope_label = ctx.map_or("<scope>", AuthContext::label);
+
+    if error_code == "invalid_grant" {
+        return format!(
+            "google_auth: refresh token rejected (invalid_grant — usually \
+             revoked or expired). Recover with: \
+             `claudette --auth-google {scope_label} --revoke` then \
+             `claudette --auth-google {scope_label}`. \
+             Google said: {description}"
+        );
+    }
+    if status.is_server_error() {
+        return format!(
+            "google_auth: refresh HTTP {status} — Google's token endpoint \
+             returned a transient server error. Retry in a moment; if it \
+             keeps happening, check https://status.cloud.google.com/. \
+             Body: {}",
+            body.to_string().chars().take(200).collect::<String>()
+        );
+    }
+    // Other 4xx — preserve the prior generic form but still include the
+    // structured error code first if Google gave us one, so the user
+    // can google the exact code.
+    let error_prefix = if error_code.is_empty() {
+        String::new()
+    } else {
+        format!("{error_code}: ")
+    };
+    format!(
+        "google_auth: refresh HTTP {status} — {error_prefix}{}",
+        body.to_string().chars().take(300).collect::<String>()
+    )
+}
+
+/// Live-verify access for `ctx` by issuing one cheap read call:
+/// - `Calendar` → `events.list?maxResults=1` against `primary`.
+/// - `GmailRead` → `users/me/messages?maxResults=1` so we can quote the
+///   `resultSizeEstimate` count back to the user.
+///
+/// Returns a human-readable success line on success, an error string on
+/// failure. Used by both `claudette --auth-google <scope>` (post-grant
+/// confirmation) and `claudette --doctor` (token-staleness probe), so the
+/// two callers stay in lockstep on what "access works" means.
+pub fn verify_scope_live(ctx: AuthContext, token: &str) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("google_auth: http client: {e}"))?;
+    let url = match ctx {
+        AuthContext::Calendar => {
+            "https://www.googleapis.com/calendar/v3/calendars/primary/events?maxResults=1"
+        }
+        AuthContext::GmailRead => {
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=1"
+        }
+    };
+    let resp = client
+        .get(url)
+        .bearer_auth(token)
+        .send()
+        .map_err(|e| format!("google_auth: verify request: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().unwrap_or_default();
+        return Err(format!(
+            "google_auth: verify HTTP {} — {}",
+            status.as_u16(),
+            body.chars().take(160).collect::<String>()
+        ));
+    }
+    let body: Value = resp
+        .json()
+        .map_err(|e| format!("google_auth: verify parse: {e}"))?;
+    match ctx {
+        AuthContext::Calendar => Ok("calendar access verified".to_string()),
+        AuthContext::GmailRead => {
+            let n = body
+                .get("resultSizeEstimate")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            Ok(format!("gmail access verified ({n} messages visible)"))
+        }
+    }
 }
 
 /// Revoke the stored refresh token for `ctx` with Google and delete the
@@ -344,6 +448,19 @@ pub fn run_auth_flow(ctx: AuthContext) -> Result<(), String> {
         ctx.label(),
         tokens_path(ctx).display()
     );
+
+    // Confirm the granted scope actually works against the live API before
+    // the user discovers a broken token mid-prompt. A failed verify here is
+    // a warning, not a hard error: tokens did save successfully, and a
+    // transient Google outage shouldn't make the user re-run the whole
+    // consent flow. The user can re-verify later via `claudette --doctor`.
+    match verify_scope_live(ctx, &tokens.access_token) {
+        Ok(msg) => eprintln!("✔ OK: {msg}"),
+        Err(e) => eprintln!(
+            "⚠  saved tokens but live verify failed: {e}. \
+             Re-run `claudette --doctor` after you fix it."
+        ),
+    }
     Ok(())
 }
 
@@ -743,6 +860,71 @@ mod tests {
         let err = load_client_creds().unwrap_err();
         assert!(err.contains("OAuth client not configured"), "got: {err}");
         assert!(err.contains("docs/google_setup.md"), "got: {err}");
+    }
+
+    #[test]
+    fn classify_refresh_failure_invalid_grant_names_revoke_then_reauth() {
+        let body = serde_json::json!({
+            "error": "invalid_grant",
+            "error_description": "Token has been expired or revoked."
+        });
+        let msg = classify_refresh_failure(
+            reqwest::StatusCode::BAD_REQUEST,
+            &body,
+            Some(AuthContext::Calendar),
+        );
+        assert!(msg.contains("invalid_grant"), "got: {msg}");
+        // Must literally name the recovery command so the user doesn't
+        // have to read the source to figure out what to do.
+        assert!(
+            msg.contains("--auth-google calendar --revoke"),
+            "got: {msg}"
+        );
+        assert!(msg.contains("--auth-google calendar"), "got: {msg}");
+        assert!(msg.contains("revoked or expired"), "got: {msg}");
+    }
+
+    #[test]
+    fn classify_refresh_failure_5xx_says_transient() {
+        let body = serde_json::json!({"error": "internal_error"});
+        let msg = classify_refresh_failure(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            &body,
+            Some(AuthContext::GmailRead),
+        );
+        assert!(msg.contains("transient"), "got: {msg}");
+        // Must NOT direct the user to revoke their token over a transient
+        // server error — that's exactly the regression we're guarding
+        // against.
+        assert!(
+            !msg.contains("--revoke"),
+            "transient 5xx should not advise --revoke: {msg}"
+        );
+    }
+
+    #[test]
+    fn classify_refresh_failure_other_4xx_keeps_structured_error() {
+        let body = serde_json::json!({
+            "error": "unauthorized_client",
+            "error_description": "..."
+        });
+        let msg = classify_refresh_failure(
+            reqwest::StatusCode::UNAUTHORIZED,
+            &body,
+            Some(AuthContext::Calendar),
+        );
+        assert!(msg.contains("unauthorized_client"), "got: {msg}");
+        // Should not recommend revoking — that's only the invalid_grant
+        // path.
+        assert!(!msg.contains("--revoke"), "got: {msg}");
+    }
+
+    #[test]
+    fn classify_refresh_failure_handles_missing_context() {
+        let body = serde_json::json!({"error": "invalid_grant"});
+        let msg = classify_refresh_failure(reqwest::StatusCode::BAD_REQUEST, &body, None);
+        // Falls back to a placeholder rather than panicking.
+        assert!(msg.contains("<scope>"), "got: {msg}");
     }
 
     #[test]
