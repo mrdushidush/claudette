@@ -589,6 +589,11 @@ fn handle_sessions(out: &mut impl Write) {
         "\n  {}",
         theme::dim("delete with: /sessions delete <name>")
     );
+    let _ = writeln!(
+        out,
+        "  {}",
+        theme::dim("rename with: /sessions rename <old> <new>")
+    );
 }
 
 fn handle_sessions_rename(out: &mut impl Write, old: &str, new: &str) {

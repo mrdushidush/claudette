@@ -1,5 +1,12 @@
 # Sprint: The Life Agent
 
+> **HISTORICAL — not a live roadmap.** This sprint plan ran 2026-04 and
+> shipped as `v0.2.0`. The "life agent" concept evolved into the broader
+> claudette agent and this file is preserved only as a record of that
+> sprint's scope and decisions. Do not treat anything below as a current
+> spec or a TODO list. See `docs/forge.md` and the v0.5+ CHANGELOG for the
+> live surface area.
+
 **Status (2026-04-22).** Phases 1-4 shipped as `v0.2.0`. Phase 5 (Gmail write) deferred
 to a later release — the read-only surface is enough to ship the ship-line demo. Phase 6
 launch polish landed without the screenshot/screencast step (no launch campaign).

@@ -55,6 +55,12 @@ pub struct TestResult {
 /// `cwd` overrides the subprocess working directory — needed by
 /// `run_python_unittest` which must `cd` into the file's parent so
 /// Python can import it by module name.
+///
+/// **Pipe draining:** stdout and stderr are read concurrently on dedicated
+/// reader threads. Reading lazily (only after `try_wait` returns `Some`)
+/// deadlocks any child that writes more than the OS pipe buffer (~64 KB)
+/// because the child blocks on the write while the parent spins on
+/// `try_wait` and the timeout eats the whole 30 s budget.
 pub fn run_command_with_timeout(
     program: &str,
     args: &[&str],
@@ -79,17 +85,19 @@ pub fn run_command_with_timeout(
         }
     };
 
+    // Drain pipes on background threads so the child can't block writing.
+    let stdout_reader = spawn_pipe_reader(child.stdout.take());
+    let stderr_reader = spawn_pipe_reader(child.stderr.take());
+
     let start = Instant::now();
     let timeout = Duration::from_secs(timeout_secs);
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                let stdout = read_pipe(child.stdout.take());
-                let stderr = read_pipe(child.stderr.take());
                 return CommandResult {
                     success: status.success(),
-                    stdout,
-                    stderr,
+                    stdout: join_reader(stdout_reader),
+                    stderr: join_reader(stderr_reader),
                     timed_out: false,
                     exit_code: status.code(),
                 };
@@ -98,10 +106,20 @@ pub fn run_command_with_timeout(
                 if start.elapsed() > timeout {
                     let _ = child.kill();
                     let _ = child.wait();
+                    // Reader threads exit cleanly once the kill closes the
+                    // pipe ends; join so any partial output is still
+                    // returned with the timeout message appended.
+                    let stdout = join_reader(stdout_reader);
+                    let mut stderr = join_reader(stderr_reader);
+                    if !stderr.is_empty() && !stderr.ends_with('\n') {
+                        stderr.push('\n');
+                    }
+                    use std::fmt::Write as _;
+                    let _ = write!(stderr, "timed out after {timeout_secs}s");
                     return CommandResult {
                         success: false,
-                        stdout: String::new(),
-                        stderr: format!("timed out after {timeout_secs}s"),
+                        stdout,
+                        stderr,
                         timed_out: true,
                         exit_code: None,
                     };
@@ -111,8 +129,11 @@ pub fn run_command_with_timeout(
             Err(e) => {
                 return CommandResult {
                     success: false,
-                    stdout: String::new(),
-                    stderr: format!("try_wait error: {e}"),
+                    stdout: join_reader(stdout_reader),
+                    stderr: format!(
+                        "{}\ntry_wait error: {e}",
+                        join_reader(stderr_reader).trim_end()
+                    ),
                     timed_out: false,
                     exit_code: None,
                 };
@@ -121,15 +142,28 @@ pub fn run_command_with_timeout(
     }
 }
 
-/// Helper: drain a piped stdout/stderr handle into a String. Returns empty
-/// string on None (pipe not captured) or read error.
-fn read_pipe(pipe: Option<impl Read>) -> String {
-    let Some(mut r) = pipe else {
-        return String::new();
-    };
-    let mut buf = String::new();
-    let _ = r.read_to_string(&mut buf);
-    buf
+/// Spawn a background thread that drains a child pipe into a `String`. The
+/// thread exits when the pipe closes (child exit or kill). `None` input
+/// yields a thread that returns an empty string immediately so callers
+/// never have to special-case "pipe wasn't captured."
+fn spawn_pipe_reader<P>(pipe: Option<P>) -> std::thread::JoinHandle<String>
+where
+    P: Read + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let Some(mut r) = pipe else {
+            return String::new();
+        };
+        let mut buf = String::new();
+        let _ = r.read_to_string(&mut buf);
+        buf
+    })
+}
+
+/// Join a pipe-reader thread and return its captured string. Treats a
+/// panicked reader as an empty pipe — output capture is best-effort.
+fn join_reader(handle: std::thread::JoinHandle<String>) -> String {
+    handle.join().unwrap_or_default()
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -557,6 +591,38 @@ mod tests {
                 result.missing,
             );
         }
+    }
+
+    #[test]
+    fn run_command_drains_large_output_without_timeout() {
+        // Regression: previously the parent only read pipes after the child
+        // exited, so any child that wrote more than the OS pipe buffer
+        // (~64 KB) would block on write and we would burn the full 30 s
+        // timeout. With concurrent drainers this completes in well under
+        // the timeout budget.
+        //
+        // Python is the most portable "spew 200 KB" we have on the runners
+        // that already cover the rest of this module. If python isn't
+        // installed we skip — the assertion would be meaningful only when
+        // the subprocess actually ran.
+        let body = "import sys; sys.stdout.write('x' * 200_000); sys.stdout.flush()";
+        let started = Instant::now();
+        let result = run_command_with_timeout("python", &["-c", body], 10, None);
+        if !result.success
+            && result.exit_code.is_none()
+            && result.stderr.starts_with("failed to spawn")
+        {
+            eprintln!("skipping: python not on PATH");
+            return;
+        }
+        assert!(!result.timed_out, "should not time out: {result:?}");
+        assert!(result.success, "child should exit 0: {result:?}");
+        assert_eq!(result.stdout.len(), 200_000);
+        assert!(
+            started.elapsed() < Duration::from_secs(8),
+            "drain should be fast, took {:?}",
+            started.elapsed()
+        );
     }
 
     #[test]

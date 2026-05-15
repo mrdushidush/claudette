@@ -69,6 +69,48 @@ pub struct RecallHit {
     pub score: f32,
 }
 
+/// Internal heap entry. Wraps `RecallHit` with an `Ord` impl over the
+/// score, since `f32` is only `PartialOrd`. NaN sinks to the smallest so
+/// it gets evicted from the top-k heap first.
+#[derive(Debug, Clone)]
+struct ScoredHit {
+    score: f32,
+    hit: RecallHit,
+}
+
+impl PartialEq for ScoredHit {
+    fn eq(&self, other: &Self) -> bool {
+        self.score == other.score
+    }
+}
+
+impl Eq for ScoredHit {}
+
+impl PartialOrd for ScoredHit {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ScoredHit {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // NaN-tolerant: treat NaN as smaller than everything so it
+        // evicts first from the heap.
+        match self.score.partial_cmp(&other.score) {
+            Some(o) => o,
+            None => {
+                if self.score.is_nan() && other.score.is_nan() {
+                    std::cmp::Ordering::Equal
+                } else if self.score.is_nan() {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Greater
+                }
+            }
+        }
+    }
+}
+
 /// Embedding-model abstraction. Production = [`OllamaEmbedder`]; tests
 /// inject a deterministic mock so they don't need a live Ollama.
 pub trait Embedder: Send {
@@ -125,18 +167,28 @@ pub fn encode_vec(v: &[f32]) -> Vec<u8> {
 }
 
 pub fn decode_vec(bytes: &[u8]) -> Result<Vec<f32>, String> {
+    let mut out = Vec::with_capacity(bytes.len() / 4);
+    decode_vec_into(bytes, &mut out)?;
+    Ok(out)
+}
+
+/// Decode a vector into a pre-allocated buffer. `dst` is cleared first;
+/// the caller picks the capacity so this can be reused across rows in a
+/// scan without re-allocating 50K times per query.
+pub fn decode_vec_into(bytes: &[u8], dst: &mut Vec<f32>) -> Result<(), String> {
     if !bytes.len().is_multiple_of(4) {
         return Err(format!(
             "recall: BLOB length {} is not a multiple of 4 — corrupt vector",
             bytes.len()
         ));
     }
-    let mut out = Vec::with_capacity(bytes.len() / 4);
+    dst.clear();
+    dst.reserve(bytes.len() / 4);
     for chunk in bytes.chunks_exact(4) {
         let arr: [u8; 4] = chunk.try_into().expect("chunks_exact yields 4-byte slices");
-        out.push(f32::from_le_bytes(arr));
+        dst.push(f32::from_le_bytes(arr));
     }
-    Ok(out)
+    Ok(())
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -259,12 +311,40 @@ impl RecallStore {
 
     /// Embed `query` and return the top `k` rows by cosine similarity,
     /// sorted descending by score.
+    ///
+    /// **Hot-loop optimizations (2026-05-15):** the previous implementation
+    /// called [`cosine_similarity`] per row, which recomputed the query's
+    /// norm on every row, and decoded each stored vector into a fresh
+    /// `Vec<f32>` allocation. At the 50 K row cap that's 50 K wasted
+    /// `qvec` norm passes and 50 K allocations per query. This rewrite:
+    /// 1. computes `||q||` once outside the loop,
+    /// 2. reuses one decode buffer across all rows,
+    /// 3. fuses the dot-product and stored-vector norm into a single pass
+    ///    over the row,
+    /// 4. keeps only the running top-k via a min-heap so we don't sort the
+    ///    full scored list.
+    ///
+    /// Sub-linear search (HNSW / sqlite-vec) is still the right answer
+    /// past ~100K rows but it adds a heavy dependency. The audit flagged
+    /// the brute-force scan as "borderline acceptable" at 50 K — these
+    /// constant-factor wins move it back into "comfortable" without
+    /// changing the storage model.
     pub fn query(&mut self, query: &str, k: usize) -> Result<Vec<RecallHit>, String> {
         let trimmed = query.trim();
         if trimmed.is_empty() || k == 0 {
             return Ok(Vec::new());
         }
         let qvec = self.embedder.embed(trimmed)?;
+
+        // Norm of q is constant across the scan — hoist it out.
+        let mut qnorm_sq = 0.0_f32;
+        for &x in &qvec {
+            qnorm_sq = x.mul_add(x, qnorm_sq);
+        }
+        if qnorm_sq <= 0.0 {
+            return Ok(Vec::new());
+        }
+        let qnorm = qnorm_sq.sqrt();
 
         let mut stmt = self
             .conn
@@ -280,31 +360,59 @@ impl RecallStore {
             })
             .map_err(|e| format!("recall: query_map: {e}"))?;
 
-        let mut hits: Vec<RecallHit> = Vec::new();
+        // Single buffer reused across rows to avoid 50K allocations on a
+        // full-table scan.
+        let mut vbuf: Vec<f32> = Vec::with_capacity(qvec.len());
+        // Min-heap of (-score, hit) so the smallest score is at the top
+        // and gets bumped when a better one arrives. `Reverse` keeps the
+        // ordering inverted on `f32` (NaN/partial_cmp tolerance built in).
+        use std::cmp::Reverse;
+        use std::collections::BinaryHeap;
+        let mut heap: BinaryHeap<Reverse<ScoredHit>> = BinaryHeap::with_capacity(k + 1);
         for row in rows {
             let (ts, role_str, snippet, blob) =
                 row.map_err(|e| format!("recall: row error: {e}"))?;
             let Some(role) = Role::parse(&role_str) else {
                 continue; // skip rows with unknown roles
             };
-            let Ok(v) = decode_vec(&blob) else {
+            if decode_vec_into(&blob, &mut vbuf).is_err() {
                 continue; // skip corrupt rows
-            };
-            let score = cosine_similarity(&qvec, &v);
-            hits.push(RecallHit {
-                ts,
-                role,
-                snippet,
+            }
+            if vbuf.len() != qvec.len() {
+                continue; // dim mismatch — old rows from a different model
+            }
+            // Fused dot + ||b||² — one pass, exploits FMA on x86.
+            let mut dot = 0.0_f32;
+            let mut bnorm_sq = 0.0_f32;
+            for (qx, &bx) in qvec.iter().zip(&vbuf) {
+                dot = qx.mul_add(bx, dot);
+                bnorm_sq = bx.mul_add(bx, bnorm_sq);
+            }
+            let denom = qnorm * bnorm_sq.sqrt();
+            let score = if denom == 0.0 { 0.0 } else { dot / denom };
+
+            heap.push(Reverse(ScoredHit {
                 score,
-            });
+                hit: RecallHit {
+                    ts,
+                    role,
+                    snippet,
+                    score,
+                },
+            }));
+            if heap.len() > k {
+                heap.pop();
+            }
         }
 
+        // Heap is sorted ascending by score; drain and reverse so the
+        // caller sees descending order.
+        let mut hits: Vec<RecallHit> = heap.into_iter().map(|Reverse(s)| s.hit).collect();
         hits.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        hits.truncate(k);
         Ok(hits)
     }
 
@@ -893,6 +1001,55 @@ mod tests {
                 "results must be descending by score"
             );
         }
+    }
+
+    #[test]
+    fn query_returns_only_top_k_via_heap() {
+        // The rewrite swapped a "score everything, sort, truncate" pass
+        // for a running top-k heap. Pin that the heap-based path still
+        // returns exactly `k` results in descending order even when the
+        // store has many more rows than `k`.
+        let mut store = RecallStore::open_in_memory(Box::new(HashEmbedder::new())).expect("open");
+        for i in 0..20 {
+            store
+                .index(
+                    Role::User,
+                    &format!("snippet number {i} talking about cats"),
+                )
+                .unwrap();
+        }
+        let hits = store.query("cats", 3).unwrap();
+        assert_eq!(hits.len(), 3, "exactly k results");
+        for w in hits.windows(2) {
+            assert!(
+                w[0].score >= w[1].score,
+                "results must be descending: {:?}",
+                hits
+            );
+        }
+    }
+
+    #[test]
+    fn query_skips_rows_with_mismatched_dim() {
+        // The new query path filters out rows whose vector dimension
+        // doesn't match the embedder's current dim (covers the
+        // "stored under an older model" case without crashing).
+        let mut store = RecallStore::open_in_memory(Box::new(HashEmbedder::new())).expect("open");
+        store
+            .conn
+            .execute(
+                "INSERT INTO recall (ts, role, snippet, vec) VALUES ('2026-01-01T00:00:00Z', 'user', 'old-model row', ?1)",
+                params![encode_vec(&[1.0_f32, 0.0, 0.0])],
+            )
+            .expect("seed insert");
+        store
+            .index(Role::User, "modern cat content matching the embedder dim")
+            .unwrap();
+        let hits = store.query("cat", 5).unwrap();
+        // The old-dim row should be silently skipped, leaving exactly one
+        // modern hit.
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].snippet.contains("modern cat"));
     }
 
     #[test]

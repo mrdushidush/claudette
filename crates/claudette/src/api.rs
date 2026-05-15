@@ -19,6 +19,8 @@ use serde_json::{json, Value};
 
 use crate::tool_groups::ToolRegistry;
 
+mod harmony;
+
 /// Callback type fired once per text delta when streaming is enabled. The
 /// callback owns no state shared with the runtime — it just receives bytes
 /// and is expected to side-effect (print, accumulate to a buffer, etc.).
@@ -367,124 +369,6 @@ fn is_compat_value_truthy(value: Option<&str>) -> bool {
     value.is_some_and(|v| !v.is_empty() && v != "0")
 }
 
-/// Strip Harmony / Qwen-3.6-style chat-template separators that occasionally
-/// leak through into the OpenAI-compat `content` field. Some LM Studio
-/// quants emit the channel/message markers (`<|channel|>thought<|message|>`,
-/// `<|channel>thought<channel|>`, `<|end|>`, …) that the chat template is
-/// supposed to consume internally. Without this strip, the markers show up
-/// as literal text in the user-visible response.
-///
-/// Conservative match rule: a token is treated as a separator only if it
-/// has the shape `<…>` AND contains at least one `|` adjacent to either
-/// angle bracket. So `<a>`, `<div>`, `<MyType>` etc. are left alone, while
-/// `<|x|>`, `<|x>`, and `<x|>` are stripped.
-///
-/// Fenced code blocks (lines starting with ```` ``` ````) are skipped
-/// entirely so a user asking about chat templates gets verbatim output
-/// inside their code samples.
-fn strip_harmony_separators(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut in_fence = false;
-
-    for line in text.split_inclusive('\n') {
-        if line.trim_start().starts_with("```") {
-            in_fence = !in_fence;
-            out.push_str(line);
-            continue;
-        }
-        if in_fence {
-            out.push_str(line);
-        } else {
-            out.push_str(&strip_harmony_from_segment(line));
-        }
-    }
-    out
-}
-
-/// Strip Harmony separator tokens from a single non-fenced segment. Operates
-/// on bytes for the scan (markers are pure ASCII) but slices the original
-/// `&str` at known-ASCII boundaries so multi-byte UTF-8 elsewhere in the
-/// segment is preserved untouched.
-fn strip_harmony_from_segment(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = String::with_capacity(s.len());
-    let mut i = 0;
-    let mut last_emit = 0;
-
-    while i < bytes.len() {
-        if bytes[i] == b'<' {
-            if let Some(end) = try_match_harmony_run(bytes, i) {
-                out.push_str(&s[last_emit..i]);
-                last_emit = end;
-                i = end;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    out.push_str(&s[last_emit..]);
-    out
-}
-
-/// Match a Harmony separator "run" starting at `<`: either a solo separator
-/// like `<|end|>`, or a `<marker>name<marker>` triplet like the Qwen-3.6
-/// channel pair `<|channel>thought<channel|>`. The triplet form treats the
-/// inner identifier as part of the markup so it gets stripped along with
-/// the brackets, fixing the leak where `thought` (the channel name) showed
-/// up as visible output.
-fn try_match_harmony_run(bytes: &[u8], start: usize) -> Option<usize> {
-    let after_first = try_match_harmony(bytes, start)?;
-
-    // Look for the triplet shape: identifier immediately after the first
-    // marker, followed by another marker. If both are present, swallow the
-    // whole triplet. Otherwise strip just the solo marker.
-    let mut i = after_first;
-    while i < bytes.len() && (bytes[i].is_ascii_lowercase() || bytes[i] == b'_') {
-        i += 1;
-    }
-    if i > after_first && i < bytes.len() && bytes[i] == b'<' {
-        if let Some(end) = try_match_harmony(bytes, i) {
-            return Some(end);
-        }
-    }
-
-    Some(after_first)
-}
-
-/// If `bytes[start..]` opens a Harmony separator, return the byte index just
-/// past its closing `>`. The accepted shape is `<` + optional `|` +
-/// `[a-z_]+` + optional `|` + `>` with at least one `|` present, so
-/// ordinary `<tag>` text is never matched.
-fn try_match_harmony(bytes: &[u8], start: usize) -> Option<usize> {
-    debug_assert_eq!(bytes[start], b'<');
-    let mut i = start + 1;
-    let mut has_pipe = false;
-
-    if i < bytes.len() && bytes[i] == b'|' {
-        has_pipe = true;
-        i += 1;
-    }
-
-    let name_start = i;
-    while i < bytes.len() && (bytes[i].is_ascii_lowercase() || bytes[i] == b'_') {
-        i += 1;
-    }
-    if i == name_start {
-        return None;
-    }
-
-    if i < bytes.len() && bytes[i] == b'|' {
-        has_pipe = true;
-        i += 1;
-    }
-
-    if i < bytes.len() && bytes[i] == b'>' && has_pipe {
-        Some(i + 1)
-    } else {
-        None
-    }
-}
-
 /// Returns true when the given URL's host is a loopback / localhost
 /// address. Used to warn users when `OLLAMA_HOST` points at a remote
 /// endpoint — the README tagline is "runs entirely on your hardware,"
@@ -653,8 +537,8 @@ fn lm_studio_models_data_is_empty(body: &str) -> bool {
 }
 
 impl ApiClient for OllamaApiClient {
-    fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
-        let body = self.build_chat_body(&request);
+    fn stream(&mut self, request: &ApiRequest<'_>) -> Result<Vec<AssistantEvent>, RuntimeError> {
+        let body = self.build_chat_body(request);
         let path = if self.openai_compat {
             "/v1/chat/completions"
         } else {
@@ -770,7 +654,7 @@ impl OllamaApiClient {
         )))
     }
 
-    fn build_chat_body(&self, request: &ApiRequest) -> Value {
+    fn build_chat_body(&self, request: &ApiRequest<'_>) -> Value {
         // Resolve `tools` ONCE per request and pass the same value to both
         // `history_budget_chars` (which subtracts its char cost) and the
         // request body, so we never race with a concurrent `enable_tools`
@@ -858,7 +742,7 @@ impl OllamaApiClient {
         // leaking into the assistant content. The chat template is supposed
         // to consume them; some LM Studio quants don't. See P5 in the
         // 2026-05-04 optimization queue.
-        let content_owned = strip_harmony_separators(content_raw);
+        let content_owned = harmony::strip_harmony_separators(content_raw);
         let content = content_owned.as_str();
         if !content.is_empty() {
             // Compat mode is non-streaming, but the REPL/TUI text callback
@@ -1042,11 +926,11 @@ impl OllamaApiClient {
     /// [`Self::history_budget_chars_for_tools`] directly so the same `tools`
     /// value is reused across budget-subtraction and request serialization.
     #[cfg(test)]
-    fn history_budget_chars(&self, request: &ApiRequest) -> usize {
+    fn history_budget_chars(&self, request: &ApiRequest<'_>) -> usize {
         self.history_budget_chars_for_tools(request, &self.tools.current())
     }
 
-    fn history_budget_chars_for_tools(&self, request: &ApiRequest, tools: &Value) -> usize {
+    fn history_budget_chars_for_tools(&self, request: &ApiRequest<'_>, tools: &Value) -> usize {
         let total = self.num_ctx as usize * CHARS_PER_TOKEN;
         let output = self.num_predict as usize * CHARS_PER_TOKEN;
         let system: usize = request
@@ -1065,7 +949,7 @@ impl OllamaApiClient {
 
 /// Build the full Ollama `messages` array: system prompt (always kept) plus
 /// the conversation history truncated to fit `history_budget_chars`.
-fn build_messages(request: &ApiRequest, history_budget_chars: usize) -> Vec<Value> {
+fn build_messages(request: &ApiRequest<'_>, history_budget_chars: usize) -> Vec<Value> {
     let history = build_history_messages(&request.messages);
     let history = truncate_to_budget(history, history_budget_chars);
 
@@ -1145,7 +1029,10 @@ fn build_history_messages(msgs: &[crate::ConversationMessage]) -> Vec<Value> {
 /// [`build_messages`] (system prompt + truncated history) but routes
 /// history through [`build_history_messages_openai_compat`] so tool
 /// results become standalone `tool` messages keyed by `tool_call_id`.
-fn build_messages_openai_compat(request: &ApiRequest, history_budget_chars: usize) -> Vec<Value> {
+fn build_messages_openai_compat(
+    request: &ApiRequest<'_>,
+    history_budget_chars: usize,
+) -> Vec<Value> {
     let history = build_history_messages_openai_compat(&request.messages);
     let history = truncate_to_budget(history, history_budget_chars);
 
@@ -1526,77 +1413,8 @@ mod tests {
         assert!(!is_model_reload_transient(StatusCode::BAD_REQUEST, ""));
     }
 
-    // ─── Harmony separator stripping (P5) ───────────────────────────────────
-
-    #[test]
-    fn strip_harmony_removes_qwen36_channel_pair() {
-        // The exact pattern reported on unsloth/qwen3.6-35b-a3b via LM Studio.
-        let input = "<|channel>thought<channel|>\nthe actual reply";
-        assert_eq!(strip_harmony_separators(input), "\nthe actual reply");
-    }
-
-    #[test]
-    fn strip_harmony_removes_symmetric_markers() {
-        // Triplet swallows the channel-name identifier between paired
-        // markers, then the trailing solo `<|end|>` is stripped on its own.
-        let input = "<|channel|>analysis<|message|>real content<|end|>";
-        assert_eq!(strip_harmony_separators(input), "real content");
-    }
-
-    #[test]
-    fn strip_harmony_handles_underscored_names() {
-        let input = "before <|tool_call|> after";
-        assert_eq!(strip_harmony_separators(input), "before  after");
-    }
-
-    #[test]
-    fn strip_harmony_leaves_html_tags_alone() {
-        // No `|` inside — looks like ordinary HTML/XML, leave it.
-        let input = "<a href=\"x\"><b>bold</b></a>";
-        assert_eq!(strip_harmony_separators(input), input);
-    }
-
-    #[test]
-    fn strip_harmony_leaves_plain_angle_brackets_alone() {
-        let input = "if x < y && y > z";
-        assert_eq!(strip_harmony_separators(input), input);
-    }
-
-    #[test]
-    fn strip_harmony_preserves_fenced_code() {
-        // A user asking about chat templates should see the markers verbatim
-        // inside their code block. Outside the block the markers are stripped.
-        let input = "<|end|> outside\n```\n<|channel|>thought<|message|>\n```\n<|end|> after";
-        let expected = " outside\n```\n<|channel|>thought<|message|>\n```\n after";
-        assert_eq!(strip_harmony_separators(input), expected);
-    }
-
-    #[test]
-    fn strip_harmony_handles_marker_at_start_of_line() {
-        let input = "<|end|>";
-        assert_eq!(strip_harmony_separators(input), "");
-    }
-
-    #[test]
-    fn strip_harmony_preserves_multibyte_utf8() {
-        // The scanner walks bytes but slices on `<` boundaries (always
-        // ASCII), so emoji and other multi-byte content must round-trip.
-        let input = "héllo 🦀 <|end|> wörld";
-        assert_eq!(strip_harmony_separators(input), "héllo 🦀  wörld");
-    }
-
-    #[test]
-    fn strip_harmony_unbalanced_marker_with_uppercase_is_left_alone() {
-        // Name must be `[a-z_]+`, so `<|Channel|>` is not recognised.
-        let input = "<|Channel|>";
-        assert_eq!(strip_harmony_separators(input), input);
-    }
-
-    #[test]
-    fn strip_harmony_no_op_on_clean_text() {
-        let input = "hello world\nthis is fine";
-        assert_eq!(strip_harmony_separators(input), input);
-    }
+    // Harmony separator stripping tests live in `api::harmony` alongside
+    // the implementation since 2026-05-15.
 
     // ─── LM Studio models-data emptiness check (P4) ─────────────────────────
 
@@ -2031,7 +1849,7 @@ mod tests {
         // message also always survives even at budget=0 thanks to the
         // always-keep-newest rule in truncate_to_budget.
         let request = ApiRequest {
-            messages: vec![user_text("this is the only thing the user said")],
+            messages: vec![user_text("this is the only thing the user said")].into(),
             system_prompt: vec!["you are an assistant".to_string()],
         };
         let result = build_messages(&request, 0);
@@ -2048,7 +1866,8 @@ mod tests {
                 user_text("ancient turn that should fall off"),
                 user_text("middle turn that should also fall off"),
                 user_text("newest"),
-            ],
+            ]
+            .into(),
             system_prompt: vec!["sys".to_string()],
         };
         // Budget large enough only for the last message (~6 chars).
@@ -2069,11 +1888,11 @@ mod tests {
         client.num_predict = 100; // 400 chars output reservation
 
         let small_sys = ApiRequest {
-            messages: Vec::new(),
+            messages: Vec::new().into(),
             system_prompt: vec!["short".to_string()],
         };
         let big_sys = ApiRequest {
-            messages: Vec::new(),
+            messages: Vec::new().into(),
             system_prompt: vec!["x".repeat(500)],
         };
         let small_budget = client.history_budget_chars(&small_sys);
@@ -2277,7 +2096,7 @@ mod tests {
         // tool result. Verify two clients with identical settings but
         // different tool registry sizes produce different budgets.
         let request = ApiRequest {
-            messages: Vec::new(),
+            messages: Vec::new().into(),
             system_prompt: vec!["sys".to_string()],
         };
         // Use a large enough num_ctx that even the full 27-tool schema
@@ -2352,7 +2171,7 @@ mod tests {
     fn build_chat_body_compat_uses_openai_shape() {
         let client = OllamaApiClient::new("openai/gpt-oss-20b", json!([])).with_openai_compat(true);
         let req = ApiRequest {
-            messages: vec![user_text("hi")],
+            messages: vec![user_text("hi")].into(),
             system_prompt: vec!["sys".to_string()],
         };
         let body = client.build_chat_body(&req);
@@ -2373,7 +2192,7 @@ mod tests {
     fn build_chat_body_default_stays_ollama_shape() {
         let client = OllamaApiClient::new("qwen3.5:4b", json!([]));
         let req = ApiRequest {
-            messages: vec![user_text("hi")],
+            messages: vec![user_text("hi")].into(),
             system_prompt: vec!["sys".to_string()],
         };
         let body = client.build_chat_body(&req);
@@ -2790,7 +2609,8 @@ mod tests {
                     }],
                     usage: None,
                 },
-            ],
+            ]
+            .into(),
             system_prompt: vec!["sys".to_string()],
         };
         let body = client.build_chat_body(&req);
@@ -2844,7 +2664,7 @@ mod tests {
         client.num_predict = 1024;
 
         let request = ApiRequest {
-            messages: Vec::new(),
+            messages: Vec::new().into(),
             system_prompt: vec!["sys".to_string()],
         };
 

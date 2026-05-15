@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fmt::{Display, Formatter};
 
@@ -41,10 +42,18 @@ fn build_turn_system_prompt(base: &[String], has_images: bool) -> Vec<String> {
     }
 }
 
+/// One API request to the brain. Carries the system prompt and the
+/// conversation history.
+///
+/// `messages` is a `Cow` so the hot path in `run_turn` can borrow
+/// `Session::messages` instead of cloning the full history on every loop
+/// iteration — that clone was O(n) in message count and held megabyte-scale
+/// image blocks. Test code and one-shot callers (e.g. `codet`) construct
+/// the owned variant; the runtime constructs the borrowed variant.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ApiRequest {
+pub struct ApiRequest<'a> {
     pub system_prompt: Vec<String>,
-    pub messages: Vec<ConversationMessage>,
+    pub messages: Cow<'a, [ConversationMessage]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,7 +69,7 @@ pub enum AssistantEvent {
 }
 
 pub trait ApiClient {
-    fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError>;
+    fn stream(&mut self, request: &ApiRequest<'_>) -> Result<Vec<AssistantEvent>, RuntimeError>;
 }
 
 pub trait ToolExecutor {
@@ -264,9 +273,9 @@ where
             let system_prompt = build_turn_system_prompt(&self.system_prompt, has_images);
             let request = ApiRequest {
                 system_prompt,
-                messages: self.session.messages.clone(),
+                messages: Cow::Borrowed(&self.session.messages),
             };
-            let events = self.api_client.stream(request)?;
+            let events = self.api_client.stream(&request)?;
             let (assistant_message, usage) = build_assistant_message(events)?;
             if let Some(usage) = usage {
                 self.usage_tracker.record(usage);
@@ -594,7 +603,10 @@ mod tests {
     }
 
     impl ApiClient for ScriptedApiClient {
-        fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
+        fn stream(
+            &mut self,
+            request: &ApiRequest<'_>,
+        ) -> Result<Vec<AssistantEvent>, RuntimeError> {
             self.call_count += 1;
             match self.call_count {
                 1 => {
@@ -715,7 +727,10 @@ mod tests {
 
         struct SingleCallApiClient;
         impl ApiClient for SingleCallApiClient {
-            fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
+            fn stream(
+                &mut self,
+                request: &ApiRequest<'_>,
+            ) -> Result<Vec<AssistantEvent>, RuntimeError> {
                 if request
                     .messages
                     .iter()
@@ -765,7 +780,10 @@ mod tests {
     fn denies_tool_use_when_pre_tool_hook_blocks() {
         struct SingleCallApiClient;
         impl ApiClient for SingleCallApiClient {
-            fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
+            fn stream(
+                &mut self,
+                request: &ApiRequest<'_>,
+            ) -> Result<Vec<AssistantEvent>, RuntimeError> {
                 if request
                     .messages
                     .iter()
@@ -830,7 +848,10 @@ mod tests {
         }
 
         impl ApiClient for TwoCallApiClient {
-            fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
+            fn stream(
+                &mut self,
+                request: &ApiRequest<'_>,
+            ) -> Result<Vec<AssistantEvent>, RuntimeError> {
                 self.calls += 1;
                 match self.calls {
                     1 => Ok(vec![
@@ -904,7 +925,7 @@ mod tests {
         impl ApiClient for SimpleApi {
             fn stream(
                 &mut self,
-                _request: ApiRequest,
+                _request: &ApiRequest<'_>,
             ) -> Result<Vec<AssistantEvent>, RuntimeError> {
                 Ok(vec![
                     AssistantEvent::TextDelta("done".to_string()),
@@ -946,7 +967,7 @@ mod tests {
         impl ApiClient for SimpleApi {
             fn stream(
                 &mut self,
-                _request: ApiRequest,
+                _request: &ApiRequest<'_>,
             ) -> Result<Vec<AssistantEvent>, RuntimeError> {
                 Ok(vec![
                     AssistantEvent::TextDelta("done".to_string()),
@@ -993,7 +1014,7 @@ mod tests {
         impl ApiClient for SimpleApi {
             fn stream(
                 &mut self,
-                _request: ApiRequest,
+                _request: &ApiRequest<'_>,
             ) -> Result<Vec<AssistantEvent>, RuntimeError> {
                 Ok(vec![
                     AssistantEvent::TextDelta("done".to_string()),
@@ -1050,7 +1071,7 @@ mod tests {
         impl ApiClient for SimpleApi {
             fn stream(
                 &mut self,
-                _request: ApiRequest,
+                _request: &ApiRequest<'_>,
             ) -> Result<Vec<AssistantEvent>, RuntimeError> {
                 Ok(vec![
                     AssistantEvent::TextDelta("done".to_string()),
@@ -1105,7 +1126,10 @@ mod tests {
     }
 
     impl ApiClient for UnknownToolApi {
-        fn stream(&mut self, _request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
+        fn stream(
+            &mut self,
+            _request: &ApiRequest<'_>,
+        ) -> Result<Vec<AssistantEvent>, RuntimeError> {
             self.calls += 1;
             match self.calls {
                 1 => Ok(vec![

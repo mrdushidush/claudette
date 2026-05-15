@@ -1,49 +1,13 @@
 //! Core types shared across forge stages.
 //!
-//! Ported verbatim from `claudettes-forge/crates/core/src/types.rs` at the
-//! `rc1-final` tag. These are the domain vocabulary — `Mission`, `Task`,
-//! `Role`, `Complexity`, `ProviderKind`, etc. No behaviour, just data.
-
-use std::path::PathBuf;
-
-// ─── Mission / task hierarchy ────────────────────────────────────────
-
-/// A natural-language request from the user that may decompose into one or
-/// more `Subtask`s when run through forge mode.
-#[derive(Debug, Clone)]
-pub struct Mission {
-    /// Unique identifier for this mission run.
-    pub id: MissionId,
-    /// The user's original prompt, verbatim.
-    pub prompt: String,
-    /// Per-role model assignment, resolved from CLI/TOML/env/preset at mission
-    /// start. See `providers::ModelMap`.
-    pub model_map: ModelMap,
-    /// Complexity score assigned by the Router (forge mode only).
-    pub complexity: Option<Complexity>,
-    /// Isolation dir for mission artifacts, typically
-    /// `generated/<mission-id>/`.
-    pub workspace: PathBuf,
-}
-
-/// A mission-unique identifier. Used as a branch name, a directory name, and
-/// a pipeline-report key — kept short and filesystem-safe.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct MissionId(pub String);
-
-/// A subtask produced by the Planner stage. Each subtask targets one file or
-/// one unit of work; the Coder stage handles each independently.
-#[derive(Debug, Clone)]
-pub struct Subtask {
-    /// Stable ordinal within the mission (1-indexed).
-    pub index: usize,
-    /// Target path relative to the mission workspace.
-    pub target: PathBuf,
-    /// Natural-language description passed to the Coder.
-    pub description: String,
-    /// Per-subtask complexity (may differ from mission-level).
-    pub complexity: Complexity,
-}
+//! Originally ported verbatim from `claudettes-forge/crates/core/src/types.rs`
+//! at the `rc1-final` tag. The pipeline-vocabulary types (`Mission`, `Subtask`,
+//! `MissionId`, `Complexity`, `ToolCall`, `ToolResult`) were duplicates of
+//! types claudette's runtime owns elsewhere (`crate::missions::Mission`,
+//! `crate::tools::*`) and never reached the live orchestrator in `run.rs`;
+//! they were dropped 2026-05-15 after the multi-agent audit. What remains
+//! is what `run.rs` and `models_toml.rs` actually use: `Role`, `ModelMap`,
+//! `ProviderKind`.
 
 // ─── Role + complexity + providers ───────────────────────────────────
 
@@ -68,34 +32,6 @@ pub enum Role {
     SurgicalCoder,
     /// Strategic review at Gate — ship / no-ship call.
     Cto,
-}
-
-/// Campbell Complexity scale (1-10). Routes to context-window sizing and
-/// model tier. C1-C6 → local small models; C7-C9 → local large or cloud;
-/// C10 → cloud-only.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Complexity {
-    /// Trivial tasks — single-line changes, constants.
-    C1,
-    /// Simple tasks — one small function, no branching.
-    C2,
-    /// Low complexity — small module, single file, no concurrency.
-    C3,
-    /// Moderate — multi-function file, well-known patterns.
-    C4,
-    /// Medium — small feature across 2-3 files.
-    C5,
-    /// Above medium — cross-module feature, some state.
-    C6,
-    /// High — new subsystem, concurrency, non-obvious interactions.
-    C7,
-    /// Hard — architectural decision required, tradeoff analysis.
-    C8,
-    /// Very hard — novel algorithm, performance-critical, unclear requirements.
-    C9,
-    /// Expert — research-grade problem, requires domain knowledge the model
-    /// doesn't have out of the box.
-    C10,
 }
 
 /// Which provider the request dispatches to.
@@ -139,33 +75,6 @@ impl ModelMap {
             .find(|(r, _, _)| *r == role)
             .map(|(_, p, m)| (*p, m.as_str()))
     }
-}
-
-// ─── Tool call + result vocabulary ───────────────────────────────────
-
-/// A tool invocation as emitted by the model.
-#[derive(Debug, Clone)]
-pub struct ToolCall {
-    /// Tool name (must match a registered `Tool`).
-    pub name: String,
-    /// Arguments as JSON (every provider is coerced to this format before
-    /// it reaches the dispatcher).
-    pub arguments: serde_json::Value,
-    /// Unique ID for matching the response (important for providers that
-    /// support parallel tool calling).
-    pub call_id: String,
-}
-
-/// A tool's response back to the model.
-#[derive(Debug, Clone)]
-pub struct ToolResult {
-    /// ID from the matching `ToolCall`.
-    pub call_id: String,
-    /// Serialized output (JSON string or plain text).
-    pub content: String,
-    /// Whether the tool ran to completion; `false` means the content is an
-    /// error string and the model should adapt.
-    pub success: bool,
 }
 
 #[cfg(test)]

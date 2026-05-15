@@ -191,29 +191,92 @@ pub fn validate_code_file(path: &Path, references: &[ReferenceFile]) -> Option<C
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// VRAM-swap guard (P0, 2026-05-07)
+// VRAM-swap guard (P0, 2026-05-07; coalesced 2026-05-15)
 // ────────────────────────────────────────────────────────────────────────────
 
-/// RAII guard that frees VRAM around a Codet operation by evicting the
-/// brain on construction and the coder on drop. Short-circuits to a no-op
-/// when brain == coder (since loading the model a second time costs
-/// nothing). Drop fires on every exit path including early returns and
-/// panics, so the brain always gets its VRAM back on the next user turn.
+/// Coalescing lease over the coder model's VRAM slot.
+///
+/// Originally a per-call RAII guard that ran brain-evict on construction
+/// and coder-evict on drop — but the audit on 2026-05-15 flagged that
+/// `generate_code` and multi-file `write_file` patterns triggered a fresh
+/// evict/reload cycle for every call, even when the coder we just dropped
+/// was the same model the next call wants. The lease coalesces consecutive
+/// guards over the same coder model so the swap fires once per cluster,
+/// not once per call:
+///
+/// 1. First `begin()` evicts the brain and "loads" the coder (Ollama's
+///    on-demand load runs when the coder is actually called).
+/// 2. Subsequent `begin()` calls for the same coder reuse the lease —
+///    no evict, no load. Ref count bumps.
+/// 3. `Drop` decrements the ref count. When it reaches zero the lease
+///    is marked dormant but the coder is NOT immediately evicted; a
+///    background thread evicts it after [`COALESCE_WINDOW`] unless a new
+///    `begin()` resurrects the lease first.
+/// 4. [`drain_pending_coder_lease`] is called from `run_turn_with_retry`
+///    so the next brain turn synchronously gets its VRAM back regardless
+///    of how recently codet ran.
 ///
 /// **Backend dispatch** lives in `brain_selector` and is gated by
 /// `CLAUDETTE_OPENAI_COMPAT`: LM Studio uses `lms unload --all`, Ollama
 /// uses `keep_alive: 0` per-model.
+///
+/// **Safety on tight-VRAM hosts.** The brain HTTP prep latency between
+/// tool batches typically exceeds [`COALESCE_WINDOW`], so the coder is
+/// usually evicted before the brain actually tries to load. Hosts with
+/// `OLLAMA_MAX_LOADED_MODELS=1` are doubly safe — Ollama arbitrates if a
+/// race ever does happen.
 struct CoderSwapGuard {
-    coder_model: String,
     needs_swap: bool,
 }
+
+/// How long the lease stays warm after the last guard drops. Long enough
+/// to bridge the gap between two consecutive `generate_code` /
+/// `write_file` tool calls in the same brain iteration; short enough that
+/// an idle drop releases VRAM before the user notices.
+const COALESCE_WINDOW: std::time::Duration = std::time::Duration::from_millis(750);
+
+#[derive(Default)]
+struct LeaseState {
+    /// Coder model currently leased (or pending evict). `None` means no
+    /// outstanding lease and no coder VRAM held.
+    coder_model: Option<String>,
+    /// Number of live `CoderSwapGuard`s holding the lease.
+    active_count: usize,
+    /// Bumped on every `begin` / `drop` so the background evictor can
+    /// tell whether the state changed while it was sleeping.
+    generation: u64,
+}
+
+static LEASE: std::sync::Mutex<LeaseState> = std::sync::Mutex::new(LeaseState {
+    coder_model: None,
+    active_count: 0,
+    generation: 0,
+});
 
 impl CoderSwapGuard {
     fn begin(coder_model: &str) -> Self {
         let brain_model = crate::model_config::active().brain.model.clone();
         let needs_swap = crate::brain_selector::should_swap_for_coder(&brain_model, coder_model);
 
-        if needs_swap {
+        if !needs_swap {
+            return Self { needs_swap: false };
+        }
+
+        // Re-use the lease when the previous codet call left the same
+        // coder model warm. The coder isn't actually "loaded" yet in
+        // Ollama's sense — it loads on first HTTP call — but the brain is
+        // already evicted, which is the expensive half of the swap.
+        let mut state = LEASE.lock().expect("CODER_LEASE poisoned");
+        let reusing_same_coder = state.coder_model.as_deref() == Some(coder_model);
+
+        if !reusing_same_coder {
+            // Different coder than the previous lease (or no lease).
+            // Evict whatever previous coder was holding the slot, then
+            // evict the brain. Order matters: evicting the brain after
+            // the previous coder makes the contention window smaller.
+            if let Some(prev) = state.coder_model.take() {
+                crate::brain_selector::evict_coder_after_codet(&prev);
+            }
             eprintln!(
                 "  {} {}",
                 crate::theme::dim("\u{21bb}"),
@@ -222,20 +285,76 @@ impl CoderSwapGuard {
                 )),
             );
             crate::brain_selector::evict_brain_for_codet(&brain_model);
+            state.coder_model = Some(coder_model.to_string());
         }
+        state.active_count += 1;
+        state.generation += 1;
 
-        Self {
-            coder_model: coder_model.to_string(),
-            needs_swap,
-        }
+        Self { needs_swap: true }
     }
 }
 
 impl Drop for CoderSwapGuard {
     fn drop(&mut self) {
-        if self.needs_swap {
-            crate::brain_selector::evict_coder_after_codet(&self.coder_model);
+        if !self.needs_swap {
+            return;
         }
+        let scheduled_gen = {
+            let mut state = LEASE.lock().expect("CODER_LEASE poisoned");
+            state.active_count = state.active_count.saturating_sub(1);
+            state.generation += 1;
+            if state.active_count > 0 {
+                // Still in use — another guard is keeping the lease alive.
+                return;
+            }
+            state.generation
+        };
+
+        // Schedule a deferred evict. If a new `begin()` fires before the
+        // window elapses, `generation` advances and the evictor will see
+        // that the lease moved on, leaving the new lease intact.
+        std::thread::spawn(move || {
+            std::thread::sleep(COALESCE_WINDOW);
+            let to_evict = {
+                let mut state = LEASE.lock().expect("CODER_LEASE poisoned");
+                if state.generation != scheduled_gen || state.active_count > 0 {
+                    // Either a new lease started after we slept, or another
+                    // guard came in during the window. Leave the lease.
+                    None
+                } else {
+                    state.coder_model.take()
+                }
+            };
+            if let Some(coder) = to_evict {
+                crate::brain_selector::evict_coder_after_codet(&coder);
+            }
+        });
+    }
+}
+
+/// Synchronously evict the coder model if a deferred lease is still
+/// outstanding. Called at the top of every brain turn so the brain reclaims
+/// its VRAM slot regardless of how recently codet ran. Returns true if it
+/// actually evicted something, mostly for tests.
+pub fn drain_pending_coder_lease() -> bool {
+    let to_evict = {
+        let Ok(mut state) = LEASE.lock() else {
+            return false;
+        };
+        if state.active_count > 0 {
+            // A codet operation is in flight (re-entrant brain call inside
+            // the same conv-loop iteration is rare but possible). Don't
+            // evict from under it — Ollama's `MAX_LOADED_MODELS=1` will
+            // arbitrate.
+            return false;
+        }
+        state.coder_model.take()
+    };
+    if let Some(coder) = to_evict {
+        crate::brain_selector::evict_coder_after_codet(&coder);
+        true
+    } else {
+        false
     }
 }
 
@@ -858,10 +977,11 @@ pub fn generate_code(
             role: MessageRole::User,
             blocks: vec![ContentBlock::Text { text: prompt }],
             usage: None,
-        }],
+        }]
+        .into(),
     };
 
-    let events = match client.stream(request) {
+    let events = match client.stream(&request) {
         Ok(ev) => ev,
         Err(e) => {
             eprintln!(
@@ -945,10 +1065,11 @@ fn ask_coder_to_fix(
             role: MessageRole::User,
             blocks: vec![ContentBlock::Text { text: prompt }],
             usage: None,
-        }],
+        }]
+        .into(),
     };
 
-    let events = match client.stream(request) {
+    let events = match client.stream(&request) {
         Ok(ev) => ev,
         Err(e) => {
             eprintln!(
@@ -1032,10 +1153,11 @@ fn ask_coder_for_patches(
             role: MessageRole::User,
             blocks: vec![ContentBlock::Text { text: prompt }],
             usage: None,
-        }],
+        }]
+        .into(),
     };
 
-    let events = match client.stream(request) {
+    let events = match client.stream(&request) {
         Ok(ev) => ev,
         Err(e) => {
             eprintln!(
