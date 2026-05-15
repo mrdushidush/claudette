@@ -327,13 +327,47 @@ pub(crate) struct VerifierResult {
 /// one-off forge invocation without `--resume` doesn't clobber the REPL
 /// session.
 pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnSummary> {
-    let mission = crate::missions::active_mission().ok_or_else(|| {
-        anyhow::anyhow!(
-            "forge-mode requires an active brownfield mission. Run `/brownfield <repo>` \
-             (in the REPL) or `claudette` then `/brownfield <repo>` first to clone a \
-             target tree, then re-run with --forge."
-        )
-    })?;
+    // ── Auto-bootstrap ──────────────────────────────────────────────────
+    // If no mission is active, try to bootstrap an ephemeral one rooted at
+    // the cwd's git toplevel (under $HOME or CLAUDETTE_WORKSPACE). Lets
+    // `claudette --forge "<prompt>"` Just Work inside the repo the user is
+    // already cd'd into, without an explicit `/brownfield owner/repo`
+    // clone first. The ephemeral mission is never persisted and is auto-
+    // cleared on any error in this fn so a failed forge doesn't leak a
+    // mission slot the user didn't ask for.
+    let mission = match crate::missions::active_mission() {
+        Some(m) => m,
+        None => match crate::missions::try_bootstrap_local_mission() {
+            Ok(m) => {
+                eprintln!(
+                    "{} {} {}",
+                    theme::BOLT,
+                    theme::accent("forge: ephemeral mission"),
+                    theme::dim(&m.path.display().to_string())
+                );
+                crate::missions::set_active(m.clone())
+                    .map_err(|e| anyhow::anyhow!("set_active for ephemeral mission: {e}"))?;
+                m
+            }
+            Err(why) => {
+                return Err(anyhow::anyhow!(
+                    "forge-mode requires an active brownfield mission, and could not \
+                     auto-bootstrap one from the working directory ({why}). Either \
+                     `cd` into a git repo under $HOME / CLAUDETTE_WORKSPACE, or run \
+                     `/brownfield <owner/repo>` first to clone a target tree."
+                ));
+            }
+        },
+    };
+
+    // Guard for the ephemeral path: any early return from this point on
+    // clears the mission slot if and only if WE installed it. User-
+    // initiated missions (`/brownfield`, `mission_attach`) are left alone
+    // so the user can retry / inspect after a forge failure. Disarmed at
+    // the end of the happy path so a successful run also leaves the slot
+    // intact (lets subsequent `/forge` invocations in the same REPL keep
+    // the same mission without re-bootstrapping).
+    let mut cleanup = EphemeralMissionGuard::new(mission.ephemeral);
 
     let session = if opts.resume {
         try_load_session()?.ok_or_else(|| {
@@ -478,7 +512,33 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
     // that opened the PR. Earlier Coder/Verifier iterations are visible
     // from the user's terminal stream but don't roll into the returned
     // counter; the user sees per-phase progress as it happens.
+    cleanup.disarm();
     Ok(submit_summary)
+}
+
+/// RAII guard: clears the active mission slot on Drop iff the mission we
+/// installed was ephemeral AND `disarm()` was not called. Pairs with the
+/// auto-bootstrap path in [`run_forge_mission`] so a mid-pipeline failure
+/// can't leave a `/forge`-installed mission active in the REPL.
+struct EphemeralMissionGuard {
+    armed: bool,
+}
+
+impl EphemeralMissionGuard {
+    fn new(ephemeral: bool) -> Self {
+        Self { armed: ephemeral }
+    }
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for EphemeralMissionGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = crate::missions::clear_active();
+        }
+    }
 }
 
 /// v0c: capture `git diff HEAD` from the mission tree. Used to feed the

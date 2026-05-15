@@ -276,6 +276,7 @@ fn run_mission_start(input: &str) -> Result<String, String> {
         path: target_path.clone(),
         repo: parsed.repo.clone(),
         created_at: now,
+        ephemeral: false,
     };
     // Add the marker filename to `.git/info/exclude` BEFORE writing the
     // marker so `mission_submit`'s `git add -A` never sees it as a tracked

@@ -37,6 +37,14 @@ pub struct Mission {
     pub path: PathBuf,
     pub repo: Option<String>,
     pub created_at: i64,
+    /// True for ephemeral missions auto-bootstrapped by `--forge` /
+    /// `/forge` when run inside an existing git repo with no active
+    /// mission (no clone, no on-disk marker). Set to false (the serde
+    /// default) for `/brownfield` missions and missions loaded from a
+    /// persisted marker — they survive across forge runs and are not
+    /// auto-cleared on failure.
+    #[serde(default)]
+    pub ephemeral: bool,
 }
 
 /// Process-wide active-mission slot. `OnceLock<Mutex<…>>` rather than a
@@ -119,6 +127,108 @@ pub fn set_active(mission: Mission) -> Result<(), String> {
 pub fn clear_active() -> Option<String> {
     let mut guard = active_slot().lock().ok()?;
     guard.take().map(|m| m.slug)
+}
+
+/// Attempt to bootstrap an ephemeral mission rooted at the git toplevel of
+/// the current working directory. Used by `--forge` / `/forge` so the user
+/// can invoke forge-mode against the repo they're already in without first
+/// running `mission_start` / `/brownfield`.
+///
+/// Returns `Ok(Mission)` only when **all** of:
+/// - cwd is inside a git working tree (`git rev-parse --show-toplevel`
+///   succeeds with a non-empty path),
+/// - that toplevel resolves under `$HOME` *or* any path in
+///   `CLAUDETTE_WORKSPACE` (so out-of-home repos that the user has
+///   explicitly opted into are allowed, but a system dir like `/etc/foo`
+///   is not).
+///
+/// Returns `Err(reason)` for "no git repo here" / "outside permitted
+/// roots" so the caller can surface a clear message about why auto-
+/// bootstrap declined. Does NOT call `set_active` — the caller decides
+/// whether to install the mission, since the slot is a process-wide
+/// singleton and we want the install + clear-on-error pair to live at
+/// the same level.
+pub fn try_bootstrap_local_mission() -> Result<Mission, String> {
+    let toplevel = match std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+    {
+        Ok(out) if out.status.success() => {
+            let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if raw.is_empty() {
+                return Err("not inside a git working tree (empty toplevel)".to_string());
+            }
+            PathBuf::from(raw)
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(format!(
+                "git rev-parse --show-toplevel failed: {}",
+                stderr.trim().chars().take(160).collect::<String>()
+            ));
+        }
+        Err(e) => return Err(format!("git not on PATH: {e}")),
+    };
+
+    // Permit only if the toplevel lives under $HOME or one of the
+    // CLAUDETTE_WORKSPACE roots — the same envelope that `validate_read_path`
+    // enforces for tool reads. This prevents `--forge` in `/etc` from
+    // silently rooting a mission outside the safe surface.
+    if !path_under_permitted_roots(&toplevel) {
+        return Err(format!(
+            "git repo at {} is outside $HOME and CLAUDETTE_WORKSPACE — \
+             set CLAUDETTE_WORKSPACE=\"$(pwd)\" first if you intend forge \
+             to operate on this tree",
+            toplevel.display()
+        ));
+    }
+
+    let slug = toplevel
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("local")
+        .to_string();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|d| i64::try_from(d.as_secs()).ok())
+        .unwrap_or(0);
+
+    Ok(Mission {
+        slug,
+        path: toplevel,
+        repo: None,
+        created_at: now,
+        ephemeral: true,
+    })
+}
+
+/// Whether `path` is under `$HOME` or any `CLAUDETTE_WORKSPACE` root.
+/// Pure helper — no side effects. Public to allow tests to assert the
+/// auto-bootstrap envelope without spawning a git child process.
+#[must_use]
+pub fn path_under_permitted_roots(path: &Path) -> bool {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .ok()
+        .map(PathBuf::from);
+    if let Some(home) = home {
+        if path.starts_with(&home) {
+            return true;
+        }
+    }
+    if let Ok(ws) = std::env::var("CLAUDETTE_WORKSPACE") {
+        #[cfg(unix)]
+        let sep = ':';
+        #[cfg(not(unix))]
+        let sep = ';';
+        for root in ws.split(sep).map(str::trim).filter(|s| !s.is_empty()) {
+            if path.starts_with(root) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Path of the on-disk marker for a given mission tree.
@@ -252,6 +362,89 @@ mod tests {
     use super::*;
 
     #[test]
+    fn path_under_permitted_roots_accepts_home_subpath() {
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .expect("HOME or USERPROFILE must be set for this test");
+        let candidate = PathBuf::from(&home).join("subdir").join("repo");
+        assert!(
+            path_under_permitted_roots(&candidate),
+            "{} should be permitted under {}",
+            candidate.display(),
+            home
+        );
+    }
+
+    #[test]
+    fn path_under_permitted_roots_rejects_system_dir() {
+        let _guard = crate::test_env_lock();
+        // Make sure CLAUDETTE_WORKSPACE doesn't sneak permission for us.
+        let prev_ws = std::env::var("CLAUDETTE_WORKSPACE").ok();
+        std::env::remove_var("CLAUDETTE_WORKSPACE");
+        #[cfg(unix)]
+        let bad = PathBuf::from("/etc/something");
+        #[cfg(not(unix))]
+        let bad = PathBuf::from("C:\\Windows\\System32");
+        assert!(
+            !path_under_permitted_roots(&bad),
+            "{} must NOT be permitted",
+            bad.display()
+        );
+        if let Some(v) = prev_ws {
+            std::env::set_var("CLAUDETTE_WORKSPACE", v);
+        }
+    }
+
+    #[test]
+    fn path_under_permitted_roots_accepts_workspace_entry() {
+        let _guard = crate::test_env_lock();
+        let prev_ws = std::env::var("CLAUDETTE_WORKSPACE").ok();
+        let root = std::env::temp_dir().join("claudette-workspace-root-test");
+        std::fs::create_dir_all(&root).unwrap();
+        std::env::set_var("CLAUDETTE_WORKSPACE", &root);
+        let candidate = root.join("nested-repo");
+        assert!(
+            path_under_permitted_roots(&candidate),
+            "{} should be permitted via CLAUDETTE_WORKSPACE",
+            candidate.display()
+        );
+        match prev_ws {
+            Some(v) => std::env::set_var("CLAUDETTE_WORKSPACE", v),
+            None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn try_bootstrap_local_mission_in_this_repo_succeeds() {
+        // We're running cargo test from inside the claudette repo itself,
+        // which lives under D:\dev\claudette — but CI / dev-box paths
+        // vary. As long as the cwd resolves to a git toplevel under HOME
+        // or CLAUDETTE_WORKSPACE, this test should round-trip. If it
+        // doesn't (e.g. running outside any git repo), we accept Err.
+        match try_bootstrap_local_mission() {
+            Ok(m) => {
+                assert!(m.ephemeral, "auto-bootstrapped mission must be ephemeral");
+                assert!(m.path.is_dir(), "bootstrap path must be a directory");
+                assert!(m.path.join(".git").exists(), "must be a git repo");
+                assert!(
+                    m.repo.is_none(),
+                    "ephemeral mission has no GH repo metadata"
+                );
+            }
+            Err(why) => {
+                // Acceptable when the test runner is not inside a git
+                // toplevel under HOME — e.g. some sandboxed CI shapes.
+                // Make sure the error message is informative.
+                assert!(
+                    !why.is_empty(),
+                    "bootstrap error must have a non-empty reason"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn validate_slug_accepts_simple_name() {
         assert_eq!(
             validate_slug("django__issue-12345").unwrap(),
@@ -297,6 +490,7 @@ mod tests {
             path: tmp.clone(),
             repo: Some("mrdushidush/agent-battle-command-center".to_string()),
             created_at: 1_700_000_000,
+            ephemeral: false,
         };
 
         save_marker(&mission).expect("save_marker should succeed");

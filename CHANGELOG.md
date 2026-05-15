@@ -12,6 +12,34 @@ bumps are non-breaking bugfixes only.
 
 ### Added
 
+- **Forge-mode auto-bootstrap.** `--forge "<prompt>"` and `/forge <prompt>`
+  no longer require an explicit `/brownfield` step when invoked from inside
+  an existing git working tree under `$HOME` (or any `CLAUDETTE_WORKSPACE`
+  root). On no active mission, forge-mode tries
+  `crate::missions::try_bootstrap_local_mission()` which runs
+  `git rev-parse --show-toplevel`, validates the toplevel against the same
+  envelope `validate_read_path` enforces, and installs an **ephemeral**
+  mission — a new `Mission { ephemeral: true, repo: None, … }` flavour
+  that is not persisted to a `.claudette-mission.json` marker. A mid-
+  pipeline failure auto-clears the ephemeral mission via a new
+  `EphemeralMissionGuard` RAII type so the next `/forge` call can re-
+  bootstrap from a clean slot; user-initiated `/brownfield` /
+  `mission_attach` missions are left intact on failure (the user's state,
+  not ours). Out-of-envelope repos (e.g. `/etc/something` with no
+  `CLAUDETTE_WORKSPACE` opt-in) get a clear refusal pointing at the
+  recovery step.
+
+- **`docs/forge.md` — forge-mode walkthrough.** New doc covers the
+  Planner → Coder → Verifier → fix-loop → Submitter pipeline with the
+  `MAX_FIX_ROUNDS=2` budget, the **Submitter contract** (Coder must NOT
+  pre-commit — `mission_submit` refuses on a clean tree, exactly the
+  silent-failure shape that surfaced on 2026-05-15 from a forge_e2e
+  prompt asking Coder to `git_add` + `git_commit`), the `models.toml`
+  schema with the four routed roles (Planner / Coder / Verifier /
+  Submitter), the env-var overrides (`CLAUDETTES_FORGE_<ROLE>_MODEL`),
+  and the diagnostic checklist. Linked from README Highlights and
+  `docs/quickstart.md`.
+
 - **`claudette --doctor` — flat diagnostic probe.** New top-level CLI flag
   that prints green/red status for every external dependency in a single
   pass: Ollama / LM Studio reachable, the configured brain in the

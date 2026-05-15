@@ -79,7 +79,7 @@ claudette
 > /forge open the PR
 ```
 
-`/brownfield` clones into `~/.claudette/missions/<slug>/` and silently re-routes file operations into the mission tree. `/forge` runs a Planner→Coder→Verifier pipeline that ends at `mission_submit`, which auto-branches, commits, pushes, and opens the PR.
+`/brownfield` clones into `~/.claudette/missions/<slug>/` and silently re-routes file operations into the mission tree. `/forge` runs a Planner→Coder→Verifier pipeline that ends at `mission_submit`, which auto-branches, commits, pushes, and opens the PR. If you're already cd'd into a git repo, `claudette --forge "<prompt>"` auto-bootstraps an ephemeral mission rooted at the repo toplevel — no `/brownfield` step needed. Full pipeline walkthrough: [forge.md](forge.md).
 
 ### Google Calendar + Gmail (needs OAuth)
 

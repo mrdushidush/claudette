@@ -50,7 +50,7 @@ Every tool except `enable_tools` and `get_current_time` lives in a group the mod
 `mission_start("owner/repo")` clones into `~/.claudette/missions/<slug>/` and silently re-routes `git_status` / `glob_search` / `grep_search` / `write_file` / `bash` into the mission tree. `mission_submit` auto-branches, commits, pushes, and opens the PR via `gh_create_pr`. Resumable across sessions via `mission_attach`.
 
 ### Forge-mode: autonomous code-change pipeline
-`claudette --forge "<prompt>"` or `/forge <prompt>` runs a Planner → Coder → Verifier loop against the active mission, with a configurable fix-loop (default 2 rounds) before the PR opens. Roles are routable via `~/.claudettes-forge/models.toml` so you can pin a stronger model to Verifier and keep a cheap model on Coder.
+`claudette --forge "<prompt>"` or `/forge <prompt>` runs a Planner → Coder → Verifier loop against the active mission, with a configurable fix-loop (default 2 rounds) before the PR opens. Roles are routable via `~/.claudettes-forge/models.toml` so you can pin a stronger model to Verifier and keep a cheap model on Coder. Inside an existing git repo with no mission active, forge auto-bootstraps an ephemeral mission rooted at the repo toplevel — no clone required. Full walkthrough: [`docs/forge.md`](docs/forge.md).
 
 ### Tiered-brain auto-fallback
 Three presets (Fast / Auto / Smart). Auto runs `qwen3.5:4b` and escalates to `qwen3.5:9b` on stuck signals (empty response after retry, max-iterations hit with no text, ≥ 3 consecutive tool errors). Per-turn revert — not session-sticky.
@@ -122,6 +122,7 @@ Out of the box: notes, todos, files, time, weather, Wikipedia, code search. Brav
 - [`docs/hardware.md`](docs/hardware.md) — VRAM/RAM/disk by preset, 30b-on-8GB env recipe
 - [`docs/usage.md`](docs/usage.md) — CLI flags, slash commands, Telegram-only commands
 - [`docs/architecture.md`](docs/architecture.md) — module layout, tool-group contract, Codet sidecar contract
+- [`docs/forge.md`](docs/forge.md) — forge-mode pipeline, Submitter contract, `models.toml` schema, auto-bootstrap
 - [`docs/comparison.md`](docs/comparison.md) — honest side-by-side vs. opencode / Aider / OpenHands / Cline / Continue
 - [`docs/google_setup.md`](docs/google_setup.md) — Calendar + Gmail OAuth walkthrough
 
