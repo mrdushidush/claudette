@@ -1,4 +1,4 @@
-# Claudette one-line installer — Windows.
+# Claudette one-line installer - Windows.
 #
 # Usage (PowerShell):
 #   iwr -useb https://raw.githubusercontent.com/mrdushidush/claudette/main/install.ps1 | iex
@@ -36,12 +36,12 @@ function Fail($msg) {
     exit 1
 }
 
-# Only x86_64-pc-windows-msvc is shipped — surface a friendly failure on ARM64
+# Only x86_64-pc-windows-msvc is shipped - surface a friendly failure on ARM64
 # rather than a 404 from Releases. ARM64 Windows users should fall back to
 # `cargo install claudette` until we add an arm64-msvc build leg.
 $arch = [System.Environment]::GetEnvironmentVariable('PROCESSOR_ARCHITECTURE')
 if ($arch -ne 'AMD64') {
-    Fail "unsupported Windows arch: $arch (only x86_64 prebuilt binaries are shipped today — try 'cargo install claudette')"
+    Fail "unsupported Windows arch: $arch (only x86_64 prebuilt binaries are shipped today - try 'cargo install claudette')"
 }
 $Target = 'x86_64-pc-windows-msvc'
 
@@ -77,7 +77,7 @@ try {
     $expected = ((Get-Content (Join-Path $tmp "$Archive.sha256") -Raw) -split '\s+')[0].Trim().ToLower()
     $actual   = (Get-FileHash (Join-Path $tmp $Archive) -Algorithm SHA256).Hash.ToLower()
     if ($expected -ne $actual) {
-        Fail "checksum mismatch — refusing to install (expected $expected, got $actual)"
+        Fail "checksum mismatch - refusing to install (expected $expected, got $actual)"
     }
 
     Info 'extracting'
@@ -93,7 +93,7 @@ try {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
 
-# PATH check — read the User-scope Path, not the process-scope one (the
+# PATH check - read the User-scope Path, not the process-scope one (the
 # process Path is built from User + System + injections and doesn't reflect
 # what a fresh terminal would see).
 $userPath = [System.Environment]::GetEnvironmentVariable('Path', 'User')
