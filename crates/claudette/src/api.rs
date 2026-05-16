@@ -573,7 +573,8 @@ impl ApiClient for OllamaApiClient {
 const MODEL_RELOAD_RETRY_DEFAULT_MS: u64 = 750;
 
 /// Detect LM Studio's `{"error":"Model reloaded."}` 400 (and the closely
-/// related "Model is loading" / "Model not loaded" surface forms). Matches
+/// related "Model is loading" / "Model not loaded" / "Model unloaded" /
+/// "failed to load" / "operation canceled" surface forms). Matches
 /// case-insensitively on the body since the wording has drifted slightly
 /// across LM Studio versions. Returns false for everything else — most
 /// 4xx responses are genuine client errors that won't be fixed by retry.
@@ -585,6 +586,9 @@ fn is_model_reload_transient(status: reqwest::StatusCode, body: &str) -> bool {
     lower.contains("model reloaded")
         || lower.contains("model is loading")
         || lower.contains("model not loaded")
+        || lower.contains("model unloaded")
+        || lower.contains("failed to load")
+        || lower.contains("operation canceled")
 }
 
 impl OllamaApiClient {
@@ -1380,6 +1384,21 @@ mod tests {
         assert!(is_model_reload_transient(
             StatusCode::BAD_REQUEST,
             r#"{"error":"model not loaded"}"#
+        ));
+        // Three additional patterns observed in the 2026-05-16 live forge
+        // test session — without these, swap-state errors slipped past the
+        // classifier and surfaced as fatal 400s instead of retry-able blips.
+        assert!(is_model_reload_transient(
+            StatusCode::BAD_REQUEST,
+            r#"{"error":"Model unloaded."}"#
+        ));
+        assert!(is_model_reload_transient(
+            StatusCode::BAD_REQUEST,
+            r#"{"error":"failed to load model"}"#
+        ));
+        assert!(is_model_reload_transient(
+            StatusCode::BAD_REQUEST,
+            r#"{"error":"Operation canceled"}"#
         ));
     }
 

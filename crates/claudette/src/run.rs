@@ -389,6 +389,12 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
     // the same mission without re-bootstrapping).
     let mut cleanup = EphemeralMissionGuard::new(mission.ephemeral);
 
+    // Snapshot HEAD before any forge phase runs so the Verifier can diff
+    // against it after the Coder commits. Without this, `git diff HEAD`
+    // inside the Verifier loop returns empty (HEAD already points at the
+    // Coder's new commit) and the Verifier sees nothing to grade.
+    let base_sha = capture_base_sha(&mission.path);
+
     let session = if opts.resume {
         try_load_session()?.ok_or_else(|| {
             anyhow::anyhow!("no saved session at {}", default_session_path().display())
@@ -451,7 +457,7 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
 
         // Verifier
         eprintln!("{} {}", theme::BOLT, theme::accent("forge: verifier"));
-        let diff = capture_git_diff(&mission.path).unwrap_or_default();
+        let diff = capture_git_diff(&mission.path, base_sha.as_deref()).unwrap_or_default();
         let verifier = run_verifier(
             session.clone(),
             &mission,
@@ -561,21 +567,49 @@ impl Drop for EphemeralMissionGuard {
     }
 }
 
-/// v0c: capture `git diff HEAD` from the mission tree. Used to feed the
-/// Verifier a snapshot of what the Coder just did. Returns `None` on any
-/// failure — the Verifier silently falls back to "no diff captured" mode
-/// (which usually scores well since there's nothing to fault) so a
-/// transient `git` failure can't deadlock the pipeline.
-fn capture_git_diff(mission_path: &std::path::Path) -> Option<String> {
+/// v0c: capture the diff the Coder produced this mission. When a `base`
+/// SHA is provided (captured once at the start of [`run_forge_mission`]
+/// before the Coder commits anything), runs `git diff <base>..HEAD` so the
+/// Verifier sees the full Coder output even though the Coder has already
+/// committed. Falls back to `git diff HEAD` (uncommitted working-tree
+/// changes) when no base is available — e.g., fresh repo with no commits
+/// yet, or `git rev-parse` failed at mission start. Returns `None` on any
+/// `git` failure so a transient error can't deadlock the pipeline.
+fn capture_git_diff(mission_path: &std::path::Path, base: Option<&str>) -> Option<String> {
+    let mut cmd = std::process::Command::new("git");
+    cmd.current_dir(mission_path);
+    match base {
+        Some(b) => cmd.args(["diff", &format!("{b}..HEAD")]),
+        None => cmd.args(["diff", "HEAD"]),
+    };
+    let output = cmd.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Capture the mission's HEAD SHA at the moment forge begins, before the
+/// Planner or Coder run. Used by [`capture_git_diff`] to produce a
+/// `base..HEAD` diff that survives the Coder committing mid-pipeline
+/// (otherwise `git diff HEAD` returns empty and the Verifier sees nothing
+/// to grade). Returns `None` on fresh repos with no commits yet or any
+/// `git` failure; callers fall back to the working-tree diff.
+fn capture_base_sha(mission_path: &std::path::Path) -> Option<String> {
     let output = std::process::Command::new("git")
-        .args(["diff", "HEAD"])
+        .args(["rev-parse", "HEAD"])
         .current_dir(mission_path)
         .output()
         .ok()?;
     if !output.status.success() {
         return None;
     }
-    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if sha.is_empty() {
+        None
+    } else {
+        Some(sha)
+    }
 }
 
 /// v0c: run a tool-less Planner turn. The Planner sees the user's request,
@@ -1953,6 +1987,89 @@ mod tests {
             Some(v) => std::env::set_var("CLAUDETTE_SOFT_COMPACT_THRESHOLD", v),
             None => std::env::remove_var("CLAUDETTE_SOFT_COMPACT_THRESHOLD"),
         }
+    }
+
+    /// Helper: run `git` with args under `dir`, asserting success. Tests
+    /// for `capture_git_diff` need to drive a real repo since we shell out.
+    #[cfg(test)]
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.com")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.com")
+            .status()
+            .expect("git should be on PATH for forge tests");
+        assert!(status.success(), "git {args:?} failed in {dir:?}");
+    }
+
+    /// Repro of the 2026-05-16 false-negative: Coder commits its changes,
+    /// `git diff HEAD` returns empty afterwards, Verifier sees no work.
+    /// Fix: snapshot the base SHA before Coder runs, use `base..HEAD`.
+    #[test]
+    fn capture_git_diff_with_base_sees_committed_coder_work() {
+        let dir = std::env::temp_dir().join(format!(
+            "claudette-forge-diff-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        git(&dir, &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.join("seed.txt"), "seed\n").unwrap();
+        git(&dir, &["add", "seed.txt"]);
+        git(&dir, &["commit", "-q", "-m", "seed"]);
+
+        // Snapshot base BEFORE the simulated Coder commit.
+        let base = capture_base_sha(&dir).expect("base SHA should be capturable");
+
+        // Simulate the Coder phase: edit a file and commit.
+        std::fs::write(dir.join("new.txt"), "coder output\n").unwrap();
+        git(&dir, &["add", "new.txt"]);
+        git(&dir, &["commit", "-q", "-m", "coder change"]);
+
+        // OLD behavior (base=None): working-tree diff = empty after commit.
+        let old_diff = capture_git_diff(&dir, None).expect("git diff HEAD should succeed");
+        assert!(
+            old_diff.trim().is_empty(),
+            "without base SHA, post-commit diff should be empty (this is the bug we're fixing); got {old_diff:?}"
+        );
+
+        // NEW behavior: base..HEAD shows the Coder's commit.
+        let new_diff = capture_git_diff(&dir, Some(&base)).expect("base..HEAD diff should succeed");
+        assert!(
+            new_diff.contains("coder output"),
+            "base..HEAD diff should include the Coder's changes; got {new_diff:?}"
+        );
+        assert!(
+            new_diff.contains("new.txt"),
+            "base..HEAD diff should mention the new file; got {new_diff:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn capture_base_sha_returns_none_on_fresh_repo() {
+        // No commits yet → rev-parse HEAD fails → callers fall back to
+        // working-tree diff. Verify we don't panic and don't return a sha.
+        let dir = std::env::temp_dir().join(format!(
+            "claudette-forge-emptyrepo-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q", "-b", "main"]);
+
+        assert!(capture_base_sha(&dir).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
