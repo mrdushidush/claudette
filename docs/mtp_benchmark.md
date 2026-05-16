@@ -180,7 +180,22 @@ LM Studio loaded with the same Q4_K_XL GGUF, `--no-mmap` toggled ON in the UI Co
 | LM Studio + no-mmap | MXFP4 (23.5 GB) | 28.1 | 14.04 GB | 14.81 GB | −16.6 |
 | LM Studio + no-mmap | smaller ~18.6 GB | 25.0 | 10.97 GB | 16.68 GB | −19.7 |
 
-**Verdict: MTP wins by +10.2 tok/s (+30%) on the same Q4_K_XL — claudette daily prod stays on MTP.** MXFP4 is a confirmed null/negative on both backends (Blackwell FP4 path doesn't pay off here; workload is memory-bandwidth bound). LM Studio's `--no-mmap` toggle (Configure panel, not CLI) works fine and gives the same RAM win we saw on MTP. The end-to-end forge wall-clock comparison with this fair quant pairing is open follow-up.
+**Verdict: MTP wins by +10.2 tok/s (+30%) on the same Q4_K_XL — claudette daily prod stays on MTP.** MXFP4 is a confirmed null/negative on both backends (Blackwell FP4 path doesn't pay off here; workload is memory-bandwidth bound). LM Studio's `--no-mmap` toggle (Configure panel, not CLI) works fine and gives the same RAM win we saw on MTP.
+
+### Round 3 forge wall-clock (2026-05-16 PM, post-c6c5969)
+
+After the c6c5969 fixes landed (verifier `git diff <base>..HEAD`, widened reload classifier) and **with all roles forced to `qwen3.6-35b-a3b` (single model id = no swap dance)**, the forge mission re-ran on the same Q4_K_XL + fit-2304 + no-mmap config:
+
+| Run | Wall-clock | Coder rounds | Outcome |
+|---|---:|---:|---|
+| Round 2 (pre-c6c5969, gemma↔qwen swap, false fix-loop) | 224.8 s | 2+ (Verifier false negative on empty diff) | committed `multiply(a,b)`, mission stalled in fix-loop |
+| **Round 3 (post-c6c5969, single model)** | **106.59 s** | **1** (clean) | ✅ committed `multiply(a,b)` clean Planner → Coder → Verifier → Submit |
+
+**53% wall-clock improvement** comes from two compounding wins: (a) the c6c5969 verifier fix eliminates a wasted Coder round when the diff IS correct (previously the post-commit `git diff HEAD` was empty, scoring `pass=false` and re-entering the fix-loop), and (b) staying on a single model id removes the LM Studio swap-dance churn that previously dominated forge wall-clock.
+
+Real-workload MTP draft acceptance under forge was **88% (628/715)** — actually beating the 84% synthetic baseline, because real forge prompts have heavy repetition (function signatures, JSON envelopes, file paths) that draft-mtp predicts very well.
+
+The end-to-end LMS-Q4_K_XL forge comparison at the same fair quant is still open follow-up — but the round-3 MTP number is now the floor to beat.
 
 Notes from the run:
 - forge auto-bootstrap (`--forge` in a temp git repo under `$HOME`) works as documented in [[forge-mode-shipped]].

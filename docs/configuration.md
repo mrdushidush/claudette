@@ -25,6 +25,14 @@ Claudette intentionally does **not** auto-load `.env` from the current working d
 | `CLAUDETTE_LIVE_GOOGLE` | unset | Set to `1` to run live Google integration tests via `cargo test --ignored`. Never set in CI. |
 | `CLAUDETTE_WORKSPACE` | unset | Extra read roots outside `$HOME`, colon-separated on Unix, semicolon-separated on Windows. Example: `D:\dev\claudette` for developing Claudette itself. Reads under `$HOME` and under a `$HOME`-rooted CWD are always allowed regardless. |
 
+### Backend quirks: LM Studio variant suffix
+
+LM Studio exposes models with a `@<quant>` suffix in `/v1/models` — for example `qwen3.6-35b-a3b@q4_k_xl` rather than the bare `qwen3.6-35b-a3b`. If you set `CLAUDETTE_MODEL=qwen3.6-35b-a3b` (bare id) against LM Studio, the server treats it as an unknown id, attempts a JIT-load for a different variant, and (when VRAM is tight) returns HTTP 400 `{"error":"Model is unloaded."}`. **Use the exact id from `lms ps` or `/v1/models`** when targeting LM Studio — e.g. `CLAUDETTE_MODEL=qwen3.6-35b-a3b@q4_k_xl`. llama.cpp's `llama-server` (and the MTP fork) ignores the `model` field entirely since it only has one loaded, so the bare id works there.
+
+### Backend quirks: brain and embeddings share `OLLAMA_HOST`
+
+Both the brain (`/v1/chat/completions`) and recall (`/v1/embeddings`) resolve to the same `OLLAMA_HOST`. There is no separate `CLAUDETTE_RECALL_HOST` knob. If you run a chat-only server (e.g. an MTP llama-server with no `--embeddings`) you'll see `recall: /v1/embeddings HTTP 501 Not Implemented` from `--doctor` and from `/recall`. Either (a) set `CLAUDETTE_RECALL_DISABLE=1`, or (b) load the embedding model on the same endpoint as the brain (LM Studio supports loading both simultaneously if VRAM allows).
+
 ## Codet (code-generation sidecar)
 
 | Variable | Default | Purpose |
