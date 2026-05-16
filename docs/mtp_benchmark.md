@@ -47,13 +47,33 @@ $env:Path = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\bin\x64;" 
   -m C:\models\Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf `
   -c 8192 -fa on -np 1 --port 1235 `
   --fit-target 2816 `
-  --spec-type draft-mtp --spec-draft-n-max 2
+  -ctk q8_0 -ctv q8_0 --cache-ram 1024 `
+  --spec-type draft-mtp --spec-draft-n-max 2 `
+  --no-mmap
 ```
 
-> **CRITICAL CONFIG NOTE (see [config sensitivity](#config-sensitivity) below):**
-> `--fit-target 2816` (= 2.75 GiB margin) gives the optimal config — the auto-fit reserves enough headroom to avoid VRAM spillage while packing as many MoE experts on GPU as fit. **DO NOT use `--cpu-moe` here** — counter-intuitively that pessimizes throughput on this rig because it forces ALL routed experts to RAM instead of letting the fit logic pack the best ones on GPU.
+> **CRITICAL CONFIG NOTES:**
 >
-> Also, the **`--spec-type draft-mtp`** flag is critical — the pre-2026-05-13 alias `--spec-type mtp` silently disables MTP (verified in `common/speculative.cpp:27`).
+> 1. **`--fit-target 2816`** (= 2.75 GiB margin) gives the optimal VRAM packing — the auto-fit reserves enough headroom to avoid spillage while packing as many MoE experts on GPU as fit. **DO NOT use `--cpu-moe`** — counter-intuitively that pessimizes throughput on this rig because it forces ALL routed experts to RAM instead of letting the fit logic pack the best ones on GPU.
+>
+> 2. **`--spec-type draft-mtp`** is critical — the pre-2026-05-13 alias `--spec-type mtp` silently disables MTP (verified in `common/speculative.cpp:27`).
+>
+> 3. **`--no-mmap`** is the RAM-priority unlock (added 2026-05-16 follow-up — see [§RAM-priority tune](#ram-priority-tune-no-mmap) below). Frees ~10 GB of system RAM and improves tk/s by ~9% vs mmap default.
+
+## RAM-priority tune (`--no-mmap`)
+
+Follow-up to the main benchmark: 4 GB free RAM during inference wasn't enough to keep using the rig for other things (browser, IDE, light builds). The mmap warning the server emits — *"tensor overrides to CPU are used with mmap enabled - consider --no-mmap for better performance"* — turns out to be 100% accurate on this rig. Re-running the same 5-prompt probe with `--no-mmap` added:
+
+| Config | RAM free (steady) | Gen tk/s avg | VRAM | Quality |
+|---|---:|---:|---:|---|
+| Q4_K_XL + mmap (prior production) | 4.4 GB | 40.16 | 13.84 GB | KLD 0.41 |
+| **Q4_K_XL + `--no-mmap` (new production)** | **14.6 GB** | **43.92** | 13.84 GB | KLD 0.41 |
+
+**Δ:** +10.2 GB free RAM (3.3× headroom), +9.4% gen tk/s, same VRAM, same quality.
+
+Why `--no-mmap` wins here despite the conventional "mmap is friendlier to RAM" intuition: with `--fit-target 2816` already putting ~13.4 GB of model on VRAM, only ~9.5 GB of expert tensors need to stay CPU-resident. Under mmap, the OS page cache holds the entire 22.9 GB GGUF hot after load (the file got touched once during upload, every page is "warm"). Under `--no-mmap`, llama.cpp allocates private buffers, uploads GPU layers to VRAM, and the buffer pages for those layers go cold — Windows pages them out cleanly via the working set manager. Result: process Private commit climbs to ~27 GB but resident WS stays at ~13 GB, and the rest of system RAM stays available.
+
+The tk/s gain is incidental but consistent across runs (44.0 ± 1.5 tok/s across two probes): private allocations avoid the page-fault path on cold expert lookups that mmap suffers when Windows trims rarely-used pages.
 
 The MTP head is embedded in the same GGUF — no separate `-md` / draft model file needed. The server log confirms: `creating MTP draft context against the target model 'C:\models\...'`. Code path at `tools/server/server-context.cpp:801-820` builds a second `LLAMA_CONTEXT_TYPE_MTP` context against the same `model_tgt`.
 
