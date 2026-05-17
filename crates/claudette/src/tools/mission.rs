@@ -354,6 +354,11 @@ fn run_mission_list() -> Result<String, String> {
 }
 
 fn run_mission_exit() -> Result<String, String> {
+    // Always clear the brownfield-failed sticky flag too — mission_exit
+    // signals "fresh start", so a forge call after this should be free
+    // to auto-bootstrap from cwd again. Mirrors the slash-handler logic
+    // in `commands::handle_mission_exit`.
+    crate::missions::clear_brownfield_failed();
     match clear_active() {
         Some(slug) => Ok(json!({ "ok": true, "exited": slug }).to_string()),
         None => Err("mission_exit: no active mission".to_string()),

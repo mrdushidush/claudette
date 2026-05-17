@@ -87,6 +87,12 @@ pub enum SlashCommand {
     /// active mission in one shot. Thin wrapper over the `mission_start`
     /// tool — exposes it from the REPL without going through the brain.
     Brownfield(String),
+    /// Clear the active mission. Same effect as the `mission_exit` brain
+    /// tool, but reachable directly from the REPL so the user can wipe a
+    /// rehydrated mission without going through the brain. Added with the
+    /// F8 safety fix — the rehydrate banner advises this command so it has
+    /// to exist as a slash for the advice to work.
+    MissionExit,
     /// 0.4.2 forge-mode v0a: run the trailing prompt against the active
     /// brownfield mission with file/search/git/advanced/github tools
     /// pre-enabled, ending at `mission_submit` (auto-PR). Errors if no
@@ -212,6 +218,7 @@ pub fn parse_slash_command(line: &str) -> Option<SlashCommand> {
                 "/brownfield requires a target. Try: /brownfield owner/repo".to_string(),
             ),
         },
+        "mission_exit" | "mission-exit" => SlashCommand::MissionExit,
         "forge" => match arg.filter(|s| !s.is_empty()) {
             Some(prompt) => SlashCommand::Forge(prompt),
             None => SlashCommand::Invalid(
@@ -394,6 +401,10 @@ where
             handle_brownfield(out, &target);
             SlashOutcome::Continue
         }
+        SlashCommand::MissionExit => {
+            handle_mission_exit(out);
+            SlashOutcome::Continue
+        }
         SlashCommand::Forge(prompt) => {
             handle_forge(out, &prompt);
             SlashOutcome::Continue
@@ -486,6 +497,10 @@ fn print_help(out: &mut impl Write) {
                 (
                     "/brownfield <target>",
                     "Clone a repo and make it the active mission",
+                ),
+                (
+                    "/mission_exit",
+                    "Clear the active mission (and unblock /forge if /brownfield failed)",
                 ),
                 (
                     "/forge <prompt>",
@@ -1467,31 +1482,84 @@ fn handle_brownfield(out: &mut impl Write, target: &str) {
     );
     let payload = serde_json::json!({ "target": target }).to_string();
     match crate::tools::dispatch_tool("mission_start", &payload) {
-        Ok(json) => match serde_json::from_str::<serde_json::Value>(&json) {
-            Ok(v) => {
-                let slug = v.get("slug").and_then(|x| x.as_str()).unwrap_or("?");
-                let path = v.get("path").and_then(|x| x.as_str()).unwrap_or("?");
-                let _ = writeln!(
-                    out,
-                    "  {} {} {}",
-                    theme::ok(theme::OK_GLYPH),
-                    theme::ok(&format!("mission active: {slug}")),
-                    theme::dim(path)
-                );
+        Ok(json) => {
+            // Success path: a /brownfield that succeeded clears any prior
+            // failure sticky-flag so subsequent /forge calls go back to
+            // normal auto-bootstrap behaviour.
+            crate::missions::clear_brownfield_failed();
+            match serde_json::from_str::<serde_json::Value>(&json) {
+                Ok(v) => {
+                    let slug = v.get("slug").and_then(|x| x.as_str()).unwrap_or("?");
+                    let path = v.get("path").and_then(|x| x.as_str()).unwrap_or("?");
+                    let _ = writeln!(
+                        out,
+                        "  {} {} {}",
+                        theme::ok(theme::OK_GLYPH),
+                        theme::ok(&format!("mission active: {slug}")),
+                        theme::dim(path)
+                    );
+                }
+                // mission_start always returns valid JSON on success, so this
+                // branch is defensive against future shape drift; print the
+                // raw payload so the user sees something useful either way.
+                Err(_) => {
+                    let _ = writeln!(out, "  {} {}", theme::ok(theme::OK_GLYPH), json);
+                }
             }
-            // mission_start always returns valid JSON on success, so this
-            // branch is defensive against future shape drift; print the
-            // raw payload so the user sees something useful either way.
-            Err(_) => {
-                let _ = writeln!(out, "  {} {}", theme::ok(theme::OK_GLYPH), json);
-            }
-        },
+        }
         Err(e) => {
+            // F8b safety fix: poison the session so the next /forge can't
+            // silently fall through to cwd auto-bootstrap. The user
+            // explicitly tried to target a different repo and that failed
+            // — running /forge against their dev tree instead is rarely
+            // what they want.
+            crate::missions::mark_brownfield_failed();
             let _ = writeln!(
                 out,
                 "  {} {}",
                 theme::error(theme::ERR_GLYPH),
                 theme::error(&e)
+            );
+            let _ = writeln!(
+                out,
+                "  {} {}",
+                theme::dim("∘"),
+                theme::dim(
+                    "/forge is blocked until you fix this or call /mission_exit \
+                     to clear the failure flag."
+                )
+            );
+        }
+    }
+}
+
+fn handle_mission_exit(out: &mut impl Write) {
+    // Always clear the sticky brownfield-failed flag, even if no mission
+    // is active — the user is signalling "fresh start, please".
+    crate::missions::clear_brownfield_failed();
+    match crate::missions::clear_active() {
+        Some(slug) => {
+            let _ = writeln!(
+                out,
+                "{} {} {}",
+                theme::ROBOT,
+                theme::accent("mission exit"),
+                theme::dim(&slug)
+            );
+            let _ = writeln!(
+                out,
+                "  {} {}",
+                theme::ok(theme::OK_GLYPH),
+                theme::ok("mission cleared")
+            );
+        }
+        None => {
+            let _ = writeln!(out, "{} {}", theme::ROBOT, theme::accent("mission exit"));
+            let _ = writeln!(
+                out,
+                "  {} {}",
+                theme::dim("∘"),
+                theme::dim("no active mission")
             );
         }
     }
@@ -2079,6 +2147,24 @@ mod tests {
         if let Some(SlashCommand::Invalid(msg)) = parse_slash_command("/forge") {
             assert!(msg.contains("/forge"), "got: {msg}");
         }
+    }
+
+    #[test]
+    fn parse_mission_exit_aliases() {
+        // Both underscore and dash forms must work — REPL users type both.
+        assert_eq!(
+            parse_slash_command("/mission_exit"),
+            Some(SlashCommand::MissionExit)
+        );
+        assert_eq!(
+            parse_slash_command("/mission-exit"),
+            Some(SlashCommand::MissionExit)
+        );
+        // Case-insensitive like every other slash.
+        assert_eq!(
+            parse_slash_command("/Mission_Exit"),
+            Some(SlashCommand::MissionExit)
+        );
     }
 
     #[test]

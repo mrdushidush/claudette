@@ -116,8 +116,18 @@ fn run_read_file(input: &str) -> Result<String, String> {
 
     let path = validate_read_path(path_str)?;
 
-    let metadata = fs::metadata(&path)
-        .map_err(|e| format!("read_file: stat {} failed: {e}", path.display()))?;
+    let metadata = fs::metadata(&path).map_err(|e| {
+        // Verbose error so the brain stops papering over silent
+        // missing-file outcomes (F5). Include the resolved absolute path
+        // and the original user-supplied form so the brain can correct
+        // its next call instead of hallucinating success.
+        format!(
+            "read_file: stat {} failed: {e}. (input path: {path_str}; \
+             relative paths resolve against the active mission cwd or the \
+             process cwd, with CLAUDETTE_WORKSPACE roots as a fallback.)",
+            path.display()
+        )
+    })?;
     if metadata.is_dir() {
         return Err(format!(
             "read_file: {} is a directory; use list_dir instead",

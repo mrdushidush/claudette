@@ -166,15 +166,27 @@ fn run_grep_search(input: &str) -> Result<String, String> {
     if pattern.is_empty() {
         return Err("grep_search: pattern is empty".to_string());
     }
-    // Default search root: the active mission tree when one is active
-    // (matches the brain's likely intent — grep within the project it's
-    // working on), else $HOME (pre-T2 default).
+    // Default search root, in priority order:
+    // 1. Active mission tree (matches the brain's likely intent — grep
+    //    within the project being worked on).
+    // 2. Process cwd if it's inside a CLAUDETTE_WORKSPACE root (so a user
+    //    who launched claudette from inside their workspace gets the
+    //    project, not their home dir).
+    // 3. First CLAUDETTE_WORKSPACE root (so a user who launched from $HOME
+    //    with CLAUDETTE_WORKSPACE=D:/dev/foo gets the project they
+    //    pointed claudette at).
+    // 4. $HOME (pre-T2 default).
+    //
+    // The pre-fix default of `~` is F5: it caused grep_search to silently
+    // crawl HOME when the brain meant "grep the project I'm working on".
     let default_path: String;
     let path_str = match v.get("path").and_then(Value::as_str) {
         Some(s) => s,
         None => {
-            default_path = if crate::missions::active_mission().is_some() {
-                crate::missions::active_cwd().display().to_string()
+            default_path = if let Some(m) = crate::missions::active_mission() {
+                m.path.display().to_string()
+            } else if let Some(root) = crate::tools::default_workspace_root() {
+                root.display().to_string()
             } else {
                 "~".to_string()
             };

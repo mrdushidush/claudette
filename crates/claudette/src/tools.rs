@@ -435,6 +435,18 @@ pub(super) fn normalize_path(path: &Path) -> PathBuf {
 /// hook that makes `read_file`, `list_dir`, `edit_file`, and `grep_search`
 /// mission-aware — `glob_search` does its own bare-relative resolution and
 /// is updated separately.
+///
+/// **F5 fallback (2026-05-17):** when no mission is active, the process
+/// cwd isn't inside any `CLAUDETTE_WORKSPACE` root, *and* the cwd-joined
+/// path doesn't exist on disk, we additionally probe each
+/// `CLAUDETTE_WORKSPACE` root for the same relative path and prefer the
+/// first hit. Closes the silent-hallucination footgun where a user
+/// launched `claudette.exe` from `$HOME` and asked the brain to read
+/// `crates/foo/bar.rs` — the brain phrased a workspace-relative path,
+/// claudette joined it to cwd, the file wasn't there, and the brain
+/// papered over the missing-file error with a hallucinated answer. The
+/// fallback only kicks in when the cwd resolution would miss anyway, so
+/// it can't move a real-cwd file out from under the caller.
 //
 // Returns Result purely to keep the call-site `?` ergonomics callers expect
 // (validate_*_path chain `?` from this); after T2 made cwd resolution
@@ -443,12 +455,51 @@ pub(super) fn normalize_path(path: &Path) -> PathBuf {
 #[allow(clippy::unnecessary_wraps)]
 fn resolve_input_path(input: &str) -> Result<PathBuf, String> {
     let expanded = expand_tilde(input);
-    let absolute = if expanded.is_absolute() {
-        expanded
-    } else {
-        crate::missions::active_cwd().join(expanded)
-    };
-    Ok(normalize_path(&absolute))
+    if expanded.is_absolute() {
+        return Ok(normalize_path(&expanded));
+    }
+    let cwd_joined = crate::missions::active_cwd().join(&expanded);
+    let cwd_norm = normalize_path(&cwd_joined);
+
+    // F5 fallback: if no mission and cwd-joined misses, try workspace roots.
+    if crate::missions::active_mission().is_none() && !cwd_norm.exists() {
+        if let Some(resolved) = resolve_via_workspace_roots(&expanded) {
+            return Ok(resolved);
+        }
+    }
+    Ok(cwd_norm)
+}
+
+/// F5 helper: probe each `CLAUDETTE_WORKSPACE` root for `relative` and
+/// return the first one that exists. Returns `None` when no workspace
+/// roots are configured, when cwd is already under a workspace root (so
+/// the user is operating where they expect — don't surprise them), or
+/// when nothing matches. The relative path is taken verbatim — `..`
+/// segments don't bypass the workspace because we only return paths that
+/// already exist.
+fn resolve_via_workspace_roots(relative: &Path) -> Option<PathBuf> {
+    let roots = parse_workspace_env();
+    if roots.is_empty() {
+        return None;
+    }
+    // If cwd is inside any workspace root, the caller is operating
+    // inside their workspace and we shouldn't sneak a sibling root in.
+    if let Ok(cwd) = std::env::current_dir() {
+        let cwd_norm = normalize_path(&cwd);
+        if roots
+            .iter()
+            .any(|r| cwd_norm.starts_with(normalize_path(r)))
+        {
+            return None;
+        }
+    }
+    for root in &roots {
+        let candidate = normalize_path(&root.join(relative));
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 // Codegen group — generate_code + spawn_agent, along with reference-file
@@ -530,6 +581,32 @@ impl WorkspaceRoots {
         }
         warnings
     }
+}
+
+/// Return the best default workspace root for tools that need a search
+/// root and the caller didn't provide one. Priority: process cwd if it's
+/// inside a `CLAUDETTE_WORKSPACE` entry, else the first
+/// `CLAUDETTE_WORKSPACE` entry. Returns `None` when `CLAUDETTE_WORKSPACE`
+/// is unset or empty — callers should fall back to `$HOME` (or whatever
+/// their previous default was). Used by `grep_search` to fix F5 (default
+/// search root was `~`, which crawled the user's home dir instead of the
+/// project they pointed claudette at).
+#[must_use]
+pub(crate) fn default_workspace_root() -> Option<PathBuf> {
+    let roots = parse_workspace_env();
+    if roots.is_empty() {
+        return None;
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let cwd_norm = normalize_path(&cwd);
+        if let Some(hit) = roots
+            .iter()
+            .find(|r| cwd_norm.starts_with(normalize_path(r)))
+        {
+            return Some(normalize_path(hit));
+        }
+    }
+    Some(normalize_path(&roots[0]))
 }
 
 /// Parse `CLAUDETTE_WORKSPACE` into a list of root paths. Empty when the
@@ -1275,6 +1352,98 @@ mod tests {
             validate_read_path_with(target, &permitting).is_ok(),
             "workspace covers target, expected ok"
         );
+    }
+
+    #[test]
+    fn default_workspace_root_returns_none_when_env_empty() {
+        let _guard = crate::test_env_lock();
+        let prev = std::env::var("CLAUDETTE_WORKSPACE").ok();
+        std::env::remove_var("CLAUDETTE_WORKSPACE");
+        let out = default_workspace_root();
+        if let Some(v) = prev {
+            std::env::set_var("CLAUDETTE_WORKSPACE", v);
+        }
+        assert!(
+            out.is_none(),
+            "expected None with no CLAUDETTE_WORKSPACE, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn default_workspace_root_returns_first_root_when_cwd_outside() {
+        let _guard = crate::test_env_lock();
+        let prev = std::env::var("CLAUDETTE_WORKSPACE").ok();
+        // Use an absolute path that's guaranteed not to contain the test
+        // runner's cwd. The path doesn't need to exist for this helper.
+        #[cfg(unix)]
+        let synthetic = "/claudette-default-ws-2bf3";
+        #[cfg(not(unix))]
+        let synthetic = r"Z:\claudette-default-ws-2bf3";
+        std::env::set_var("CLAUDETTE_WORKSPACE", synthetic);
+        let out = default_workspace_root();
+        match prev {
+            Some(v) => std::env::set_var("CLAUDETTE_WORKSPACE", v),
+            None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+        }
+        let got = out.expect("default_workspace_root should return Some");
+        assert_eq!(got, normalize_path(&PathBuf::from(synthetic)));
+    }
+
+    #[test]
+    fn resolve_input_path_falls_back_to_workspace_when_cwd_misses() {
+        // F5 regression: launch from outside a workspace, ask for a
+        // relative path that doesn't exist under cwd but does exist
+        // under CLAUDETTE_WORKSPACE → fallback returns the workspace
+        // hit. Build a fresh temp dir to use as the workspace, drop a
+        // file inside it, then assert resolve_input_path picks it up.
+        let _guard = crate::test_env_lock();
+        let prev = std::env::var("CLAUDETTE_WORKSPACE").ok();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let ws = std::env::temp_dir().join(format!("claudette-f5-ws-{nanos}"));
+        std::fs::create_dir_all(ws.join("crates").join("foo")).unwrap();
+        let target = ws.join("crates").join("foo").join("bar.rs");
+        std::fs::write(&target, "// f5 fixture\n").unwrap();
+        std::env::set_var("CLAUDETTE_WORKSPACE", &ws);
+
+        // We can't easily relocate the process cwd to "outside the workspace"
+        // portably (Windows current_dir behaviour varies). Instead, use the
+        // helper directly with the relative path — that's what
+        // resolve_input_path delegates to when cwd-joined misses.
+        let hit = resolve_via_workspace_roots(Path::new("crates/foo/bar.rs"));
+
+        match prev {
+            Some(v) => std::env::set_var("CLAUDETTE_WORKSPACE", v),
+            None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+        }
+
+        // Cleanup must happen even if the assertion fails — wrap in a
+        // closure-ish scope. Skip if cwd happens to be inside `ws` (rare
+        // but possible if a test runner roots itself in the temp dir).
+        let cwd_inside_ws = std::env::current_dir()
+            .ok()
+            .is_some_and(|c| normalize_path(&c).starts_with(normalize_path(&ws)));
+
+        let assert_result = if cwd_inside_ws {
+            // The helper deliberately returns None when cwd is inside the
+            // workspace — we don't want to override the user's actual
+            // working dir. Skip the positive assertion in this case.
+            None
+        } else {
+            Some(hit.clone())
+        };
+
+        let _ = std::fs::remove_dir_all(&ws);
+
+        if let Some(out) = assert_result {
+            let out = out.expect("workspace fallback should resolve relative path");
+            assert!(
+                out.ends_with(Path::new("crates").join("foo").join("bar.rs")),
+                "unexpected resolved path: {}",
+                out.display()
+            );
+        }
     }
 
     #[test]

@@ -311,6 +311,20 @@ fn max_fix_rounds() -> u32 {
     }
 }
 
+/// Seconds the ephemeral-mission auto-bootstrap waits before proceeding so
+/// the user can Ctrl+C if cwd wasn't what they intended. Default 3; set
+/// `CLAUDETTE_FORGE_ABORT_WINDOW_SECS=0` to disable (e.g. CI / scripted
+/// runs), or to a larger value for cautious workflows. Clamped to [0, 30]
+/// — a 30-second wait is the longest that's still a safety pause rather
+/// than just an annoyance.
+fn ephemeral_abort_window_secs() -> u64 {
+    std::env::var("CLAUDETTE_FORGE_ABORT_WINDOW_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(3)
+        .min(30)
+}
+
 /// One Verifier judgement. `pass` is the authoritative gate (a Verifier
 /// can score 8 and still mark fail if it spotted a security bug); `score`
 /// is advisory and shown to the user but not compared against a threshold
@@ -357,27 +371,75 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
     // mission slot the user didn't ask for.
     let mission = match crate::missions::active_mission() {
         Some(m) => m,
-        None => match crate::missions::try_bootstrap_local_mission() {
-            Ok(m) => {
-                eprintln!(
-                    "{} {} {}",
-                    theme::BOLT,
-                    theme::accent("forge: ephemeral mission"),
-                    theme::dim(&m.path.display().to_string())
-                );
-                crate::missions::set_active(m.clone())
-                    .map_err(|e| anyhow::anyhow!("set_active for ephemeral mission: {e}"))?;
-                m
-            }
-            Err(why) => {
+        None => {
+            // F8b safety gate: if the user invoked /brownfield earlier in
+            // this process and it failed, refuse to silently fall back to
+            // a cwd-rooted ephemeral mission. They were explicit about
+            // wanting to target a different repo; running forge against
+            // the dev tree instead is a footgun.
+            if crate::missions::brownfield_failed_this_session() {
                 return Err(anyhow::anyhow!(
-                    "forge-mode requires an active brownfield mission, and could not \
-                     auto-bootstrap one from the working directory ({why}). Either \
-                     `cd` into a git repo under $HOME / CLAUDETTE_WORKSPACE, or run \
-                     `/brownfield <owner/repo>` first to clone a target tree."
+                    "forge: refusing to auto-bootstrap from cwd because a \
+                     /brownfield invocation failed earlier in this session. \
+                     Fix the underlying error and retry /brownfield, or run \
+                     /mission_exit to clear the failure flag and operate on \
+                     the current directory."
                 ));
             }
-        },
+            match crate::missions::try_bootstrap_local_mission() {
+                Ok(m) => {
+                    // F8 safety: surface this loud and clear. forge will
+                    // commit AI-generated changes into this tree, and the
+                    // pre-fix dim line was easy to miss in a busy terminal.
+                    eprintln!();
+                    eprintln!(
+                        "{} {}",
+                        theme::warn(theme::WARN_GLYPH),
+                        theme::warn(
+                            "forge: NO active brownfield mission — \
+                                     auto-bootstrapping an ephemeral mission \
+                                     rooted at the current directory."
+                        )
+                    );
+                    eprintln!(
+                        "  {} {} {}",
+                        theme::dim("∘"),
+                        theme::dim("target tree:"),
+                        theme::accent(&m.path.display().to_string()),
+                    );
+                    let abort_secs = ephemeral_abort_window_secs();
+                    if abort_secs > 0 {
+                        eprintln!(
+                            "  {} {}",
+                            theme::dim("∘"),
+                            theme::dim(&format!(
+                                "commits will land here. Press Ctrl+C in the next {abort_secs} \
+                                 seconds to abort if this isn't what you want."
+                            )),
+                        );
+                        std::thread::sleep(std::time::Duration::from_secs(abort_secs));
+                    } else {
+                        eprintln!(
+                            "  {} {}",
+                            theme::dim("∘"),
+                            theme::dim("commits will land here."),
+                        );
+                    }
+                    eprintln!();
+                    crate::missions::set_active(m.clone())
+                        .map_err(|e| anyhow::anyhow!("set_active for ephemeral mission: {e}"))?;
+                    m
+                }
+                Err(why) => {
+                    return Err(anyhow::anyhow!(
+                        "forge-mode requires an active brownfield mission, and could not \
+                         auto-bootstrap one from the working directory ({why}). Either \
+                         `cd` into a git repo under $HOME / CLAUDETTE_WORKSPACE, or run \
+                         `/brownfield <owner/repo>` first to clone a target tree."
+                    ));
+                }
+            }
+        }
     };
 
     // Guard for the ephemeral path: any early return from this point on
@@ -802,6 +864,11 @@ pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
     // per-turn noise after the user starts asking questions. Honors
     // CLAUDETTE_RECALL_DISABLE — opting out skips the probe too.
     probe_recall_at_startup();
+
+    // Rehydrate any persisted non-ephemeral mission so /brownfield → exit
+    // → restart → /forge keeps targeting the cloned tree instead of
+    // silently falling back to cwd auto-bootstrap (F8a safety fix).
+    print_rehydrate_outcome(crate::missions::try_rehydrate_active_mission());
 
     eprintln!();
 
@@ -1412,6 +1479,42 @@ pub(crate) fn probe_recall_at_startup() {
                  (load an embed model and restart, or set CLAUDETTE_RECALL_DISABLE=1 to silence)."
             ))
         );
+    }
+}
+
+/// Render a one-line startup banner for the outcome of
+/// `try_rehydrate_active_mission()`. Quiet on `None` (no pointer file) so
+/// fresh sessions stay clean; loud on `Rehydrated` and `Cleared` so the
+/// user always knows when they've just inherited a non-empty mission slot
+/// or when a stale pointer was wiped.
+pub(crate) fn print_rehydrate_outcome(outcome: crate::missions::RehydrateOutcome) {
+    use crate::missions::RehydrateOutcome;
+    match outcome {
+        RehydrateOutcome::None => {}
+        RehydrateOutcome::Rehydrated(m) => {
+            eprintln!(
+                "{} {} {} {}",
+                theme::SAVE,
+                theme::ok("resumed mission"),
+                theme::ok(&m.slug),
+                theme::dim(&format!("({})", m.path.display())),
+            );
+            eprintln!(
+                "  {} {}",
+                theme::dim("∘"),
+                theme::dim("clear it with /mission_exit (or the mission_exit tool) if you didn't intend this"),
+            );
+        }
+        RehydrateOutcome::Cleared { reason, path } => {
+            eprintln!(
+                "{} {}",
+                theme::warn(theme::WARN_GLYPH),
+                theme::warn(&format!(
+                    "cleared stale active-mission pointer at {} — {reason}",
+                    path.display()
+                ))
+            );
+        }
     }
 }
 

@@ -125,6 +125,28 @@ fn handle_tui_slash(
     outcome
 }
 
+/// Format the outcome of `try_rehydrate_active_mission()` as a plain-text
+/// line for `TuiEvent::Info`. Returns `None` for `RehydrateOutcome::None`
+/// so a fresh session stays quiet. Mirrors `run::print_rehydrate_outcome`
+/// but writes to a string instead of stderr because the TUI swallows
+/// stderr in alt-screen mode.
+fn format_rehydrate_outcome_for_tui(outcome: &crate::missions::RehydrateOutcome) -> Option<String> {
+    use crate::missions::RehydrateOutcome;
+    match outcome {
+        RehydrateOutcome::None => None,
+        RehydrateOutcome::Rehydrated(m) => Some(format!(
+            "resumed mission: {} ({})\n\
+             clear it with /mission_exit (or the mission_exit tool) if you didn't intend this",
+            m.slug,
+            m.path.display(),
+        )),
+        RehydrateOutcome::Cleared { reason, path } => Some(format!(
+            "cleared stale active-mission pointer at {} — {reason}",
+            path.display(),
+        )),
+    }
+}
+
 /// Strip CSI/SGR ANSI escape sequences (`ESC [ … final-byte`) from a string.
 /// The slash-command handlers in [`crate::commands`] format output with the
 /// `colored` crate via [`crate::theme`], which emits ANSI escapes when the
@@ -200,6 +222,15 @@ pub fn spawn_worker(
         // noise. Mirrors the REPL startup probe — same sticky-disable
         // semantics afterwards.
         probe_recall_at_startup();
+
+        // Rehydrate any persisted non-ephemeral mission (F8a fix). Mirrors
+        // the REPL startup in run_secretary_repl. Outcome is surfaced via
+        // TuiEvent::Info so the user sees it in the chat history rather
+        // than the terminal stderr (which the TUI swallows).
+        let outcome = crate::missions::try_rehydrate_active_mission();
+        if let Some(line) = format_rehydrate_outcome_for_tui(&outcome) {
+            let _ = tui_tx.send(TuiEvent::Info(line));
+        }
 
         while let Ok(input) = user_rx.recv() {
             match input {
