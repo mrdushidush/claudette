@@ -1146,7 +1146,9 @@ mod tests {
     fn validate_read_path_rejects_traversal_escape() {
         // ~/.claudette/../../../etc/passwd resolves to outside home → reject
         let bad = "~/.claudette/../../../../../../etc/passwd";
-        // Clear workspace env var in case another test left it populated.
+        // Hold the env lock so parallel CLAUDETTE_WORKSPACE-touching tests
+        // can't race us between set_var and the call under test.
+        let _guard = crate::test_env_lock();
         let prev = std::env::var("CLAUDETTE_WORKSPACE").ok();
         std::env::remove_var("CLAUDETTE_WORKSPACE");
 
@@ -1179,6 +1181,9 @@ mod tests {
             r"Z:\claudette-ws-test-xyz-e3a7\hello.txt",
         );
 
+        // Serialise against other CLAUDETTE_WORKSPACE-mutating tests so a
+        // parallel remove_var can't strip our set_var before the call.
+        let _guard = crate::test_env_lock();
         let prev = std::env::var("CLAUDETTE_WORKSPACE").ok();
 
         // (a) Without env var → rejected (outside HOME, outside CWD, outside workspace).
@@ -1249,6 +1254,7 @@ mod tests {
         // Roundtrip the platform-correct separator. Use absolute paths
         // because parse_workspace_env preserves them as PathBuf without
         // resolving — we just want to confirm the split + trim logic.
+        let _guard = crate::test_env_lock();
         let prev = std::env::var("CLAUDETTE_WORKSPACE").ok();
         #[cfg(unix)]
         let val = "/a:/b:/c";
@@ -1266,6 +1272,7 @@ mod tests {
 
     #[test]
     fn workspace_roots_parse_workspace_env_empty_when_unset() {
+        let _guard = crate::test_env_lock();
         let prev = std::env::var("CLAUDETTE_WORKSPACE").ok();
         std::env::remove_var("CLAUDETTE_WORKSPACE");
         let parsed = parse_workspace_env();
