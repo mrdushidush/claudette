@@ -34,12 +34,15 @@ pub mod usage;
 
 // ── Claudette secretary layer ────────────────────────────────────────────
 pub mod agents;
+pub mod antipatterns;
 pub mod api;
+pub mod bench;
 pub mod brain_selector;
 pub mod briefing;
 pub mod clock;
 pub mod codet;
 pub mod commands;
+pub mod cto;
 pub mod doctor;
 pub mod executor;
 pub mod forge;

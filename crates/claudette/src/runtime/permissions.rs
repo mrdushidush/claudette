@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PermissionMode {
@@ -7,6 +8,49 @@ pub enum PermissionMode {
     DangerFullAccess,
     Prompt,
     Allow,
+}
+
+/// A structured operation a tool wants to perform. Lifted from the
+/// `claudettes-forge` scaffold (Phase 4 of `docs/sprint_import_2026_05_19.md`)
+/// so prompters can show meaningful context — `read /etc/passwd` instead of
+/// a JSON blob — and so future operation-level tier inference can replace
+/// the current tool-name-based lookup. Today only the prompter consumes
+/// it; the policy still keys off the tool name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Operation {
+    /// Read a file at `path`.
+    ReadFile(PathBuf),
+    /// Write to a file at `path`.
+    WriteFile(PathBuf),
+    /// Execute a shell command (the argv after splitting).
+    Execute(Vec<String>),
+    /// Outbound network call to `url`.
+    Network(String),
+    /// Anything else — `reason` is a human-readable description shown by
+    /// the prompter when the operation can't be classified statically.
+    Other(String),
+}
+
+impl Operation {
+    /// One-line summary suitable for a prompter modal. Long paths /
+    /// commands are truncated to 80 chars so the prompt stays readable on
+    /// a small terminal.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        let raw = match self {
+            Self::ReadFile(p) => format!("read file: {}", p.display()),
+            Self::WriteFile(p) => format!("write file: {}", p.display()),
+            Self::Execute(argv) => format!("execute: {}", argv.join(" ")),
+            Self::Network(url) => format!("network: {url}"),
+            Self::Other(reason) => reason.clone(),
+        };
+        if raw.chars().count() <= 80 {
+            raw
+        } else {
+            let truncated: String = raw.chars().take(77).collect();
+            format!("{truncated}...")
+        }
+    }
 }
 
 impl PermissionMode {
@@ -49,6 +93,13 @@ pub enum PermissionOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermissionPolicy {
     active_mode: PermissionMode,
+    /// Hard upper bound on what any tool may request. A tool registered as
+    /// needing a tier above `max_tier` is denied at dispatch *before* the
+    /// prompter is consulted. Defaults to `DangerFullAccess` so existing
+    /// configurations behave exactly as they did before
+    /// `docs/sprint_import_2026_05_19.md` Phase 4 lifted it from the
+    /// `claudettes-forge` scaffold.
+    max_tier: PermissionMode,
     tool_requirements: BTreeMap<String, PermissionMode>,
 }
 
@@ -57,6 +108,7 @@ impl PermissionPolicy {
     pub fn new(active_mode: PermissionMode) -> Self {
         Self {
             active_mode,
+            max_tier: PermissionMode::DangerFullAccess,
             tool_requirements: BTreeMap::new(),
         }
     }
@@ -70,6 +122,23 @@ impl PermissionPolicy {
         self.tool_requirements
             .insert(tool_name.into(), required_mode);
         self
+    }
+
+    /// Cap the maximum tier any tool can request from this policy. Tools
+    /// whose `required_mode_for` returns a tier higher than `max_tier` are
+    /// denied at dispatch without ever reaching the prompter. Useful for
+    /// CI / sandbox / read-only inspection sessions that should refuse to
+    /// run `bash` (`DangerFullAccess`) even when a clever model tries to
+    /// invoke it.
+    #[must_use]
+    pub fn with_max_tier(mut self, max: PermissionMode) -> Self {
+        self.max_tier = max;
+        self
+    }
+
+    #[must_use]
+    pub fn max_tier(&self) -> PermissionMode {
+        self.max_tier
     }
 
     #[must_use]
@@ -146,6 +215,26 @@ impl PermissionPolicy {
     ) -> PermissionOutcome {
         let current_mode = self.active_mode();
         let required_mode = self.required_mode_for(tool_name);
+
+        // Hard cap: deny without prompt when a tool's required tier exceeds
+        // the policy's `max_tier`. Independent of `active_mode` so even an
+        // `Allow` session can be capped at `WorkspaceWrite` for sandboxed
+        // execution. `Prompt` / `Allow` modes are session-control tiers
+        // (not "higher privilege") so they bypass this cap.
+        if !matches!(
+            required_mode,
+            PermissionMode::Prompt | PermissionMode::Allow
+        ) && required_mode > self.max_tier
+        {
+            return PermissionOutcome::Deny {
+                reason: format!(
+                    "tool '{tool_name}' requires {} permission but session max is {}",
+                    required_mode.as_str(),
+                    self.max_tier.as_str(),
+                ),
+            };
+        }
+
         if current_mode == PermissionMode::Allow || current_mode >= required_mode {
             return PermissionOutcome::Allow;
         }
@@ -382,5 +471,116 @@ mod tests {
         assert_eq!(super::levenshtein("abc", "ab"), 1);
         assert_eq!(super::levenshtein("kitten", "sitting"), 3);
         assert_eq!(super::levenshtein("", "hello"), 5);
+    }
+
+    // ─── Phase 4 of import_2026_05_19: Operation enum + max_tier cap ──
+
+    use std::path::PathBuf;
+
+    use super::Operation;
+
+    #[test]
+    fn operation_describe_shows_file_paths() {
+        assert_eq!(
+            Operation::ReadFile(PathBuf::from("/etc/passwd")).describe(),
+            "read file: /etc/passwd"
+        );
+        assert_eq!(
+            Operation::WriteFile(PathBuf::from("notes/x.md")).describe(),
+            "write file: notes/x.md"
+        );
+    }
+
+    #[test]
+    fn operation_describe_shows_execute_argv() {
+        let op = Operation::Execute(vec!["rm".into(), "-rf".into(), "/tmp/x".into()]);
+        assert_eq!(op.describe(), "execute: rm -rf /tmp/x");
+    }
+
+    #[test]
+    fn operation_describe_truncates_long_strings() {
+        let op = Operation::Other("a".repeat(120));
+        let d = op.describe();
+        assert!(d.ends_with("..."));
+        assert!(d.chars().count() <= 80, "got {} chars", d.chars().count());
+    }
+
+    #[test]
+    fn operation_describe_passes_through_short_other() {
+        let op = Operation::Other("brief".to_string());
+        assert_eq!(op.describe(), "brief");
+    }
+
+    #[test]
+    fn max_tier_defaults_to_danger_full_access() {
+        let policy = PermissionPolicy::new(PermissionMode::ReadOnly);
+        assert_eq!(policy.max_tier(), PermissionMode::DangerFullAccess);
+    }
+
+    #[test]
+    fn with_max_tier_overrides_default() {
+        let policy = PermissionPolicy::new(PermissionMode::Allow)
+            .with_max_tier(PermissionMode::WorkspaceWrite);
+        assert_eq!(policy.max_tier(), PermissionMode::WorkspaceWrite);
+    }
+
+    #[test]
+    fn max_tier_denies_above_cap_even_in_allow_mode() {
+        // Pathological combination: active_mode=Allow (would normally
+        // approve anything) but max_tier caps at WorkspaceWrite. A tool
+        // needing DangerFullAccess is refused without a prompter call.
+        let policy = PermissionPolicy::new(PermissionMode::Allow)
+            .with_max_tier(PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("bash", PermissionMode::DangerFullAccess);
+        let mut prompter = RecordingPrompter {
+            seen: Vec::new(),
+            allow: true,
+        };
+
+        let outcome = policy.authorize("bash", "rm -rf", Some(&mut prompter));
+
+        assert!(matches!(
+            outcome,
+            PermissionOutcome::Deny { reason } if reason.contains("session max")
+        ));
+        assert!(
+            prompter.seen.is_empty(),
+            "max_tier cap should fire before the prompter is consulted"
+        );
+    }
+
+    #[test]
+    fn max_tier_allows_tools_at_or_below_cap() {
+        let policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite)
+            .with_max_tier(PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("note_create", PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("note_list", PermissionMode::ReadOnly);
+
+        assert_eq!(
+            policy.authorize("note_create", "{}", None),
+            PermissionOutcome::Allow
+        );
+        assert_eq!(
+            policy.authorize("note_list", "{}", None),
+            PermissionOutcome::Allow
+        );
+    }
+
+    #[test]
+    fn max_tier_at_default_preserves_legacy_behaviour() {
+        // No `with_max_tier` call — cap defaults to DangerFullAccess, so
+        // the existing WorkspaceWrite → DangerFullAccess prompt path runs
+        // exactly as before Phase 4 landed.
+        let policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("bash", PermissionMode::DangerFullAccess);
+        let mut prompter = RecordingPrompter {
+            seen: Vec::new(),
+            allow: true,
+        };
+
+        let outcome = policy.authorize("bash", "echo hi", Some(&mut prompter));
+
+        assert_eq!(outcome, PermissionOutcome::Allow);
+        assert_eq!(prompter.seen.len(), 1, "prompter should still be invoked");
     }
 }

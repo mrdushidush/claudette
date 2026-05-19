@@ -53,6 +53,11 @@ pub(super) fn render(f: &mut Frame, app: &App) {
 
     render_status(f, app, outer[2]);
     render_input(f, app, outer[3]);
+
+    // Space Invaders easter egg — overlay covers the whole area when active.
+    if let Some(game) = app.space_game.as_ref() {
+        game.draw(f, area);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

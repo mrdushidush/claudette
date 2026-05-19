@@ -198,7 +198,15 @@ struct App {
     /// Transient one-line notice shown in the input row (e.g. "📎 image
     /// attached", "clipboard empty"). Cleared on the next keypress.
     paste_notice: Option<String>,
+    /// Large-paste temp-file buffer (>500 chars stashed to disk to keep the
+    /// input widget responsive). Empty until a big paste arrives.
+    paste_file: paste::PasteFile,
     working: bool,
+
+    // ── Easter egg ────────────────────────────────────────────────────────
+    /// Space Invaders modal. `Some` while the game is being played; `None`
+    /// otherwise. Toggled via Ctrl+G.
+    space_game: Option<space::SpaceGame>,
 
     // ── Tool log ──────────────────────────────────────────────────────────
     all_tool_records: Vec<ToolRecord>,
@@ -233,7 +241,9 @@ impl Default for App {
             input: String::new(),
             pending_images: Vec::new(),
             paste_notice: None,
+            paste_file: paste::PasteFile::new(),
             working: false,
+            space_game: None,
             all_tool_records: Vec::new(),
             notes: NotesState::default(),
             todos: TodosState::default(),
@@ -728,6 +738,29 @@ fn run_loop(
             }
         }
 
+        // Space Invaders modal — own its own input + tick loop, then loop.
+        if let Some(game) = app.space_game.as_mut() {
+            game.tick();
+            terminal.draw(|f| render::render(f, &app))?;
+            if event::poll(Duration::from_millis(50))? {
+                if let Event::Key(k) = event::read()? {
+                    if k.kind == KeyEventKind::Press {
+                        // Ctrl+G also exits the modal (the same way it opened
+                        // it), so a power user can flip in and out fast.
+                        let close_via_chord = matches!(
+                            (k.code, k.modifiers),
+                            (KeyCode::Char('g' | 'G'), KeyModifiers::CONTROL)
+                        );
+                        let game = app.space_game.as_mut().expect("space_game was Some above");
+                        if close_via_chord || game.handle_input(k.code) {
+                            app.space_game = None;
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+
         terminal.draw(|f| render::render(f, &app))?;
 
         if !event::poll(Duration::from_millis(50))? {
@@ -756,6 +789,11 @@ fn run_loop(
                         }
                         Err(e) => app.paste_notice = Some(format!("paste failed: {e}")),
                     }
+                } else if app.paste_file.try_store(&text) {
+                    // Large paste — stashed in a temp file; the input bar
+                    // shows a preview and the full content is retrieved on
+                    // submit. See `tui/paste.rs`.
+                    app.paste_notice = Some(app.paste_file.display());
                 } else {
                     for c in text.chars() {
                         if c != '\r' && c != '\n' {
@@ -813,6 +851,11 @@ fn run_loop(
             (KeyCode::Char('c' | 'd'), KeyModifiers::CONTROL) => {
                 let _ = user_tx.send(UserInput::Quit);
                 return Ok(());
+            }
+
+            // Space Invaders easter egg — Ctrl+G to launch, Esc/q to close.
+            (KeyCode::Char('g' | 'G'), KeyModifiers::CONTROL) if !app.working => {
+                app.space_game = Some(space::SpaceGame::new());
             }
 
             // Tab switching (works even while Claudette is thinking).
@@ -968,11 +1011,33 @@ fn run_loop(
                 app.paste_notice = Some("attachments cleared".to_string());
             }
 
+            // Esc clears a stashed large paste when input is empty.
+            (KeyCode::Esc, _) if app.paste_file.is_active() && app.input.is_empty() => {
+                app.paste_file.clear();
+                app.paste_notice = Some("paste cleared".to_string());
+            }
+
             // Submit input.
             (KeyCode::Enter, _)
-                if !app.working && (!app.input.is_empty() || !app.pending_images.is_empty()) =>
+                if !app.working
+                    && (!app.input.is_empty()
+                        || !app.pending_images.is_empty()
+                        || app.paste_file.is_active()) =>
             {
-                let text = std::mem::take(&mut app.input);
+                let typed = std::mem::take(&mut app.input);
+                // When a big paste is stashed, the typed text is treated as
+                // a prefix/context and the paste body is appended.
+                let text = if app.paste_file.is_active() {
+                    let body = app.paste_file.retrieve().unwrap_or_default();
+                    app.paste_file.clear();
+                    if typed.trim().is_empty() {
+                        body
+                    } else {
+                        format!("{typed}\n\n{body}")
+                    }
+                } else {
+                    typed
+                };
                 app.paste_notice = None;
                 app.chat_scroll = 0;
                 if let Some(cmd) = text.strip_prefix('/') {
@@ -1032,4 +1097,7 @@ fn run_loop(
     }
 }
 
+mod paste;
 mod render;
+mod space;
+mod typewriter;

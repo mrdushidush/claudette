@@ -18,8 +18,8 @@ use crate::forge;
 use crate::memory::try_load_memory;
 use crate::model_config;
 use crate::prompt::{
-    forge_planner_system_prompt, forge_system_prompt, forge_verifier_system_prompt,
-    secretary_system_prompt_with_memory,
+    faceless_mode_enabled, forge_planner_system_prompt, forge_system_prompt,
+    forge_verifier_system_prompt, secretary_system_prompt_with_memory,
 };
 use crate::theme;
 use crate::tool_groups::{ToolGroup, ToolRegistry};
@@ -336,6 +336,75 @@ pub(crate) struct VerifierResult {
     pub feedback: String,
 }
 
+/// One forge fix-loop round: the Verifier's score + the Coder's resulting
+/// HEAD SHA. Captured so [`run_forge_mission`] can: (1) smart-stop when the
+/// score is regressing two consecutive rounds, and (2) restore to the best-
+/// scoring round's commit before the Submitter phase if the final round
+/// scored lower than an earlier one ([[project-import-sprint-2026-05-19]]
+/// Phase 3 — BCF learning #12 "full regen always degrades score").
+#[derive(Debug, Clone)]
+pub(crate) struct RoundReport {
+    pub round: u32,
+    /// HEAD after the Coder committed. `None` when git rev-parse failed —
+    /// the round is still tracked for scoring but can't participate in
+    /// best-round restore.
+    pub head_sha: Option<String>,
+    pub score: u8,
+    pub pass: bool,
+}
+
+/// Pick the highest-scoring round from `history`. Ties resolved by lowest
+/// round index — earlier-is-better when scores are equal, so we don't burn
+/// a `git reset` for nothing. Returns `None` when `history` is empty or no
+/// entry has a recoverable `head_sha`.
+pub(crate) fn best_round(history: &[RoundReport]) -> Option<&RoundReport> {
+    history
+        .iter()
+        .filter(|r| r.head_sha.is_some())
+        .min_by(|a, b| {
+            // Higher score first; on tie, lower round index wins.
+            b.score.cmp(&a.score).then_with(|| a.round.cmp(&b.round))
+        })
+}
+
+/// True when `history`'s last three entries are strictly monotonically
+/// declining in score. Triggers the smart-stop break in
+/// [`run_forge_mission`]. Returns `false` for fewer than 3 entries — we
+/// need a baseline plus two declines.
+pub(crate) fn score_declining_two_consecutive(history: &[RoundReport]) -> bool {
+    if history.len() < 3 {
+        return false;
+    }
+    let n = history.len();
+    let a = history[n - 3].score;
+    let b = history[n - 2].score;
+    let c = history[n - 1].score;
+    b < a && c < b
+}
+
+/// Truncate `sha` to its first 7 hex chars for log output. Short-circuits
+/// on already-short inputs so empty / malformed SHAs don't panic.
+fn short_sha(sha: &str) -> &str {
+    let end = sha.len().min(7);
+    &sha[..end]
+}
+
+/// `git reset --hard <sha>` inside `mission_path`. Returns the command's
+/// stderr on failure so the caller can surface the reason. Used by
+/// [`run_forge_mission`]'s best-round restore path.
+fn git_reset_hard(mission_path: &std::path::Path, sha: &str) -> Result<(), String> {
+    let output = std::process::Command::new("git")
+        .args(["reset", "--hard", sha])
+        .current_dir(mission_path)
+        .output()
+        .map_err(|e| format!("git reset --hard {sha}: spawn failed: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(format!("git reset --hard {sha}: {stderr}"));
+    }
+    Ok(())
+}
+
 /// Run a forge-mode mission inside the active brownfield mission and
 /// return the cumulative summary. Errors immediately if no mission is
 /// active — forge-mode without a mission has no tree to edit and no PR
@@ -490,6 +559,13 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
     };
 
     // ── Phase 2 + 3 + 4: Coder ↔ Verifier fix-loop ───────────────────
+    //
+    // Each round's HEAD SHA + Verifier score lands in `history` so the
+    // post-loop best-round restore can `git reset --hard` to an earlier,
+    // higher-scoring commit when the fix-pass regresses (BCF learning #12:
+    // "full regen always degrades score"; smart-stop catches the chain of
+    // two consecutive declines).
+    let mut history: Vec<RoundReport> = Vec::new();
     let mut feedback: Option<String> = None;
     let mut round: u32 = 0;
     loop {
@@ -516,6 +592,10 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
             &mut prompter_opt,
         )
         .map_err(|e| anyhow::anyhow!("forge coder turn failed (round {round}): {e}"))?;
+
+        // Snapshot HEAD now — the Coder turn's commit (if any) lands the
+        // round's diff on top of the mission branch.
+        let head_after = capture_base_sha(&mission.path);
 
         // Verifier
         eprintln!("{} {}", theme::BOLT, theme::accent("forge: verifier"));
@@ -553,7 +633,29 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
             ))
         );
 
+        history.push(RoundReport {
+            round,
+            head_sha: head_after.clone(),
+            score: verifier.score,
+            pass: verifier.pass,
+        });
+
         if verifier.pass {
+            break;
+        }
+        if score_declining_two_consecutive(&history) {
+            let n = history.len();
+            eprintln!(
+                "  {} {}",
+                theme::dim("∘"),
+                theme::warn(&format!(
+                    "smart-stop: score declined two consecutive rounds ({} → {} → {}); \
+                     breaking out of fix-loop",
+                    history[n - 3].score,
+                    history[n - 2].score,
+                    history[n - 1].score,
+                ))
+            );
             break;
         }
         if round >= max_fix_rounds() {
@@ -568,6 +670,43 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
         }
         feedback = Some(verifier.feedback);
         round += 1;
+    }
+
+    // ── Best-round restore ─────────────────────────────────────────
+    // If the final round didn't pass AND an earlier round scored higher,
+    // `git reset --hard` to that round's HEAD before the Submitter phase
+    // so the PR ships the strongest revision the fix-loop produced rather
+    // than the latest one. Best-round restore is best-effort: a missing
+    // SHA, a git failure, or a clean-already path all log + continue.
+    if let Some(final_report) = history.last() {
+        if !final_report.pass {
+            if let Some(best) = best_round(&history) {
+                if best.score > final_report.score {
+                    if let Some(sha) = best.head_sha.as_deref() {
+                        eprintln!(
+                            "  {} {}",
+                            theme::BOLT,
+                            theme::info(&format!(
+                                "best-round restore: round {} scored {} (final round {} = {}); \
+                                 resetting to {}",
+                                best.round,
+                                best.score,
+                                final_report.round,
+                                final_report.score,
+                                short_sha(sha),
+                            ))
+                        );
+                        if let Err(e) = git_reset_hard(&mission.path, sha) {
+                            eprintln!(
+                                "  {} {}",
+                                theme::dim("∘"),
+                                theme::dim(&format!("restore failed: {e} — continuing"))
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // ── Phase 5: Submitter ──────────────────────────────────────────
@@ -730,7 +869,7 @@ fn run_verifier(
 /// Concatenate the assistant text blocks from a `TurnSummary`. Forge
 /// Planner/Verifier turns produce a single assistant message with text
 /// content; this helper centralises the unwrapping.
-fn extract_assistant_text(summary: &TurnSummary) -> String {
+pub(crate) fn extract_assistant_text(summary: &TurnSummary) -> String {
     use crate::ContentBlock;
     let mut out = String::new();
     for msg in &summary.assistant_messages {
@@ -1093,6 +1232,31 @@ pub(crate) fn build_runtime_with_brain(
     streaming: bool,
     telegram: bool,
 ) -> ConversationRuntime<OllamaApiClient, SecretaryToolExecutor> {
+    build_runtime_with_brain_inner(session, brain, streaming, telegram, None)
+}
+
+/// Same as [`build_runtime_with_brain`] but the caller supplies a fully-
+/// formed `system_prompt`. Used by CTO sub-sessions
+/// ([`crate::cto::run_cto_decomposition`]) so the persona / format
+/// directives from `cto_decomposition_system_prompt` are honored instead
+/// of the secretary's default prompt.
+pub(crate) fn build_runtime_with_brain_and_prompt(
+    session: Session,
+    brain: &crate::model_config::RoleConfig,
+    streaming: bool,
+    telegram: bool,
+    system_prompt: Vec<String>,
+) -> ConversationRuntime<OllamaApiClient, SecretaryToolExecutor> {
+    build_runtime_with_brain_inner(session, brain, streaming, telegram, Some(system_prompt))
+}
+
+fn build_runtime_with_brain_inner(
+    session: Session,
+    brain: &crate::model_config::RoleConfig,
+    streaming: bool,
+    telegram: bool,
+    system_override: Option<Vec<String>>,
+) -> ConversationRuntime<OllamaApiClient, SecretaryToolExecutor> {
     // One shared ToolRegistry is the single source of truth for the
     // `tools` field on every request. The API client reads from it (via
     // ToolsProvider::Dynamic) and the executor mutates it when the model
@@ -1129,31 +1293,28 @@ pub(crate) fn build_runtime_with_brain(
     let policy = build_permission_policy();
     let memory = try_load_memory();
 
-    ConversationRuntime::new(
-        session,
-        api_client,
-        executor,
-        policy,
-        secretary_system_prompt_with_memory(memory.as_deref(), telegram),
-    )
-    // Tools in optional groups need 3+ iterations (enable_tools → tool call
-    // → respond). With the empty-response retry nudge, 8 was too tight for
-    // single-shot search/grep/git chains. The shared default (currently 40)
-    // and the `CLAUDETTE_MAX_ITERATIONS` env-var knob live in `max_iterations`.
-    .with_max_iterations(max_iterations())
-    .with_auto_compaction_input_tokens_threshold(u32::MAX)
-    .with_unknown_tool_hinter(move |name: &str| {
-        ToolGroup::parse(name).map_or_else(Vec::new, |group| {
-            // Poisoned-lock recovery: another thread held the lock and
-            // panicked. Continue with the inner state — the hinter is a
-            // best-effort suggestion, not a correctness path.
-            let reg = match hinter_registry.lock() {
-                Ok(g) => g,
-                Err(p) => p.into_inner(),
-            };
-            reg.group_tool_names(group)
+    let system_prompt = system_override
+        .unwrap_or_else(|| secretary_system_prompt_with_memory(memory.as_deref(), telegram));
+
+    ConversationRuntime::new(session, api_client, executor, policy, system_prompt)
+        // Tools in optional groups need 3+ iterations (enable_tools → tool call
+        // → respond). With the empty-response retry nudge, 8 was too tight for
+        // single-shot search/grep/git chains. The shared default (currently 40)
+        // and the `CLAUDETTE_MAX_ITERATIONS` env-var knob live in `max_iterations`.
+        .with_max_iterations(max_iterations())
+        .with_auto_compaction_input_tokens_threshold(u32::MAX)
+        .with_unknown_tool_hinter(move |name: &str| {
+            ToolGroup::parse(name).map_or_else(Vec::new, |group| {
+                // Poisoned-lock recovery: another thread held the lock and
+                // panicked. Continue with the inner state — the hinter is a
+                // best-effort suggestion, not a correctness path.
+                let reg = match hinter_registry.lock() {
+                    Ok(g) => g,
+                    Err(p) => p.into_inner(),
+                };
+                reg.group_tool_names(group)
+            })
         })
-    })
 }
 
 /// Forge-mode runtime: same plumbing as [`build_runtime_with_brain`] but with
@@ -1173,7 +1334,14 @@ fn build_forge_runtime(
     // forge mode. The persona's voice + backstory get woven into the system
     // prompt via `forge_system_prompt`. Lookup failures fall back to an
     // unpersonified prompt — persona overlay is best-effort, never required.
-    let persona = forge_default_coder_persona();
+    //
+    // `--faceless` / `CLAUDETTE_FACELESS=1` skips the overlay so CI / API
+    // integrations can opt out (added 2026-05-19, Phase 2 of import sweep).
+    let persona = if faceless_mode_enabled() {
+        None
+    } else {
+        forge_default_coder_persona()
+    };
     let memory = try_load_memory();
     let persona_overlay = persona
         .as_ref()
@@ -2345,5 +2513,122 @@ mod tests {
         assert_eq!(r.score, 6);
         assert!(r.pass);
         assert!(r.feedback.is_empty());
+    }
+
+    // ─── Forge best-round restore + smart stopping (Phase 3 of
+    //     import_2026_05_19) ──────────────────────────────────────────────
+
+    fn round(n: u32, score: u8, pass: bool, sha: Option<&str>) -> RoundReport {
+        RoundReport {
+            round: n,
+            head_sha: sha.map(str::to_string),
+            score,
+            pass,
+        }
+    }
+
+    #[test]
+    fn best_round_picks_highest_score_with_recoverable_sha() {
+        let history = vec![
+            round(0, 6, false, Some("aaaaaaaaaaaa")),
+            round(1, 9, false, Some("bbbbbbbbbbbb")),
+            round(2, 7, false, Some("cccccccccccc")),
+        ];
+        let best = best_round(&history).expect("non-empty history");
+        assert_eq!(best.round, 1);
+        assert_eq!(best.score, 9);
+    }
+
+    #[test]
+    fn best_round_breaks_tie_by_earlier_round() {
+        // Two rounds at score 8 — keep the earlier one (no churn).
+        let history = vec![
+            round(0, 8, false, Some("aaaa")),
+            round(1, 6, false, Some("bbbb")),
+            round(2, 8, false, Some("cccc")),
+        ];
+        let best = best_round(&history).unwrap();
+        assert_eq!(best.round, 0);
+    }
+
+    #[test]
+    fn best_round_skips_entries_with_no_sha() {
+        // The round with the highest score (round 1, score 9) is unrestorable
+        // because it has no SHA. Fall back to the next-best with a SHA.
+        let history = vec![
+            round(0, 7, false, Some("aaaa")),
+            round(1, 9, false, None),
+            round(2, 6, false, Some("cccc")),
+        ];
+        let best = best_round(&history).unwrap();
+        assert_eq!(best.round, 0);
+        assert_eq!(best.score, 7);
+    }
+
+    #[test]
+    fn best_round_none_on_empty() {
+        let history: Vec<RoundReport> = Vec::new();
+        assert!(best_round(&history).is_none());
+    }
+
+    #[test]
+    fn best_round_none_when_all_entries_lack_sha() {
+        let history = vec![round(0, 9, false, None), round(1, 8, false, None)];
+        assert!(best_round(&history).is_none());
+    }
+
+    #[test]
+    fn score_declining_returns_false_for_short_history() {
+        assert!(!score_declining_two_consecutive(&[]));
+        assert!(!score_declining_two_consecutive(&[round(
+            0, 9, false, None
+        )]));
+        assert!(!score_declining_two_consecutive(&[
+            round(0, 9, false, None),
+            round(1, 5, false, None),
+        ]));
+    }
+
+    #[test]
+    fn score_declining_detects_two_consecutive_drops() {
+        let history = vec![
+            round(0, 9, false, None),
+            round(1, 7, false, None),
+            round(2, 5, false, None),
+        ];
+        assert!(score_declining_two_consecutive(&history));
+    }
+
+    #[test]
+    fn score_declining_does_not_fire_on_recovery() {
+        // drop then recover — not a chain.
+        let history = vec![
+            round(0, 9, false, None),
+            round(1, 6, false, None),
+            round(2, 8, false, None),
+        ];
+        assert!(!score_declining_two_consecutive(&history));
+    }
+
+    #[test]
+    fn score_declining_requires_strict_inequality() {
+        // Flat scores → no decline.
+        let history = vec![
+            round(0, 7, false, None),
+            round(1, 7, false, None),
+            round(2, 7, false, None),
+        ];
+        assert!(!score_declining_two_consecutive(&history));
+    }
+
+    #[test]
+    fn short_sha_truncates_long_inputs() {
+        assert_eq!(short_sha("abcdef0123456789"), "abcdef0");
+    }
+
+    #[test]
+    fn short_sha_returns_short_inputs_intact() {
+        assert_eq!(short_sha("abc"), "abc");
+        assert_eq!(short_sha(""), "");
     }
 }

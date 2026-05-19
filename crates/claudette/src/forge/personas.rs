@@ -1,19 +1,21 @@
 //! Persona loader — bundled + user-defined.
 //!
-//! Ported verbatim from `claudettes-forge/crates/core/src/personas.rs` at
-//! the `rc1-final` tag. Dormant in claudette 0.4.1 — no `--persona` flag,
-//! no surfacing in the CLI. Carried for future forge-mode work.
+//! Originally ported from `claudettes-forge/crates/core/src/personas.rs` at
+//! the `rc1-final` tag. Forge-mode Coder is wired against `codex7` since v0b;
+//! assistant-mode (Eva) and Verifier (Sentinel-9) get wired in
+//! `import_2026_05_19` Phase 2 alongside the `--faceless` flag.
 //!
 //! A persona bundles name, role, voice style, backstory, and example
 //! interactions into a single markdown file (TOML frontmatter + markdown
 //! body). At startup the loader walks two directories:
 //!
-//! 1. **Bundled personas** shipped inside the repo under `personas/` at the
-//!    workspace root.
-//! 2. **User overrides** at `$PROJECT/.claudettes-forge/personas/`.
+//! 1. **Bundled personas** shipped inside the repo under
+//!    `crates/claudette/personas/`.
+//! 2. **User overrides** at `$PROJECT/.claudette/personas/`.
 //!
 //! User overrides win by filename — drop `codex7.md` into your project's
-//! `.claudettes-forge/personas/` to rewrite CodeX-7 for that project.
+//! `.claudette/personas/` to rewrite CodeX-7 for that project. Restart is
+//! required; no hot reload.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -256,10 +258,10 @@ pub fn default_bundled_dir() -> PathBuf {
 }
 
 /// The per-project user-override location.
-/// `$PROJECT/.claudettes-forge/personas/`.
+/// `$PROJECT/.claudette/personas/`.
 #[must_use]
 pub fn default_user_dir(project_root: &Path) -> PathBuf {
-    project_root.join(".claudettes-forge").join("personas")
+    project_root.join(".claudette").join("personas")
 }
 
 #[cfg(test)]

@@ -24,6 +24,26 @@ pub fn secretary_system_prompt() -> Vec<String> {
     secretary_system_prompt_with_memory(None, false)
 }
 
+/// True when the user opted out of persona injection via `--faceless` /
+/// `CLAUDETTE_FACELESS=1`. Mirrors the forge-mode CodeX-7 opt-out: the
+/// persona overlay is best-effort and never load-bearing.
+#[must_use]
+pub fn faceless_mode_enabled() -> bool {
+    matches!(
+        std::env::var("CLAUDETTE_FACELESS").as_deref(),
+        Ok("1" | "true" | "yes" | "on")
+    )
+}
+
+/// Bundled Eva persona — the assistant-mode voice. Baked into the binary so
+/// shipping the .md file is not required by `cargo install`. If the file
+/// fails to parse (asserted at build time by the personas-suite tests), the
+/// secretary prompt silently runs without a persona overlay.
+fn default_assistant_persona() -> Option<crate::forge::personas::Persona> {
+    const EVA: &str = include_str!("../personas/eva.md");
+    crate::forge::personas::parse_persona_content(EVA, "bundled:eva").ok()
+}
+
 /// Build the secretary's system prompt, optionally appending a "About the
 /// user" block from `CLAUDETTE.MD`. Empty / whitespace-only memory is
 /// treated as no memory so callers don't need to special-case it.
@@ -31,6 +51,10 @@ pub fn secretary_system_prompt() -> Vec<String> {
 /// When `concise` is true a Telegram-specific suffix is appended that
 /// tells the model to keep answers short — 2-3 sentences for simple
 /// questions, bullet points for lists.
+///
+/// Eva persona overlay is enabled by default (since 2026-05-19, Phase 2 of
+/// `docs/sprint_import_2026_05_19.md`). Set `CLAUDETTE_FACELESS=1` (or pass
+/// `--faceless` at the CLI) to skip the overlay.
 ///
 /// Also appends a compact environment block (cwd, date, OS, git status)
 /// discovered via `crate::ProjectContext`.
@@ -79,6 +103,23 @@ pub fn secretary_system_prompt_with_memory(memory: Option<&str>, concise: bool) 
     );
 
     let mut prompt = base;
+
+    // Eva persona overlay (claudette 0.5.5+). Disabled by `--faceless` or
+    // `CLAUDETTE_FACELESS=1`. Concise (Telegram) mode also skips the overlay
+    // — the channel benefits from terse output, not warmth.
+    if !faceless_mode_enabled() && !concise {
+        if let Some(persona) = default_assistant_persona() {
+            use std::fmt::Write;
+            let voice = persona.voice.trim();
+            let backstory = persona.backstory.trim();
+            if !voice.is_empty() {
+                let _ = write!(prompt, "\n\nVoice: {voice}");
+            }
+            if !backstory.is_empty() {
+                let _ = write!(prompt, "\n\nBackstory:\n{backstory}");
+            }
+        }
+    }
 
     if concise {
         prompt.push_str(
@@ -366,6 +407,78 @@ mod tests {
         assert!(concise[0].contains("concise"));
         // Base prompt should still be present.
         assert!(concise[0].starts_with("You are an AI personal secretary"));
+    }
+
+    // ─── Eva persona overlay (Phase 2 of import_2026_05_19) ────────────
+
+    #[test]
+    fn default_assistant_persona_parses() {
+        // Bundled `personas/eva.md` must always parse — same shape as the
+        // forge `bundled_personas_all_parse` guard.
+        let p = default_assistant_persona().expect("bundled eva must parse");
+        assert_eq!(p.name, "Eva");
+        assert!(!p.voice.is_empty(), "Eva must declare a voice");
+        assert!(!p.backstory.is_empty(), "Eva must declare a backstory");
+    }
+
+    #[test]
+    fn assistant_prompt_includes_eva_overlay_by_default() {
+        let _lock = crate::test_env_lock();
+        // Ensure no stale env from another test.
+        std::env::remove_var("CLAUDETTE_FACELESS");
+        let p = secretary_system_prompt_with_memory(None, false);
+        assert!(p[0].contains("Voice:"), "expected Voice line in: {}", p[0]);
+        assert!(
+            p[0].contains("warm-efficient"),
+            "expected Eva's voice descriptor"
+        );
+        assert!(p[0].contains("Backstory:"));
+    }
+
+    #[test]
+    fn faceless_env_disables_eva_overlay() {
+        let _lock = crate::test_env_lock();
+        std::env::set_var("CLAUDETTE_FACELESS", "1");
+        let p = secretary_system_prompt_with_memory(None, false);
+        std::env::remove_var("CLAUDETTE_FACELESS");
+        assert!(
+            !p[0].contains("Voice:"),
+            "faceless mode should skip persona overlay: {}",
+            p[0]
+        );
+        assert!(!p[0].contains("Backstory:"));
+    }
+
+    #[test]
+    fn concise_mode_skips_eva_overlay() {
+        // Telegram-mode prompts opt out of the persona overlay so the
+        // channel stays terse.
+        let _lock = crate::test_env_lock();
+        std::env::remove_var("CLAUDETTE_FACELESS");
+        let p = secretary_system_prompt_with_memory(None, true);
+        assert!(!p[0].contains("Voice:"));
+        assert!(!p[0].contains("Backstory:"));
+        assert!(p[0].contains("Telegram"));
+    }
+
+    #[test]
+    fn faceless_truthy_values_all_recognised() {
+        let _lock = crate::test_env_lock();
+        for value in ["1", "true", "yes", "on"] {
+            std::env::set_var("CLAUDETTE_FACELESS", value);
+            assert!(
+                faceless_mode_enabled(),
+                "value '{value}' should enable faceless mode"
+            );
+        }
+        for value in ["", "0", "false", "no", "off", "FALSE"] {
+            std::env::set_var("CLAUDETTE_FACELESS", value);
+            assert!(
+                !faceless_mode_enabled(),
+                "value '{value}' should NOT enable faceless mode"
+            );
+        }
+        std::env::remove_var("CLAUDETTE_FACELESS");
     }
 
     // ─── forge_system_prompt (v0a/v0b/v0c) ─────────────────────────────
