@@ -117,7 +117,7 @@ impl ToolGroup {
             Self::Registry => "package registries: crates.io and npm package metadata (version, downloads, homepage)",
             Self::Github => "github + brownfield missions: PRs, issues, code search, clone/fork, mission_start/attach/submit (requires GITHUB_TOKEN)",
             Self::Markets => "market data: TradingView quotes (stocks/crypto/forex/futures, bare or qualified tickers)",
-            Self::Telegram => "telegram bot: send text messages and photos (requires TELEGRAM_BOT_TOKEN)",
+            Self::Telegram => "telegram bot: tg_send (text, or photo via optional `photo` URL — caption becomes the text). Requires TELEGRAM_BOT_TOKEN.",
             Self::Calendar => "google calendar: list/create/update/delete events, RSVP (requires claudette --auth-google)",
             Self::Schedule => "proactive reminders: one-shot + recurring schedules that fire prompts back at you",
             Self::Gmail => "gmail (read-only): list/search/read messages, list labels (requires claudette --auth-google gmail)",
@@ -232,7 +232,9 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         | "mission_exit"
         | "mission_submit" => Some(ToolGroup::Github),
         "tv_get_quote" => Some(ToolGroup::Markets),
-        "tg_send" | "tg_send_photo" => Some(ToolGroup::Telegram),
+        // tg_send_photo is a v0.6.0 dispatch-only alias for tg_send(photo?) —
+        // not classified here because it's not in the advertised schema.
+        "tg_send" => Some(ToolGroup::Telegram),
         "calendar_list_events"
         | "calendar_create_event"
         | "calendar_update_event"
@@ -501,7 +503,8 @@ mod tests {
         assert_eq!(group_of("gh_create_issue"), Some(ToolGroup::Github));
         assert_eq!(group_of("tv_get_quote"), Some(ToolGroup::Markets));
         assert_eq!(group_of("tg_send"), Some(ToolGroup::Telegram));
-        assert_eq!(group_of("tg_send_photo"), Some(ToolGroup::Telegram));
+        // v0.6.0: tg_send_photo is a dispatch-only alias, not classified.
+        assert_eq!(group_of("tg_send_photo"), None);
         // v0.6.0 decom: these tools no longer exist anywhere.
         assert_eq!(group_of("crate_search"), None);
         assert_eq!(group_of("npm_search"), None);

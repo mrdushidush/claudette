@@ -1530,10 +1530,9 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("tv_get_quote", ReadOnly)
         // ── Sprint 10: telegram group ────────────────────────────────
         // Sends: WorkspaceWrite (posts messages on the user's behalf but
-        // doesn't touch the filesystem). v0.6.0 decom dropped
-        // tg_get_updates because making it model-callable was a
-        // prompt-injection footgun — the bot loop still polls at the
-        // transport layer.
+        // doesn't touch the filesystem). v0.6.0 decom: tg_get_updates
+        // dropped (prompt-injection footgun), tg_send_photo merged into
+        // tg_send via optional `photo` arg — alias still dispatches.
         .with_tool_requirement("tg_send", WorkspaceWrite)
         .with_tool_requirement("tg_send_photo", WorkspaceWrite)
         // ── Life Agent (v0.2.0): calendar group ──────────────────────
