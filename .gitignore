@@ -12,6 +12,8 @@ Cargo.lock.bak
 # also match a pre-conversion checkout's tests/ at the repo root.
 **/tests/results_brain100/
 **/tests/results_brain100_*/
+**/tests/results_claudette100/
+**/tests/results_claudette100_*/
 **/tests/results_sandbox10_*/
 **/tests/brain100_prompts_failsubset.txt
 **/tests/brain100_prompts_truncbug.txt
