@@ -1,7 +1,13 @@
-//! Telegram bot group — 3 tools against the Bot API (Sprint 10). Token
-//! comes from `crate::secrets::read_secret("telegram")`
+//! Telegram bot group — 2 tools against the Bot API. Token comes from
+//! `crate::secrets::read_secret("telegram")`
 //! (CLAUDETTE_TELEGRAM_TOKEN / TELEGRAM_BOT_TOKEN env or
 //! `~/.claudette/secrets/telegram.token`).
+//!
+//! Sprint v0.6.0 (2026-05-21) decom dropped `tg_get_updates`: making it
+//! model-callable was a prompt-injection footgun (a hostile incoming
+//! message could appear inside the tool result and steer the model). The
+//! bot loop still polls at the transport layer in [`crate::run`]; the
+//! model just doesn't get to drive that polling itself.
 //!
 //! Self-contained: all helpers (`telegram_token`, `tg_extract_chat_id`,
 //! `tg_api_url`) are private to this module. Handlers reuse the pub(super)
@@ -21,25 +27,10 @@ pub(super) fn schemas() -> Vec<Value> {
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "chat_id": { "type": "string", "description": "Telegram chat ID (user or group). Use tg_get_updates to discover chat IDs." },
+                        "chat_id": { "type": "string", "description": "Telegram chat ID (user or group)" },
                         "text":    { "type": "string", "description": "Message text (supports Markdown)" }
                     },
                     "required": ["chat_id", "text"]
-                }
-            }
-        }),
-        json!({
-            "type": "function",
-            "function": {
-                "name": "tg_get_updates",
-                "description": "Poll recent messages/commands sent to the Telegram bot. Use this to discover chat IDs and read incoming messages.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "limit":  { "type": "number", "description": "Max updates to return (default 10, max 100)" },
-                        "offset": { "type": "number", "description": "Update offset — pass last update_id+1 to acknowledge previous updates" }
-                    },
-                    "required": []
                 }
             }
         }),
@@ -65,7 +56,6 @@ pub(super) fn schemas() -> Vec<Value> {
 pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>> {
     let result = match name {
         "tg_send" => run_tg_send(input),
-        "tg_get_updates" => run_tg_get_updates(input),
         "tg_send_photo" => run_tg_send_photo(input),
         _ => return None,
     };
@@ -138,83 +128,6 @@ fn run_tg_send(input: &str) -> Result<String, String> {
         "ok": true,
         "message_id": message_id,
         "chat_id": chat_id,
-    })
-    .to_string())
-}
-
-/// `tg_get_updates` — poll recent messages/commands sent to the bot.
-fn run_tg_get_updates(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "tg_get_updates")?;
-    let limit = v
-        .get("limit")
-        .and_then(Value::as_i64)
-        .unwrap_or(10)
-        .clamp(1, 100);
-    let offset = v.get("offset").and_then(Value::as_i64);
-
-    let token = telegram_token()?;
-    let client = external_http_client()?;
-
-    let mut params = vec![("limit", limit.to_string())];
-    if let Some(off) = offset {
-        params.push(("offset", off.to_string()));
-    }
-
-    let resp = client
-        .get(format!("{}/getUpdates", tg_api_url(&token)))
-        .query(&params)
-        .send()
-        .map_err(|e| format!("tg_get_updates: request failed: {e}"))?;
-
-    if !resp.status().is_success() {
-        let body = resp.text().unwrap_or_default();
-        return Err(format!("tg_get_updates: HTTP error: {body}"));
-    }
-
-    let data: Value = resp
-        .json()
-        .map_err(|e| format!("tg_get_updates: parse failed: {e}"))?;
-
-    let updates = data
-        .get("result")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-
-    // Compact each update into a user-friendly shape.
-    let results: Vec<Value> = updates
-        .iter()
-        .filter_map(|u| {
-            let update_id = u.get("update_id").and_then(Value::as_i64)?;
-            let msg = u.get("message")?;
-            let from = msg
-                .pointer("/from/first_name")
-                .and_then(Value::as_str)
-                .unwrap_or("unknown");
-            let username = msg
-                .pointer("/from/username")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let chat_id = msg.pointer("/chat/id").and_then(Value::as_i64)?;
-            let text = msg
-                .get("text")
-                .and_then(Value::as_str)
-                .unwrap_or("[non-text message]");
-            let date = msg.get("date").and_then(Value::as_i64).unwrap_or(0);
-            Some(json!({
-                "update_id": update_id,
-                "chat_id": chat_id,
-                "from": from,
-                "username": username,
-                "text": text,
-                "date": date,
-            }))
-        })
-        .collect();
-
-    Ok(json!({
-        "count": results.len(),
-        "updates": results,
     })
     .to_string())
 }
@@ -305,13 +218,13 @@ mod tests {
     }
 
     #[test]
-    fn schemas_lists_three_tools() {
+    fn schemas_lists_two_tools() {
         let schemas = schemas();
-        assert_eq!(schemas.len(), 3);
+        assert_eq!(schemas.len(), 2);
         let names: Vec<&str> = schemas
             .iter()
             .filter_map(|v| v.pointer("/function/name").and_then(Value::as_str))
             .collect();
-        assert_eq!(names, ["tg_send", "tg_get_updates", "tg_send_photo"]);
+        assert_eq!(names, ["tg_send", "tg_send_photo"]);
     }
 }

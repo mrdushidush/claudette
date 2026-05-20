@@ -90,7 +90,7 @@
 65|||What's the current weather in London?|||london|temperature|°|degree|||weather_current
 66|||Three-day forecast for Tel Aviv.|||tel aviv|forecast|day|||weather_forecast
 67|||What's the latest version of the serde crate?|||1\.[0-9]+\.[0-9]+|serde|||crate_info
-68|||Search crates.io for "tokio".|||tokio|async|runtime|||crate_search
+68|||Search the web for "tokio crate" and summarise.|||tokio|async|runtime|||web_search
 69|||npm info for "react".|||react|version|||npm_info
 70|||Get a TradingView quote for AAPL.|||AAPL|apple|price|||tv_get_quote
 

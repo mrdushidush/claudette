@@ -114,10 +114,10 @@ impl ToolGroup {
             Self::Search => "search: web_search (Brave), web_fetch, glob_search, grep_search",
             Self::Advanced => "power tools: bash, edit_file, spawn_agent (delegation)",
             Self::Facts => "reference lookups: wikipedia, weather (no API key needed)",
-            Self::Registry => "package registries: crates.io and npmjs metadata",
+            Self::Registry => "package registries: crates.io and npm package metadata (version, downloads, homepage)",
             Self::Github => "github + brownfield missions: PRs, issues, code search, clone/fork, mission_start/attach/submit (requires GITHUB_TOKEN)",
-            Self::Markets => "market data: TradingView quotes/ratings/economic calendar, vestige.fi Algorand ASAs",
-            Self::Telegram => "telegram bot: send messages, poll updates, send photos (requires TELEGRAM_BOT_TOKEN)",
+            Self::Markets => "market data: TradingView quotes (stocks/crypto/forex/futures, bare or qualified tickers)",
+            Self::Telegram => "telegram bot: send text messages and photos (requires TELEGRAM_BOT_TOKEN)",
             Self::Calendar => "google calendar: list/create/update/delete events, RSVP (requires claudette --auth-google)",
             Self::Schedule => "proactive reminders: one-shot + recurring schedules that fire prompts back at you",
             Self::Gmail => "gmail (read-only): list/search/read messages, list labels (requires claudette --auth-google gmail)",
@@ -214,7 +214,7 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         "wikipedia_search" | "wikipedia_summary" | "weather_current" | "weather_forecast" => {
             Some(ToolGroup::Facts)
         }
-        "crate_info" | "crate_search" | "npm_info" | "npm_search" => Some(ToolGroup::Registry),
+        "crate_info" | "npm_info" => Some(ToolGroup::Registry),
         "gh_list_my_prs"
         | "gh_list_assigned_issues"
         | "gh_get_issue"
@@ -231,14 +231,8 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         | "mission_attach"
         | "mission_exit"
         | "mission_submit" => Some(ToolGroup::Github),
-        "tv_get_quote"
-        | "tv_technical_rating"
-        | "tv_search_symbol"
-        | "tv_economic_calendar"
-        | "vestige_asa_info"
-        | "vestige_search_asa"
-        | "vestige_top_movers" => Some(ToolGroup::Markets),
-        "tg_send" | "tg_get_updates" | "tg_send_photo" => Some(ToolGroup::Telegram),
+        "tv_get_quote" => Some(ToolGroup::Markets),
+        "tg_send" | "tg_send_photo" => Some(ToolGroup::Telegram),
         "calendar_list_events"
         | "calendar_create_event"
         | "calendar_update_event"
@@ -502,16 +496,22 @@ mod tests {
         assert_eq!(group_of("wikipedia_search"), Some(ToolGroup::Facts));
         assert_eq!(group_of("weather_forecast"), Some(ToolGroup::Facts));
         assert_eq!(group_of("crate_info"), Some(ToolGroup::Registry));
-        assert_eq!(group_of("npm_search"), Some(ToolGroup::Registry));
+        assert_eq!(group_of("npm_info"), Some(ToolGroup::Registry));
         assert_eq!(group_of("gh_list_my_prs"), Some(ToolGroup::Github));
         assert_eq!(group_of("gh_create_issue"), Some(ToolGroup::Github));
         assert_eq!(group_of("tv_get_quote"), Some(ToolGroup::Markets));
-        assert_eq!(group_of("tv_technical_rating"), Some(ToolGroup::Markets));
-        assert_eq!(group_of("vestige_asa_info"), Some(ToolGroup::Markets));
-        assert_eq!(group_of("vestige_top_movers"), Some(ToolGroup::Markets));
         assert_eq!(group_of("tg_send"), Some(ToolGroup::Telegram));
-        assert_eq!(group_of("tg_get_updates"), Some(ToolGroup::Telegram));
         assert_eq!(group_of("tg_send_photo"), Some(ToolGroup::Telegram));
+        // v0.6.0 decom: these tools no longer exist anywhere.
+        assert_eq!(group_of("crate_search"), None);
+        assert_eq!(group_of("npm_search"), None);
+        assert_eq!(group_of("tv_technical_rating"), None);
+        assert_eq!(group_of("tv_search_symbol"), None);
+        assert_eq!(group_of("tv_economic_calendar"), None);
+        assert_eq!(group_of("vestige_asa_info"), None);
+        assert_eq!(group_of("vestige_search_asa"), None);
+        assert_eq!(group_of("vestige_top_movers"), None);
+        assert_eq!(group_of("tg_get_updates"), None);
     }
 
     #[test]

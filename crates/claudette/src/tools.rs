@@ -996,10 +996,9 @@ pub(super) fn parse_json_input(input: &str, tool: &str) -> Result<Value, String>
 }
 
 // GitHub group (gh_*) lives in src/tools/github.rs.
-// Markets group (tv_*, vestige_*) lives in src/tools/markets.rs.
+// Markets group (tv_get_quote) lives in src/tools/markets.rs.
 
-// Telegram group (tg_send, tg_get_updates, tg_send_photo) lives in
-// src/tools/telegram.rs.
+// Telegram group (tg_send, tg_send_photo) lives in src/tools/telegram.rs.
 
 // ────────────────────────────────────────────────────────────────────────────
 // Tests
@@ -1018,7 +1017,7 @@ mod tests {
 
     // GitHub-group tests (gh_*, github_token) live in src/tools/github.rs.
 
-    // Markets-group tests (tv_*, vestige_*, resolve_tv_symbol) live in
+    // Markets-group tests (tv_get_quote, resolve_tv_symbol) live in
     // src/tools/markets.rs.
 
     // wmo_label, resolve_location, hebrew_city_alias tests live in

@@ -1506,10 +1506,11 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("weather_current", ReadOnly)
         .with_tool_requirement("weather_forecast", ReadOnly)
         // ── Sprint 9 Phase 0a: registry group (read-only) ────────────
+        // crate_search + npm_search were dropped in v0.6.0 — web_search
+        // covers the same need with better recall and an already-loaded
+        // schema.
         .with_tool_requirement("crate_info", ReadOnly)
-        .with_tool_requirement("crate_search", ReadOnly)
         .with_tool_requirement("npm_info", ReadOnly)
-        .with_tool_requirement("npm_search", ReadOnly)
         // ── Sprint 9 Phase 0a: github group ──────────────────────────
         // Reads: auto-allowed. Writes: WorkspaceWrite (hit the network
         // on the user's behalf but don't touch the filesystem).
@@ -1523,18 +1524,16 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("gh_comment_issue", WorkspaceWrite)
         .with_tool_requirement("gh_fork", WorkspaceWrite)
         .with_tool_requirement("gh_create_pr", WorkspaceWrite)
-        // ── Sprint 9 Phase 0b: markets group (all read-only) ─────────
+        // ── Sprint 9 Phase 0b: markets group (read-only) ─────────────
+        // v0.6.0 decom: tv_technical_rating, tv_search_symbol,
+        // tv_economic_calendar, and all vestige_* tools dropped.
         .with_tool_requirement("tv_get_quote", ReadOnly)
-        .with_tool_requirement("tv_technical_rating", ReadOnly)
-        .with_tool_requirement("tv_search_symbol", ReadOnly)
-        .with_tool_requirement("tv_economic_calendar", ReadOnly)
-        .with_tool_requirement("vestige_asa_info", ReadOnly)
-        .with_tool_requirement("vestige_search_asa", ReadOnly)
-        .with_tool_requirement("vestige_top_movers", ReadOnly)
         // ── Sprint 10: telegram group ────────────────────────────────
-        // Reads: auto-allowed. Sends: WorkspaceWrite (posts messages on
-        // the user's behalf but doesn't touch the filesystem).
-        .with_tool_requirement("tg_get_updates", ReadOnly)
+        // Sends: WorkspaceWrite (posts messages on the user's behalf but
+        // doesn't touch the filesystem). v0.6.0 decom dropped
+        // tg_get_updates because making it model-callable was a
+        // prompt-injection footgun — the bot loop still polls at the
+        // transport layer.
         .with_tool_requirement("tg_send", WorkspaceWrite)
         .with_tool_requirement("tg_send_photo", WorkspaceWrite)
         // ── Life Agent (v0.2.0): calendar group ──────────────────────

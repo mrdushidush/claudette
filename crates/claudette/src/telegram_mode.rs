@@ -101,9 +101,10 @@ pub fn run_telegram_bot(
              Pass `--chat <your-chat-id>` to restrict incoming messages \
              (repeat for multiple IDs), or `--chat any` to explicitly \
              accept every chat that messages the bot.\n\
-             Your own chat ID comes back in `tg_get_updates` once you /start \
-             the bot once from the account you want to allow. This can also \
-             be set via CLAUDETTE_TELEGRAM_CHAT (comma-separated)."
+             Your own chat ID is shown in the bot's startup log once you /start \
+             the bot from the account you want to allow (the bot loop logs every \
+             incoming chat_id). This can also be set via CLAUDETTE_TELEGRAM_CHAT \
+             (comma-separated)."
         ));
     }
 
