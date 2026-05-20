@@ -27,9 +27,16 @@ export CLAUDETTE_SKIP_LM_STUDIO_PROBE=1
 ## Pinning a brain (no preset gymnastics)
 
 ```bash
-export CLAUDETTE_MODEL=qwen3-coder:14b           # the brain itself
-export CLAUDETTE_FALLBACK_BRAIN_MODEL=qwen3.5:9b # ignored unless Auto preset
+# Recommended on 16 GB+ VRAM (LM Studio backend):
+export CLAUDETTE_MODEL=qwen3.6-35b-a3b@q4_k_xl   # best brain & coder by a wide margin
+export CLAUDETTE_CODER_MODEL=qwen3.6-35b-a3b@q4_k_xl   # same model, no swap dance
+
+# Or on 8 GB VRAM (Ollama backend):
+# export CLAUDETTE_MODEL=qwen3-coder:14b         # the brain itself
+# export CLAUDETTE_FALLBACK_BRAIN_MODEL=qwen3.5:9b   # ignored unless Auto preset
 ```
+
+> The `@q4_k_xl` suffix is needed only when multiple quants of the same model are on disk — LM Studio picks the smallest match otherwise. With a single quant downloaded, bare `qwen3.6-35b-a3b` works.
 
 Or in `~/.claudette/.env` for persistence across sessions.
 
@@ -54,14 +61,23 @@ The default of 2 is tuned for local 8b coder models. If you've routed Verifier t
 Per-role model routing lives in `~/.claudettes-forge/models.toml`:
 
 ```toml
+# Recommended (16 GB+ VRAM): single model for every role — no swap dance.
 [planner]
-model = "qwen3.5:9b"
+model = "qwen3.6-35b-a3b"
 
 [coder]
-model = "qwen3-coder:30b"
+model = "qwen3.6-35b-a3b"
 
 [verifier]
-model = "qwen3.5:14b"       # stronger Verifier than Coder is a good default
+model = "qwen3.6-35b-a3b"
+
+# Or the legacy mixed setup (works on 8 GB VRAM):
+# [planner]
+# model = "qwen3.5:9b"
+# [coder]
+# model = "qwen3-coder:30b"
+# [verifier]
+# model = "qwen3.5:14b"       # stronger Verifier than Coder is a good default
 ```
 
 See [`forge.md`](forge.md) for the full pipeline.

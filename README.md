@@ -73,13 +73,13 @@ Every tool except `enable_tools` and `get_current_time` lives in a group the mod
 `claudette --forge "<prompt>"` or `/forge <prompt>` runs a Planner → Coder → Verifier loop against the active mission, with a configurable fix-loop (default 2 rounds) before the PR opens. Roles are routable via `~/.claudettes-forge/models.toml` so you can pin a stronger model to Verifier and keep a cheap model on Coder. Inside an existing git repo with no mission active, forge auto-bootstraps an ephemeral mission rooted at the repo toplevel — no clone required. Full walkthrough: [`docs/forge.md`](docs/forge.md).
 
 ### Tiered-brain auto-fallback
-Three presets (Fast / Auto / Smart). Auto runs `qwen3.5:4b` and escalates to `qwen3.5:9b` on stuck signals (empty response after retry, max-iterations hit with no text, ≥ 3 consecutive tool errors). Per-turn revert — not session-sticky.
+Three presets (Fast / Auto / Smart). Auto runs `qwen3.5:4b` and escalates to `qwen3.5:9b` on stuck signals (empty response after retry, max-iterations hit with no text, ≥ 3 consecutive tool errors). Per-turn revert — not session-sticky. **For 16 GB+ VRAM, pin `qwen3.6-35b-a3b` instead** — see [Recommended models](#recommended-models).
 
 ### Voice in, voice out, and vision in
 Whisper transcription for Telegram voice notes, edge-tts for replies (English or Hebrew). Image attachments in the TUI/REPL via Alt+V (clipboard), drag-drop, or `@/path/to/img.png` when the loaded brain is multimodal.
 
 ### Codet sidecar for code generation
-`generate_code` routes through a dedicated coder model (default `qwen3-coder:30b`, fallback `qwen2.5-coder:14b`). Runs a real syntax check (`py_compile`, `rustc --emit=metadata`, `tsc --noEmit`, etc. — 5 languages), then an Aider-style SEARCH/REPLACE fix loop on failure, then optional pytest/cargo-test/jest. Hot-swaps into VRAM on demand on memory-constrained boxes.
+`generate_code` routes through a dedicated coder model (default `qwen3-coder:30b`, fallback `qwen2.5-coder:14b`; **recommended upgrade `qwen3.6-35b-a3b`** — same model as the brain, no swap dance — see [Recommended models](#recommended-models)). Runs a real syntax check (`py_compile`, `rustc --emit=metadata`, `tsc --noEmit`, etc. — 5 languages), then an Aider-style SEARCH/REPLACE fix loop on failure, then optional pytest/cargo-test/jest. Hot-swaps into VRAM on demand on memory-constrained boxes.
 
 ### Cross-session semantic recall
 `/recall <query>` searches past conversation turns across sessions via an embedding index (works on Ollama or LM Studio's `/v1/embeddings`). Drops fragments of relevant past turns straight into the current context.
@@ -105,15 +105,51 @@ The numbers below describe the *comfortable* setup. **You don't need a GPU** —
 
 Full model footprint table, CPU-only recipes, and the 30b-coder-on-8GB-VRAM env recipe: [`docs/hardware.md`](docs/hardware.md).
 
+> For the recommended `qwen3.6-35b-a3b` setup (best quality), see the [Recommended models](#recommended-models) section below — 16 GB VRAM or 32 GB RAM with CPU-MoE offload is the practical tier.
+
+---
+
+## Recommended models
+
+The defaults (`qwen3.5:4b` brain / `qwen3-coder:30b` coder) are tuned for **broad hardware compatibility** — they install in under a minute and work on any 8 GB GPU or modern CPU. Beyond that, extensive testing (most recently the [100-prompt regression sweep on 2026-05-20](crates/claudette/tests/claudette100_prompts.txt) — 80% raw / ~98% adjusted, zero true regressions) has shown what works best at each tier:
+
+### Brain
+
+| Hardware tier | Recommended brain | Notes |
+|---------------|-------------------|-------|
+| 8 GB VRAM / 16 GB RAM | `qwen3.5:4b` (Q8) | Default. Fast, fits everywhere, tool-calling solid. |
+| 16 GB VRAM / 32 GB RAM | **`qwen3.6-35b-a3b`** | Best overall by a wide margin. MoE — 35 B total / ~3 B active per token, needs CPU-MoE offload. ~24 t/s baseline / ~43 t/s with MTP on RTX 5060 Ti. |
+| 24 GB+ VRAM | **`qwen3.6-35b-a3b`** (full GPU) | Top quality, full GPU residency. |
+
+`qwen3.6-35b-a3b` is currently distributed via [LM Studio](https://lmstudio.ai/) (Unsloth GGUF) rather than packaged on Ollama. Flip the backend with `CLAUDETTE_OPENAI_COMPAT=1` — see [`docs/power-user.md`](docs/power-user.md#lm-studio-or-any-openai-compatible-server). When multiple quants are on disk, pin one explicitly (`CLAUDETTE_MODEL=qwen3.6-35b-a3b@q4_k_xl`) — LM Studio picks the smallest match otherwise.
+
+### Codet sidecar coder
+
+When you use `generate_code` or `--forge`:
+
+1. **`qwen3.6-35b-a3b`** — best if the VRAM/RAM budget is there. Same model as the brain means no swap dance between turns.
+2. **`qwen3-coder:30b`** — current default. Quality coder, available on Ollama, MoE-friendly on 8 GB VRAM with the [env recipe](docs/hardware.md#running-the-30b-coder-on-8-gb-vram--32-gb-ram).
+3. **`qwen3.6-27b` (dense)** — top quality but **very tight on 16 GB VRAM** even at Q4; comfortable on 24 GB+.
+
+Pin a non-default brain via `~/.claudette/.env` (`CLAUDETTE_MODEL=...`) or `/brain <model>` at runtime. Pin the coder via `CLAUDETTE_CODER_MODEL=...`.
+
 ---
 
 ## Quick start (full setup)
 
 ```bash
-# 1. Pull models with Ollama.
+# 1a. Default path — Ollama with the 3.5 family (works on 8 GB VRAM).
 ollama pull qwen3.5:4b           # brain (default Auto preset)
 ollama pull qwen3.5:9b           # fallback brain (optional)
 ollama pull qwen3-coder:30b      # Codet coder, only if you'll use generate_code
+
+# 1b. Recommended path — LM Studio with qwen3.6 (best on 16 GB+ VRAM).
+# Pull `qwen3.6-35b-a3b` from inside LM Studio, then in ~/.claudette/.env:
+#   CLAUDETTE_OPENAI_COMPAT=1
+#   OLLAMA_HOST=http://localhost:1234
+#   CLAUDETTE_MODEL=qwen3.6-35b-a3b@q4_k_xl
+#   CLAUDETTE_CODER_MODEL=qwen3.6-35b-a3b@q4_k_xl
+# See `docs/power-user.md` for the full LM Studio recipe.
 
 # 2. Install Claudette — pick one.
 curl -fsSL https://raw.githubusercontent.com/mrdushidush/claudette/main/install.sh | sh   # Linux/macOS
