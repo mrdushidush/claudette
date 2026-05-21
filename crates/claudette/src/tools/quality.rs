@@ -1,5 +1,6 @@
-//! Quality group — code-quality tooling. Sprint v0.6.0 first lands
-//! `run_tests`; `diagnostics` follows in Phase 3.1b.
+//! Quality group — code-quality tooling. Two tools so far:
+//! `run_tests` (project test framework) and `diagnostics` (typechecker /
+//! linter). `apply_patch` lands next in Phase 3.1c.
 //!
 //! Both tools auto-detect the active project's framework by walking up
 //! from the active cwd (mission-aware via [`crate::missions::active_cwd`])
@@ -25,27 +26,48 @@ use crate::test_runner::{run_command_with_timeout, CommandResult};
 /// driven via the upcoming `bash_background` family instead.
 const TEST_TIMEOUT_SECS: u64 = 180;
 
+/// Diagnostics are generally faster than tests but `cargo check` on a
+/// cold workspace can still take a minute or so on large projects.
+const DIAG_TIMEOUT_SECS: u64 = 120;
+
 pub(super) fn schemas() -> Vec<Value> {
-    vec![json!({
-        "type": "function",
-        "function": {
-            "name": "run_tests",
-            "description": "Run the project test suite. Auto-detects framework (cargo, npm, pytest, go) from project files. Returns pass/fail counts + failures (name, file, line, message). 180s timeout.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "framework": { "type": "string", "description": "Override auto-detect: 'cargo', 'npm', 'pytest', 'go', or 'auto' (default)." },
-                    "filter":    { "type": "string", "description": "Optional test-name substring filter (passed to the framework's own filter flag)." }
-                },
-                "required": []
+    vec![
+        json!({
+            "type": "function",
+            "function": {
+                "name": "run_tests",
+                "description": "Run the project test suite. Auto-detects framework (cargo, npm, pytest, go) from project files. Returns pass/fail counts + failures (name, file, line, message). 180s timeout.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "framework": { "type": "string", "description": "Override auto-detect: 'cargo', 'npm', 'pytest', 'go', or 'auto' (default)." },
+                        "filter":    { "type": "string", "description": "Optional test-name substring filter (passed to the framework's own filter flag)." }
+                    },
+                    "required": []
+                }
             }
-        }
-    })]
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "diagnostics",
+                "description": "Run the project typechecker/linter and return structured errors {file, line, code, severity, message}. Auto-detects (cargo check, clippy, tsc, ruff, mypy) from project files. 120s timeout.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "tool": { "type": "string", "description": "Override auto-detect: 'cargo', 'clippy', 'tsc', 'mypy', 'ruff', or 'auto' (default)." }
+                    },
+                    "required": []
+                }
+            }
+        }),
+    ]
 }
 
 pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>> {
     let result = match name {
         "run_tests" => run_tests(input),
+        "diagnostics" => run_diagnostics(input),
         _ => return None,
     };
     Some(result)
@@ -207,6 +229,324 @@ fn format_result(framework: Framework, result: &CommandResult) -> Value {
         "stdout_tail": tail(&result.stdout, 2000),
         "stderr_tail": tail(&result.stderr, 2000),
     })
+}
+
+// ────── diagnostics tool ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiagTool {
+    CargoCheck,
+    Clippy,
+    Tsc,
+    Mypy,
+    Ruff,
+}
+
+impl DiagTool {
+    fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_lowercase().as_str() {
+            "cargo" | "cargo-check" | "check" => Some(Self::CargoCheck),
+            "clippy" => Some(Self::Clippy),
+            "tsc" | "typescript" => Some(Self::Tsc),
+            "mypy" => Some(Self::Mypy),
+            "ruff" => Some(Self::Ruff),
+            _ => None,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::CargoCheck => "cargo-check",
+            Self::Clippy => "clippy",
+            Self::Tsc => "tsc",
+            Self::Mypy => "mypy",
+            Self::Ruff => "ruff",
+        }
+    }
+}
+
+/// Pick the most likely diagnostics tool by walking up from `start`.
+/// Preference order on Python is ruff > mypy because ruff is faster
+/// and increasingly the project standard; Rust prefers cargo-check
+/// because clippy needs an explicit opt-in (it's slower and noisier).
+fn detect_diag_tool(start: &Path) -> Option<DiagTool> {
+    let mut current: Option<&Path> = Some(start);
+    while let Some(dir) = current {
+        if dir.join("Cargo.toml").exists() {
+            return Some(DiagTool::CargoCheck);
+        }
+        if dir.join("tsconfig.json").exists() {
+            return Some(DiagTool::Tsc);
+        }
+        if dir.join("pyproject.toml").exists() || dir.join("ruff.toml").exists() {
+            return Some(DiagTool::Ruff);
+        }
+        if dir.join("mypy.ini").exists() {
+            return Some(DiagTool::Mypy);
+        }
+        current = dir.parent();
+    }
+    None
+}
+
+fn run_diagnostics(input: &str) -> Result<String, String> {
+    let v = parse_json_input(input, "diagnostics")?;
+    let cwd = crate::missions::active_cwd();
+    let requested = v.get("tool").and_then(Value::as_str).unwrap_or("auto");
+    let tool = if requested == "auto" || requested.is_empty() {
+        detect_diag_tool(&cwd).ok_or_else(|| {
+            format!(
+                "diagnostics: could not auto-detect a checker under {} \
+                 (looked for Cargo.toml, tsconfig.json, pyproject.toml/ruff.toml, mypy.ini). \
+                 Pass `tool` explicitly.",
+                cwd.display()
+            )
+        })?
+    } else {
+        DiagTool::parse(requested).ok_or_else(|| {
+            format!(
+                "diagnostics: unknown tool '{requested}' \
+                 — use 'auto', 'cargo', 'clippy', 'tsc', 'mypy', or 'ruff'."
+            )
+        })?
+    };
+
+    let (program, args) = match tool {
+        DiagTool::CargoCheck => (
+            "cargo",
+            vec!["check", "--message-format=json", "--all-targets"],
+        ),
+        DiagTool::Clippy => (
+            "cargo",
+            vec![
+                "clippy",
+                "--message-format=json",
+                "--all-targets",
+                "--all-features",
+            ],
+        ),
+        DiagTool::Tsc => ("npx", vec!["tsc", "--noEmit"]),
+        DiagTool::Mypy => ("mypy", vec![".", "--no-color-output"]),
+        DiagTool::Ruff => ("ruff", vec!["check", "--output-format=json"]),
+    };
+
+    let result = run_command_with_timeout(program, &args, DIAG_TIMEOUT_SECS, Some(&cwd));
+    let errors = parse_diag_errors(tool, &result.stdout, &result.stderr);
+
+    Ok(json!({
+        "tool": tool.label(),
+        "exit_code": result.exit_code,
+        "timed_out": result.timed_out,
+        "errors": errors,
+        "stdout_tail": tail(&result.stdout, 2000),
+        "stderr_tail": tail(&result.stderr, 2000),
+    })
+    .to_string())
+}
+
+fn parse_diag_errors(tool: DiagTool, stdout: &str, stderr: &str) -> Vec<Value> {
+    match tool {
+        DiagTool::CargoCheck | DiagTool::Clippy => parse_cargo_messages(stdout),
+        DiagTool::Tsc => parse_tsc_lines(&format!("{stdout}\n{stderr}")),
+        DiagTool::Mypy => parse_mypy_lines(&format!("{stdout}\n{stderr}")),
+        DiagTool::Ruff => parse_ruff_json(stdout),
+    }
+}
+
+/// Parse cargo's `--message-format=json` stream. Each line is a JSON
+/// object; we keep only `compiler-message` entries at error/warning
+/// severity. Skips silent-failure cases (build script output, etc.)
+/// without panicking.
+fn parse_cargo_messages(stdout: &str) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    for line in stdout.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if v.get("reason").and_then(Value::as_str) != Some("compiler-message") {
+            continue;
+        }
+        let Some(msg) = v.get("message") else {
+            continue;
+        };
+        let level = msg
+            .get("level")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if level != "error" && level != "warning" {
+            continue;
+        }
+        let code = msg
+            .pointer("/code/code")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let message = msg
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let (file, line, col) = msg
+            .get("spans")
+            .and_then(Value::as_array)
+            .and_then(|spans| {
+                spans.iter().find(|s| {
+                    s.get("is_primary")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                })
+            })
+            .map(|primary| {
+                (
+                    primary
+                        .get("file_name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    primary
+                        .get("line_start")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0),
+                    primary
+                        .get("column_start")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0),
+                )
+            })
+            .unwrap_or_default();
+        out.push(json!({
+            "file": file,
+            "line": line,
+            "column": col,
+            "code": code,
+            "severity": level,
+            "message": message,
+        }));
+    }
+    out
+}
+
+/// Parse `tsc --noEmit` text output. Lines look like:
+/// `src/foo.ts(12,3): error TS2304: Cannot find name 'bar'.`
+fn parse_tsc_lines(s: &str) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    for line in s.lines() {
+        // Split on `: error TS` or `: warning TS`
+        let Some(paren_open) = line.find('(') else {
+            continue;
+        };
+        let Some(paren_close) = line[paren_open..].find(')').map(|i| paren_open + i) else {
+            continue;
+        };
+        let Some(colon) = line[paren_close..].find(": ").map(|i| paren_close + i) else {
+            continue;
+        };
+        let file = line[..paren_open].to_string();
+        let inside = &line[paren_open + 1..paren_close];
+        let (line_str, col_str) = inside.split_once(',').unwrap_or((inside, "0"));
+        let tail = &line[colon + 2..];
+        let severity = if tail.starts_with("error") {
+            "error"
+        } else {
+            "warning"
+        };
+        // The diagnostic code immediately follows the severity word.
+        let after_sev = tail.trim_start_matches(severity).trim_start();
+        let (code, message) = after_sev.split_once(": ").unwrap_or((after_sev, ""));
+        out.push(json!({
+            "file": file,
+            "line": line_str.parse::<u64>().unwrap_or(0),
+            "column": col_str.parse::<u64>().unwrap_or(0),
+            "code": code.trim(),
+            "severity": severity,
+            "message": message.trim(),
+        }));
+    }
+    out
+}
+
+/// Parse `mypy` output (no-color). Lines look like:
+/// `foo.py:12: error: Incompatible types ... [arg-type]`
+fn parse_mypy_lines(s: &str) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    for line in s.lines() {
+        let Some(first_colon) = line.find(':') else {
+            continue;
+        };
+        let rest = &line[first_colon + 1..];
+        let Some(line_end) = rest.find(':') else {
+            continue;
+        };
+        let line_num: u64 = rest[..line_end].trim().parse().unwrap_or(0);
+        if line_num == 0 {
+            // Skip blank/header lines.
+            continue;
+        }
+        let after = &rest[line_end + 1..];
+        let severity = if after.trim_start().starts_with("error") {
+            "error"
+        } else if after.trim_start().starts_with("warning") {
+            "warning"
+        } else {
+            continue;
+        };
+        let body = after
+            .trim_start()
+            .trim_start_matches(severity)
+            .trim_start_matches(": ");
+        let (message, code) = if let Some(open) = body.rfind('[') {
+            if let Some(close) = body[open..].find(']') {
+                (
+                    body[..open].trim().to_string(),
+                    body[open + 1..open + close].to_string(),
+                )
+            } else {
+                (body.to_string(), String::new())
+            }
+        } else {
+            (body.to_string(), String::new())
+        };
+        out.push(json!({
+            "file": line[..first_colon].to_string(),
+            "line": line_num,
+            "column": 0,
+            "code": code,
+            "severity": severity,
+            "message": message,
+        }));
+    }
+    out
+}
+
+/// Parse `ruff check --output-format=json`. Output is a single JSON
+/// array of objects with `filename`, `location.row`, `code`, `message`.
+fn parse_ruff_json(stdout: &str) -> Vec<Value> {
+    let Ok(arr) = serde_json::from_str::<Value>(stdout) else {
+        return Vec::new();
+    };
+    let Some(items) = arr.as_array() else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .map(|item| {
+            json!({
+                "file": item.get("filename").and_then(Value::as_str).unwrap_or(""),
+                "line": item
+                    .pointer("/location/row")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                "column": item
+                    .pointer("/location/column")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                "code": item.get("code").and_then(Value::as_str).unwrap_or(""),
+                "severity": "error",
+                "message": item.get("message").and_then(Value::as_str).unwrap_or(""),
+            })
+        })
+        .collect()
 }
 
 fn tail(s: &str, max: usize) -> String {
@@ -415,14 +755,95 @@ mod tests {
     use super::*;
 
     #[test]
-    fn schemas_lists_one_tool() {
+    fn schemas_lists_two_tools() {
         let schemas = schemas();
-        assert_eq!(schemas.len(), 1);
+        assert_eq!(schemas.len(), 2);
         let names: Vec<&str> = schemas
             .iter()
             .filter_map(|v| v.pointer("/function/name").and_then(Value::as_str))
             .collect();
-        assert_eq!(names, ["run_tests"]);
+        assert_eq!(names, ["run_tests", "diagnostics"]);
+    }
+
+    #[test]
+    fn diagnostics_rejects_unknown_tool() {
+        let err = run_diagnostics(r#"{"tool":"banana"}"#).unwrap_err();
+        assert!(err.contains("unknown tool"), "got: {err}");
+        assert!(
+            err.contains("cargo") && err.contains("ruff") && err.contains("tsc"),
+            "error must enumerate supported tools: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_cargo_messages_extracts_primary_span() {
+        let line = r#"{"reason":"compiler-message","message":{"level":"error","message":"cannot find value `x` in this scope","code":{"code":"E0425"},"spans":[{"is_primary":true,"file_name":"src/lib.rs","line_start":12,"column_start":7}]}}"#;
+        let errors = parse_cargo_messages(line);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0]["file"], "src/lib.rs");
+        assert_eq!(errors[0]["line"], 12);
+        assert_eq!(errors[0]["code"], "E0425");
+        assert_eq!(errors[0]["severity"], "error");
+    }
+
+    #[test]
+    fn parse_cargo_messages_skips_non_compiler_lines() {
+        let mixed = r#"{"reason":"build-script-executed","package_id":"x"}
+{"reason":"compiler-artifact"}
+not json at all
+{"reason":"compiler-message","message":{"level":"warning","message":"unused import","code":{"code":"unused_imports"},"spans":[{"is_primary":true,"file_name":"src/foo.rs","line_start":3,"column_start":1}]}}"#;
+        let errors = parse_cargo_messages(mixed);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0]["severity"], "warning");
+    }
+
+    #[test]
+    fn parse_tsc_lines_extracts_position_and_code() {
+        let out = "src/foo.ts(12,3): error TS2304: Cannot find name 'bar'.\n\
+                   src/bar.ts(5,11): warning TS6133: 'x' is declared but never used.\n";
+        let errors = parse_tsc_lines(out);
+        assert_eq!(errors.len(), 2);
+        assert_eq!(errors[0]["file"], "src/foo.ts");
+        assert_eq!(errors[0]["line"], 12);
+        assert_eq!(errors[0]["code"], "TS2304");
+        assert_eq!(errors[0]["severity"], "error");
+        assert_eq!(errors[1]["severity"], "warning");
+    }
+
+    #[test]
+    fn parse_mypy_lines_extracts_code_in_brackets() {
+        let out = "foo.py:12: error: Incompatible types in assignment  [assignment]\n\
+                   bar.py:5: note: Revealed type is 'builtins.int'\n";
+        let errors = parse_mypy_lines(out);
+        // We only keep error/warning lines, not notes.
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0]["file"], "foo.py");
+        assert_eq!(errors[0]["line"], 12);
+        assert_eq!(errors[0]["code"], "assignment");
+        assert_eq!(errors[0]["severity"], "error");
+    }
+
+    #[test]
+    fn parse_ruff_json_array() {
+        let out = r#"[{"code":"E501","message":"Line too long","filename":"foo.py","location":{"row":12,"column":80}},{"code":"F401","message":"`os` imported but unused","filename":"bar.py","location":{"row":1,"column":0}}]"#;
+        let errors = parse_ruff_json(out);
+        assert_eq!(errors.len(), 2);
+        assert_eq!(errors[0]["code"], "E501");
+        assert_eq!(errors[1]["file"], "bar.py");
+    }
+
+    #[test]
+    fn detect_diag_tool_prefers_closest_marker() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let root = std::env::temp_dir().join(format!("claudette-diag-{stamp}"));
+        let leaf = root.join("sub").join("leaf");
+        std::fs::create_dir_all(&leaf).expect("mkdir");
+        std::fs::write(leaf.join("Cargo.toml"), "[package]\nname=\"x\"\n").expect("write toml");
+        let t = detect_diag_tool(&leaf);
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(t, Some(DiagTool::CargoCheck));
     }
 
     #[test]
