@@ -105,7 +105,7 @@ impl ToolGroup {
     pub fn summary(self) -> &'static str {
         match self {
             Self::Notes => "personal notes: create/list/read/update/delete",
-            Self::Todos => "todo list: add/list/complete/uncomplete/delete",
+            Self::Todos => "todo list: add/list/set_status (done bool)/delete",
             Self::Files => "file ops: read_file, write_file, list_dir (under ~/)",
             Self::Code => "code generation via specialised coder model + validator",
             Self::Meta => "self-introspection: config, tool inventory, limits",
@@ -200,9 +200,9 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         "note_create" | "note_list" | "note_read" | "note_update" | "note_delete" => {
             Some(ToolGroup::Notes)
         }
-        "todo_add" | "todo_list" | "todo_complete" | "todo_uncomplete" | "todo_delete" => {
-            Some(ToolGroup::Todos)
-        }
+        // todo_complete + todo_uncomplete are v0.6.0 dispatch-only aliases
+        // for todo_set_status(done?). Not classified here.
+        "todo_add" | "todo_list" | "todo_set_status" | "todo_delete" => Some(ToolGroup::Todos),
         "read_file" | "write_file" | "list_dir" => Some(ToolGroup::Files),
         "generate_code" => Some(ToolGroup::Code),
         "get_capabilities" => Some(ToolGroup::Meta),

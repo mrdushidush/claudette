@@ -1488,6 +1488,10 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("note_update", WorkspaceWrite)
         .with_tool_requirement("note_delete", WorkspaceWrite)
         .with_tool_requirement("todo_add", WorkspaceWrite)
+        // v0.6.0: todo_complete + todo_uncomplete merged into
+        // todo_set_status(done?). Aliases still dispatch so policy
+        // entries stay for compat.
+        .with_tool_requirement("todo_set_status", WorkspaceWrite)
         .with_tool_requirement("todo_complete", WorkspaceWrite)
         .with_tool_requirement("todo_uncomplete", WorkspaceWrite)
         .with_tool_requirement("todo_delete", WorkspaceWrite)

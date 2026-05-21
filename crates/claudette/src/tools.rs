@@ -1827,9 +1827,10 @@ mod tests {
     // Note-handler tests (note_read_rejects_*, note_delete_rejects_*,
     // note_list_*) live in src/tools/notes.rs alongside their handlers.
 
-    // Todo-handler tests (todo_add_rejects_*, todo_uncomplete_rejects_*,
-    // todo_delete_rejects_*, todo_list_pending_only_flag_passes_through)
-    // live in src/tools/todos.rs alongside their handlers.
+    // Todo-handler tests (todo_add_rejects_*, todo_set_status_rejects_*,
+    // todo_delete_rejects_*, todo_list_pending_only_flag_passes_through,
+    // todo_complete_alias_*, todo_uncomplete_alias_*) live in
+    // src/tools/todos.rs alongside their handlers.
 
     #[test]
     fn note_and_todo_tools_classified_into_their_groups() {
@@ -1855,13 +1856,7 @@ mod tests {
                 "{tool} must classify as Notes"
             );
         }
-        for tool in &[
-            "todo_add",
-            "todo_list",
-            "todo_complete",
-            "todo_uncomplete",
-            "todo_delete",
-        ] {
+        for tool in &["todo_add", "todo_list", "todo_set_status", "todo_delete"] {
             assert!(
                 !CORE_TOOL_NAMES.contains(tool),
                 "{tool} must NOT be in core (regression — it should live in the Todos group)"
@@ -1923,15 +1918,30 @@ mod tests {
         let added: Value = serde_json::from_str(&add_out).unwrap();
         let todo_id = added["id"].as_str().unwrap().to_string();
 
-        // Complete.
-        let comp_out = dispatch_tool("todo_complete", &json!({ "id": todo_id }).to_string())
-            .expect("todo_complete");
+        // Complete via the unified todo_set_status.
+        let comp_out = dispatch_tool(
+            "todo_set_status",
+            &json!({ "id": todo_id, "done": true }).to_string(),
+        )
+        .expect("todo_set_status complete");
         assert!(comp_out.contains("\"done\":true"));
 
-        // Uncomplete.
-        let uncomp_out = dispatch_tool("todo_uncomplete", &json!({ "id": todo_id }).to_string())
-            .expect("todo_uncomplete");
+        // Un-complete via the unified todo_set_status.
+        let uncomp_out = dispatch_tool(
+            "todo_set_status",
+            &json!({ "id": todo_id, "done": false }).to_string(),
+        )
+        .expect("todo_set_status uncomplete");
         assert!(uncomp_out.contains("\"done\":false"));
+
+        // Legacy aliases must keep working: drive the same todo through
+        // todo_complete + todo_uncomplete to prove the v0.6.0 shims are wired.
+        let alias_comp = dispatch_tool("todo_complete", &json!({ "id": todo_id }).to_string())
+            .expect("todo_complete alias");
+        assert!(alias_comp.contains("\"done\":true"));
+        let alias_uncomp = dispatch_tool("todo_uncomplete", &json!({ "id": todo_id }).to_string())
+            .expect("todo_uncomplete alias");
+        assert!(alias_uncomp.contains("\"done\":false"));
 
         // pending_only list should now include it.
         let list_out = dispatch_tool("todo_list", r#"{"pending_only":true}"#).expect("todo_list");

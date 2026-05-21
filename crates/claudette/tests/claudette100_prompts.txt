@@ -55,7 +55,7 @@
 36|||Append the line "section 4 in progress" to the sweep-100 note.|||updated|appended|section 4|||note_update
 37|||Add a todo "verify all 100 sweep prompts" with high priority.|||added|created|todo|verify|||todo_add
 38|||List my current todos.|||verify|sweep|todo|||todo_list
-39|||Mark the "verify all 100" todo as complete.|||completed|marked|done|finished|||todo_complete
+39|||Mark the "verify all 100" todo as complete.|||completed|marked|done|finished|||todo_set_status
 40|||Delete the note titled "sweep-100".|||deleted|removed|gone|||note_delete
 
 # === SECTION 5: Filesystem, search, git (41-50) ===

@@ -1,5 +1,7 @@
-//! Todos group — 5 tools (todo_add, todo_list, todo_complete,
-//! todo_uncomplete, todo_delete).
+//! Todos group — 4 tools (todo_add, todo_list, todo_set_status,
+//! todo_delete). v0.6.0 merged the old todo_complete + todo_uncomplete
+//! pair into the polymorphic todo_set_status(id, done) — the old names
+//! still dispatch via aliases for one release.
 //!
 //! Storage: a single `todos.json` file under `~/.claudette/`. Reads the
 //! whole file on every call and writes it back — fine at personal-agent
@@ -83,28 +85,15 @@ pub(super) fn schemas() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
-                "name": "todo_complete",
-                "description": "Mark a todo as done by its ID.",
+                "name": "todo_set_status",
+                "description": "Mark a todo done or un-done by its ID. Set done=true to complete, done=false to revert.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "id": { "type": "string", "description": "Todo ID from todo_list" }
+                        "id":   { "type": "string", "description": "Todo ID from todo_list" },
+                        "done": { "type": "boolean", "description": "true to mark complete, false to revert to pending" }
                     },
-                    "required": ["id"]
-                }
-            }
-        }),
-        json!({
-            "type": "function",
-            "function": {
-                "name": "todo_uncomplete",
-                "description": "Un-mark a completed todo (set done back to false) by its ID.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string", "description": "Todo ID from todo_list" }
-                    },
-                    "required": ["id"]
+                    "required": ["id", "done"]
                 }
             }
         }),
@@ -129,8 +118,10 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
     let result = match name {
         "todo_add" => run_todo_add(input),
         "todo_list" => run_todo_list(input),
-        "todo_complete" => run_todo_complete(input),
-        "todo_uncomplete" => run_todo_uncomplete(input),
+        "todo_set_status" => run_todo_set_status(input),
+        // v0.6.0 deprecated aliases — drop in next minor release.
+        "todo_complete" => run_todo_complete_alias(input),
+        "todo_uncomplete" => run_todo_uncomplete_alias(input),
         "todo_delete" => run_todo_delete(input),
         _ => return None,
     };
@@ -207,54 +198,67 @@ fn run_todo_list(input: &str) -> Result<String, String> {
     Ok(result.to_string())
 }
 
-fn run_todo_complete(input: &str) -> Result<String, String> {
+/// `todo_set_status(id, done)` — flip a todo's done flag either direction.
+/// Replaces todo_complete + todo_uncomplete.
+fn run_todo_set_status(input: &str) -> Result<String, String> {
+    let v: Value = serde_json::from_str(input)
+        .map_err(|e| format!("todo_set_status: invalid JSON ({e}): {input}"))?;
+    let id = v
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or("todo_set_status: missing 'id'")?
+        .to_string();
+    let done = v
+        .get("done")
+        .and_then(Value::as_bool)
+        .ok_or("todo_set_status: missing 'done' (boolean)")?;
+
+    let mut todos = load_todos()?;
+    let mut updated = None;
+    for t in &mut todos {
+        if t.id == id {
+            t.done = done;
+            t.completed_at = if done {
+                Some(chrono::Local::now().to_rfc3339())
+            } else {
+                None
+            };
+            updated = Some(t.text.clone());
+            break;
+        }
+    }
+    let text = updated.ok_or_else(|| format!("todo_set_status: no todo with id '{id}'"))?;
+    save_todos(&todos)?;
+
+    Ok(json!({ "ok": true, "id": id, "text": text, "done": done }).to_string())
+}
+
+/// Backwards-compat shim for the old `todo_complete` shape (`{id}`).
+/// Forwards to `todo_set_status` with `done=true`. Drop in the next
+/// minor release after v0.6.0.
+fn run_todo_complete_alias(input: &str) -> Result<String, String> {
     let v: Value = serde_json::from_str(input)
         .map_err(|e| format!("todo_complete: invalid JSON ({e}): {input}"))?;
     let id = v
         .get("id")
         .and_then(Value::as_str)
-        .ok_or("todo_complete: missing 'id'")?
-        .to_string();
-
-    let mut todos = load_todos()?;
-    let mut updated = None;
-    for t in &mut todos {
-        if t.id == id {
-            t.done = true;
-            t.completed_at = Some(chrono::Local::now().to_rfc3339());
-            updated = Some(t.text.clone());
-            break;
-        }
-    }
-    let text = updated.ok_or_else(|| format!("todo_complete: no todo with id '{id}'"))?;
-    save_todos(&todos)?;
-
-    Ok(json!({ "ok": true, "id": id, "text": text, "done": true }).to_string())
+        .ok_or("todo_complete: missing 'id'")?;
+    let payload = json!({ "id": id, "done": true });
+    run_todo_set_status(&payload.to_string())
 }
 
-fn run_todo_uncomplete(input: &str) -> Result<String, String> {
+/// Backwards-compat shim for the old `todo_uncomplete` shape (`{id}`).
+/// Forwards to `todo_set_status` with `done=false`. Drop in the next
+/// minor release after v0.6.0.
+fn run_todo_uncomplete_alias(input: &str) -> Result<String, String> {
     let v: Value = serde_json::from_str(input)
         .map_err(|e| format!("todo_uncomplete: invalid JSON ({e}): {input}"))?;
     let id = v
         .get("id")
         .and_then(Value::as_str)
-        .ok_or("todo_uncomplete: missing 'id'")?
-        .to_string();
-
-    let mut todos = load_todos()?;
-    let mut updated = None;
-    for t in &mut todos {
-        if t.id == id {
-            t.done = false;
-            t.completed_at = None;
-            updated = Some(t.text.clone());
-            break;
-        }
-    }
-    let text = updated.ok_or_else(|| format!("todo_uncomplete: no todo with id '{id}'"))?;
-    save_todos(&todos)?;
-
-    Ok(json!({ "ok": true, "id": id, "text": text, "done": false }).to_string())
+        .ok_or("todo_uncomplete: missing 'id'")?;
+    let payload = json!({ "id": id, "done": false });
+    run_todo_set_status(&payload.to_string())
 }
 
 fn run_todo_delete(input: &str) -> Result<String, String> {
@@ -307,15 +311,54 @@ mod tests {
     }
 
     #[test]
-    fn todo_uncomplete_rejects_missing_id() {
-        let err = run_todo_uncomplete("{}").unwrap_err();
+    fn todo_set_status_rejects_missing_id() {
+        let err = run_todo_set_status(r#"{"done":true}"#).unwrap_err();
         assert!(err.contains("missing 'id'"), "got: {err}");
     }
 
     #[test]
-    fn todo_uncomplete_rejects_unknown_id() {
-        let err = run_todo_uncomplete(r#"{"id":"t_does_not_exist_99999"}"#).unwrap_err();
+    fn todo_set_status_rejects_missing_done() {
+        let err = run_todo_set_status(r#"{"id":"t_x"}"#).unwrap_err();
+        assert!(err.contains("missing 'done'"), "got: {err}");
+    }
+
+    #[test]
+    fn todo_set_status_rejects_unknown_id() {
+        let err =
+            run_todo_set_status(r#"{"id":"t_does_not_exist_99999","done":true}"#).unwrap_err();
         assert!(err.contains("no todo with id"), "got: {err}");
+    }
+
+    #[test]
+    fn todo_complete_alias_dispatches() {
+        // Alias must still route through dispatch — execution would touch
+        // disk, so we only verify the dispatch branch is wired by trying
+        // an unknown id (which gets through arg validation, then errors
+        // at the lookup step).
+        let result = dispatch("todo_complete", r#"{"id":"t_unknown_xyz_123"}"#);
+        assert!(result.is_some(), "todo_complete alias must dispatch");
+        let err = result.unwrap().unwrap_err();
+        assert!(err.contains("no todo with id"), "got: {err}");
+    }
+
+    #[test]
+    fn todo_uncomplete_alias_dispatches() {
+        let result = dispatch("todo_uncomplete", r#"{"id":"t_unknown_xyz_123"}"#);
+        assert!(result.is_some(), "todo_uncomplete alias must dispatch");
+        let err = result.unwrap().unwrap_err();
+        assert!(err.contains("no todo with id"), "got: {err}");
+    }
+
+    #[test]
+    fn todo_complete_alias_rejects_missing_id() {
+        let err = run_todo_complete_alias("{}").unwrap_err();
+        assert!(err.contains("missing 'id'"), "got: {err}");
+    }
+
+    #[test]
+    fn todo_uncomplete_alias_rejects_missing_id() {
+        let err = run_todo_uncomplete_alias("{}").unwrap_err();
+        assert!(err.contains("missing 'id'"), "got: {err}");
     }
 
     #[test]
@@ -341,22 +384,16 @@ mod tests {
     }
 
     #[test]
-    fn schemas_lists_five_tools() {
+    fn schemas_lists_four_tools() {
         let schemas = schemas();
-        assert_eq!(schemas.len(), 5);
+        assert_eq!(schemas.len(), 4);
         let names: Vec<&str> = schemas
             .iter()
             .filter_map(|v| v.pointer("/function/name").and_then(Value::as_str))
             .collect();
         assert_eq!(
             names,
-            [
-                "todo_add",
-                "todo_list",
-                "todo_complete",
-                "todo_uncomplete",
-                "todo_delete"
-            ]
+            ["todo_add", "todo_list", "todo_set_status", "todo_delete"]
         );
     }
 }
