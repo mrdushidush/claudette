@@ -41,7 +41,7 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "edit_file",
-                "description": "Replace text in an existing file under the user's home. Requires confirmation. For creating new files use write_file or generate_code.",
+                "description": "Legacy single-string text replace (one occurrence only). Prefer apply_patch for multi-line / multi-file edits — v0.6.0 marks this for removal in a future release. For new files use write_file or generate_code.",
                 "parameters": {
                     "type": "object",
                     "properties": {

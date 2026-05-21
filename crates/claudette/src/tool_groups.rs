@@ -128,7 +128,7 @@ impl ToolGroup {
             Self::Schedule => "proactive reminders: one-shot + recurring schedules that fire prompts back at you",
             Self::Gmail => "gmail (read-only): list/search/read messages, list labels (requires claudette --auth-google gmail)",
             Self::Recall => "cross-session memory: recall past messages by semantic similarity (use when user references prior conversations)",
-            Self::Quality => "code quality: run_tests (cargo/npm/pytest/go) and diagnostics (cargo check, clippy, tsc, mypy, ruff). apply_patch lands next.",
+            Self::Quality => "code quality + edits: run_tests, diagnostics (cargo check / clippy / tsc / mypy / ruff), apply_patch (atomic multi-file unified diff).",
         }
     }
 
@@ -260,7 +260,7 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
             Some(ToolGroup::Gmail)
         }
         "recall" => Some(ToolGroup::Recall),
-        "run_tests" | "diagnostics" => Some(ToolGroup::Quality),
+        "run_tests" | "diagnostics" | "apply_patch" => Some(ToolGroup::Quality),
         _ => None,
     }
 }

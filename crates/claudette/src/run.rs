@@ -1529,6 +1529,11 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         // auto-allowed by the policy cache.
         .with_tool_requirement("run_tests", WorkspaceWrite)
         .with_tool_requirement("diagnostics", WorkspaceWrite)
+        // apply_patch mutates files under $HOME — same DangerFullAccess
+        // gate as edit_file (its long-term replacement). dry_run does no
+        // disk writes but the schema doesn't differentiate, so the
+        // permission applies uniformly.
+        .with_tool_requirement("apply_patch", DangerFullAccess)
         // ── Sprint 9 Phase 0a: github group ──────────────────────────
         // Reads: auto-allowed. Writes: WorkspaceWrite (hit the network
         // on the user's behalf but don't touch the filesystem).
