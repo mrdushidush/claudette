@@ -1541,6 +1541,9 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("bash_background", DangerFullAccess)
         .with_tool_requirement("bash_status", ReadOnly)
         .with_tool_requirement("bash_tail", ReadOnly)
+        // ── v0.6.0 Phase 3.4a: ask_user clarifier ───────────────────
+        // ReadOnly — it only reads from stdin; no side effects.
+        .with_tool_requirement("ask_user", ReadOnly)
         // ── v0.6.0: semantic search ─────────────────────────────────
         // semantic_grep reads workspace files (capped) and ranks by
         // token-overlap. Pure read — ReadOnly tier is fine.

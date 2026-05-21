@@ -25,6 +25,7 @@ use serde_json::{json, Value};
 // group-module contract at the top of `registry.rs`.
 mod calendar;
 mod codegen;
+mod dialog;
 mod facts;
 mod file_ops;
 mod git;
@@ -74,6 +75,7 @@ type DispatchFn = fn(&str, &str) -> Option<Result<String, String>>;
 const GROUPS: &[(SchemasFn, DispatchFn)] = &[
     (calendar::schemas, calendar::dispatch),
     (codegen::schemas, codegen::dispatch),
+    (dialog::schemas, dialog::dispatch),
     (facts::schemas, facts::dispatch),
     (file_ops::schemas, file_ops::dispatch),
     (git::schemas, git::dispatch),

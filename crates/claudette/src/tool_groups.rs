@@ -126,7 +126,7 @@ impl ToolGroup {
             Self::Git => "git workflows: status, diff, log, add, commit, branch, checkout, push",
             Self::Ide => "IDE integration: open_in_editor, reveal_in_explorer, open_url",
             Self::Search => "search: web_search (Brave), web_fetch, glob_search, grep_search",
-            Self::Advanced => "power tools: bash (sync), bash_background + bash_status + bash_tail (long-running), edit_file (legacy — prefer apply_patch), spawn_agent (delegation)",
+            Self::Advanced => "power tools: bash (sync), bash_background + bash_status + bash_tail, edit_file (legacy), spawn_agent, ask_user (turn-suspending clarifier)",
             Self::Facts => "reference lookups: wikipedia (summary or search via `mode`), weather (no API key needed)",
             Self::Registry => "package registries: crates.io and npm package metadata (version, downloads, homepage)",
             Self::Github => "github + brownfield missions: gh_inbox(scope=my_prs|assigned|repo_issues), issue+PR ops, code search, clone/fork, mission_start + mission_state(action=status|list|attach|exit) + mission_submit (requires GITHUB_TOKEN)",
@@ -233,9 +233,8 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         | "git_checkout" | "git_push" | "git_clone" => Some(ToolGroup::Git),
         "open_in_editor" | "reveal_in_explorer" | "open_url" => Some(ToolGroup::Ide),
         "glob_search" | "grep_search" | "web_fetch" | "web_search" => Some(ToolGroup::Search),
-        "bash" | "edit_file" | "spawn_agent" | "bash_background" | "bash_status" | "bash_tail" => {
-            Some(ToolGroup::Advanced)
-        }
+        "bash" | "edit_file" | "spawn_agent" | "bash_background" | "bash_status" | "bash_tail"
+        | "ask_user" => Some(ToolGroup::Advanced),
         // wikipedia_search/wikipedia_summary and weather_current/weather_forecast
         // are v0.6.0 dispatch-only aliases for `wikipedia(mode?)` and
         // `weather(days?)` respectively — not classified here because they're
