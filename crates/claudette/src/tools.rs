@@ -44,6 +44,7 @@ mod semantic;
 mod shell;
 mod telegram;
 mod todos;
+mod vision;
 mod web_search;
 
 // Pub re-exports for entry points that pre-extract paths from the raw
@@ -90,6 +91,7 @@ const GROUPS: &[(SchemasFn, DispatchFn)] = &[
     (search::schemas, search::dispatch),
     (semantic::schemas, semantic::dispatch),
     (shell::schemas, shell::dispatch),
+    (vision::schemas, vision::dispatch),
     (telegram::schemas, telegram::dispatch),
     (todos::schemas, todos::dispatch),
     (web_search::schemas, web_search::dispatch),

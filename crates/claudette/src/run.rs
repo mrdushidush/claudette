@@ -1545,6 +1545,14 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         // semantic_grep reads workspace files (capped) and ranks by
         // token-overlap. Pure read — ReadOnly tier is fine.
         .with_tool_requirement("semantic_grep", ReadOnly)
+        // ── v0.6.0: vision tools ────────────────────────────────────
+        // screenshot_capture invokes a platform screenshot tool (PowerShell
+        // bitmap on Windows, screencapture on macOS, gnome-screenshot/
+        // import on Linux). Treated as WorkspaceWrite because it writes
+        // a PNG under ~/.claudette/files/. image_describe is a network
+        // POST to LM Studio plus a file read — WorkspaceWrite tier.
+        .with_tool_requirement("screenshot_capture", WorkspaceWrite)
+        .with_tool_requirement("image_describe", WorkspaceWrite)
         // ── Sprint 9 Phase 0a: github group ──────────────────────────
         // Reads: auto-allowed. Writes: WorkspaceWrite (hit the network
         // on the user's behalf but don't touch the filesystem).
