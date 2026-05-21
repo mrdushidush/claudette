@@ -24,6 +24,7 @@ use serde_json::{json, Value};
 // Per-group sub-modules. Each exports `schemas()` and `dispatch()`; see the
 // group-module contract at the top of `registry.rs`.
 mod calendar;
+mod clipboard;
 mod codegen;
 mod dialog;
 mod facts;
@@ -74,6 +75,7 @@ type DispatchFn = fn(&str, &str) -> Option<Result<String, String>>;
 
 const GROUPS: &[(SchemasFn, DispatchFn)] = &[
     (calendar::schemas, calendar::dispatch),
+    (clipboard::schemas, clipboard::dispatch),
     (codegen::schemas, codegen::dispatch),
     (dialog::schemas, dialog::dispatch),
     (facts::schemas, facts::dispatch),

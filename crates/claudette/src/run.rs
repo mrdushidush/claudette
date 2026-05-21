@@ -1548,6 +1548,12 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         // semantic_grep reads workspace files (capped) and ranks by
         // token-overlap. Pure read — ReadOnly tier is fine.
         .with_tool_requirement("semantic_grep", ReadOnly)
+        // ── v0.6.0 Phase 3.4b: clipboard text I/O ───────────────────
+        // Both can leak sensitive content (passwords on the clipboard,
+        // arbitrary text written into a user-visible buffer) — gate at
+        // WorkspaceWrite so the first call shows up in the prompt.
+        .with_tool_requirement("clipboard_read", WorkspaceWrite)
+        .with_tool_requirement("clipboard_write", WorkspaceWrite)
         // ── v0.6.0: vision tools ────────────────────────────────────
         // screenshot_capture invokes a platform screenshot tool (PowerShell
         // bitmap on Windows, screencapture on macOS, gnome-screenshot/

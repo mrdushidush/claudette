@@ -79,6 +79,9 @@ pub enum ToolGroup {
     /// Vision tools (v0.6.0 Phase 3.2b): screenshot_capture + image_describe.
     /// image_describe requires a vision-language model loaded in LM Studio.
     Vision,
+    /// Clipboard text I/O (v0.6.0 Phase 3.4b): clipboard_read + clipboard_write.
+    /// Backed by arboard.
+    Clipboard,
 }
 
 impl ToolGroup {
@@ -107,6 +110,7 @@ impl ToolGroup {
             Self::Quality => "quality",
             Self::Semantic => "semantic",
             Self::Vision => "vision",
+            Self::Clipboard => "clipboard",
         }
     }
 
@@ -139,12 +143,13 @@ impl ToolGroup {
             Self::Quality => "code quality + edits: run_tests, diagnostics (cargo check / clippy / tsc / mypy / ruff), apply_patch (atomic multi-file unified diff).",
             Self::Semantic => "workspace search: semantic_grep (token-overlap ranking, fuzzier than grep).",
             Self::Vision => "vision: screenshot_capture (PNG to ~/.claudette/files/), image_describe (needs a VLM loaded in LM Studio).",
+            Self::Clipboard => "OS clipboard: clipboard_read, clipboard_write (text only, 1 MB cap).",
         }
     }
 
     /// All groups in a stable order, for schema generation and tests.
     #[must_use]
-    pub fn all() -> [ToolGroup; 21] {
+    pub fn all() -> [ToolGroup; 22] {
         [
             Self::Notes,
             Self::Todos,
@@ -167,6 +172,7 @@ impl ToolGroup {
             Self::Quality,
             Self::Semantic,
             Self::Vision,
+            Self::Clipboard,
         ]
     }
 
@@ -197,6 +203,7 @@ impl ToolGroup {
             "quality" | "tests" | "lint" | "diagnostics" => Some(Self::Quality),
             "semantic" | "smart-grep" | "concept" => Some(Self::Semantic),
             "vision" | "image" | "screenshot" | "vlm" => Some(Self::Vision),
+            "clipboard" | "copy" | "paste" => Some(Self::Clipboard),
             _ => None,
         }
     }
@@ -280,6 +287,7 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         "run_tests" | "diagnostics" | "apply_patch" => Some(ToolGroup::Quality),
         "semantic_grep" => Some(ToolGroup::Semantic),
         "screenshot_capture" | "image_describe" => Some(ToolGroup::Vision),
+        "clipboard_read" | "clipboard_write" => Some(ToolGroup::Clipboard),
         _ => None,
     }
 }
