@@ -1534,6 +1534,13 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         // disk writes but the schema doesn't differentiate, so the
         // permission applies uniformly.
         .with_tool_requirement("apply_patch", DangerFullAccess)
+        // ── v0.6.0: bash_background family ──────────────────────────
+        // bash_background spawns a long-running subprocess — same gate
+        // as `bash`. bash_status + bash_tail are pure reads of files
+        // we wrote, so they're ReadOnly.
+        .with_tool_requirement("bash_background", DangerFullAccess)
+        .with_tool_requirement("bash_status", ReadOnly)
+        .with_tool_requirement("bash_tail", ReadOnly)
         // ── Sprint 9 Phase 0a: github group ──────────────────────────
         // Reads: auto-allowed. Writes: WorkspaceWrite (hit the network
         // on the user's behalf but don't touch the filesystem).
