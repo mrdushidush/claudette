@@ -1839,13 +1839,7 @@ mod tests {
         // stays under ~200 tokens. Verify the new classification holds.
         use crate::tool_groups::{group_of, ToolGroup, CORE_TOOL_NAMES};
 
-        for tool in &[
-            "note_create",
-            "note_list",
-            "note_read",
-            "note_update",
-            "note_delete",
-        ] {
+        for tool in &["note_create", "note_list", "note_read", "note_delete"] {
             assert!(
                 !CORE_TOOL_NAMES.contains(tool),
                 "{tool} must NOT be in core (regression — it should live in the Notes group)"
@@ -1856,6 +1850,9 @@ mod tests {
                 "{tool} must classify as Notes"
             );
         }
+        // v0.6.0: note_update is a dispatch-only alias for the upsert path
+        // in note_create — it must NOT classify into any group.
+        assert_eq!(group_of("note_update"), None);
         for tool in &["todo_add", "todo_list", "todo_set_status", "todo_delete"] {
             assert!(
                 !CORE_TOOL_NAMES.contains(tool),

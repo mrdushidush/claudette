@@ -104,7 +104,7 @@ impl ToolGroup {
     #[must_use]
     pub fn summary(self) -> &'static str {
         match self {
-            Self::Notes => "personal notes: create/list/read/update/delete",
+            Self::Notes => "personal notes: create/list/read/delete. note_create is upsert — pass `id` from note_list to update an existing note.",
             Self::Todos => "todo list: add/list/set_status (done bool)/delete",
             Self::Files => "file ops: read_file, write_file, list_dir (under ~/)",
             Self::Code => "code generation via specialised coder model + validator",
@@ -197,9 +197,9 @@ pub const CORE_TOOL_NAMES: &[&str] = &["enable_tools", "get_current_time", "load
 #[must_use]
 pub fn group_of(tool: &str) -> Option<ToolGroup> {
     match tool {
-        "note_create" | "note_list" | "note_read" | "note_update" | "note_delete" => {
-            Some(ToolGroup::Notes)
-        }
+        // note_update is a v0.6.0 dispatch-only alias for note_create
+        // (upsert via optional `id`) — not classified here.
+        "note_create" | "note_list" | "note_read" | "note_delete" => Some(ToolGroup::Notes),
         // todo_complete + todo_uncomplete are v0.6.0 dispatch-only aliases
         // for todo_set_status(done?). Not classified here.
         "todo_add" | "todo_list" | "todo_set_status" | "todo_delete" => Some(ToolGroup::Todos),
