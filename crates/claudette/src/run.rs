@@ -1521,6 +1521,13 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         // schema.
         .with_tool_requirement("crate_info", ReadOnly)
         .with_tool_requirement("npm_info", ReadOnly)
+        // ── v0.6.0: quality group (project-tests, project-diagnostics) ──
+        // run_tests spawns the project's test framework as a subprocess,
+        // which runs arbitrary user code — gate it at WorkspaceWrite so
+        // the user sees the dispatch the first time the brain reaches
+        // for it. Subsequent calls within the same session are
+        // auto-allowed by the policy cache.
+        .with_tool_requirement("run_tests", WorkspaceWrite)
         // ── Sprint 9 Phase 0a: github group ──────────────────────────
         // Reads: auto-allowed. Writes: WorkspaceWrite (hit the network
         // on the user's behalf but don't touch the filesystem).

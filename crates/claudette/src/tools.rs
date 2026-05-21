@@ -34,6 +34,7 @@ mod ide;
 mod markets;
 mod mission;
 mod notes;
+mod quality;
 mod recall;
 mod registry;
 mod schedule;
@@ -79,6 +80,7 @@ const GROUPS: &[(SchemasFn, DispatchFn)] = &[
     (markets::schemas, markets::dispatch),
     (mission::schemas, mission::dispatch),
     (notes::schemas, notes::dispatch),
+    (quality::schemas, quality::dispatch),
     (recall::schemas, recall::dispatch),
     (registry::schemas, registry::dispatch),
     (schedule::schemas, schedule::dispatch),

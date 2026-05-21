@@ -68,6 +68,11 @@ pub enum ToolGroup {
     /// Cross-session semantic recall: search past conversations indexed in
     /// `~/.claudette/recall.sqlite`. One tool — `recall(query, k)`.
     Recall,
+    /// Code-quality tools that close the gap with Claude Code / Aider on
+    /// the engineering inner loop: `run_tests`, plus `diagnostics`
+    /// (Phase 3.1b) and `apply_patch` (Phase 3.1c) coming in the same
+    /// v0.6.0 sprint.
+    Quality,
 }
 
 impl ToolGroup {
@@ -93,6 +98,7 @@ impl ToolGroup {
             Self::Schedule => "schedule",
             Self::Gmail => "gmail",
             Self::Recall => "recall",
+            Self::Quality => "quality",
         }
     }
 
@@ -122,12 +128,13 @@ impl ToolGroup {
             Self::Schedule => "proactive reminders: one-shot + recurring schedules that fire prompts back at you",
             Self::Gmail => "gmail (read-only): list/search/read messages, list labels (requires claudette --auth-google gmail)",
             Self::Recall => "cross-session memory: recall past messages by semantic similarity (use when user references prior conversations)",
+            Self::Quality => "code quality: run_tests (cargo/npm/pytest/go auto-detect, structured failures). diagnostics + apply_patch land in v0.6.0 too.",
         }
     }
 
     /// All groups in a stable order, for schema generation and tests.
     #[must_use]
-    pub fn all() -> [ToolGroup; 18] {
+    pub fn all() -> [ToolGroup; 19] {
         [
             Self::Notes,
             Self::Todos,
@@ -147,6 +154,7 @@ impl ToolGroup {
             Self::Schedule,
             Self::Gmail,
             Self::Recall,
+            Self::Quality,
         ]
     }
 
@@ -174,6 +182,7 @@ impl ToolGroup {
             "schedule" | "scheduler" | "reminders" | "reminder" => Some(Self::Schedule),
             "gmail" | "mail" | "email" | "inbox" => Some(Self::Gmail),
             "recall" | "memory" | "remember" | "history" => Some(Self::Recall),
+            "quality" | "tests" | "lint" | "diagnostics" => Some(Self::Quality),
             _ => None,
         }
     }
@@ -251,6 +260,7 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
             Some(ToolGroup::Gmail)
         }
         "recall" => Some(ToolGroup::Recall),
+        "run_tests" => Some(ToolGroup::Quality),
         _ => None,
     }
 }
