@@ -158,6 +158,24 @@ pub(super) fn schemas() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
+                "name": "gh_workflow_logs",
+                "description": "Fetch failed-job log lines for a GitHub Actions run. Provide owner+repo plus one of: `pr` (auto-resolve to the latest failed run on the PR's head sha), `run_id`, or `job_id`. Returns matching lines around error/FAILED/panic markers.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "owner":  { "type": "string", "description": "Repo owner" },
+                        "repo":   { "type": "string", "description": "Repo name" },
+                        "pr":     { "type": "number", "description": "PR number — auto-resolves to the latest failed workflow run on the PR's head sha." },
+                        "run_id": { "type": "number", "description": "Explicit workflow run id." },
+                        "job_id": { "type": "number", "description": "Explicit job id (skips the run-lookup hop)." }
+                    },
+                    "required": ["owner", "repo"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
                 "name": "gh_fork",
                 "description": "Fork a repo to the authenticated user's account. Required before pushing fix branches when you can't push to upstream.",
                 "parameters": {
@@ -206,6 +224,7 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
         "gh_list_repo_issues" => run_gh_list_repo_issues(input),
         "gh_pr_status" => run_gh_pr_status(input),
         "gh_pr_view" => run_gh_pr_view(input),
+        "gh_workflow_logs" => run_gh_workflow_logs(input),
         "gh_fork" => run_gh_fork(input),
         "gh_create_pr" => run_gh_create_pr(input),
         _ => return None,
@@ -864,6 +883,267 @@ fn run_gh_pr_view(input: &str) -> Result<String, String> {
     .to_string())
 }
 
+/// `gh_workflow_logs` — auto-extract failed-job error context. The brain
+/// gets to ask "what broke?" without paging through the GitHub UI.
+///
+/// Resolution order:
+/// 1. `job_id` → fetch that job's log directly.
+/// 2. `run_id` → list jobs, pick failed ones, fetch each log.
+/// 3. `pr` → look up PR head_sha → find latest failed run on that sha →
+///    list its failed jobs → fetch each log.
+fn run_gh_workflow_logs(input: &str) -> Result<String, String> {
+    let v = parse_json_input(input, "gh_workflow_logs")?;
+    let owner = extract_str(&v, "owner", "gh_workflow_logs")?;
+    let repo = extract_str(&v, "repo", "gh_workflow_logs")?;
+    let pr = v.get("pr").and_then(Value::as_i64);
+    let explicit_run = v.get("run_id").and_then(Value::as_i64);
+    let explicit_job = v.get("job_id").and_then(Value::as_i64);
+
+    if pr.is_none() && explicit_run.is_none() && explicit_job.is_none() {
+        return Err("gh_workflow_logs: provide one of 'pr', 'run_id', or 'job_id'".to_string());
+    }
+
+    let token = github_token()?;
+    let client = external_http_client()?;
+
+    let mut sections: Vec<Value> = Vec::new();
+
+    if let Some(job_id) = explicit_job {
+        let log = fetch_job_log(&client, &token, owner, repo, job_id)?;
+        sections.push(json!({
+            "job_id": job_id,
+            "lines": extract_error_lines(&log),
+        }));
+    } else {
+        // Resolve to a run id.
+        let run_id = if let Some(rid) = explicit_run {
+            rid
+        } else if let Some(pr_num) = pr {
+            resolve_run_from_pr(&client, &token, owner, repo, pr_num)?
+        } else {
+            unreachable!("guarded above")
+        };
+        let jobs = list_failed_jobs(&client, &token, owner, repo, run_id)?;
+        if jobs.is_empty() {
+            return Ok(json!({
+                "owner": owner,
+                "repo": repo,
+                "run_id": run_id,
+                "note": "no failed jobs on this run (or all jobs are still in progress)",
+                "sections": [],
+            })
+            .to_string());
+        }
+        for (jid, name) in jobs {
+            let log = match fetch_job_log(&client, &token, owner, repo, jid) {
+                Ok(s) => s,
+                Err(e) => {
+                    sections.push(json!({
+                        "job_id": jid,
+                        "job_name": name,
+                        "error": e,
+                    }));
+                    continue;
+                }
+            };
+            sections.push(json!({
+                "job_id": jid,
+                "job_name": name,
+                "lines": extract_error_lines(&log),
+            }));
+        }
+    }
+
+    Ok(json!({
+        "owner": owner,
+        "repo": repo,
+        "pr": pr,
+        "run_id": explicit_run,
+        "job_id": explicit_job,
+        "sections": sections,
+    })
+    .to_string())
+}
+
+fn fetch_job_log(
+    client: &reqwest::blocking::Client,
+    token: &str,
+    owner: &str,
+    repo: &str,
+    job_id: i64,
+) -> Result<String, String> {
+    // GitHub redirects this endpoint to a signed URL — reqwest follows
+    // redirects by default. Response body is plain text.
+    let url = format!("https://api.github.com/repos/{owner}/{repo}/actions/jobs/{job_id}/logs");
+    let resp = github_get(client, &url, token)
+        .send()
+        .map_err(|e| format!("gh_workflow_logs: fetch job {job_id}: {e}"))?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(format!(
+            "gh_workflow_logs: job {job_id} log not available (already expired?)"
+        ));
+    }
+    if !resp.status().is_success() {
+        return Err(format!(
+            "gh_workflow_logs: job {job_id} HTTP {}",
+            resp.status()
+        ));
+    }
+    resp.text()
+        .map_err(|e| format!("gh_workflow_logs: job {job_id} read body: {e}"))
+}
+
+fn resolve_run_from_pr(
+    client: &reqwest::blocking::Client,
+    token: &str,
+    owner: &str,
+    repo: &str,
+    pr_num: i64,
+) -> Result<i64, String> {
+    let pr_url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{pr_num}");
+    let pr_resp = github_get(client, &pr_url, token)
+        .send()
+        .map_err(|e| format!("gh_workflow_logs: PR lookup failed: {e}"))?;
+    if !pr_resp.status().is_success() {
+        return Err(format!(
+            "gh_workflow_logs: PR {owner}/{repo}#{pr_num} HTTP {}",
+            pr_resp.status()
+        ));
+    }
+    let pr: Value = pr_resp
+        .json()
+        .map_err(|e| format!("gh_workflow_logs: PR parse failed: {e}"))?;
+    let head_sha = pr
+        .pointer("/head/sha")
+        .and_then(Value::as_str)
+        .ok_or("gh_workflow_logs: PR has no head sha")?;
+
+    let runs_url = format!("https://api.github.com/repos/{owner}/{repo}/actions/runs");
+    let runs_resp = github_get(client, &runs_url, token)
+        .query(&[("head_sha", head_sha), ("per_page", "20")])
+        .send()
+        .map_err(|e| format!("gh_workflow_logs: runs request failed: {e}"))?;
+    if !runs_resp.status().is_success() {
+        return Err(format!(
+            "gh_workflow_logs: runs HTTP {}",
+            runs_resp.status()
+        ));
+    }
+    let data: Value = runs_resp
+        .json()
+        .map_err(|e| format!("gh_workflow_logs: runs parse failed: {e}"))?;
+    let runs = data
+        .get("workflow_runs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for run in &runs {
+        let status = run.get("status").and_then(Value::as_str).unwrap_or("");
+        let conclusion = run.get("conclusion").and_then(Value::as_str).unwrap_or("");
+        if status == "completed"
+            && matches!(
+                conclusion,
+                "failure" | "timed_out" | "cancelled" | "action_required"
+            )
+        {
+            if let Some(id) = run.get("id").and_then(Value::as_i64) {
+                return Ok(id);
+            }
+        }
+    }
+    Err(format!(
+        "gh_workflow_logs: no failed workflow run found for {owner}/{repo}#{pr_num} (head {head_sha})"
+    ))
+}
+
+fn list_failed_jobs(
+    client: &reqwest::blocking::Client,
+    token: &str,
+    owner: &str,
+    repo: &str,
+    run_id: i64,
+) -> Result<Vec<(i64, String)>, String> {
+    let url = format!("https://api.github.com/repos/{owner}/{repo}/actions/runs/{run_id}/jobs");
+    let resp = github_get(client, &url, token)
+        .query(&[("per_page", "30")])
+        .send()
+        .map_err(|e| format!("gh_workflow_logs: list jobs failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("gh_workflow_logs: jobs HTTP {}", resp.status()));
+    }
+    let data: Value = resp
+        .json()
+        .map_err(|e| format!("gh_workflow_logs: jobs parse failed: {e}"))?;
+    let jobs = data
+        .get("jobs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut out: Vec<(i64, String)> = Vec::new();
+    for job in &jobs {
+        let conclusion = job.get("conclusion").and_then(Value::as_str).unwrap_or("");
+        if matches!(
+            conclusion,
+            "failure" | "timed_out" | "cancelled" | "action_required"
+        ) {
+            if let Some(id) = job.get("id").and_then(Value::as_i64) {
+                let name = job
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                out.push((id, name));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Pull error-relevant lines out of a workflow log. We capture lines
+/// containing common failure markers plus a small window of context
+/// around each. Caps at 80 retained lines and 8 KB total so the brain
+/// doesn't get drowned in a 50 MB build log.
+fn extract_error_lines(log: &str) -> Vec<String> {
+    const MARKERS: &[&str] = &[
+        "error:",
+        "Error:",
+        "FAILED",
+        "panicked at",
+        "##[error]",
+        "fatal:",
+        "Process completed with exit code",
+    ];
+    const CONTEXT: usize = 2;
+    const MAX_LINES: usize = 80;
+    const MAX_BYTES: usize = 8 * 1024;
+
+    let lines: Vec<&str> = log.lines().collect();
+    let mut keep: Vec<bool> = vec![false; lines.len()];
+    for (i, line) in lines.iter().enumerate() {
+        if MARKERS.iter().any(|m| line.contains(m)) {
+            let start = i.saturating_sub(CONTEXT);
+            let end = (i + CONTEXT + 1).min(lines.len());
+            for k in keep.iter_mut().take(end).skip(start) {
+                *k = true;
+            }
+        }
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut bytes = 0usize;
+    for (i, line) in lines.iter().enumerate() {
+        if !keep[i] {
+            continue;
+        }
+        if out.len() >= MAX_LINES || bytes + line.len() > MAX_BYTES {
+            out.push("... [truncated]".to_string());
+            break;
+        }
+        bytes += line.len();
+        out.push((*line).to_string());
+    }
+    out
+}
+
 fn run_gh_fork(input: &str) -> Result<String, String> {
     let v = parse_json_input(input, "gh_fork")?;
     let owner = extract_str(&v, "owner", "gh_fork")?;
@@ -999,9 +1279,9 @@ mod tests {
     }
 
     #[test]
-    fn schemas_lists_ten_tools() {
+    fn schemas_lists_eleven_tools() {
         let schemas = schemas();
-        assert_eq!(schemas.len(), 10);
+        assert_eq!(schemas.len(), 11);
         let names: Vec<&str> = schemas
             .iter()
             .filter_map(|v| v.pointer("/function/name").and_then(Value::as_str))
@@ -1017,9 +1297,66 @@ mod tests {
                 "gh_list_repo_issues",
                 "gh_pr_status",
                 "gh_pr_view",
+                "gh_workflow_logs",
                 "gh_fork",
                 "gh_create_pr",
             ]
+        );
+    }
+
+    #[test]
+    fn gh_workflow_logs_requires_resolver_arg() {
+        let err = run_gh_workflow_logs(r#"{"owner":"me","repo":"r"}"#).unwrap_err();
+        assert!(
+            err.contains("'pr'") || err.contains("'run_id'") || err.contains("'job_id'"),
+            "error must enumerate the resolver args: {err}"
+        );
+    }
+
+    #[test]
+    fn gh_workflow_logs_rejects_missing_owner() {
+        let err = run_gh_workflow_logs(r#"{"repo":"r","pr":1}"#).unwrap_err();
+        assert!(err.contains("owner"), "got: {err}");
+    }
+
+    #[test]
+    fn extract_error_lines_keeps_markers_and_context() {
+        let log = "step 1\n\
+                   step 2\n\
+                   error: build failed\n\
+                   step 4\n\
+                   step 5\n\
+                   step 6\n\
+                   step 7\n\
+                   FAILED test_x\n\
+                   step 9\n";
+        let kept = super::extract_error_lines(log);
+        // 'error: build failed' brings context lines 1..=4 (0-indexed 0..=4
+        // because i=2 with CONTEXT=2). FAILED at i=7 brings 5..=9 (clamped).
+        // Both ranges merge; the result must include both markers + their
+        // ± 2 line context.
+        let joined = kept.join("\n");
+        assert!(joined.contains("error: build failed"), "got: {joined}");
+        assert!(joined.contains("FAILED test_x"), "got: {joined}");
+        assert!(joined.contains("step 2"), "context not preserved: {joined}");
+    }
+
+    #[test]
+    fn extract_error_lines_truncates_huge_logs() {
+        use std::fmt::Write as _;
+        let mut log = String::new();
+        for i in 0..1000 {
+            let _ = writeln!(log, "error: line {i}");
+        }
+        let kept = super::extract_error_lines(&log);
+        assert!(
+            kept.len() <= 81,
+            "should cap retained lines, got {}",
+            kept.len()
+        );
+        assert!(
+            kept.iter().any(|l| l.contains("truncated")),
+            "missing truncation marker"
         );
     }
 

@@ -255,6 +255,7 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         | "gh_list_repo_issues"
         | "gh_pr_status"
         | "gh_pr_view"
+        | "gh_workflow_logs"
         | "gh_fork"
         | "gh_create_pr"
         | "mission_start"
@@ -723,6 +724,7 @@ mod tests {
             "gh_list_repo_issues",
             "gh_pr_status",
             "gh_pr_view",
+            "gh_workflow_logs",
             "gh_fork",
             "gh_create_pr",
             "mission_start",
@@ -733,9 +735,9 @@ mod tests {
         }
         // v0.6.0: gh_list_my_prs + gh_list_assigned_issues collapsed into
         // gh_inbox(scope=...); mission_status/list/attach/exit collapsed
-        // into mission_state(action=...). gh_pr_view added in Phase 3.3a.
-        // Github group is now 13 advertised tools.
-        assert_eq!(gh.len(), 13);
+        // into mission_state(action=...). gh_pr_view + gh_workflow_logs
+        // added in Phase 3.3. Github group is now 14 advertised tools.
+        assert_eq!(gh.len(), 14);
     }
 
     #[test]
