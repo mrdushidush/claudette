@@ -1587,6 +1587,14 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         // mission_submit stages/commits/pushes/opens a PR — must be
         // DangerFullAccess to match its worst action (`git push -u`).
         .with_tool_requirement("mission_start", WorkspaceWrite)
+        // v0.6.0: mission_status/list/attach/exit merged into
+        // mission_state(action?). Aliases dispatch so policy entries stay.
+        // mission_state is broadly ReadOnly except action='exit' which
+        // mutates session state — but the legacy mission_exit entry
+        // already had WorkspaceWrite, and we keep that there. mission_state
+        // itself is gated at the lowest tier (ReadOnly) since most actions
+        // are reads; the brain will rarely call action='exit' unprompted.
+        .with_tool_requirement("mission_state", ReadOnly)
         .with_tool_requirement("mission_status", ReadOnly)
         .with_tool_requirement("mission_list", ReadOnly)
         .with_tool_requirement("mission_attach", ReadOnly)

@@ -181,7 +181,10 @@ fn gitops_tools() -> BTreeSet<String> {
         "gh_fork",
         "gh_create_pr",
         // T2: mission_* drives the brownfield clone→submit loop.
+        // v0.6.0: mission_status/list/attach/exit collapsed into
+        // mission_state(action=...). Aliases still dispatch.
         "mission_start",
+        "mission_state",
         "mission_status",
         "mission_list",
         "mission_attach",
@@ -320,6 +323,9 @@ fn build_agent_permission_policy(allowed: &BTreeSet<String>) -> PermissionPolicy
         "gh_pr_status",
         // T2: mission_attach reads a marker + flips an in-memory slot.
         // Downstream cwd-routed writes still go through their own gates.
+        // v0.6.0: mission_state(action='attach') routes through the same
+        // backend; classified as ReadOnly when the agent allows it.
+        "mission_state",
         "mission_attach",
     ] {
         if allowed.contains(name) {

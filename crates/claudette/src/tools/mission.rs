@@ -51,39 +51,16 @@ pub(super) fn schemas() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
-                "name": "mission_status",
-                "description": "Show the currently active mission (slug, path, GitHub repo, current branch). Returns null when no mission is active.",
-                "parameters": { "type": "object", "properties": {}, "required": [] }
-            }
-        }),
-        json!({
-            "type": "function",
-            "function": {
-                "name": "mission_list",
-                "description": "List every mission registered under ~/.claudette/missions/ (active or not). Also reports 'orphans' — directories under that root with no marker (likely pre-T2 git_clone leftovers; mission_attach won't find them).",
-                "parameters": { "type": "object", "properties": {}, "required": [] }
-            }
-        }),
-        json!({
-            "type": "function",
-            "function": {
-                "name": "mission_attach",
-                "description": "Re-attach to a mission previously started in another session by reading its on-disk marker. Use after restart to resume cwd-routing into the mission tree. Errors if a mission is already active or the slug has no marker.",
+                "name": "mission_state",
+                "description": "Polymorphic mission state ops. action='status' (current mission), 'list' (all registered missions), 'attach' (resume by slug — pass `slug`), 'exit' (clear active mission). v0.6.0 collapsed mission_status/mission_list/mission_attach/mission_exit into this one tool.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "slug": { "type": "string", "description": "Mission slug (directory name under ~/.claudette/missions/) — same value mission_start returned." }
+                        "action": { "type": "string", "description": "'status', 'list', 'attach', or 'exit'" },
+                        "slug":   { "type": "string", "description": "Mission slug (required when action='attach')" }
                     },
-                    "required": ["slug"]
+                    "required": ["action"]
                 }
-            }
-        }),
-        json!({
-            "type": "function",
-            "function": {
-                "name": "mission_exit",
-                "description": "Clear the active mission. The cloned tree is left intact for resumption.",
-                "parameters": { "type": "object", "properties": {}, "required": [] }
             }
         }),
         json!({
@@ -109,6 +86,10 @@ pub(super) fn schemas() -> Vec<Value> {
 pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>> {
     let r = match name {
         "mission_start" => run_mission_start(input),
+        "mission_state" => run_mission_state(input),
+        // v0.6.0 deprecated aliases — drop in next minor release. The four
+        // single-purpose state tools are still reachable for one release
+        // so existing prompts keep working.
         "mission_status" => run_mission_status(),
         "mission_list" => run_mission_list(),
         "mission_attach" => run_mission_attach(input),
@@ -117,6 +98,28 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
         _ => return None,
     };
     Some(r)
+}
+
+/// `mission_state(action, slug?)` — polymorphic mission state ops.
+/// Routes to the same backends as the legacy mission_status/list/attach/
+/// exit tools. `attach` is the only action that needs `slug` — the others
+/// ignore it.
+fn run_mission_state(input: &str) -> Result<String, String> {
+    let v = parse_json_input(input, "mission_state")?;
+    let action = extract_str(&v, "action", "mission_state")?;
+    match action {
+        "status" => run_mission_status(),
+        "list" => run_mission_list(),
+        "attach" => {
+            // Forward the original payload — run_mission_attach expects
+            // `{slug}` at top level, which matches mission_state's shape.
+            run_mission_attach(input)
+        }
+        "exit" => run_mission_exit(),
+        other => Err(format!(
+            "mission_state: unknown action '{other}' — use 'status', 'list', 'attach', or 'exit'"
+        )),
+    }
 }
 
 // ─── target parsing ──────────────────────────────────────────────────────
@@ -766,24 +769,68 @@ mod tests {
     }
 
     #[test]
-    fn schemas_lists_six_tools() {
+    fn schemas_lists_three_tools() {
         let schemas = schemas();
-        assert_eq!(schemas.len(), 6);
+        assert_eq!(schemas.len(), 3);
         let names: Vec<&str> = schemas
             .iter()
             .filter_map(|v| v.pointer("/function/name").and_then(Value::as_str))
             .collect();
-        assert_eq!(
-            names,
-            [
-                "mission_start",
-                "mission_status",
-                "mission_list",
-                "mission_attach",
-                "mission_exit",
-                "mission_submit",
-            ]
+        // v0.6.0: mission_status/list/attach/exit collapsed into the
+        // polymorphic mission_state. Only start/state/submit are
+        // advertised.
+        assert_eq!(names, ["mission_start", "mission_state", "mission_submit"]);
+    }
+
+    #[test]
+    fn mission_state_rejects_missing_action() {
+        let err = run_mission_state("{}").unwrap_err();
+        assert!(err.contains("action"), "got: {err}");
+    }
+
+    #[test]
+    fn mission_state_rejects_unknown_action() {
+        let err = run_mission_state(r#"{"action":"banana"}"#).unwrap_err();
+        assert!(err.contains("unknown action"), "got: {err}");
+        assert!(
+            err.contains("status")
+                && err.contains("list")
+                && err.contains("attach")
+                && err.contains("exit"),
+            "error must enumerate every valid action: {err}"
         );
+    }
+
+    #[test]
+    fn mission_state_status_and_list_run_without_args() {
+        // status + list ignore `slug`; both must complete without error
+        // regardless of mission-active state on the host.
+        let _ = run_mission_state(r#"{"action":"status"}"#).expect("mission_state status");
+        let _ = run_mission_state(r#"{"action":"list"}"#).expect("mission_state list");
+    }
+
+    #[test]
+    fn mission_state_attach_forwards_slug_validation() {
+        // mission_state(action='attach') without slug must surface the same
+        // missing-slug error as the legacy mission_attach tool — i.e. it
+        // routes through run_mission_attach rather than failing at a generic
+        // schema level.
+        let err = run_mission_state(r#"{"action":"attach"}"#).unwrap_err();
+        assert!(
+            err.contains("slug") || err.contains("missing"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn mission_state_legacy_aliases_dispatch() {
+        // Each legacy mission_* state name must keep dispatching through
+        // the group's dispatch function — the arm being wired is what we
+        // assert; success vs error depends on session state.
+        assert!(super::dispatch("mission_status", "{}").is_some());
+        assert!(super::dispatch("mission_list", "{}").is_some());
+        assert!(super::dispatch("mission_attach", r#"{"slug":"x"}"#).is_some());
+        assert!(super::dispatch("mission_exit", "{}").is_some());
     }
 
     #[test]

@@ -115,7 +115,7 @@ impl ToolGroup {
             Self::Advanced => "power tools: bash, edit_file, spawn_agent (delegation)",
             Self::Facts => "reference lookups: wikipedia (summary or search via `mode`), weather (no API key needed)",
             Self::Registry => "package registries: crates.io and npm package metadata (version, downloads, homepage)",
-            Self::Github => "github + brownfield missions: gh_inbox(scope=my_prs|assigned|repo_issues), issue+PR ops, code search, clone/fork, mission_start/attach/submit (requires GITHUB_TOKEN)",
+            Self::Github => "github + brownfield missions: gh_inbox(scope=my_prs|assigned|repo_issues), issue+PR ops, code search, clone/fork, mission_start + mission_state(action=status|list|attach|exit) + mission_submit (requires GITHUB_TOKEN)",
             Self::Markets => "market data: TradingView quotes (stocks/crypto/forex/futures, bare or qualified tickers)",
             Self::Telegram => "telegram bot: tg_send (text, or photo via optional `photo` URL — caption becomes the text). Requires TELEGRAM_BOT_TOKEN.",
             Self::Calendar => "google calendar: list/create/update/delete events, RSVP (requires claudette --auth-google)",
@@ -218,7 +218,10 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         "wikipedia" | "weather" => Some(ToolGroup::Facts),
         "crate_info" | "npm_info" => Some(ToolGroup::Registry),
         // gh_list_my_prs / gh_list_assigned_issues are v0.6.0
-        // dispatch-only aliases for gh_inbox(scope=...). Not classified.
+        // dispatch-only aliases for gh_inbox(scope=...).
+        // mission_status / mission_list / mission_attach / mission_exit
+        // are v0.6.0 dispatch-only aliases for mission_state(action=...).
+        // None of those legacy names are classified into a group.
         "gh_inbox"
         | "gh_get_issue"
         | "gh_create_issue"
@@ -229,10 +232,7 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         | "gh_fork"
         | "gh_create_pr"
         | "mission_start"
-        | "mission_status"
-        | "mission_list"
-        | "mission_attach"
-        | "mission_exit"
+        | "mission_state"
         | "mission_submit" => Some(ToolGroup::Github),
         "tv_get_quote" => Some(ToolGroup::Markets),
         // tg_send_photo is a v0.6.0 dispatch-only alias for tg_send(photo?) —
@@ -509,9 +509,14 @@ mod tests {
         assert_eq!(group_of("npm_info"), Some(ToolGroup::Registry));
         assert_eq!(group_of("gh_inbox"), Some(ToolGroup::Github));
         assert_eq!(group_of("gh_create_issue"), Some(ToolGroup::Github));
-        // v0.6.0: legacy listing names are dispatch-only aliases.
+        assert_eq!(group_of("mission_state"), Some(ToolGroup::Github));
+        // v0.6.0: legacy listing + mission state names are dispatch-only aliases.
         assert_eq!(group_of("gh_list_my_prs"), None);
         assert_eq!(group_of("gh_list_assigned_issues"), None);
+        assert_eq!(group_of("mission_status"), None);
+        assert_eq!(group_of("mission_list"), None);
+        assert_eq!(group_of("mission_attach"), None);
+        assert_eq!(group_of("mission_exit"), None);
         assert_eq!(group_of("tv_get_quote"), Some(ToolGroup::Markets));
         assert_eq!(group_of("tg_send"), Some(ToolGroup::Telegram));
         // v0.6.0: tg_send_photo is a dispatch-only alias, not classified.
@@ -690,17 +695,16 @@ mod tests {
             "gh_fork",
             "gh_create_pr",
             "mission_start",
-            "mission_status",
-            "mission_list",
-            "mission_attach",
-            "mission_exit",
+            "mission_state",
             "mission_submit",
         ] {
             assert!(gh.contains(&name.to_string()), "missing {name} in {gh:?}");
         }
         // v0.6.0: gh_list_my_prs + gh_list_assigned_issues collapsed into
-        // gh_inbox(scope=...); Github group is now 15 advertised tools.
-        assert_eq!(gh.len(), 15);
+        // gh_inbox(scope=...); mission_status/list/attach/exit collapsed
+        // into mission_state(action=...). Github group is now 12
+        // advertised tools.
+        assert_eq!(gh.len(), 12);
     }
 
     #[test]
