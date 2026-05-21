@@ -279,8 +279,7 @@ fn apply_hunks(original: &str, hunks: &[Hunk]) -> Result<(String, Vec<Value>), S
 
     for (idx, hunk) in hunks.iter().enumerate() {
         let expected_start = ilen(hunk.old_start) + drift - 1; // zero-based
-        if expected_start < 0
-            || usize::try_from(expected_start).unwrap_or(usize::MAX) > lines.len()
+        if expected_start < 0 || usize::try_from(expected_start).unwrap_or(usize::MAX) > lines.len()
         {
             return Err(format!(
                 "hunk {} at line {} is outside the file (have {} lines)",
