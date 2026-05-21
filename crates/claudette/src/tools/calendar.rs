@@ -61,7 +61,7 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "calendar_update_event",
-                "description": "Patch fields on an existing Google Calendar event. Only supplied fields are changed.",
+                "description": "Update an existing Google Calendar event. Only supplied fields are changed. Pass `rsvp` ('accepted', 'declined', or 'tentative') to set your own response on an event you're invited to — when `rsvp` is set, the other patch fields are ignored.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -71,6 +71,7 @@ pub(super) fn schemas() -> Vec<Value> {
                         "end":         { "type": "string", "description": "RFC3339 end datetime." },
                         "description": { "type": "string" },
                         "location":    { "type": "string" },
+                        "rsvp":        { "type": "string", "description": "Optional RSVP: 'accepted', 'declined', or 'tentative'. When set, this is an RSVP-only update." },
                         "calendar_id": { "type": "string", "description": "Calendar ID. Default: 'primary'." }
                     },
                     "required": ["event_id"]
@@ -92,22 +93,6 @@ pub(super) fn schemas() -> Vec<Value> {
                 }
             }
         }),
-        json!({
-            "type": "function",
-            "function": {
-                "name": "calendar_respond_to_event",
-                "description": "RSVP to a Google Calendar event as the current user (accepted, declined, or tentative).",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "event_id":    { "type": "string", "description": "The event ID to respond to." },
-                        "response":    { "type": "string", "enum": ["accepted", "declined", "tentative"], "description": "RSVP value." },
-                        "calendar_id": { "type": "string", "description": "Calendar ID. Default: 'primary'." }
-                    },
-                    "required": ["event_id", "response"]
-                }
-            }
-        }),
     ]
 }
 
@@ -117,7 +102,9 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
         "calendar_create_event" => run_create_event(input),
         "calendar_update_event" => run_update_event(input),
         "calendar_delete_event" => run_delete_event(input),
-        "calendar_respond_to_event" => run_respond_to_event(input),
+        // v0.6.0 deprecated alias — drop in next minor release. Routes
+        // through calendar_update_event's `rsvp` field.
+        "calendar_respond_to_event" => run_respond_to_event_alias(input),
         _ => return None,
     };
     Some(result)
@@ -323,6 +310,14 @@ fn run_update_event(input: &str) -> Result<String, String> {
     let event_id = extract_str(&v, "event_id", "calendar_update_event")?;
     let calendar_id = default_calendar_id(&v);
 
+    // v0.6.0: RSVP path absorbed from the dropped calendar_respond_to_event.
+    // When `rsvp` is present, fall through to the GET-mutate-PATCH dance and
+    // ignore the other patch fields — RSVP and field-edit are independent
+    // operations that the caller wouldn't naturally combine.
+    if let Some(rsvp) = v.get("rsvp").and_then(Value::as_str) {
+        return rsvp_event(event_id, &calendar_id, rsvp);
+    }
+
     let mut payload = serde_json::Map::new();
     if let Some(x) = v.get("summary").and_then(Value::as_str) {
         payload.insert("summary".into(), Value::String(x.to_string()));
@@ -416,15 +411,13 @@ fn run_delete_event(input: &str) -> Result<String, String> {
     .to_string())
 }
 
-fn run_respond_to_event(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "calendar_respond_to_event")?;
-    let event_id = extract_str(&v, "event_id", "calendar_respond_to_event")?;
-    let response = extract_str(&v, "response", "calendar_respond_to_event")?;
-    let calendar_id = default_calendar_id(&v);
-
+/// RSVP path lifted out of the dropped calendar_respond_to_event tool so
+/// it can run both from the legacy alias and from the v0.6.0
+/// `calendar_update_event(rsvp=...)` entry point.
+fn rsvp_event(event_id: &str, calendar_id: &str, response: &str) -> Result<String, String> {
     if !matches!(response, "accepted" | "declined" | "tentative") {
         return Err(format!(
-            "calendar_respond_to_event: invalid response '{response}' \
+            "calendar_update_event: invalid rsvp '{response}' \
              (must be one of: accepted, declined, tentative)"
         ));
     }
@@ -437,28 +430,28 @@ fn run_respond_to_event(input: &str) -> Result<String, String> {
     // marks for the authenticated user.
     let url = format!(
         "{API_BASE}/calendars/{cal}/events/{eid}",
-        cal = encode_segment(&calendar_id),
+        cal = encode_segment(calendar_id),
         eid = encode_segment(event_id),
     );
     let resp = auth_header(client.get(&url), &token)
         .send()
-        .map_err(|e| format!("calendar_respond_to_event: GET failed: {e}"))?;
+        .map_err(|e| format!("calendar_update_event(rsvp): GET failed: {e}"))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().unwrap_or_default();
         return Err(format!(
-            "calendar_respond_to_event: GET HTTP {status}: {}",
+            "calendar_update_event(rsvp): GET HTTP {status}: {}",
             text.chars().take(300).collect::<String>()
         ));
     }
     let event: Value = resp
         .json()
-        .map_err(|e| format!("calendar_respond_to_event: GET parse failed: {e}"))?;
+        .map_err(|e| format!("calendar_update_event(rsvp): GET parse failed: {e}"))?;
 
     let attendees = event
         .get("attendees")
         .and_then(Value::as_array)
-        .ok_or("calendar_respond_to_event: event has no attendees list")?;
+        .ok_or("calendar_update_event(rsvp): event has no attendees list")?;
 
     let mut updated: Vec<Value> = attendees.clone();
     let mut mutated = false;
@@ -470,7 +463,7 @@ fn run_respond_to_event(input: &str) -> Result<String, String> {
     }
     if !mutated {
         return Err(
-            "calendar_respond_to_event: current user is not listed as an attendee on this event"
+            "calendar_update_event(rsvp): current user is not listed as an attendee on this event"
                 .to_string(),
         );
     }
@@ -479,25 +472,37 @@ fn run_respond_to_event(input: &str) -> Result<String, String> {
     let resp = auth_header(client.patch(&url), &token)
         .json(&payload)
         .send()
-        .map_err(|e| format!("calendar_respond_to_event: PATCH failed: {e}"))?;
+        .map_err(|e| format!("calendar_update_event(rsvp): PATCH failed: {e}"))?;
     let status = resp.status();
     if !status.is_success() {
         let text = resp.text().unwrap_or_default();
         return Err(format!(
-            "calendar_respond_to_event: PATCH HTTP {status}: {}",
+            "calendar_update_event(rsvp): PATCH HTTP {status}: {}",
             text.chars().take(300).collect::<String>()
         ));
     }
     let data: Value = resp
         .json()
-        .map_err(|e| format!("calendar_respond_to_event: PATCH parse failed: {e}"))?;
+        .map_err(|e| format!("calendar_update_event(rsvp): PATCH parse failed: {e}"))?;
 
     Ok(json!({
         "ok": true,
-        "response": response,
+        "rsvp": response,
         "event": summarize_event(&data),
     })
     .to_string())
+}
+
+/// Backwards-compat shim for the dropped `calendar_respond_to_event`
+/// schema (`{event_id, response, calendar_id?}`). Forwards to the
+/// shared rsvp_event helper using the same arg order. Drop in the next
+/// minor release after v0.6.0.
+fn run_respond_to_event_alias(input: &str) -> Result<String, String> {
+    let v = parse_json_input(input, "calendar_respond_to_event")?;
+    let event_id = extract_str(&v, "event_id", "calendar_respond_to_event")?;
+    let response = extract_str(&v, "response", "calendar_respond_to_event")?;
+    let calendar_id = default_calendar_id(&v);
+    rsvp_event(event_id, &calendar_id, response)
 }
 
 #[cfg(test)]
@@ -505,13 +510,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn schemas_lists_five_tools() {
+    fn schemas_lists_four_tools() {
         let schemas = schemas();
-        assert_eq!(schemas.len(), 5);
+        assert_eq!(schemas.len(), 4);
         let names: Vec<&str> = schemas
             .iter()
             .filter_map(|v| v.pointer("/function/name").and_then(Value::as_str))
             .collect();
+        // v0.6.0: calendar_respond_to_event merged into
+        // calendar_update_event via the optional `rsvp` field.
         assert_eq!(
             names,
             [
@@ -519,7 +526,6 @@ mod tests {
                 "calendar_create_event",
                 "calendar_update_event",
                 "calendar_delete_event",
-                "calendar_respond_to_event",
             ]
         );
     }
@@ -572,18 +578,37 @@ mod tests {
     }
 
     #[test]
-    fn respond_to_event_rejects_missing_event_id() {
-        let err = run_respond_to_event(r#"{"response":"accepted"}"#).unwrap_err();
+    fn respond_to_event_alias_rejects_missing_event_id() {
+        let err = run_respond_to_event_alias(r#"{"response":"accepted"}"#).unwrap_err();
         assert!(err.contains("event_id"), "got: {err}");
     }
 
     #[test]
-    fn respond_to_event_rejects_bad_response_value() {
-        // Skip if the user is actually authenticated — the handler validates
-        // the response value BEFORE calling access_token, so this case is
-        // covered regardless.
-        let err = run_respond_to_event(r#"{"event_id":"abc","response":"maybe"}"#).unwrap_err();
-        assert!(err.contains("invalid response"), "got: {err}");
+    fn respond_to_event_alias_rejects_bad_response_value() {
+        // The rsvp_event helper validates the response value BEFORE calling
+        // access_token, so this case is covered regardless of whether the
+        // user is actually authenticated.
+        let err =
+            run_respond_to_event_alias(r#"{"event_id":"abc","response":"maybe"}"#).unwrap_err();
+        assert!(err.contains("invalid rsvp"), "got: {err}");
+    }
+
+    #[test]
+    fn update_event_rsvp_rejects_bad_value() {
+        // Same path, reached via the new merged schema.
+        let err = run_update_event(r#"{"event_id":"abc","rsvp":"banana"}"#).unwrap_err();
+        assert!(err.contains("invalid rsvp"), "got: {err}");
+    }
+
+    #[test]
+    fn calendar_respond_to_event_alias_still_dispatches() {
+        // Old tool name must keep resolving through dispatch() even after
+        // its schema entry was removed.
+        assert!(super::dispatch(
+            "calendar_respond_to_event",
+            r#"{"event_id":"x","response":"y"}"#
+        )
+        .is_some());
     }
 
     #[test]

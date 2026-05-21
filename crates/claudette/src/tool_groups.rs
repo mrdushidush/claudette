@@ -118,7 +118,7 @@ impl ToolGroup {
             Self::Github => "github + brownfield missions: gh_inbox(scope=my_prs|assigned|repo_issues), issue+PR ops, code search, clone/fork, mission_start + mission_state(action=status|list|attach|exit) + mission_submit (requires GITHUB_TOKEN)",
             Self::Markets => "market data: TradingView quotes (stocks/crypto/forex/futures, bare or qualified tickers)",
             Self::Telegram => "telegram bot: tg_send (text, or photo via optional `photo` URL — caption becomes the text). Requires TELEGRAM_BOT_TOKEN.",
-            Self::Calendar => "google calendar: list/create/update/delete events, RSVP (requires claudette --auth-google)",
+            Self::Calendar => "google calendar: list/create/update/delete events. calendar_update_event takes optional `rsvp` for RSVP-only edits. Requires claudette --auth-google.",
             Self::Schedule => "proactive reminders: one-shot + recurring schedules that fire prompts back at you",
             Self::Gmail => "gmail (read-only): list/search/read messages, list labels (requires claudette --auth-google gmail)",
             Self::Recall => "cross-session memory: recall past messages by semantic similarity (use when user references prior conversations)",
@@ -238,11 +238,12 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         // tg_send_photo is a v0.6.0 dispatch-only alias for tg_send(photo?) —
         // not classified here because it's not in the advertised schema.
         "tg_send" => Some(ToolGroup::Telegram),
+        // calendar_respond_to_event is a v0.6.0 dispatch-only alias for
+        // calendar_update_event(rsvp=...) — not classified here.
         "calendar_list_events"
         | "calendar_create_event"
         | "calendar_update_event"
-        | "calendar_delete_event"
-        | "calendar_respond_to_event" => Some(ToolGroup::Calendar),
+        | "calendar_delete_event" => Some(ToolGroup::Calendar),
         "schedule_once" | "schedule_recurring" | "schedule_list" | "schedule_cancel" => {
             Some(ToolGroup::Schedule)
         }
