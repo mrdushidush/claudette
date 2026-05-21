@@ -95,8 +95,8 @@
 70|||Get a TradingView quote for AAPL.|||AAPL|apple|price|||tv_get_quote
 
 # === SECTION 8: GitHub, missions, forge (71-80) ===
-71|||List my open GitHub pull requests.|||PR|pull request|none|open|||gh_list_my_prs
-72|||List my assigned GitHub issues.|||issue|assigned|none|||gh_list_assigned_issues
+71|||List my open GitHub pull requests.|||PR|pull request|none|open|||gh_inbox
+72|||List my assigned GitHub issues.|||issue|assigned|none|||gh_inbox
 73|||What's the status of PR #1 in the claudette repo?|||PR|merged|open|closed|||gh_pr_status
 74|||Search GitHub code for "spawn_agent" in this repo.|||spawn_agent|agents|||gh_search_code
 75|||/brownfield D:/tmp/sweep-mission-target|||mission|target|exclude|marker|||SLASH_BROWNFIELD

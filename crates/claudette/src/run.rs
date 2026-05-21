@@ -1524,6 +1524,9 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         // ── Sprint 9 Phase 0a: github group ──────────────────────────
         // Reads: auto-allowed. Writes: WorkspaceWrite (hit the network
         // on the user's behalf but don't touch the filesystem).
+        // v0.6.0: gh_list_my_prs + gh_list_assigned_issues merged into
+        // gh_inbox(scope?). Both old names still dispatch.
+        .with_tool_requirement("gh_inbox", ReadOnly)
         .with_tool_requirement("gh_list_my_prs", ReadOnly)
         .with_tool_requirement("gh_list_assigned_issues", ReadOnly)
         .with_tool_requirement("gh_get_issue", ReadOnly)

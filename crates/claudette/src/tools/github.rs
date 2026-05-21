@@ -1,12 +1,19 @@
-//! GitHub group — 10 tools against the REST API. Token comes from
+//! GitHub group — REST API tools. Token comes from
 //! `crate::secrets::read_secret("github")` (GITHUB_TOKEN env or
 //! `~/.claudette/secrets/github.token`).
 //!
 //! Tools split into two flavours:
-//! - User-account scoped: `gh_list_my_prs`, `gh_list_assigned_issues`.
+//! - User-account scoped: `gh_inbox(scope)` — `scope="my_prs"` lists open
+//!   PRs you authored, `scope="assigned"` lists open issues assigned to
+//!   you, `scope="repo_issues"` (with owner+repo) lists issues in any
+//!   repo. v0.6.0 collapsed the old `gh_list_my_prs` and
+//!   `gh_list_assigned_issues` into this polymorphic entry; both legacy
+//!   names still dispatch as aliases.
 //! - Repo-scoped (the brownfield set): `gh_get_issue`, `gh_create_issue`,
 //!   `gh_comment_issue`, `gh_search_code`, `gh_list_repo_issues`,
-//!   `gh_pr_status`, `gh_fork`, `gh_create_pr`.
+//!   `gh_pr_status`, `gh_fork`, `gh_create_pr`. `gh_list_repo_issues`
+//!   stays advertised for now — the dedicated repo+owner shape is
+//!   friendlier than reaching for `gh_inbox(scope="repo_issues", ...)`.
 //!
 //! Self-contained: all helpers (`github_token`, `github_get`, `github_post`,
 //! `github_me`, `github_search_issues`) are private to this module.
@@ -20,17 +27,17 @@ pub(super) fn schemas() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
-                "name": "gh_list_my_prs",
-                "description": "List open pull requests I authored. Requires GITHUB_TOKEN in env.",
-                "parameters": { "type": "object", "properties": {}, "required": [] }
-            }
-        }),
-        json!({
-            "type": "function",
-            "function": {
-                "name": "gh_list_assigned_issues",
-                "description": "List open issues assigned to me. Requires GITHUB_TOKEN in env.",
-                "parameters": { "type": "object", "properties": {}, "required": [] }
+                "name": "gh_inbox",
+                "description": "List GitHub inbox items by scope. scope='my_prs' (open PRs I authored), 'assigned' (issues assigned to me), or 'repo_issues' (open issues in any repo — pass owner+repo). Requires GITHUB_TOKEN.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "scope": { "type": "string", "description": "'my_prs', 'assigned', or 'repo_issues'" },
+                        "owner": { "type": "string", "description": "Repo owner (required for scope='repo_issues')" },
+                        "repo":  { "type": "string", "description": "Repo name (required for scope='repo_issues')" }
+                    },
+                    "required": ["scope"]
+                }
             }
         }),
         json!({
@@ -171,6 +178,8 @@ pub(super) fn schemas() -> Vec<Value> {
 
 pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>> {
     let result = match name {
+        "gh_inbox" => run_gh_inbox(input),
+        // v0.6.0 deprecated aliases — drop in next minor release.
         "gh_list_my_prs" => run_gh_list_my_prs(),
         "gh_list_assigned_issues" => run_gh_list_assigned_issues(),
         "gh_get_issue" => run_gh_get_issue(input),
@@ -184,6 +193,28 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
         _ => return None,
     };
     Some(result)
+}
+
+/// `gh_inbox(scope, owner?, repo?)` — polymorphic GitHub inbox. Routes to
+/// the same backend search as the legacy `gh_list_my_prs` /
+/// `gh_list_assigned_issues` (for the user-scoped scopes), or to
+/// `run_gh_list_repo_issues` (for scope='repo_issues').
+fn run_gh_inbox(input: &str) -> Result<String, String> {
+    let v = parse_json_input(input, "gh_inbox")?;
+    let scope = extract_str(&v, "scope", "gh_inbox")?;
+    match scope {
+        "my_prs" => run_gh_list_my_prs(),
+        "assigned" => run_gh_list_assigned_issues(),
+        "repo_issues" => {
+            // owner+repo are required for this scope; let the existing
+            // run_gh_list_repo_issues do the validation by forwarding the
+            // input payload unchanged (it already requires those fields).
+            run_gh_list_repo_issues(input)
+        }
+        other => Err(format!(
+            "gh_inbox: unknown scope '{other}' — use 'my_prs', 'assigned', or 'repo_issues'"
+        )),
+    }
 }
 
 /// Resolve the GitHub token via the unified secret store. Checks
@@ -751,9 +782,9 @@ mod tests {
     }
 
     #[test]
-    fn schemas_lists_ten_tools() {
+    fn schemas_lists_nine_tools() {
         let schemas = schemas();
-        assert_eq!(schemas.len(), 10);
+        assert_eq!(schemas.len(), 9);
         let names: Vec<&str> = schemas
             .iter()
             .filter_map(|v| v.pointer("/function/name").and_then(Value::as_str))
@@ -761,8 +792,7 @@ mod tests {
         assert_eq!(
             names,
             [
-                "gh_list_my_prs",
-                "gh_list_assigned_issues",
+                "gh_inbox",
                 "gh_get_issue",
                 "gh_create_issue",
                 "gh_comment_issue",
@@ -773,6 +803,39 @@ mod tests {
                 "gh_create_pr",
             ]
         );
+    }
+
+    #[test]
+    fn gh_inbox_rejects_missing_scope() {
+        let err = run_gh_inbox("{}").unwrap_err();
+        assert!(err.contains("scope"), "got: {err}");
+    }
+
+    #[test]
+    fn gh_inbox_rejects_unknown_scope() {
+        let err = run_gh_inbox(r#"{"scope":"banana"}"#).unwrap_err();
+        assert!(err.contains("unknown scope"), "got: {err}");
+        assert!(
+            err.contains("my_prs") && err.contains("assigned") && err.contains("repo_issues"),
+            "error must enumerate valid scopes: {err}"
+        );
+    }
+
+    #[test]
+    fn gh_inbox_repo_issues_forwards_owner_repo_validation() {
+        // scope='repo_issues' without owner/repo must surface the missing-
+        // field error from run_gh_list_repo_issues, not a generic scope error.
+        let err = run_gh_inbox(r#"{"scope":"repo_issues"}"#).unwrap_err();
+        assert!(err.contains("owner") || err.contains("repo"), "got: {err}");
+    }
+
+    #[test]
+    fn gh_inbox_legacy_aliases_dispatch() {
+        // Both old names must keep dispatching through the github group's
+        // dispatch function — failure is fine (no token), success is fine
+        // too (real token in env); the assertion is that the arm is wired.
+        assert!(super::dispatch("gh_list_my_prs", "{}").is_some());
+        assert!(super::dispatch("gh_list_assigned_issues", "{}").is_some());
     }
 
     #[test]

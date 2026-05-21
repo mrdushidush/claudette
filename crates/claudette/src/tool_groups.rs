@@ -115,7 +115,7 @@ impl ToolGroup {
             Self::Advanced => "power tools: bash, edit_file, spawn_agent (delegation)",
             Self::Facts => "reference lookups: wikipedia (summary or search via `mode`), weather (no API key needed)",
             Self::Registry => "package registries: crates.io and npm package metadata (version, downloads, homepage)",
-            Self::Github => "github + brownfield missions: PRs, issues, code search, clone/fork, mission_start/attach/submit (requires GITHUB_TOKEN)",
+            Self::Github => "github + brownfield missions: gh_inbox(scope=my_prs|assigned|repo_issues), issue+PR ops, code search, clone/fork, mission_start/attach/submit (requires GITHUB_TOKEN)",
             Self::Markets => "market data: TradingView quotes (stocks/crypto/forex/futures, bare or qualified tickers)",
             Self::Telegram => "telegram bot: tg_send (text, or photo via optional `photo` URL — caption becomes the text). Requires TELEGRAM_BOT_TOKEN.",
             Self::Calendar => "google calendar: list/create/update/delete events, RSVP (requires claudette --auth-google)",
@@ -217,8 +217,9 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         // not in the advertised schema.
         "wikipedia" | "weather" => Some(ToolGroup::Facts),
         "crate_info" | "npm_info" => Some(ToolGroup::Registry),
-        "gh_list_my_prs"
-        | "gh_list_assigned_issues"
+        // gh_list_my_prs / gh_list_assigned_issues are v0.6.0
+        // dispatch-only aliases for gh_inbox(scope=...). Not classified.
+        "gh_inbox"
         | "gh_get_issue"
         | "gh_create_issue"
         | "gh_comment_issue"
@@ -506,8 +507,11 @@ mod tests {
         assert_eq!(group_of("weather_forecast"), None);
         assert_eq!(group_of("crate_info"), Some(ToolGroup::Registry));
         assert_eq!(group_of("npm_info"), Some(ToolGroup::Registry));
-        assert_eq!(group_of("gh_list_my_prs"), Some(ToolGroup::Github));
+        assert_eq!(group_of("gh_inbox"), Some(ToolGroup::Github));
         assert_eq!(group_of("gh_create_issue"), Some(ToolGroup::Github));
+        // v0.6.0: legacy listing names are dispatch-only aliases.
+        assert_eq!(group_of("gh_list_my_prs"), None);
+        assert_eq!(group_of("gh_list_assigned_issues"), None);
         assert_eq!(group_of("tv_get_quote"), Some(ToolGroup::Markets));
         assert_eq!(group_of("tg_send"), Some(ToolGroup::Telegram));
         // v0.6.0: tg_send_photo is a dispatch-only alias, not classified.
@@ -680,6 +684,7 @@ mod tests {
         let reg = ToolRegistry::new();
         let gh = reg.group_tool_names(ToolGroup::Github);
         for name in [
+            "gh_inbox",
             "gh_list_repo_issues",
             "gh_pr_status",
             "gh_fork",
@@ -693,7 +698,9 @@ mod tests {
         ] {
             assert!(gh.contains(&name.to_string()), "missing {name} in {gh:?}");
         }
-        assert_eq!(gh.len(), 16);
+        // v0.6.0: gh_list_my_prs + gh_list_assigned_issues collapsed into
+        // gh_inbox(scope=...); Github group is now 15 advertised tools.
+        assert_eq!(gh.len(), 15);
     }
 
     #[test]
