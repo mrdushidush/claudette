@@ -10,6 +10,88 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Tool surface rework: −18 / +10 (Sprint v0.6.0, 2026-05-21)
+
+After the 2026-05-20 8-agent tool-inventory roast, this sprint reshapes
+claudette's tool surface to close the biggest gaps versus Claude Code /
+Aider while pulling out scope creep nobody was actually using.
+
+**Removed (18 tools)** — every one had zero positive invocations in
+the 100-prompt sweep, or duplicated `web_search` / `bash` more cheaply:
+
+- Phase 1 drops (9): `vestige_asa_info`, `vestige_search_asa`,
+  `vestige_top_movers`, `tv_economic_calendar`, `tv_technical_rating`,
+  `tv_search_symbol`, `tg_get_updates` (prompt-injection footgun —
+  bot loop still polls at the transport layer), `crate_search`,
+  `npm_search`.
+- Phase 2 merges (9): `tg_send_photo` → `tg_send(photo?)`,
+  `wikipedia_search` + `wikipedia_summary` → `wikipedia(mode?)`,
+  `weather_current` + `weather_forecast` → `weather(days?)`,
+  `todo_complete` + `todo_uncomplete` → `todo_set_status(done)`,
+  `note_update` → `note_create` upsert (`id` arg),
+  `gh_list_my_prs` + `gh_list_assigned_issues` → `gh_inbox(scope)`,
+  `mission_status` + `mission_list` + `mission_attach` +
+  `mission_exit` → `mission_state(action)`,
+  `calendar_respond_to_event` → `calendar_update_event(rsvp?)`.
+
+Every removed name still **dispatches** through a one-release alias
+shim so existing prompts and prior-turn tool calls keep working —
+they're just no longer advertised in the schema. Aliases drop in the
+next minor release.
+
+**Added (10 tools / families)** closing the engineering-loop,
+AI-native, GitHub depth, and UX gaps from the roast:
+
+- **`run_tests`** (auto-detect cargo / npm / pytest / go, structured
+  failures with file+line+message).
+- **`diagnostics`** (auto-detect cargo check / clippy / tsc / mypy /
+  ruff, structured `{file, line, code, severity, message}` rows).
+- **`apply_patch`** (atomic multi-file unified diff with `dry_run`).
+  Marks `edit_file` legacy.
+- **`bash_background` + `bash_status` + `bash_tail`** (long-running
+  shell jobs with on-disk job storage at `~/.claudette/jobs/<id>.*`).
+- **`semantic_grep`** (MVP: token-overlap ranking; embedding-backed
+  variant is documented follow-up — needs per-workspace sqlite
+  cache).
+- **`screenshot_capture`** (platform-native: PowerShell on Windows,
+  `screencapture` on macOS, gnome-screenshot/import/scrot on Linux).
+- **`image_describe`** (POST to LM Studio's OpenAI-compatible vision
+  endpoint — needs a VLM loaded; see `docs/vision.md` for setup).
+- **`gh_pr_view`** (single-shot PR snapshot: body + truncated diff +
+  last 20 comments + check-runs summary). Folds `gh_pr_status`.
+- **`gh_workflow_logs`** (auto-extract failed-job error lines from
+  `pr` / `run_id` / `job_id` — saves a navigate-to-GitHub round-trip).
+- **`ask_user`** (REPL stdin MVP — TUI modal + Telegram inline
+  buttons are documented follow-up). Closes the
+  "model wedges clarification into chat" anti-pattern.
+- **`clipboard_read` + `clipboard_write`** (text I/O via the
+  existing `arboard` dependency).
+- **`forge_tail`** (mid-mission Planner/Coder/Verifier tail —
+  consumer-side; the forge worker writing
+  `~/.claudette/forge/<id>.log` is documented follow-up).
+
+New tool groups: `Quality` (run_tests, diagnostics, apply_patch),
+`Semantic` (semantic_grep), `Vision` (screenshot_capture +
+image_describe), `Clipboard`. `ToolGroup::all()` goes 18 → 22.
+
+**Known gap vs the brief**: schema "+all" target was ≤ 26,000 chars;
+landed at ~34,600 because the 10 new tool descriptions ran longer
+than the brief estimated and the deprecation-alias dispatch arms
+kept the legacy names alive for one release. Trimming back to under
+26 KB is a documented follow-up — candidates include (1) dropping
+the legacy alias arms once the next session-cycle has rotated, (2)
+tightening the wordiest descriptions (gh_create_pr, calendar_*).
+Functionally the surface is right where the brief wanted it.
+
+Tests: 994 lib tests passing including 50+ new — schemas, dispatch,
+alias-still-dispatches, end-to-end round trips for shell
+(bash_background → status → tail), semantic_grep (real workspace
+walk), forge_tail (plant + read + truncate), patch (atomic
+multi-file rollback), todos (legacy aliases drive the same id),
+notes (id-arg upsert via note_create), and so on. Pre-commit
+`cargo fmt --all` + `cargo clippy --all-targets --all-features --
+-D warnings` clean on every phase.
+
 ### Changed
 
 - **OAuth refresh diagnostics: branch invalid_grant vs transient 5xx.**
