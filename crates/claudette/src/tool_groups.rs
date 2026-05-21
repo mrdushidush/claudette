@@ -746,8 +746,10 @@ mod tests {
         // v0.6.0: gh_list_my_prs + gh_list_assigned_issues collapsed into
         // gh_inbox(scope=...); mission_status/list/attach/exit collapsed
         // into mission_state(action=...). gh_pr_view + gh_workflow_logs
-        // added in Phase 3.3. Github group is now 14 advertised tools.
-        assert_eq!(gh.len(), 14);
+        // added in Phase 3.3. forge_tail joins via Phase 3.4c (lives in
+        // the Github group with the mission_* lifecycle). Group is now 15.
+        assert!(gh.contains(&"forge_tail".to_string()), "forge_tail missing");
+        assert_eq!(gh.len(), 15);
     }
 
     #[test]
