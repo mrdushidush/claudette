@@ -30,27 +30,13 @@ pub(super) fn schemas() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
-                "name": "weather_current",
-                "description": "Current weather for a city or 'lat,lon'. No API key needed. Uses Open-Meteo.",
+                "name": "weather",
+                "description": "Weather for a city or 'lat,lon' via Open-Meteo. `days=0` (default) returns current conditions; `days=1..7` returns a daily forecast. No API key needed.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "location": { "type": "string", "description": "City name (e.g. 'Paris') or 'lat,lon'" }
-                    },
-                    "required": ["location"]
-                }
-            }
-        }),
-        json!({
-            "type": "function",
-            "function": {
-                "name": "weather_forecast",
-                "description": "Multi-day weather forecast for a city or 'lat,lon'. No API key needed.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "location": { "type": "string", "description": "City name or 'lat,lon'" },
-                        "days":     { "type": "number", "description": "Number of days (1-7, default 3)" }
+                        "location": { "type": "string", "description": "City name (e.g. 'Paris') or 'lat,lon'" },
+                        "days":     { "type": "number", "description": "0 (default) for current conditions, 1-7 for a daily forecast" }
                     },
                     "required": ["location"]
                 }
@@ -62,11 +48,12 @@ pub(super) fn schemas() -> Vec<Value> {
 pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>> {
     let result = match name {
         "wikipedia" => run_wikipedia(input),
+        "weather" => run_weather(input),
         // v0.6.0 deprecated aliases — drop in next minor release.
         "wikipedia_search" => run_wikipedia_search_alias(input),
         "wikipedia_summary" => run_wikipedia_summary_alias(input),
-        "weather_current" => run_weather_current(input),
-        "weather_forecast" => run_weather_forecast(input),
+        "weather_current" => run_weather_current_alias(input),
+        "weather_forecast" => run_weather_forecast_alias(input),
         _ => return None,
     };
     Some(result)
@@ -352,9 +339,22 @@ fn wmo_label(code: i64) -> &'static str {
     }
 }
 
-fn run_weather_current(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "weather_current")?;
-    let location = extract_str(&v, "location", "weather_current")?;
+/// `weather(location, days?)` — unified weather. `days=0` (default) is
+/// current conditions; `days=1..7` is a daily forecast. Values outside
+/// the range clamp; non-numeric `days` is treated as 0.
+fn run_weather(input: &str) -> Result<String, String> {
+    let v = parse_json_input(input, "weather")?;
+    let location = extract_str(&v, "location", "weather")?.to_string();
+    let days = v.get("days").and_then(Value::as_i64).unwrap_or(0);
+
+    if days <= 0 {
+        weather_current_impl(&location)
+    } else {
+        weather_forecast_impl(&location, days.min(7))
+    }
+}
+
+fn weather_current_impl(location: &str) -> Result<String, String> {
     let (lat, lon, display) = resolve_location(location)?;
 
     let client = external_http_client()?;
@@ -372,19 +372,19 @@ fn run_weather_current(input: &str) -> Result<String, String> {
             ("wind_speed_unit", "kmh"),
         ])
         .send()
-        .map_err(|e| format!("weather_current: request failed: {e}"))?;
+        .map_err(|e| format!("weather(current): request failed: {e}"))?;
 
     if !resp.status().is_success() {
-        return Err(format!("weather_current: HTTP {}", resp.status()));
+        return Err(format!("weather(current): HTTP {}", resp.status()));
     }
 
     let data: Value = resp
         .json()
-        .map_err(|e| format!("weather_current: parse failed: {e}"))?;
+        .map_err(|e| format!("weather(current): parse failed: {e}"))?;
 
     let current = data
         .get("current")
-        .ok_or("weather_current: response missing 'current'")?;
+        .ok_or("weather(current): response missing 'current'")?;
     let code = current
         .get("weather_code")
         .and_then(Value::as_i64)
@@ -410,14 +410,8 @@ fn run_weather_current(input: &str) -> Result<String, String> {
     .to_string())
 }
 
-fn run_weather_forecast(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "weather_forecast")?;
-    let location = extract_str(&v, "location", "weather_forecast")?;
-    let days = v
-        .get("days")
-        .and_then(Value::as_i64)
-        .unwrap_or(3)
-        .clamp(1, 7);
+fn weather_forecast_impl(location: &str, days: i64) -> Result<String, String> {
+    let days = days.clamp(1, 7);
     let (lat, lon, display) = resolve_location(location)?;
 
     let client = external_http_client()?;
@@ -435,19 +429,19 @@ fn run_weather_forecast(input: &str) -> Result<String, String> {
             ("forecast_days", days.to_string().as_str()),
         ])
         .send()
-        .map_err(|e| format!("weather_forecast: request failed: {e}"))?;
+        .map_err(|e| format!("weather(forecast): request failed: {e}"))?;
 
     if !resp.status().is_success() {
-        return Err(format!("weather_forecast: HTTP {}", resp.status()));
+        return Err(format!("weather(forecast): HTTP {}", resp.status()));
     }
 
     let data: Value = resp
         .json()
-        .map_err(|e| format!("weather_forecast: parse failed: {e}"))?;
+        .map_err(|e| format!("weather(forecast): parse failed: {e}"))?;
 
     let daily = data
         .get("daily")
-        .ok_or("weather_forecast: response missing 'daily'")?;
+        .ok_or("weather(forecast): response missing 'daily'")?;
     let dates = daily
         .get("time")
         .and_then(Value::as_array)
@@ -497,6 +491,28 @@ fn run_weather_forecast(input: &str) -> Result<String, String> {
     .to_string())
 }
 
+/// Backwards-compat shim for the old `weather_current` shape
+/// (`{location}`). Forwards to `weather` with `days=0`. Drop in the next
+/// minor release after v0.6.0.
+fn run_weather_current_alias(input: &str) -> Result<String, String> {
+    let v = parse_json_input(input, "weather_current")?;
+    let location = extract_str(&v, "location", "weather_current")?;
+    let payload = json!({ "location": location, "days": 0 });
+    run_weather(&payload.to_string())
+}
+
+/// Backwards-compat shim for the old `weather_forecast` shape
+/// (`{location, days?}`). Forwards to `weather` preserving `days` (default
+/// 3 to match the old behaviour). Drop in the next minor release after
+/// v0.6.0.
+fn run_weather_forecast_alias(input: &str) -> Result<String, String> {
+    let v = parse_json_input(input, "weather_forecast")?;
+    let location = extract_str(&v, "location", "weather_forecast")?;
+    let days = v.get("days").and_then(Value::as_i64).unwrap_or(3);
+    let payload = json!({ "location": location, "days": days });
+    run_weather(&payload.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -539,10 +555,26 @@ mod tests {
 
     #[test]
     fn weather_rejects_missing_location() {
-        let err = run_weather_current("{}").unwrap_err();
+        let err = run_weather("{}").unwrap_err();
         assert!(err.contains("missing"), "got: {err}");
-        let err = run_weather_forecast("{}").unwrap_err();
+    }
+
+    #[test]
+    fn weather_current_alias_rejects_missing_location() {
+        let err = run_weather_current_alias("{}").unwrap_err();
         assert!(err.contains("missing"), "got: {err}");
+    }
+
+    #[test]
+    fn weather_forecast_alias_rejects_missing_location() {
+        let err = run_weather_forecast_alias("{}").unwrap_err();
+        assert!(err.contains("missing"), "got: {err}");
+    }
+
+    #[test]
+    fn weather_aliases_dispatch() {
+        assert!(dispatch("weather_current", r#"{"location":"Paris"}"#).is_some());
+        assert!(dispatch("weather_forecast", r#"{"location":"Paris"}"#).is_some());
     }
 
     // Offline unit tests for the facts-private helpers — no network.
@@ -585,13 +617,13 @@ mod tests {
     }
 
     #[test]
-    fn schemas_lists_three_tools() {
+    fn schemas_lists_two_tools() {
         let schemas = schemas();
-        assert_eq!(schemas.len(), 3);
+        assert_eq!(schemas.len(), 2);
         let names: Vec<&str> = schemas
             .iter()
             .filter_map(|v| v.pointer("/function/name").and_then(Value::as_str))
             .collect();
-        assert_eq!(names, ["wikipedia", "weather_current", "weather_forecast"]);
+        assert_eq!(names, ["wikipedia", "weather"]);
     }
 }

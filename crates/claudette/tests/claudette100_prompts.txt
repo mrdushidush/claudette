@@ -87,8 +87,8 @@
 62|||Fetch https://example.com and tell me the page title.|||example|domain|illustrative|||web_fetch
 63|||Wikipedia search for "Linus Torvalds".|||linus|torvalds|linux|||wikipedia
 64|||Wikipedia summary for "Tel Aviv".|||tel aviv|israel|city|||wikipedia
-65|||What's the current weather in London?|||london|temperature|°|degree|||weather_current
-66|||Three-day forecast for Tel Aviv.|||tel aviv|forecast|day|||weather_forecast
+65|||What's the current weather in London?|||london|temperature|°|degree|||weather
+66|||Three-day forecast for Tel Aviv.|||tel aviv|forecast|day|||weather
 67|||What's the latest version of the serde crate?|||1\.[0-9]+\.[0-9]+|serde|||crate_info
 68|||Search the web for "tokio crate" and summarise.|||tokio|async|runtime|||web_search
 69|||npm info for "react".|||react|version|||npm_info

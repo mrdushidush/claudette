@@ -211,10 +211,11 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         "open_in_editor" | "reveal_in_explorer" | "open_url" => Some(ToolGroup::Ide),
         "glob_search" | "grep_search" | "web_fetch" | "web_search" => Some(ToolGroup::Search),
         "bash" | "edit_file" | "spawn_agent" => Some(ToolGroup::Advanced),
-        // wikipedia_search/wikipedia_summary are v0.6.0 dispatch-only aliases
-        // for `wikipedia(mode?)` — not classified here because they're not in
-        // the advertised schema.
-        "wikipedia" | "weather_current" | "weather_forecast" => Some(ToolGroup::Facts),
+        // wikipedia_search/wikipedia_summary and weather_current/weather_forecast
+        // are v0.6.0 dispatch-only aliases for `wikipedia(mode?)` and
+        // `weather(days?)` respectively — not classified here because they're
+        // not in the advertised schema.
+        "wikipedia" | "weather" => Some(ToolGroup::Facts),
         "crate_info" | "npm_info" => Some(ToolGroup::Registry),
         "gh_list_my_prs"
         | "gh_list_assigned_issues"
@@ -497,10 +498,12 @@ mod tests {
         assert_eq!(group_of("spawn_agent"), Some(ToolGroup::Advanced));
         // Sprint 9 Phase 0a additions.
         assert_eq!(group_of("wikipedia"), Some(ToolGroup::Facts));
-        assert_eq!(group_of("weather_forecast"), Some(ToolGroup::Facts));
-        // v0.6.0: wikipedia_search/wikipedia_summary are dispatch-only aliases.
+        assert_eq!(group_of("weather"), Some(ToolGroup::Facts));
+        // v0.6.0: legacy facts-group names are dispatch-only aliases.
         assert_eq!(group_of("wikipedia_search"), None);
         assert_eq!(group_of("wikipedia_summary"), None);
+        assert_eq!(group_of("weather_current"), None);
+        assert_eq!(group_of("weather_forecast"), None);
         assert_eq!(group_of("crate_info"), Some(ToolGroup::Registry));
         assert_eq!(group_of("npm_info"), Some(ToolGroup::Registry));
         assert_eq!(group_of("gh_list_my_prs"), Some(ToolGroup::Github));
