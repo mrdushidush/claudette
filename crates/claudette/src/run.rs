@@ -1501,6 +1501,10 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("add_numbers", WorkspaceWrite)
         .with_tool_requirement("spawn_agent", WorkspaceWrite)
         // ── Sprint 9 Phase 0a: facts group (read-only REST calls) ───
+        // v0.6.0: wikipedia_search + wikipedia_summary merged into
+        // wikipedia(mode?). The aliases still dispatch through the same
+        // network calls so the policy entries stay for compat.
+        .with_tool_requirement("wikipedia", ReadOnly)
         .with_tool_requirement("wikipedia_search", ReadOnly)
         .with_tool_requirement("wikipedia_summary", ReadOnly)
         .with_tool_requirement("weather_current", ReadOnly)

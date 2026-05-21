@@ -15,28 +15,15 @@ pub(super) fn schemas() -> Vec<Value> {
         json!({
             "type": "function",
             "function": {
-                "name": "wikipedia_search",
-                "description": "Search Wikipedia for article titles matching a query. Returns top 5 hits.",
+                "name": "wikipedia",
+                "description": "Wikipedia lookup. Default mode='summary' fetches a plain-text article summary (`query` = exact title). mode='search' returns top 5 title matches for `query`.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": { "type": "string", "description": "Search terms" }
+                        "query": { "type": "string", "description": "Exact article title for mode='summary', or search terms for mode='search'" },
+                        "mode":  { "type": "string", "description": "'summary' (default) or 'search'" }
                     },
                     "required": ["query"]
-                }
-            }
-        }),
-        json!({
-            "type": "function",
-            "function": {
-                "name": "wikipedia_summary",
-                "description": "Get a plain-text summary of a Wikipedia article by exact title.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "title": { "type": "string", "description": "Exact article title (use wikipedia_search first if unsure)" }
-                    },
-                    "required": ["title"]
                 }
             }
         }),
@@ -74,8 +61,10 @@ pub(super) fn schemas() -> Vec<Value> {
 
 pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>> {
     let result = match name {
-        "wikipedia_search" => run_wikipedia_search(input),
-        "wikipedia_summary" => run_wikipedia_summary(input),
+        "wikipedia" => run_wikipedia(input),
+        // v0.6.0 deprecated aliases — drop in next minor release.
+        "wikipedia_search" => run_wikipedia_search_alias(input),
+        "wikipedia_summary" => run_wikipedia_summary_alias(input),
         "weather_current" => run_weather_current(input),
         "weather_forecast" => run_weather_forecast(input),
         _ => return None,
@@ -85,30 +74,50 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
 
 // ────── Wikipedia ────────────────────────────────────────────────────────
 
-fn run_wikipedia_search(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "wikipedia_search")?;
-    let query = extract_str(&v, "query", "wikipedia_search")?.to_string();
+/// `wikipedia(query, mode?)` — unified lookup. Two modes:
+///   - `summary` (default): `query` is treated as the exact article title,
+///     returns plain-text extract + URL via the REST summary endpoint.
+///   - `search`: `query` is search terms, returns top 5 title matches
+///     with HTML-stripped snippets via the MediaWiki search API.
+fn run_wikipedia(input: &str) -> Result<String, String> {
+    let v = parse_json_input(input, "wikipedia")?;
+    let query = extract_str(&v, "query", "wikipedia")?.to_string();
+    let mode = v
+        .get("mode")
+        .and_then(Value::as_str)
+        .unwrap_or("summary")
+        .to_lowercase();
 
+    match mode.as_str() {
+        "summary" | "" => wikipedia_summary_impl(&query),
+        "search" => wikipedia_search_impl(&query),
+        other => Err(format!(
+            "wikipedia: unknown mode '{other}' — use 'summary' (default) or 'search'"
+        )),
+    }
+}
+
+fn wikipedia_search_impl(query: &str) -> Result<String, String> {
     let client = external_http_client()?;
     let resp = client
         .get("https://en.wikipedia.org/w/api.php")
         .query(&[
             ("action", "query"),
             ("list", "search"),
-            ("srsearch", query.as_str()),
+            ("srsearch", query),
             ("format", "json"),
             ("srlimit", "5"),
         ])
         .send()
-        .map_err(|e| format!("wikipedia_search: request failed: {e}"))?;
+        .map_err(|e| format!("wikipedia(search): request failed: {e}"))?;
 
     if !resp.status().is_success() {
-        return Err(format!("wikipedia_search: HTTP {}", resp.status()));
+        return Err(format!("wikipedia(search): HTTP {}", resp.status()));
     }
 
     let data: Value = resp
         .json()
-        .map_err(|e| format!("wikipedia_search: parse failed: {e}"))?;
+        .map_err(|e| format!("wikipedia(search): parse failed: {e}"))?;
 
     let results: Vec<Value> = data
         .pointer("/query/search")
@@ -131,6 +140,7 @@ fn run_wikipedia_search(input: &str) -> Result<String, String> {
         .unwrap_or_default();
 
     Ok(json!({
+        "mode": "search",
         "query": query,
         "count": results.len(),
         "results": results,
@@ -138,9 +148,7 @@ fn run_wikipedia_search(input: &str) -> Result<String, String> {
     .to_string())
 }
 
-fn run_wikipedia_summary(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "wikipedia_summary")?;
-    let title = extract_str(&v, "title", "wikipedia_summary")?;
+fn wikipedia_summary_impl(title: &str) -> Result<String, String> {
     // Wikipedia REST API uses underscore-separated titles in the path.
     let encoded = title.replace(' ', "_");
     let url = format!("https://en.wikipedia.org/api/rest_v1/page/summary/{encoded}");
@@ -149,21 +157,24 @@ fn run_wikipedia_summary(input: &str) -> Result<String, String> {
     let resp = client
         .get(&url)
         .send()
-        .map_err(|e| format!("wikipedia_summary: request failed: {e}"))?;
+        .map_err(|e| format!("wikipedia(summary): request failed: {e}"))?;
 
     let status = resp.status();
     if status == reqwest::StatusCode::NOT_FOUND {
-        return Err(format!("wikipedia_summary: no article titled '{title}'"));
+        return Err(format!(
+            "wikipedia(summary): no article titled '{title}' — try mode='search' to find candidates"
+        ));
     }
     if !status.is_success() {
-        return Err(format!("wikipedia_summary: HTTP {status}"));
+        return Err(format!("wikipedia(summary): HTTP {status}"));
     }
 
     let data: Value = resp
         .json()
-        .map_err(|e| format!("wikipedia_summary: parse failed: {e}"))?;
+        .map_err(|e| format!("wikipedia(summary): parse failed: {e}"))?;
 
     Ok(json!({
+        "mode": "summary",
         "title": data.get("title").and_then(Value::as_str).unwrap_or(title),
         "extract": data.get("extract").and_then(Value::as_str).unwrap_or(""),
         "url": data
@@ -172,6 +183,26 @@ fn run_wikipedia_summary(input: &str) -> Result<String, String> {
             .unwrap_or(""),
     })
     .to_string())
+}
+
+/// Backwards-compat shim for the old `wikipedia_search` shape (`{query}`).
+/// Routes through the new unified handler with `mode='search'`. Drop in
+/// the next minor release after v0.6.0.
+fn run_wikipedia_search_alias(input: &str) -> Result<String, String> {
+    let v = parse_json_input(input, "wikipedia_search")?;
+    let query = extract_str(&v, "query", "wikipedia_search")?;
+    let payload = json!({ "query": query, "mode": "search" });
+    run_wikipedia(&payload.to_string())
+}
+
+/// Backwards-compat shim for the old `wikipedia_summary` shape (`{title}`).
+/// Routes through the new unified handler with `mode='summary'`. Drop in
+/// the next minor release after v0.6.0.
+fn run_wikipedia_summary_alias(input: &str) -> Result<String, String> {
+    let v = parse_json_input(input, "wikipedia_summary")?;
+    let title = extract_str(&v, "title", "wikipedia_summary")?;
+    let payload = json!({ "query": title, "mode": "summary" });
+    run_wikipedia(&payload.to_string())
 }
 
 // ────── Open-Meteo weather ───────────────────────────────────────────────
@@ -471,15 +502,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wikipedia_search_rejects_missing_query() {
-        let err = run_wikipedia_search("{}").unwrap_err();
+    fn wikipedia_rejects_missing_query() {
+        let err = run_wikipedia("{}").unwrap_err();
         assert!(err.contains("missing"), "got: {err}");
     }
 
     #[test]
-    fn wikipedia_summary_rejects_missing_title() {
-        let err = run_wikipedia_summary("{}").unwrap_err();
+    fn wikipedia_rejects_unknown_mode() {
+        let err = run_wikipedia(r#"{"query":"x","mode":"chaos"}"#).unwrap_err();
+        assert!(err.contains("unknown mode"), "got: {err}");
+        assert!(err.contains("summary"), "got: {err}");
+        assert!(err.contains("search"), "got: {err}");
+    }
+
+    #[test]
+    fn wikipedia_search_alias_rejects_missing_query() {
+        let err = run_wikipedia_search_alias("{}").unwrap_err();
         assert!(err.contains("missing"), "got: {err}");
+    }
+
+    #[test]
+    fn wikipedia_summary_alias_rejects_missing_title() {
+        let err = run_wikipedia_summary_alias("{}").unwrap_err();
+        assert!(err.contains("missing"), "got: {err}");
+    }
+
+    #[test]
+    fn wikipedia_aliases_dispatch() {
+        // Both legacy names must still resolve through `dispatch` even
+        // though they're not advertised in the schema. We only check the
+        // dispatch branch is wired — execution will fail at the network
+        // call but that's after the alias resolution.
+        assert!(dispatch("wikipedia_search", r#"{"query":"x"}"#).is_some());
+        assert!(dispatch("wikipedia_summary", r#"{"title":"x"}"#).is_some());
     }
 
     #[test]
@@ -530,21 +585,13 @@ mod tests {
     }
 
     #[test]
-    fn schemas_lists_four_tools() {
+    fn schemas_lists_three_tools() {
         let schemas = schemas();
-        assert_eq!(schemas.len(), 4);
+        assert_eq!(schemas.len(), 3);
         let names: Vec<&str> = schemas
             .iter()
             .filter_map(|v| v.pointer("/function/name").and_then(Value::as_str))
             .collect();
-        assert_eq!(
-            names,
-            [
-                "wikipedia_search",
-                "wikipedia_summary",
-                "weather_current",
-                "weather_forecast"
-            ]
-        );
+        assert_eq!(names, ["wikipedia", "weather_current", "weather_forecast"]);
     }
 }
