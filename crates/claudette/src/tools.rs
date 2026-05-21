@@ -40,6 +40,7 @@ mod recall;
 mod registry;
 mod schedule;
 mod search;
+mod semantic;
 mod shell;
 mod telegram;
 mod todos;
@@ -87,6 +88,7 @@ const GROUPS: &[(SchemasFn, DispatchFn)] = &[
     (registry::schemas, registry::dispatch),
     (schedule::schemas, schedule::dispatch),
     (search::schemas, search::dispatch),
+    (semantic::schemas, semantic::dispatch),
     (shell::schemas, shell::dispatch),
     (telegram::schemas, telegram::dispatch),
     (todos::schemas, todos::dispatch),

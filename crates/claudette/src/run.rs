@@ -1541,6 +1541,10 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("bash_background", DangerFullAccess)
         .with_tool_requirement("bash_status", ReadOnly)
         .with_tool_requirement("bash_tail", ReadOnly)
+        // ── v0.6.0: semantic search ─────────────────────────────────
+        // semantic_grep reads workspace files (capped) and ranks by
+        // token-overlap. Pure read — ReadOnly tier is fine.
+        .with_tool_requirement("semantic_grep", ReadOnly)
         // ── Sprint 9 Phase 0a: github group ──────────────────────────
         // Reads: auto-allowed. Writes: WorkspaceWrite (hit the network
         // on the user's behalf but don't touch the filesystem).

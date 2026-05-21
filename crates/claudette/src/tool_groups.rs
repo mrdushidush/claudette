@@ -73,6 +73,9 @@ pub enum ToolGroup {
     /// (Phase 3.1b) and `apply_patch` (Phase 3.1c) coming in the same
     /// v0.6.0 sprint.
     Quality,
+    /// Workspace-scoped semantic-ish search (v0.6.0 ships `semantic_grep`
+    /// as a token-overlap MVP; embedding-backed variant is follow-up).
+    Semantic,
 }
 
 impl ToolGroup {
@@ -99,6 +102,7 @@ impl ToolGroup {
             Self::Gmail => "gmail",
             Self::Recall => "recall",
             Self::Quality => "quality",
+            Self::Semantic => "semantic",
         }
     }
 
@@ -129,12 +133,13 @@ impl ToolGroup {
             Self::Gmail => "gmail (read-only): list/search/read messages, list labels (requires claudette --auth-google gmail)",
             Self::Recall => "cross-session memory: recall past messages by semantic similarity (use when user references prior conversations)",
             Self::Quality => "code quality + edits: run_tests, diagnostics (cargo check / clippy / tsc / mypy / ruff), apply_patch (atomic multi-file unified diff).",
+            Self::Semantic => "workspace search: semantic_grep (token-overlap ranking, fuzzier than grep).",
         }
     }
 
     /// All groups in a stable order, for schema generation and tests.
     #[must_use]
-    pub fn all() -> [ToolGroup; 19] {
+    pub fn all() -> [ToolGroup; 20] {
         [
             Self::Notes,
             Self::Todos,
@@ -155,6 +160,7 @@ impl ToolGroup {
             Self::Gmail,
             Self::Recall,
             Self::Quality,
+            Self::Semantic,
         ]
     }
 
@@ -183,6 +189,7 @@ impl ToolGroup {
             "gmail" | "mail" | "email" | "inbox" => Some(Self::Gmail),
             "recall" | "memory" | "remember" | "history" => Some(Self::Recall),
             "quality" | "tests" | "lint" | "diagnostics" => Some(Self::Quality),
+            "semantic" | "smart-grep" | "concept" => Some(Self::Semantic),
             _ => None,
         }
     }
@@ -263,6 +270,7 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         }
         "recall" => Some(ToolGroup::Recall),
         "run_tests" | "diagnostics" | "apply_patch" => Some(ToolGroup::Quality),
+        "semantic_grep" => Some(ToolGroup::Semantic),
         _ => None,
     }
 }
