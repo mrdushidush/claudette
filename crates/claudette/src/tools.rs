@@ -29,6 +29,7 @@ mod codegen;
 mod dialog;
 mod facts;
 mod file_ops;
+mod forge_tail;
 mod git;
 mod github;
 mod gmail;
@@ -80,6 +81,7 @@ const GROUPS: &[(SchemasFn, DispatchFn)] = &[
     (dialog::schemas, dialog::dispatch),
     (facts::schemas, facts::dispatch),
     (file_ops::schemas, file_ops::dispatch),
+    (forge_tail::schemas, forge_tail::dispatch),
     (git::schemas, git::dispatch),
     (github::schemas, github::dispatch),
     (gmail::schemas, gmail::dispatch),

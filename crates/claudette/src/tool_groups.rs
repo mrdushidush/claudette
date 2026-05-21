@@ -288,6 +288,9 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         "semantic_grep" => Some(ToolGroup::Semantic),
         "screenshot_capture" | "image_describe" => Some(ToolGroup::Vision),
         "clipboard_read" | "clipboard_write" => Some(ToolGroup::Clipboard),
+        // forge_tail lives in the Github group alongside mission_* since
+        // that's where the forge-mission lifecycle already lives.
+        "forge_tail" => Some(ToolGroup::Github),
         _ => None,
     }
 }

@@ -1578,6 +1578,8 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("gh_pr_view", ReadOnly)
         // v0.6.0 Phase 3.3b — failed-job log extraction.
         .with_tool_requirement("gh_workflow_logs", ReadOnly)
+        // v0.6.0 Phase 3.4c — forge mission tail. Pure file read.
+        .with_tool_requirement("forge_tail", ReadOnly)
         .with_tool_requirement("gh_create_issue", WorkspaceWrite)
         .with_tool_requirement("gh_comment_issue", WorkspaceWrite)
         .with_tool_requirement("gh_fork", WorkspaceWrite)
