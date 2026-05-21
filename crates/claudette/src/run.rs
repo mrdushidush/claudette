@@ -1565,6 +1565,8 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("gh_search_code", ReadOnly)
         .with_tool_requirement("gh_list_repo_issues", ReadOnly)
         .with_tool_requirement("gh_pr_status", ReadOnly)
+        // v0.6.0 Phase 3.3a — single-shot PR snapshot.
+        .with_tool_requirement("gh_pr_view", ReadOnly)
         .with_tool_requirement("gh_create_issue", WorkspaceWrite)
         .with_tool_requirement("gh_comment_issue", WorkspaceWrite)
         .with_tool_requirement("gh_fork", WorkspaceWrite)

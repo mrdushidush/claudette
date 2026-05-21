@@ -126,13 +126,30 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "gh_pr_status",
-                "description": "Fetch a PR's mergeable / draft / checks state by owner/repo/number.",
+                "description": "Fetch a PR's mergeable / draft / checks state by owner/repo/number. (v0.6.0: prefer gh_pr_view for a richer single-shot snapshot.)",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "owner":  { "type": "string", "description": "Repo owner" },
                         "repo":   { "type": "string", "description": "Repo name" },
                         "number": { "type": "number", "description": "PR number" }
+                    },
+                    "required": ["owner", "repo", "number"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "gh_pr_view",
+                "description": "Single-shot PR snapshot: body + truncated diff + last 20 review/issue comments + check-runs summary. Use this for 'show me PR #N' style questions. Folds the gh_pr_status surface.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "owner":        { "type": "string", "description": "Repo owner" },
+                        "repo":         { "type": "string", "description": "Repo name" },
+                        "number":       { "type": "number", "description": "PR number" },
+                        "include_diff": { "type": "boolean", "description": "Include the diff (truncated to 30k chars). Default true." }
                     },
                     "required": ["owner", "repo", "number"]
                 }
@@ -188,6 +205,7 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
         "gh_search_code" => run_gh_search_code(input),
         "gh_list_repo_issues" => run_gh_list_repo_issues(input),
         "gh_pr_status" => run_gh_pr_status(input),
+        "gh_pr_view" => run_gh_pr_view(input),
         "gh_fork" => run_gh_fork(input),
         "gh_create_pr" => run_gh_create_pr(input),
         _ => return None,
@@ -647,6 +665,205 @@ fn run_gh_pr_status(input: &str) -> Result<String, String> {
     .to_string())
 }
 
+/// `gh_pr_view` — v0.6.0 single-shot PR snapshot. Pulls PR data + diff +
+/// last 20 issue-comments + check-runs summary in one tool call. Folds
+/// the gh_pr_status use case (everything that tool returned is in here
+/// too, just under different keys for clarity).
+fn run_gh_pr_view(input: &str) -> Result<String, String> {
+    let v = parse_json_input(input, "gh_pr_view")?;
+    let owner = extract_str(&v, "owner", "gh_pr_view")?;
+    let repo = extract_str(&v, "repo", "gh_pr_view")?;
+    let number = v
+        .get("number")
+        .and_then(Value::as_i64)
+        .ok_or("gh_pr_view: missing 'number'")?;
+    let include_diff = v
+        .get("include_diff")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+
+    let token = github_token()?;
+    let client = external_http_client()?;
+
+    // PR metadata (same shape as gh_pr_status, plus body).
+    let pr_url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}");
+    let pr_resp = github_get(&client, &pr_url, &token)
+        .send()
+        .map_err(|e| format!("gh_pr_view: PR request failed: {e}"))?;
+    let pr_status = pr_resp.status();
+    if pr_status == reqwest::StatusCode::NOT_FOUND {
+        return Err(format!("gh_pr_view: {owner}/{repo}#{number} not found"));
+    }
+    if !pr_status.is_success() {
+        return Err(format!("gh_pr_view: PR HTTP {pr_status}"));
+    }
+    let pr: Value = pr_resp
+        .json()
+        .map_err(|e| format!("gh_pr_view: PR parse failed: {e}"))?;
+
+    let head_sha = pr
+        .pointer("/head/sha")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+
+    // PR body is attacker-controlled — wrap in <untrusted>.
+    let body_raw = pr
+        .get("body")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .chars()
+        .take(4000)
+        .collect::<String>();
+    let body = wrap_untrusted(
+        &format!("github-pr-body:{owner}/{repo}#{number}"),
+        &body_raw,
+    );
+
+    // Diff — separate request with a different Accept header.
+    let diff = if include_diff {
+        let diff_resp = client
+            .get(&pr_url)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Accept", "application/vnd.github.v3.diff")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .send()
+            .ok();
+        diff_resp
+            .and_then(|r| {
+                if r.status().is_success() {
+                    r.text().ok()
+                } else {
+                    None
+                }
+            })
+            .map(|s| s.chars().take(30_000).collect::<String>())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    // Recent issue comments — capped to last 20. Each is attacker-
+    // controlled, so wrap in <untrusted> per-comment.
+    let comments_url =
+        format!("https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments");
+    let comments_resp = github_get(&client, &comments_url, &token)
+        .query(&[
+            ("per_page", "20"),
+            ("sort", "created"),
+            ("direction", "desc"),
+        ])
+        .send()
+        .map_err(|e| format!("gh_pr_view: comments request failed: {e}"))?;
+    let comments_raw: Vec<Value> = if comments_resp.status().is_success() {
+        comments_resp
+            .json::<Value>()
+            .ok()
+            .and_then(|v| v.as_array().cloned())
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let comments: Vec<Value> = comments_raw
+        .iter()
+        .map(|c| {
+            let author = c
+                .pointer("/user/login")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let raw_body = c
+                .get("body")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .chars()
+                .take(800)
+                .collect::<String>();
+            let wrapped = wrap_untrusted(&format!("github-comment:{author}"), &raw_body);
+            json!({
+                "author": author,
+                "created_at": c.get("created_at").and_then(Value::as_str).unwrap_or(""),
+                "body": wrapped,
+            })
+        })
+        .collect();
+
+    // Check-runs for the head commit. Summarises pass/fail/in_progress
+    // counts with a per-failed-job list.
+    let mut checks_summary = json!(null);
+    if !head_sha.is_empty() {
+        let checks_url =
+            format!("https://api.github.com/repos/{owner}/{repo}/commits/{head_sha}/check-runs");
+        if let Ok(check_resp) = github_get(&client, &checks_url, &token).send() {
+            if check_resp.status().is_success() {
+                if let Ok(check_data) = check_resp.json::<Value>() {
+                    let runs = check_data
+                        .get("check_runs")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    let mut success = 0u32;
+                    let mut failed = 0u32;
+                    let mut in_progress = 0u32;
+                    let mut neutral = 0u32;
+                    let mut failed_runs: Vec<Value> = Vec::new();
+                    for run in &runs {
+                        let status = run.get("status").and_then(Value::as_str).unwrap_or("");
+                        let conclusion =
+                            run.get("conclusion").and_then(Value::as_str).unwrap_or("");
+                        if status != "completed" {
+                            in_progress += 1;
+                            continue;
+                        }
+                        match conclusion {
+                            "success" => success += 1,
+                            "failure" | "timed_out" | "cancelled" | "action_required" => {
+                                failed += 1;
+                                failed_runs.push(json!({
+                                    "name": run.get("name").and_then(Value::as_str).unwrap_or(""),
+                                    "conclusion": conclusion,
+                                    "url": run.get("html_url").and_then(Value::as_str).unwrap_or(""),
+                                }));
+                            }
+                            "neutral" | "skipped" => neutral += 1,
+                            _ => {}
+                        }
+                    }
+                    checks_summary = json!({
+                        "total": runs.len(),
+                        "success": success,
+                        "failed": failed,
+                        "in_progress": in_progress,
+                        "neutral_or_skipped": neutral,
+                        "failed_runs": failed_runs,
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(json!({
+        "owner": owner,
+        "repo": repo,
+        "number": number,
+        "title": pr.get("title").and_then(Value::as_str).unwrap_or(""),
+        "author": pr.pointer("/user/login").and_then(Value::as_str).unwrap_or(""),
+        "state": pr.get("state").and_then(Value::as_str).unwrap_or(""),
+        "draft": pr.get("draft").and_then(Value::as_bool).unwrap_or(false),
+        "merged": pr.get("merged").and_then(Value::as_bool).unwrap_or(false),
+        "mergeable": pr.get("mergeable").and_then(Value::as_bool),
+        "mergeable_state": pr.get("mergeable_state").and_then(Value::as_str).unwrap_or(""),
+        "head_ref": pr.pointer("/head/ref").and_then(Value::as_str).unwrap_or(""),
+        "head_sha": head_sha,
+        "base_ref": pr.pointer("/base/ref").and_then(Value::as_str).unwrap_or(""),
+        "url": pr.get("html_url").and_then(Value::as_str).unwrap_or(""),
+        "body": body,
+        "diff": diff,
+        "diff_included": include_diff,
+        "comments": comments,
+        "checks": checks_summary,
+    })
+    .to_string())
+}
+
 fn run_gh_fork(input: &str) -> Result<String, String> {
     let v = parse_json_input(input, "gh_fork")?;
     let owner = extract_str(&v, "owner", "gh_fork")?;
@@ -782,9 +999,9 @@ mod tests {
     }
 
     #[test]
-    fn schemas_lists_nine_tools() {
+    fn schemas_lists_ten_tools() {
         let schemas = schemas();
-        assert_eq!(schemas.len(), 9);
+        assert_eq!(schemas.len(), 10);
         let names: Vec<&str> = schemas
             .iter()
             .filter_map(|v| v.pointer("/function/name").and_then(Value::as_str))
@@ -799,10 +1016,23 @@ mod tests {
                 "gh_search_code",
                 "gh_list_repo_issues",
                 "gh_pr_status",
+                "gh_pr_view",
                 "gh_fork",
                 "gh_create_pr",
             ]
         );
+    }
+
+    #[test]
+    fn gh_pr_view_rejects_missing_number() {
+        let err = run_gh_pr_view(r#"{"owner":"me","repo":"r"}"#).unwrap_err();
+        assert!(err.contains("number"), "got: {err}");
+    }
+
+    #[test]
+    fn gh_pr_view_rejects_missing_owner() {
+        let err = run_gh_pr_view(r#"{"repo":"r","number":1}"#).unwrap_err();
+        assert!(err.contains("owner"), "got: {err}");
     }
 
     #[test]
