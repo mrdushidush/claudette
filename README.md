@@ -63,8 +63,8 @@ Honest side-by-side vs. OpenHands, Aider, opencode, Cline, Continue: [`docs/comp
 | **TUI** | `claudette --tui` | Ratatui fullscreen UI with 5 tabs. |
 | **Telegram bot** | `claudette --telegram` | Voice-capable remote chat. |
 
-### 80+ tools, ~170 token base schema
-Every tool except `enable_tools` and `get_current_time` lives in a group the model opts into via `enable_tools(group)`. 18 groups (notes, todos, files, code, git, github, ide, search, advanced, facts, registry, markets, telegram, calendar, schedule, gmail, recall, meta) — schema cost stays flat until the model actually needs the surface.
+### 80+ tools, ~200 token base schema
+Every tool except `enable_tools`, `get_current_time`, and `load_workspace_rules` lives in a group the model opts into via `enable_tools(group)`. **22 groups as of v0.6.0** (notes, todos, files, code, meta, git, ide, search, advanced, facts, registry, github, markets, telegram, calendar, schedule, gmail, recall, **quality** [run_tests / diagnostics / apply_patch], **semantic** [semantic_grep], **vision** [screenshot_capture / image_describe], **clipboard**) — schema cost stays flat until the model actually needs the surface.
 
 ### Brownfield missions: clone, edit, ship a PR — in one tool chain
 `mission_start("owner/repo")` clones into `~/.claudette/missions/<slug>/` and silently re-routes `git_status` / `glob_search` / `grep_search` / `write_file` / `bash` into the mission tree. `mission_submit` auto-branches, commits, pushes, and opens the PR via `gh_create_pr`. Resumable across sessions via `mission_attach`.

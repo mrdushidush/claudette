@@ -55,7 +55,7 @@ src/
 
 ## Tool groups
 
-18 groups, ~80 tools total. Schema cost: ~680 chars (~170 tokens) on every turn until the model enables a group; the full 18-group surface is ~26 KB only if every group is loaded at once.
+22 groups, ~80 tools total as of v0.6.0 (added Quality, Semantic, Vision, Clipboard; collapsed 18 lesser-used tools into polymorphic merges + outright drops). Schema cost: ~840 chars (~210 tokens) on every turn until the model enables a group; the full 22-group surface is ~34 KB if every group is loaded at once. A follow-up will trim back toward the ~26 KB target by dropping the v0.6.0 deprecation-alias arms (still dispatched for one release) and tightening verbose descriptions.
 
 | Group | Tools | What it does |
 |-------|-------|--------------|
