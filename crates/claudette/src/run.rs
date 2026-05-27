@@ -613,7 +613,7 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
         // Verifier
         eprintln!("{} {}", theme::BOLT, theme::accent("forge: verifier"));
         let diff = capture_git_diff(&mission.path, base_sha.as_deref()).unwrap_or_default();
-        let verifier = run_verifier(
+        let mut verifier = run_verifier(
             session.clone(),
             &mission,
             user_input,
@@ -633,6 +633,35 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
                 feedback: String::new(),
             }
         });
+
+        // ── Security review stage (opt-in) ─────────────────────────────
+        // Scan the round's diff for unsafe constructs. HIGH findings flip
+        // the round to "not passing" and prepend remediation feedback so
+        // the Coder fixes them within the fix-loop (bounded by
+        // max_fix_rounds); MEDIUM/LOW are advisory. Enable with
+        // CLAUDETTE_FORGE_SECURITY_REVIEW=1.
+        if crate::security_review::enabled() {
+            let findings = crate::security_review::scan_diff(&diff);
+            if !findings.is_empty() {
+                eprintln!("{} {}", theme::BOLT, theme::accent("forge: security review"));
+                for f in &findings {
+                    eprintln!("  {} {}", theme::dim("∘"), theme::dim(&f.to_string()));
+                }
+                let has_high = findings
+                    .iter()
+                    .any(|f| f.severity == crate::security_review::Severity::High);
+                if has_high && verifier.pass {
+                    let sec = crate::security_review::findings_feedback(&findings);
+                    verifier.pass = false;
+                    verifier.feedback = if verifier.feedback.trim().is_empty() {
+                        sec
+                    } else {
+                        format!("{sec}\n\n{}", verifier.feedback)
+                    };
+                }
+            }
+        }
+
         let feedback_display: &str = if verifier.feedback.is_empty() {
             "(no feedback)"
         } else {
@@ -719,6 +748,30 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // Final security gate: if the review is on and HIGH findings survived
+    // the fix-loop, warn loudly before the PR is opened (advisory — the
+    // submit still proceeds; the operator decides).
+    if crate::security_review::enabled() {
+        let final_diff = capture_git_diff(&mission.path, base_sha.as_deref()).unwrap_or_default();
+        let remaining: Vec<_> = crate::security_review::scan_diff(&final_diff)
+            .into_iter()
+            .filter(|f| f.severity == crate::security_review::Severity::High)
+            .collect();
+        if !remaining.is_empty() {
+            eprintln!(
+                "  {} {}",
+                theme::BOLT,
+                theme::warn(&format!(
+                    "SECURITY: {} HIGH-severity finding(s) remain in the diff after the fix-loop:",
+                    remaining.len()
+                ))
+            );
+            for f in &remaining {
+                eprintln!("    {} {}", theme::dim("∘"), theme::warn(&f.to_string()));
             }
         }
     }
