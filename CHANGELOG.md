@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Until we tag `1.0.0`, minor-version bumps may contain breaking changes; patch
 bumps are non-breaking bugfixes only.
 
+## [0.7.0] - 2026-05-27
+
+### Added — forge-mode upgrades (harvested from the Beast experiment)
+
+- **`apply_diff` tool** — fuzzy before/after edit: exact match first, then a
+  whitespace / indentation / CRLF-tolerant line-trim fallback. Lives in the
+  Advanced group; the forge Coder is steered to prefer it over rewriting whole
+  files. Far more reliable than the strict `apply_patch` on real LLM-emitted
+  edits (which fail on the slightest context drift).
+- **Agentic localizing Planner** — the forge Planner now investigates the repo
+  with read-only tools (`read_file`, `grep_search`, `glob_search`, `list_dir`),
+  localizes the exact file(s) / function(s) to change, and emits a grounded
+  brief shared with the Coder (via the plan) and the Verifier. No write / git /
+  shell access — it cannot edit the tree before the plan exists.
+- **`CLAUDETTE_FORGE_AUTO_APPROVE`** — opt-in env var that runs forge phases in
+  `PermissionMode::Allow` for unattended / scripted runs (no `[y/N]` prompts).
+  Off by default; secretary and TUI sessions are unaffected. Only enable it for
+  throwaway repos — it lets the model run bash/git/apply_diff without prompting.
+- **`▸ apply_diff:` call logging** on stderr (mirrors the git tool) so
+  edit-tool usage is observable in forge runs.
+- Antipattern rule persistence — `load_active_rules` / `save_active_rules` /
+  `ActiveRulesFile` for `~/.claudette/antipatterns/active.toml`.
+- `scripts/forge-smoke.ps1` — an end-to-end forge smoke harness (greenfield +
+  brownfield missions, LM Studio or Ollama backend) that verifies the Planner
+  localization and `apply_diff` usage and runs the resulting code.
+
+### Validated
+
+- End-to-end on `qwen3.6-35b-a3b` (LM Studio, OpenAI-compat, 24k ctx): 5/5 smoke
+  missions resolved — 3 brownfield bug-fixes (Planner localized + `apply_diff`
+  used, tests pass) and 2 greenfield builds (Space Invaders, storefront page).
+
 ## [Unreleased]
 
 ### Tool surface rework: −18 / +10 (Sprint v0.6.0, 2026-05-21)

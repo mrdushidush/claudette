@@ -311,6 +311,19 @@ fn max_fix_rounds() -> u32 {
     }
 }
 
+/// Opt-in: when set, forge phases auto-approve every tool call (the runtime
+/// uses `PermissionMode::Allow`, so the [y/N] prompter is never consulted).
+/// For UNATTENDED / scripted forge runs only — DangerFullAccess tools (bash,
+/// git, apply_diff) then run without confirmation, so only enable it for
+/// throwaway repos. Off by default; affects forge phases only (secretary/TUI
+/// keep the normal WorkspaceWrite+prompt policy).
+fn forge_auto_approve_enabled() -> bool {
+    matches!(
+        std::env::var("CLAUDETTE_FORGE_AUTO_APPROVE").as_deref(),
+        Ok("1" | "true" | "yes" | "on")
+    )
+}
+
 /// Seconds the ephemeral-mission auto-bootstrap waits before proceeding so
 /// the user can Ctrl+C if cwd wasn't what they intended. Default 3; set
 /// `CLAUDETTE_FORGE_ABORT_WINDOW_SECS=0` to disable (e.g. CI / scripted
@@ -604,6 +617,7 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
             session.clone(),
             &mission,
             user_input,
+            &plan,
             &diff,
             &mut prompter_opt,
         )
@@ -826,12 +840,16 @@ fn run_planner(
     user_input: &str,
     prompter: &mut Option<&mut dyn PermissionPrompter>,
 ) -> Result<String> {
+    // The Planner gets READ-ONLY tools so it can investigate + localize the
+    // code to change once for the whole pipeline. Files (read_file, list_dir)
+    // and Search (glob_search, grep_search) only — no Git/Advanced/write
+    // access, so it cannot edit the tree before the plan exists.
     let mut runtime = build_forge_role_runtime(
         session,
         mission,
         forge::types::Role::Planner,
         forge_planner_system_prompt(&mission.path.to_string_lossy()),
-        &[], // no tool groups
+        &[ToolGroup::Files, ToolGroup::Search],
     );
     let summary = crate::brain_selector::run_turn_with_fallback(&mut runtime, user_input, prompter)
         .map_err(|e| anyhow::anyhow!("planner turn failed: {e}"))?;
@@ -847,6 +865,7 @@ fn run_verifier(
     session: Session,
     mission: &crate::missions::Mission,
     user_input: &str,
+    plan: &str,
     diff: &str,
     prompter: &mut Option<&mut dyn PermissionPrompter>,
 ) -> Result<VerifierResult> {
@@ -857,8 +876,16 @@ fn run_verifier(
         forge_verifier_system_prompt(&mission.path.to_string_lossy()),
         &[],
     );
+    // Show the Verifier the Planner's grounded brief (relevant files + plan)
+    // when one exists, so its grading is informed by the intended localization.
+    let brief = plan.trim();
+    let brief_block = if brief.is_empty() {
+        String::new()
+    } else {
+        format!("--- Planner brief (relevant files + plan) ---\n{brief}\n--- end brief ---\n\n")
+    };
     let payload = format!(
-        "Original request: {user_input}\n\n--- git diff HEAD ---\n{diff}\n--- end diff ---"
+        "Original request: {user_input}\n\n{brief_block}--- git diff HEAD ---\n{diff}\n--- end diff ---"
     );
     let summary = crate::brain_selector::run_turn_with_fallback(&mut runtime, &payload, prompter)
         .map_err(|e| anyhow::anyhow!("verifier turn failed: {e}"))?;
@@ -1408,7 +1435,15 @@ fn build_forge_role_runtime(
 
     let hinter_registry = Arc::clone(&registry);
     let executor = SecretaryToolExecutor::with_registry(registry);
-    let policy = build_permission_policy();
+    // Forge phases auto-approve every tool call when CLAUDETTE_FORGE_AUTO_APPROVE
+    // is set (unattended/scripted runs). PermissionMode::Allow short-circuits
+    // authorize() so the CliPrompter is never consulted. Forge-only: secretary
+    // and TUI go through build_permission_policy() directly, unchanged.
+    let policy = if forge_auto_approve_enabled() {
+        build_permission_policy().with_active_mode(crate::PermissionMode::Allow)
+    } else {
+        build_permission_policy()
+    };
 
     ConversationRuntime::new(session, api_client, executor, policy, system_prompt)
         .with_max_iterations(max_iterations())
@@ -1534,6 +1569,9 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         // disk writes but the schema doesn't differentiate, so the
         // permission applies uniformly.
         .with_tool_requirement("apply_patch", DangerFullAccess)
+        // apply_diff edits arbitrary in-sandbox files (fuzzy before/after
+        // replacement) — same disk-write gate as apply_patch/edit_file.
+        .with_tool_requirement("apply_diff", DangerFullAccess)
         // ── v0.6.0: bash_background family ──────────────────────────
         // bash_background spawns a long-running subprocess — same gate
         // as `bash`. bash_status + bash_tail are pure reads of files

@@ -204,6 +204,47 @@ pub fn cluster_label(failures: &[FailureRecord], cluster: &[usize]) -> String {
         .join("-")
 }
 
+/// On-disk shape of `~/.claudette/antipatterns/active.toml`. The wrapper
+/// gives us a `[[rules]]` array of tables, which is the natural TOML
+/// representation for "a list of antipattern rules."
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ActiveRulesFile {
+    #[serde(default)]
+    pub rules: Vec<AntipatternRule>,
+}
+
+/// Read the active rules file from disk. Returns an empty vector when the
+/// file is missing, unreadable, or malformed — antipatterns are a
+/// best-effort prompt overlay and must never block the forge pipeline.
+#[must_use]
+pub fn load_active_rules() -> Vec<AntipatternRule> {
+    let path = active_rules_path();
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    match toml::from_str::<ActiveRulesFile>(&text) {
+        Ok(file) => file.rules,
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Persist a set of rules to `active.toml`, creating parent directories
+/// as needed. Returns the path written on success. Used by the graduation
+/// pipeline to append newly-clustered rules.
+pub fn save_active_rules(rules: &[AntipatternRule]) -> std::io::Result<PathBuf> {
+    let path = active_rules_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = ActiveRulesFile {
+        rules: rules.to_vec(),
+    };
+    let text = toml::to_string(&file)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(&path, text)?;
+    Ok(path)
+}
+
 /// Build the system-prompt overlay block for the currently-active rules.
 /// Returns an empty string when no rules are loaded — caller can append
 /// unconditionally without an `if !text.is_empty()` guard.
