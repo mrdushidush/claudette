@@ -133,33 +133,86 @@ fn run_apply_diff(input: &str) -> Result<String, String> {
     }
 }
 
-/// Replace the first occurrence of `before` in `content` with `after`.
-/// Pass 1: byte-for-byte exact. Pass 2: line-trim fallback.
+/// True if the byte span `[idx, idx+len)` in `content` covers whole lines:
+/// it starts at the beginning of a line (start-of-file or right after a `\n`)
+/// and ends at the end of a line (end-of-file or right after a `\n`).
 ///
-/// Returns `Err(Ambiguous)` if the block matches in more than one place.
+/// Pass 1 requires this (roast RC-E C1/C2): without it, `match_indices`
+/// happily matches a `before` that occurs only *inside* a comment or string,
+/// or mid-token, and silently edits the wrong place. Line-anchoring confines
+/// the exact pass to genuine block replacements; sub-line text that the model
+/// wants to change must be supplied as its whole line (the line-trim pass then
+/// handles indentation drift).
+fn line_anchored(content: &str, idx: usize, len: usize) -> bool {
+    let b = content.as_bytes();
+    let start_ok = idx == 0 || b.get(idx.wrapping_sub(1)) == Some(&b'\n');
+    let end = idx + len;
+    let end_ok = end == content.len() || b.get(end - 1) == Some(&b'\n');
+    start_ok && end_ok
+}
+
+/// Re-encode every line ending in `text` to CRLF (`crlf=true`) or LF
+/// (`crlf=false`). Collapses CRLF→LF first so the result is uniform. Keeps
+/// the replacement region's line endings consistent with the file it's being
+/// spliced into (roast RC-E H1/M3 — previously an LF `after` spliced into a
+/// CRLF file produced a mixed-EOL hunk).
+fn normalize_eol(text: &str, crlf: bool) -> String {
+    let lf = text.replace("\r\n", "\n");
+    if crlf {
+        lf.replace('\n', "\r\n")
+    } else {
+        lf
+    }
+}
+
+/// Replace the first occurrence of `before` in `content` with `after`.
+/// Pass 1: line-anchored exact match. Pass 2: line-trim fallback. Both count
+/// *all* candidate placements (overlapping included) and return `Ambiguous`
+/// when more than one matches, so a genuinely ambiguous edit is rejected
+/// rather than silently applied to the first hit (roast RC-E C3).
 fn fuzzy_replace(content: &str, before: &str, after: &str) -> Result<String, FuzzyError> {
     if before.is_empty() {
         return Err(FuzzyError::EmptyBefore);
     }
 
-    // Pass 1: exact match. Check for multiplicity.
-    let mut matches = content.match_indices(before);
-    if let Some((idx, _)) = matches.next() {
-        if matches.next().is_some() {
-            return Err(FuzzyError::Ambiguous);
+    // Pass 1: line-anchored exact match. Scan ALL occurrences (advancing by 1
+    // byte so self-overlapping repeats are counted, not collapsed by
+    // `match_indices`'s non-overlapping stride), keeping only line-anchored
+    // ones.
+    let mut hits: Vec<usize> = Vec::new();
+    let mut from = 0usize;
+    while let Some(rel) = content[from..].find(before) {
+        let idx = from + rel;
+        if line_anchored(content, idx, before.len()) {
+            hits.push(idx);
         }
-        // Preserve line-boundary semantics: when the matched `before` span
-        // ends with a newline but `after` doesn't, the caller almost
-        // certainly meant for the line break to stick — else the next file
-        // line glues onto the new content.
-        let after_norm = if before.ends_with('\n') && !after.is_empty() && !after.ends_with('\n') {
-            let mut s = after.to_string();
-            s.push('\n');
-            std::borrow::Cow::Owned(s)
-        } else {
-            std::borrow::Cow::Borrowed(after)
-        };
-        return Ok(splice(content, idx, before.len(), &after_norm));
+        from = idx + 1;
+    }
+    match hits.len() {
+        0 => {} // fall through to the line-trim pass
+        1 => {
+            let idx = hits[0];
+            // The matched span is byte-identical to `before`, so derive the
+            // region's EOL style from `before` (fall back to the file's
+            // dominant EOL for a single-line `before`) and re-encode `after`
+            // to match.
+            let crlf = if before.contains("\r\n") {
+                true
+            } else if before.contains('\n') {
+                false
+            } else {
+                content.contains("\r\n")
+            };
+            let mut after_norm = normalize_eol(after, crlf);
+            // Preserve line-boundary semantics: a `before` that ends with a
+            // newline but an `after` that doesn't would glue the next file
+            // line onto the new content — re-add the (correctly-encoded) break.
+            if before.ends_with('\n') && !after_norm.is_empty() && !after_norm.ends_with('\n') {
+                after_norm.push_str(if crlf { "\r\n" } else { "\n" });
+            }
+            return Ok(splice(content, idx, before.len(), &after_norm));
+        }
+        _ => return Err(FuzzyError::Ambiguous),
     }
 
     // Pass 2: line-trim fallback.
@@ -189,17 +242,24 @@ fn fuzzy_replace(content: &str, before: &str, after: &str) -> Result<String, Fuz
         return Err(FuzzyError::NotFound);
     };
 
-    // Reconstruct: pre-window lines + after + post-window lines.
-    let mut out = String::with_capacity(content.len() + after.len());
+    // Reconstruct: pre-window lines + after + post-window lines. Re-encode
+    // `after` to the matched window's EOL style so a CRLF file keeps CRLF
+    // inside the replaced region (roast RC-E H1).
+    let window_crlf = content_lines[i..i + m].iter().any(|l| l.ends_with("\r\n"));
+    let mut after_norm = normalize_eol(after, window_crlf);
+    if !after_norm.is_empty()
+        && !after_norm.ends_with('\n')
+        && content_lines[i..i + m]
+            .last()
+            .is_some_and(|l| l.ends_with('\n'))
+    {
+        after_norm.push_str(if window_crlf { "\r\n" } else { "\n" });
+    }
+    let mut out = String::with_capacity(content.len() + after_norm.len());
     for line in &content_lines[..i] {
         out.push_str(line);
     }
-    out.push_str(after);
-    if !after.ends_with('\n')
-        && content_lines[i..i + m].last().is_some_and(|l| l.ends_with('\n'))
-    {
-        out.push('\n');
-    }
+    out.push_str(&after_norm);
     for line in &content_lines[i + m..] {
         out.push_str(line);
     }
@@ -264,9 +324,49 @@ mod tests {
         let before = "alpha\nbeta\n";
         let after = "ALPHA\nBETA\n";
         let got = fuzzy_replace(content, before, after).unwrap();
-        assert!(got.contains("ALPHA"));
-        assert!(got.contains("BETA"));
-        assert!(got.contains("gamma\r\n"));
+        // roast RC-E H1: the replaced region must keep the file's CRLF, not
+        // become LF (which produced a mixed-EOL hunk git flags as churn).
+        assert_eq!(got, "ALPHA\r\nBETA\r\ngamma\r\n", "got: {got:?}");
+    }
+
+    #[test]
+    fn exact_pass_does_not_edit_a_substring_inside_a_comment() {
+        // roast RC-E C1: `before` occurs only inside a comment. It must NOT be
+        // silently edited; the real (different) code line is left for the
+        // model to target with its full line.
+        let content = "// TODO: set rate = 0.05 properly\nrate = 0.10\n";
+        let before = "rate = 0.05";
+        let after = "rate = 0.20";
+        let err = fuzzy_replace(content, before, after).unwrap_err();
+        assert_eq!(err, FuzzyError::NotFound, "must not edit the comment");
+    }
+
+    #[test]
+    fn exact_pass_does_not_edit_mid_token() {
+        // roast RC-E C2: a partial-line `before` ("ax=10" inside "max=10")
+        // must not splice mid-token.
+        let content = "max=10\n";
+        let err = fuzzy_replace(content, "ax=10", "ax=99").unwrap_err();
+        assert_eq!(err, FuzzyError::NotFound);
+    }
+
+    #[test]
+    fn overlapping_repeats_are_ambiguous() {
+        // roast RC-E C3: "ab\nab\n" matches lines (0,1) AND (1,2). The old
+        // non-overlapping match_indices saw one match and silently picked the
+        // first; now both are counted and the edit is rejected as ambiguous.
+        let content = "ab\nab\nab\n";
+        let err = fuzzy_replace(content, "ab\nab\n", "X\n").unwrap_err();
+        assert_eq!(err, FuzzyError::Ambiguous);
+    }
+
+    #[test]
+    fn whole_line_before_without_trailing_newline_still_matches_via_trim() {
+        // A whole line supplied without its trailing newline isn't line-anchored
+        // in the exact pass, but the line-trim pass still finds it.
+        let content = "alpha\nfoo\nbeta\n";
+        let got = fuzzy_replace(content, "foo", "bar").unwrap();
+        assert_eq!(got, "alpha\nbar\nbeta\n");
     }
 
     #[test]

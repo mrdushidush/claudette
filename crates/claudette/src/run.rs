@@ -283,31 +283,44 @@ pub fn run_secretary(user_input: &str, opts: SessionOptions) -> Result<TurnSumma
     Ok(summary)
 }
 
-/// Default cap on Coder→Verifier fix-loop rounds in v0c forge-mode.
-/// Round 0 is the initial Coder pass; up to this many additional rounds
-/// run if the Verifier rejects. Empirically two rounds is the sweet spot
-/// — a local 8b coder model that didn't get it after two passes usually
-/// won't on a third, and burning more rounds runs the user's context
-/// budget into the ground.
-const DEFAULT_MAX_FIX_ROUNDS: u32 = 2;
+/// Default cap on TOTAL Coder→Verifier fix-loop passes in v0c forge-mode
+/// (round 0 = initial pass; the loop runs at most this many passes total).
+/// Empirically three passes is the sweet spot — a local 8b coder model that
+/// didn't get it after three passes usually won't, and burning more rounds
+/// runs the user's context budget into the ground. (Roast RC-H F2: the knob
+/// is now total passes, not "additional rounds", so the count matches the
+/// documented number instead of running one extra.)
+const DEFAULT_MAX_FIX_ROUNDS: u32 = 3;
 
-/// Hard upper bound on fix-loop rounds, even if `CLAUDETTE_MAX_FIX_ROUNDS`
-/// is set higher. Past ~10 rounds the brain is reliably stuck in a local
+/// Hard upper bound on fix-loop passes, even if `CLAUDETTE_MAX_FIX_ROUNDS`
+/// is set higher. Past ~10 passes the brain is reliably stuck in a local
 /// minimum and the right move is to bail and let the user re-prompt.
 const FIX_ROUNDS_HARD_CAP: u32 = 10;
 
-/// Resolve the active fix-loop round cap. Honors `CLAUDETTE_MAX_FIX_ROUNDS`
-/// (parsed as u32, clamped to `FIX_ROUNDS_HARD_CAP`) and falls back to
-/// `DEFAULT_MAX_FIX_ROUNDS` on missing or unparseable input. Read on every
-/// call — the forge loop fires a few times per mission so the cost is
-/// negligible, and re-reading makes the knob hot-pluggable across sessions.
+/// Resolve the active fix-loop pass cap (total Coder passes). Honors
+/// `CLAUDETTE_MAX_FIX_ROUNDS`, clamped to `[1, FIX_ROUNDS_HARD_CAP]`, and
+/// falls back to `DEFAULT_MAX_FIX_ROUNDS` on missing input. An unparseable
+/// value warns and falls back (roast RC-H F4: a typo'd knob was previously
+/// indistinguishable from unset). Read on every call — the forge loop fires
+/// a few times per mission so the cost is negligible.
 fn max_fix_rounds() -> u32 {
-    match std::env::var("CLAUDETTE_MAX_FIX_ROUNDS")
-        .ok()
-        .and_then(|s| s.trim().parse::<u32>().ok())
-    {
-        Some(n) => n.min(FIX_ROUNDS_HARD_CAP),
-        None => DEFAULT_MAX_FIX_ROUNDS,
+    match std::env::var("CLAUDETTE_MAX_FIX_ROUNDS") {
+        Ok(raw) => match raw.trim().parse::<u32>() {
+            // Floor of 1: there is always at least one Coder pass; "0" never
+            // meant anything coherent.
+            Ok(n) => n.clamp(1, FIX_ROUNDS_HARD_CAP),
+            Err(_) => {
+                eprintln!(
+                    "  {} {}",
+                    theme::dim("∘"),
+                    theme::warn(&format!(
+                        "CLAUDETTE_MAX_FIX_ROUNDS={raw:?} is not a number — using default {DEFAULT_MAX_FIX_ROUNDS}"
+                    ))
+                );
+                DEFAULT_MAX_FIX_ROUNDS
+            }
+        },
+        Err(_) => DEFAULT_MAX_FIX_ROUNDS,
     }
 }
 
@@ -322,6 +335,36 @@ fn forge_auto_approve_enabled() -> bool {
         std::env::var("CLAUDETTE_FORGE_AUTO_APPROVE").as_deref(),
         Ok("1" | "true" | "yes" | "on")
     )
+}
+
+/// True for the canonical truthy env values. Shared by the forge gate knobs.
+fn env_flag_enabled(name: &str) -> bool {
+    matches!(
+        std::env::var(name).as_deref(),
+        Ok("1" | "true" | "yes" | "on")
+    )
+}
+
+/// Opt-in (roast RC-C): proceed with the Submitter even when a HIGH-severity
+/// security finding survived the fix-loop. Off by default — a surviving HIGH
+/// hard-blocks PR creation. Only set this once you've reviewed the finding.
+fn security_override_enabled() -> bool {
+    env_flag_enabled("CLAUDETTE_FORGE_SECURITY_OVERRIDE")
+}
+
+/// Opt-in (roast RC-A MED-7): open a PR even when the Verifier never passed
+/// within the round limit. Off by default — forge declines to submit work the
+/// gate rejected and leaves the commits on the mission branch for inspection.
+fn submit_on_fail_enabled() -> bool {
+    env_flag_enabled("CLAUDETTE_FORGE_SUBMIT_ON_FAIL")
+}
+
+/// Opt-in (roast RC-D): allow forge to operate on a dirty / mid-merge /
+/// detached working tree. Off by default — Phase 0 refuses rather than risk
+/// `git reset --hard` clobbering the user's uncommitted work or committing
+/// onto an in-progress branch.
+fn allow_dirty_tree_enabled() -> bool {
+    env_flag_enabled("CLAUDETTE_FORGE_ALLOW_DIRTY")
 }
 
 /// Seconds the ephemeral-mission auto-bootstrap waits before proceeding so
@@ -364,26 +407,51 @@ pub(crate) struct RoundReport {
     pub head_sha: Option<String>,
     pub score: u8,
     pub pass: bool,
+    /// True when the security review found a HIGH-severity issue in this
+    /// round's diff. Tracked separately from `score` (which the security
+    /// stage never mutates) so [`best_round`] can refuse to restore a
+    /// vulnerable round over a clean one (roast RC-C).
+    pub security_high: bool,
 }
 
-/// Pick the highest-scoring round from `history`. Ties resolved by lowest
-/// round index — earlier-is-better when scores are equal, so we don't burn
-/// a `git reset` for nothing. Returns `None` when `history` is empty or no
-/// entry has a recoverable `head_sha`.
+/// Pick the best round to restore from `history`. Ordering (roast RC-C), best
+/// first: (1) a passing round beats a failing one, (2) a security-clean round
+/// beats one with a HIGH finding, (3) then highest score, (4) then lowest
+/// round index (earlier-is-better, so we don't `git reset` for nothing).
+///
+/// This prevents restoring a high-*scoring* round that the security stage
+/// condemned over a clean lower-scoring one — the score alone is not the
+/// authoritative key, because the security review never lowers the score.
+/// Returns `None` when `history` is empty or no entry has a recoverable
+/// `head_sha`.
 pub(crate) fn best_round(history: &[RoundReport]) -> Option<&RoundReport> {
     history
         .iter()
         .filter(|r| r.head_sha.is_some())
         .min_by(|a, b| {
-            // Higher score first; on tie, lower round index wins.
-            b.score.cmp(&a.score).then_with(|| a.round.cmp(&b.round))
+            // `min_by` keeps the *smallest*, so map "better" to "smaller":
+            // pass first (false sorts after true via !pass), then clean
+            // (security_high=false first), then higher score, then earlier.
+            (!a.pass)
+                .cmp(&!b.pass)
+                .then_with(|| a.security_high.cmp(&b.security_high))
+                .then_with(|| b.score.cmp(&a.score))
+                .then_with(|| a.round.cmp(&b.round))
         })
 }
 
 /// True when `history`'s last three entries are strictly monotonically
 /// declining in score. Triggers the smart-stop break in
 /// [`run_forge_mission`]. Returns `false` for fewer than 3 entries — we
-/// need a baseline plus two declines.
+/// need a baseline plus two declines (so the name's "two consecutive" refers
+/// to two *drops* across three data points).
+///
+/// NOTE (roast RC-H F3): this needs ≥3 history entries, so at the default
+/// `DEFAULT_MAX_FIX_ROUNDS` it can only fire on the same final pass the round
+/// cap would break on anyway — it changes the exit *message*, not the pass
+/// count. It only saves passes when `CLAUDETTE_MAX_FIX_ROUNDS` is raised to
+/// ≥4. This is intentional: triggering on a single drop (2 entries) stops too
+/// eagerly on a normal one-round dip.
 pub(crate) fn score_declining_two_consecutive(history: &[RoundReport]) -> bool {
     if history.len() < 3 {
         return false;
@@ -416,6 +484,110 @@ fn git_reset_hard(mission_path: &std::path::Path, sha: &str) -> Result<(), Strin
         return Err(format!("git reset --hard {sha}: {stderr}"));
     }
     Ok(())
+}
+
+/// Phase-0 safety pre-flight for an ephemeral (cwd-rooted) mission on the
+/// user's *live* repo (roast RC-D). Brownfield missions (cloned into
+/// `~/.claudette/missions/`) are skipped — their tree is a fresh clone, so
+/// none of these hazards apply and the existing flow is left untouched.
+///
+/// For an ephemeral mission this:
+/// 1. refuses a dirty working tree (uncommitted/untracked changes) so a later
+///    `git reset --hard` can't silently destroy the user's in-progress work,
+/// 2. refuses a mid-merge / mid-rebase / detached-HEAD / state we can't safely
+///    branch from and restore,
+/// 3. creates and checks out a dedicated `claudette-mission/<slug>-<ts>` branch
+///    so AI commits never land on the user's current branch.
+///
+/// Returns `Ok(Some((repo, original_branch)))` when a branch was created (the
+/// caller arms the guard to restore it), `Ok(None)` when there's nothing to do
+/// (non-ephemeral), or `Err` when forge should refuse to proceed. The dirty /
+/// non-clean refusals are overridable with `CLAUDETTE_FORGE_ALLOW_DIRTY=1`.
+fn forge_phase0_preflight(mission: &crate::missions::Mission) -> Result<Option<(PathBuf, String)>> {
+    if !mission.ephemeral {
+        return Ok(None);
+    }
+    let path = &mission.path;
+    let git = |args: &[&str]| -> Result<std::process::Output> {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(path)
+            .output()
+            .map_err(|e| anyhow::anyhow!("git {}: {e}", args.join(" ")))
+    };
+
+    // Detached HEAD / unknown branch — `--abbrev-ref HEAD` yields "HEAD" when
+    // detached. We need a real branch to return to.
+    let head_out = git(&["rev-parse", "--abbrev-ref", "HEAD"])?;
+    let original_branch = String::from_utf8_lossy(&head_out.stdout).trim().to_string();
+    if !head_out.status.success() || original_branch.is_empty() || original_branch == "HEAD" {
+        return Err(anyhow::anyhow!(
+            "forge: the working tree at {} is in a detached-HEAD state (no current branch). \
+             Check out a branch first so forge can isolate its commits and restore your branch \
+             afterwards.",
+            path.display()
+        ));
+    }
+
+    // Mid-merge / mid-rebase — committing here would finalize a half-resolved
+    // operation and `git add` would stage conflict markers.
+    let git_dir = {
+        let out = git(&["rev-parse", "--git-dir"])?;
+        let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let p = std::path::PathBuf::from(&raw);
+        if p.is_absolute() {
+            p
+        } else {
+            path.join(p)
+        }
+    };
+    if git_dir.join("MERGE_HEAD").exists()
+        || git_dir.join("rebase-merge").exists()
+        || git_dir.join("rebase-apply").exists()
+    {
+        return Err(anyhow::anyhow!(
+            "forge: the working tree at {} is in the middle of a merge or rebase. Finish or abort \
+             it before running forge.",
+            path.display()
+        ));
+    }
+
+    // Dirty tree — uncommitted/untracked changes are at the mercy of the
+    // best-round restore's `git reset --hard` and the submit `git add`.
+    let status_out = git(&["status", "--porcelain"])?;
+    let dirty = !String::from_utf8_lossy(&status_out.stdout)
+        .trim()
+        .is_empty();
+    if dirty && !allow_dirty_tree_enabled() {
+        return Err(anyhow::anyhow!(
+            "forge: the working tree at {} has uncommitted or untracked changes. forge commits and \
+             may `git reset --hard` on this tree, which would destroy that work. Commit or stash \
+             it first, or set CLAUDETTE_FORGE_ALLOW_DIRTY=1 to proceed anyway (your changes will \
+             be carried onto the mission branch).",
+            path.display()
+        ));
+    }
+
+    // Create + check out a dedicated mission branch so AI commits are isolated.
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let branch = format!("claudette-mission/{}-{ts}", mission.slug);
+    let co = git(&["checkout", "-b", &branch])?;
+    if !co.status.success() {
+        return Err(anyhow::anyhow!(
+            "forge: failed to create mission branch {branch}: {}",
+            String::from_utf8_lossy(&co.stderr).trim()
+        ));
+    }
+    eprintln!(
+        "  {} {}",
+        theme::dim("∘"),
+        theme::accent(&format!(
+            "forge: isolated commits on branch {branch} (will restore {original_branch} on exit)"
+        )),
+    );
+    Ok(Some((path.clone(), original_branch)))
 }
 
 /// Run a forge-mode mission inside the active brownfield mission and
@@ -533,6 +705,30 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
     // the same mission without re-bootstrapping).
     let mut cleanup = EphemeralMissionGuard::new(mission.ephemeral);
 
+    // Loud one-time banner when running unattended (roast RC-B F5): under
+    // auto-approve every tool call — including `bash`, which is unsandboxed —
+    // runs with no confirmation against the target tree.
+    if forge_auto_approve_enabled() {
+        eprintln!(
+            "  {} {}",
+            theme::warn(theme::WARN_GLYPH),
+            theme::warn(&format!(
+                "AUTO-APPROVE ON — all tool calls (incl. unsandboxed `bash`) run WITHOUT \
+                 confirmation against {}",
+                mission.path.display()
+            )),
+        );
+    }
+
+    // Phase-0 safety pre-flight (roast RC-D): on an ephemeral cwd-rooted
+    // mission, refuse a dirty/merging/detached tree and isolate AI commits on
+    // a dedicated branch. Runs before any phase so a refusal costs nothing.
+    match forge_phase0_preflight(&mission) {
+        Ok(Some((repo, original_branch))) => cleanup.set_restore_branch(repo, original_branch),
+        Ok(None) => {}
+        Err(e) => return Err(e),
+    }
+
     // Snapshot HEAD before any forge phase runs so the Verifier can diff
     // against it after the Coder commits. Without this, `git diff HEAD`
     // inside the Verifier loop returns empty (HEAD already points at the
@@ -565,6 +761,14 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
         eprintln!("{}", theme::dim(plan.trim()));
     }
 
+    // Light localization sanity check (roast RC-F F3): the brief is trusted
+    // blindly downstream and never re-planned, so if it names files that
+    // don't exist under the mission tree, surface a warning — a confidently
+    // wrong/hallucinated localization is the silent failure mode.
+    if !plan.trim().is_empty() {
+        warn_if_brief_paths_missing(&plan, &mission.path);
+    }
+
     let augmented_input = if plan.trim().is_empty() {
         user_input.to_string()
     } else {
@@ -588,13 +792,18 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
             theme::accent("forge: coder"),
             round
         );
+        // Retry rounds keep the full Planner brief (roast RC-F F1): the brief
+        // (relevant files + plan) is folded into `augmented_input` and was
+        // previously dropped on every revision, so the Coder lost its
+        // localization exactly when it needed to re-edit. Now the brief
+        // persists across all rounds; only the feedback preamble is added.
         let coder_input = match &feedback {
             None => augmented_input.clone(),
             Some(f) => format!(
                 "The Verifier rejected your previous attempt with this feedback:\n{f}\n\n\
                  Revise your work — add additional commits to the same branch as needed. \
                  Do NOT push or call mission_submit yet; the Verifier will review again.\n\n\
-                 Original task: {user_input}"
+                 {augmented_input}"
             ),
         };
         let mut coder_runtime = build_forge_runtime(session.clone(), &mission, false);
@@ -625,14 +834,34 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
             eprintln!(
                 "  {} {}",
                 theme::dim("∘"),
-                theme::dim(&format!("verifier skipped: {e}"))
+                theme::dim(&format!("verifier errored: {e}"))
             );
+            // FAIL-CLOSED (roast RC-A HIGH-4): a verifier turn error (timeout,
+            // OOM, provider 5xx) is an abstention, not an endorsement. Was
+            // pass=true/score=10, which shipped unverified diffs on infra
+            // failure and let an errored round win best-round restore.
             VerifierResult {
-                score: 10,
-                pass: true,
-                feedback: String::new(),
+                score: 0,
+                pass: false,
+                feedback: format!("verifier turn failed ({e}) — treated as fail"),
             }
         });
+
+        // Empty / no-commit diff guard (roast RC-A HIGH / RC-H F1): if the
+        // Coder committed nothing, `diff` is empty and the Verifier would be
+        // grading a blank diff. Force a fail so the known no-commit failure
+        // mode can't route to a default-pass and submit a zero-line PR.
+        if diff.trim().is_empty() {
+            verifier.pass = false;
+            verifier.score = 0;
+            if verifier.feedback.trim().is_empty() {
+                verifier.feedback =
+                    "no committed changes were produced — commit your edits to the mission \
+                     branch (use apply_diff/edit_file then git_add + git_commit) before the \
+                     Verifier can review."
+                        .to_string();
+            }
+        }
 
         // ── Security review stage (opt-in) ─────────────────────────────
         // Scan the round's diff for unsafe constructs. HIGH findings flip
@@ -640,17 +869,28 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
         // the Coder fixes them within the fix-loop (bounded by
         // max_fix_rounds); MEDIUM/LOW are advisory. Enable with
         // CLAUDETTE_FORGE_SECURITY_REVIEW=1.
+        let mut security_high = false;
         if crate::security_review::enabled() {
             let findings = crate::security_review::scan_diff(&diff);
             if !findings.is_empty() {
-                eprintln!("{} {}", theme::BOLT, theme::accent("forge: security review"));
+                eprintln!(
+                    "{} {}",
+                    theme::BOLT,
+                    theme::accent("forge: security review")
+                );
                 for f in &findings {
                     eprintln!("  {} {}", theme::dim("∘"), theme::dim(&f.to_string()));
                 }
-                let has_high = findings
+                security_high = findings
                     .iter()
                     .any(|f| f.severity == crate::security_review::Severity::High);
-                if has_high && verifier.pass {
+                // A HIGH finding is a hard fail, INDEPENDENT of the Verifier's
+                // verdict (roast RC-C C1). Previously this only fired when the
+                // Verifier had *already* passed (`has_high && verifier.pass`),
+                // so a HIGH finding in a Verifier-rejected round dropped its
+                // remediation feedback entirely and rode along on a later
+                // "passing" round.
+                if security_high {
                     let sec = crate::security_review::findings_feedback(&findings);
                     verifier.pass = false;
                     verifier.feedback = if verifier.feedback.trim().is_empty() {
@@ -681,6 +921,7 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
             head_sha: head_after.clone(),
             score: verifier.score,
             pass: verifier.pass,
+            security_high,
         });
 
         if verifier.pass {
@@ -701,60 +942,91 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
             );
             break;
         }
-        if round >= max_fix_rounds() {
+        // Round-cap break. `round` is 0-indexed and incremented at the end of
+        // the loop body, so the loop runs `max_fix_rounds()` Coder passes
+        // total: round 0 (initial) plus up to `max_fix_rounds()-1` revisions.
+        // (Roast RC-H F2: the old `round >= max` post-increment guard ran
+        // max+1 passes — "2 rounds" did 3.)
+        if round + 1 >= max_fix_rounds() {
             eprintln!(
                 "  {} {}",
                 theme::dim("∘"),
-                theme::dim(&format!(
-                    "verifier still failing after {round} round(s); submitting anyway"
+                theme::warn(&format!(
+                    "verifier still failing after {} round(s); stopping fix-loop",
+                    round + 1
                 ))
             );
             break;
         }
-        feedback = Some(verifier.feedback);
+        // Accumulate a bounded feedback ledger so the Coder doesn't regress on
+        // an issue flagged two rounds ago while fixing the latest one (roast
+        // RC-H F5 / RC-F). Keep the most recent two rounds of feedback.
+        feedback = Some(match feedback.take() {
+            Some(prev) => {
+                let prev_tail = prev.lines().rev().take(40).collect::<Vec<_>>();
+                let prev_tail = prev_tail.into_iter().rev().collect::<Vec<_>>().join("\n");
+                format!(
+                    "{}\n\n--- earlier feedback (still applies) ---\n{prev_tail}",
+                    verifier.feedback
+                )
+            }
+            None => verifier.feedback.clone(),
+        });
         round += 1;
     }
 
     // ── Best-round restore ─────────────────────────────────────────
-    // If the final round didn't pass AND an earlier round scored higher,
-    // `git reset --hard` to that round's HEAD before the Submitter phase
-    // so the PR ships the strongest revision the fix-loop produced rather
-    // than the latest one. Best-round restore is best-effort: a missing
-    // SHA, a git failure, or a clean-already path all log + continue.
-    if let Some(final_report) = history.last() {
-        if !final_report.pass {
+    // If the final round didn't pass, `git reset --hard` to the BEST round's
+    // HEAD before the Submitter phase so the PR ships the strongest revision
+    // the fix-loop produced rather than the latest one. "Best" now prefers a
+    // passing, security-clean round over a higher-*scoring* but vulnerable one
+    // (roast RC-C — see `best_round`). Best-effort: a missing SHA or git
+    // failure logs + continues. `submitted` tracks the round whose tree we
+    // actually end up submitting so the outcome reporting is honest.
+    let final_report = history.last().cloned();
+    let mut submitted = final_report.clone();
+    if let Some(ref final_r) = final_report {
+        if !final_r.pass {
             if let Some(best) = best_round(&history) {
-                if best.score > final_report.score {
+                if best.round != final_r.round {
                     if let Some(sha) = best.head_sha.as_deref() {
                         eprintln!(
                             "  {} {}",
                             theme::BOLT,
                             theme::info(&format!(
-                                "best-round restore: round {} scored {} (final round {} = {}); \
-                                 resetting to {}",
+                                "best-round restore: round {} (score {}, pass {}, sec_high {}) \
+                                 beats final round {} (score {}); resetting to {}",
                                 best.round,
                                 best.score,
-                                final_report.round,
-                                final_report.score,
+                                best.pass,
+                                best.security_high,
+                                final_r.round,
+                                final_r.score,
                                 short_sha(sha),
                             ))
                         );
-                        if let Err(e) = git_reset_hard(&mission.path, sha) {
-                            eprintln!(
+                        match git_reset_hard(&mission.path, sha) {
+                            Ok(()) => submitted = Some(best.clone()),
+                            Err(e) => eprintln!(
                                 "  {} {}",
                                 theme::dim("∘"),
                                 theme::dim(&format!("restore failed: {e} — continuing"))
-                            );
+                            ),
                         }
                     }
                 }
             }
         }
     }
+    let submitted_pass = submitted.as_ref().is_some_and(|r| r.pass);
 
-    // Final security gate: if the review is on and HIGH findings survived
-    // the fix-loop, warn loudly before the PR is opened (advisory — the
-    // submit still proceeds; the operator decides).
+    // ── Final security gate (roast RC-C) ────────────────────────────
+    // If the review is on and HIGH findings survived into the tree we're
+    // about to submit, BLOCK the PR. This is a real gate now, not an
+    // advisory log line: an unattended (auto-approve) run must not push a
+    // confirmed XSS/eval/shell finding with nobody in the loop. Override with
+    // CLAUDETTE_FORGE_SECURITY_OVERRIDE=1 when you've reviewed and accept it.
+    let mut security_block = false;
     if crate::security_review::enabled() {
         let final_diff = capture_git_diff(&mission.path, base_sha.as_deref()).unwrap_or_default();
         let remaining: Vec<_> = crate::security_review::scan_diff(&final_diff)
@@ -773,15 +1045,80 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
             for f in &remaining {
                 eprintln!("    {} {}", theme::dim("∘"), theme::warn(&f.to_string()));
             }
+            if security_override_enabled() {
+                eprintln!(
+                    "  {} {}",
+                    theme::dim("∘"),
+                    theme::warn("CLAUDETTE_FORGE_SECURITY_OVERRIDE=1 set — submitting anyway"),
+                );
+            } else {
+                security_block = true;
+            }
         }
     }
 
     // ── Phase 5: Submitter ──────────────────────────────────────────
+    // Three guards stand before the PR (roast RC-C / RC-G / RC-A):
+    //   1. repo.is_none() — an ephemeral/local mission has no GitHub target;
+    //      mission_submit would hard-error. Report the local result honestly
+    //      instead of running a turn that silently fails while we claim success.
+    //   2. security_block — a surviving HIGH finding (handled above).
+    //   3. !submitted_pass — the fix-loop never passed; don't open a PR for
+    //      work the gate rejected unless CLAUDETTE_FORGE_SUBMIT_ON_FAIL=1.
+    if mission.repo.is_none() {
+        eprintln!(
+            "  {} {}",
+            theme::BOLT,
+            theme::info(&format!(
+                "forge: changes committed locally at {} (ephemeral/local mission — no GitHub PR \
+                 target). Review with `git log`/`git diff`, then push + open a PR manually if you \
+                 want one.",
+                mission.path.display()
+            )),
+        );
+        if opts.autosave {
+            save_session(&session)?;
+        }
+        cleanup.disarm();
+        return Ok(empty_turn_summary());
+    }
+    if security_block {
+        cleanup.disarm();
+        return Err(anyhow::anyhow!(
+            "forge: refusing to open a PR — HIGH-severity security finding(s) remain in the diff \
+             after the fix-loop. Fix them and re-run, or set CLAUDETTE_FORGE_SECURITY_OVERRIDE=1 \
+             to submit anyway."
+        ));
+    }
+    if !submitted_pass && !submit_on_fail_enabled() {
+        eprintln!(
+            "  {} {}",
+            theme::BOLT,
+            theme::warn(
+                "forge: NOT opening a PR — the Verifier never passed within the round limit. \
+                 Commits remain on the mission branch for inspection. Re-run to continue, or set \
+                 CLAUDETTE_FORGE_SUBMIT_ON_FAIL=1 to open a PR for the best revision anyway."
+            ),
+        );
+        if opts.autosave {
+            save_session(&session)?;
+        }
+        cleanup.disarm();
+        return Ok(empty_turn_summary());
+    }
+
     eprintln!("{} {}", theme::BOLT, theme::accent("forge: submit"));
     let mut submit_runtime = build_forge_runtime(session, &mission, true);
-    let submit_input =
+    // Tell the Submitter the truth about the loop outcome (roast RC-H F7: the
+    // old prompt hard-coded "All quality checks passed" even when they hadn't).
+    let submit_input = if submitted_pass {
         "All quality checks passed. Now call mission_submit with a short PR title that \
-         summarises the change. Do nothing else.";
+         summarises the change. Do nothing else."
+    } else {
+        "The round limit was reached without a full pass, but submission was explicitly \
+         requested. Call mission_submit with a short PR title summarising the change, and note \
+         in the body that automated review found unresolved issues. Do nothing else."
+    };
     crate::tools::set_current_turn_paths(crate::tools::extract_user_prompt_paths(submit_input));
     let submit_summary = crate::brain_selector::run_turn_with_fallback(
         &mut submit_runtime,
@@ -810,17 +1147,96 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
     Ok(submit_summary)
 }
 
-/// RAII guard: clears the active mission slot on Drop iff the mission we
-/// installed was ephemeral AND `disarm()` was not called. Pairs with the
-/// auto-bootstrap path in [`run_forge_mission`] so a mid-pipeline failure
-/// can't leave a `/forge`-installed mission active in the REPL.
+/// Best-effort check that the Planner's brief points at files that actually
+/// exist under `mission_path` (roast RC-F F3). The brief is free text, so this
+/// is heuristic: it pulls out tokens that look like file paths (a `/` or `\`
+/// separator, or a dotted extension) and, if the brief names path-like tokens
+/// but *none* of them resolve under the tree, warns that the localization may
+/// be wrong. Advisory only — never blocks; false negatives (odd path styles)
+/// just mean no warning.
+fn warn_if_brief_paths_missing(plan: &str, mission_path: &std::path::Path) {
+    let mut candidates: Vec<&str> = Vec::new();
+    for raw in plan.split(|c: char| {
+        c.is_whitespace() || matches!(c, ',' | ';' | '`' | '"' | '\'' | '(' | ')' | '[' | ']')
+    }) {
+        let tok = raw.trim_matches(|c: char| matches!(c, ':' | '.' | '-' | '*' | '#'));
+        if tok.len() < 3 || tok.len() > 200 {
+            continue;
+        }
+        let looks_path = tok.contains('/')
+            || tok.contains('\\')
+            || std::path::Path::new(tok)
+                .extension()
+                .is_some_and(|e| (1..=5).contains(&e.len()));
+        if looks_path {
+            candidates.push(tok);
+        }
+    }
+    if candidates.is_empty() {
+        return;
+    }
+    let any_exist = candidates.iter().any(|c| {
+        let p = std::path::Path::new(c);
+        let abs = if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            mission_path.join(p)
+        };
+        abs.exists()
+    });
+    if !any_exist {
+        eprintln!(
+            "  {} {}",
+            theme::dim("∘"),
+            theme::warn(&format!(
+                "planner localization check: none of the {} path(s) named in the brief exist \
+                 under {} — the localization may be wrong; the Coder has Search tools to \
+                 re-localize.",
+                candidates.len(),
+                mission_path.display()
+            )),
+        );
+    }
+}
+
+/// An empty `TurnSummary` for forge exit paths that don't run a final model
+/// turn (local/ephemeral mission with no PR target, a blocked submit, or a
+/// failed loop we decline to submit). Lets `run_forge_mission` return `Ok`
+/// without fabricating a Submitter turn that never happened.
+fn empty_turn_summary() -> TurnSummary {
+    TurnSummary {
+        assistant_messages: Vec::new(),
+        tool_results: Vec::new(),
+        iterations: 0,
+        usage: crate::TokenUsage::default(),
+        auto_compaction: None,
+    }
+}
+
+/// RAII guard for the auto-bootstrap path in [`run_forge_mission`]:
+/// - clears the active mission slot on Drop iff the mission we installed was
+///   ephemeral AND `disarm()` was not called (a mid-pipeline failure can't
+///   leave a `/forge`-installed mission active in the REPL);
+/// - restores the user's original git branch on Drop, ALWAYS (independent of
+///   `disarm`), so a forge run that checked out a dedicated mission branch
+///   leaves the user back where they started with the AI commits isolated on
+///   the mission branch (roast RC-D MED-2 — "ephemeral" now means cleaned up).
 struct EphemeralMissionGuard {
     armed: bool,
+    /// `(repo_path, original_branch)` to `git checkout` on Drop. Set by Phase 0
+    /// when it creates a dedicated mission branch on the user's live tree.
+    restore_branch: Option<(PathBuf, String)>,
 }
 
 impl EphemeralMissionGuard {
     fn new(ephemeral: bool) -> Self {
-        Self { armed: ephemeral }
+        Self {
+            armed: ephemeral,
+            restore_branch: None,
+        }
+    }
+    fn set_restore_branch(&mut self, repo: PathBuf, branch: String) {
+        self.restore_branch = Some((repo, branch));
     }
     fn disarm(&mut self) {
         self.armed = false;
@@ -829,6 +1245,28 @@ impl EphemeralMissionGuard {
 
 impl Drop for EphemeralMissionGuard {
     fn drop(&mut self) {
+        if let Some((repo, branch)) = self.restore_branch.take() {
+            let out = std::process::Command::new("git")
+                .args(["checkout", &branch])
+                .current_dir(&repo)
+                .output();
+            match out {
+                Ok(o) if o.status.success() => {}
+                Ok(o) => eprintln!(
+                    "  {} {}",
+                    theme::dim("∘"),
+                    theme::dim(&format!(
+                        "forge: could not restore branch {branch}: {}",
+                        String::from_utf8_lossy(&o.stderr).trim()
+                    ))
+                ),
+                Err(e) => eprintln!(
+                    "  {} {}",
+                    theme::dim("∘"),
+                    theme::dim(&format!("forge: could not restore branch {branch}: {e}"))
+                ),
+            }
+        }
         if self.armed {
             let _ = crate::missions::clear_active();
         }
@@ -965,46 +1403,64 @@ pub(crate) fn extract_assistant_text(summary: &TurnSummary) -> String {
     out
 }
 
+/// Minimum Verifier score that can count as a pass. The Verifier prompt
+/// states "pass requires score >= 8 AND no bug"; [`parse_verifier_response`]
+/// enforces the numeric half in code so a model can't ship a self-declared
+/// low-score diff by flipping `pass` to true (roast RC-A HIGH-1).
+const VERIFIER_PASS_SCORE: u8 = 8;
+
 /// Parse a Verifier JSON response. Resilient to (a) the model wrapping the
 /// JSON in ```code fences, (b) trailing prose after the closing brace, and
-/// (c) malformed JSON — in cases (b) and (c) we fall through to a
-/// permissive pass=true default rather than blocking the pipeline.
+/// (c) malformed JSON.
+///
+/// FAIL-CLOSED (roast RC-A): the Verifier is the only correctness gate before
+/// a PR, never runs the code, and is the easiest thing in the pipeline to
+/// confuse. Every degenerate path therefore ABSTAINS as a *fail*, not a pass:
+/// unparseable / fenced-only / missing-field output → `pass=false, score=0`.
+/// A genuinely stuck Verifier then exhausts the bounded fix-loop and exits via
+/// the cap rather than green-lighting unverified code. `pass` is additionally
+/// reconciled against [`VERIFIER_PASS_SCORE`] so the model can't pass a diff it
+/// scored below threshold, and float scores are rounded instead of silently
+/// becoming the max.
 fn parse_verifier_response(text: &str) -> VerifierResult {
-    let default = VerifierResult {
-        score: 10,
-        pass: true,
-        feedback: String::new(),
+    // Abstention default — fail, with a score of 0 so it can never win
+    // best-round restore by masquerading as a clean 10.
+    let abstain = VerifierResult {
+        score: 0,
+        pass: false,
+        feedback: "verifier produced no parseable verdict — treated as fail".to_string(),
     };
     let trimmed = text.trim();
-    // Strip ```json … ``` fences if present.
-    let stripped = trimmed
-        .strip_prefix("```json")
-        .or_else(|| trimmed.strip_prefix("```"))
-        .map_or(trimmed, |s| s.trim_start())
-        .strip_suffix("```")
-        .map_or(trimmed, |s| s.trim_end());
-    // Match the JSON object — find the first `{` and the last `}`.
-    let Some(start) = stripped.find('{') else {
-        return default;
+    // Match the JSON object — find the first `{` and the last `}`. This also
+    // tolerates ```json fences and trailing prose, so no separate fence strip
+    // is needed (the brace scan re-locates the object regardless).
+    let Some(start) = trimmed.find('{') else {
+        return abstain;
     };
-    let Some(end) = stripped.rfind('}') else {
-        return default;
+    let Some(end) = trimmed.rfind('}') else {
+        return abstain;
     };
     if end <= start {
-        return default;
+        return abstain;
     }
-    let json_slice = &stripped[start..=end];
+    let json_slice = &trimmed[start..=end];
     let Ok(v) = serde_json::from_str::<serde_json::Value>(json_slice) else {
-        return default;
+        return abstain;
     };
+    // Score: accept ints and floats (models love decimals); a missing or
+    // non-numeric score is treated as 0, not the max.
     let score = v
         .get("score")
-        .and_then(serde_json::Value::as_u64)
-        .map_or(10, |n| n.clamp(0, 10) as u8);
-    let pass = v
+        .and_then(|s| {
+            s.as_u64()
+                .or_else(|| s.as_f64().map(|f| f.round().max(0.0) as u64))
+        })
+        .map_or(0, |n| n.min(10) as u8);
+    // A missing `pass` field is an abstention → fail (was `unwrap_or(true)`).
+    let model_pass = v
         .get("pass")
         .and_then(serde_json::Value::as_bool)
-        .unwrap_or(true);
+        .unwrap_or(false);
     let feedback = v
         .get("feedback")
         .and_then(serde_json::Value::as_str)
@@ -1012,7 +1468,9 @@ fn parse_verifier_response(text: &str) -> VerifierResult {
         .to_string();
     VerifierResult {
         score,
-        pass,
+        // Reconcile: a pass requires BOTH the model's verdict AND the score
+        // threshold. The score gate is no longer prompt-only theater.
+        pass: model_pass && score >= VERIFIER_PASS_SCORE,
         feedback,
     }
 }
@@ -1492,10 +1950,29 @@ fn build_forge_role_runtime(
     // is set (unattended/scripted runs). PermissionMode::Allow short-circuits
     // authorize() so the CliPrompter is never consulted. Forge-only: secretary
     // and TUI go through build_permission_policy() directly, unchanged.
+    //
+    // ROLE ISOLATION (roast RC-B): the dispatch path authorizes by tool name
+    // and never consults the registry's enabled-group set, so advertising a
+    // restricted toolset to a role does NOT stop a confabulating model from
+    // emitting a tool the role was never granted. Cap each role at a hard
+    // tier ceiling so `authorize()` denies any over-tier tool *before* the
+    // prompter — and before Allow-mode auto-approval — regardless of which
+    // tool name the model invents:
+    //   • Planner  — read-only investigation, must never mutate the tree.
+    //   • Verifier — toolless grader; ReadOnly denies every write/exec tool.
+    //   • Coder/Submitter — legitimately need bash/edit_file/apply_diff/git
+    //     (all DangerFullAccess), so they keep the default cap.
+    let max_tier = match role {
+        forge::types::Role::Planner | forge::types::Role::Verifier => {
+            crate::PermissionMode::ReadOnly
+        }
+        _ => crate::PermissionMode::DangerFullAccess,
+    };
+    let base_policy = build_permission_policy().with_max_tier(max_tier);
     let policy = if forge_auto_approve_enabled() {
-        build_permission_policy().with_active_mode(crate::PermissionMode::Allow)
+        base_policy.with_active_mode(crate::PermissionMode::Allow)
     } else {
-        build_permission_policy()
+        base_policy
     };
 
     ConversationRuntime::new(session, api_client, executor, policy, system_prompt)
@@ -1519,11 +1996,51 @@ fn build_forge_role_runtime(
 ///
 /// v0b only consumed this for `Role::Coder`; v0c extends it to the Planner
 /// and Verifier role-routed turns.
+/// True iff the user has *explicitly* configured forge role-routing — either
+/// `~/.claudettes-forge/models.toml` exists or a `CLAUDETTES_FORGE_*` env var
+/// is set. When neither holds, [`forge_role_model`] returns `None` so every
+/// role uses claudette's active brain (roast RC-G #4 / theater "falls back to
+/// the active brain"): previously the built-in defaults (`qwen3.5:14b` etc.)
+/// always populated the map and silently shadowed the user's active brain —
+/// so running `claudette --forge` on a frontier brain still got qwen for the
+/// Planner/Verifier.
+fn forge_models_explicitly_configured() -> bool {
+    if forge::models_toml::default_toml_path().exists() {
+        return true;
+    }
+    std::env::vars().any(|(k, v)| {
+        k.starts_with("CLAUDETTES_FORGE_")
+            && (k.ends_with("_MODEL") || k.ends_with("_PROVIDER"))
+            && !v.trim().is_empty()
+    })
+}
+
 fn forge_role_model(role: forge::types::Role) -> Option<String> {
-    forge::types::ModelMap::load()
-        .ok()?
-        .resolve(role)
-        .map(|(_, name)| name.to_string())
+    if !forge_models_explicitly_configured() {
+        return None;
+    }
+    let map = forge::types::ModelMap::load().ok()?;
+    let (provider, name) = map.resolve(role)?;
+    // The forge runtime is hardcoded to `OllamaApiClient` (which also serves
+    // LM Studio via CLAUDETTE_OPENAI_COMPAT). A non-Ollama provider therefore
+    // can't be honored — previously the provider was dropped and the model
+    // name was sent to Ollama regardless, so `provider="anthropic"
+    // model="claude-opus-4-7"` 404'd against the local server (roast RC-G #2).
+    // Refuse loudly and fall back to the active brain rather than mis-route.
+    if provider != forge::types::ProviderKind::Ollama {
+        eprintln!(
+            "  {} {}",
+            theme::dim("∘"),
+            theme::warn(&format!(
+                "forge: role {role:?} is configured for provider {provider:?} (model {name:?}), \
+                 but forge only supports the Ollama/OpenAI-compat backend — ignoring this \
+                 override and using the active brain. Set an Ollama model for this role, or run \
+                 the whole pipeline on a frontier model via claudette's active brain config."
+            )),
+        );
+        return None;
+    }
+    Some(name.to_string())
 }
 
 /// v0b helper: load the bundled `codex7` Coder persona, parsed at runtime
@@ -2603,13 +3120,19 @@ mod tests {
     /// in a clean environment (defaults from
     /// `forge::models_toml::default_model_map`).
     #[test]
-    fn forge_role_model_returns_a_default_for_each_role() {
+    fn forge_model_map_has_a_default_for_each_role() {
+        // The built-in ModelMap always resolves a non-empty model per role.
+        // (forge_role_model itself returns None when forge models aren't
+        // explicitly configured, so each role falls back to the active brain —
+        // roast RC-G #4 — which is environment-dependent and not asserted here.)
+        let map = forge::types::ModelMap::load().expect("default model map loads");
         for role in [
             forge::types::Role::Coder,
             forge::types::Role::Planner,
             forge::types::Role::Verifier,
         ] {
-            let model = forge_role_model(role)
+            let (_, model) = map
+                .resolve(role)
                 .unwrap_or_else(|| panic!("forge default model for {role:?}"));
             assert!(!model.is_empty(), "{role:?} model name must be non-empty");
         }
@@ -2638,20 +3161,33 @@ mod tests {
     #[test]
     fn verifier_parses_json_with_trailing_prose() {
         let r = parse_verifier_response(
-            "Here is my evaluation:\n{\"score\": 7, \"pass\": true, \"feedback\": \"ok\"}\nDone.",
+            "Here is my evaluation:\n{\"score\": 8, \"pass\": true, \"feedback\": \"ok\"}\nDone.",
         );
-        assert_eq!(r.score, 7);
+        assert_eq!(r.score, 8);
         assert!(r.pass);
     }
 
     #[test]
-    fn verifier_unparseable_falls_through_to_pass() {
-        // Garbage in → permissive default. This prevents a flaky local model
-        // from deadlocking the forge pipeline.
+    fn verifier_pass_requires_score_threshold() {
+        // roast RC-A HIGH-1: the model can't ship a self-declared low-score
+        // diff by flipping `pass` — a pass requires score >= VERIFIER_PASS_SCORE.
+        let r = parse_verifier_response(r#"{"score": 3, "pass": true, "feedback": "fine"}"#);
+        assert_eq!(r.score, 3);
+        assert!(
+            !r.pass,
+            "score below threshold must not pass even if model says pass"
+        );
+    }
+
+    #[test]
+    fn verifier_unparseable_fails_closed() {
+        // roast RC-A HIGH-2: garbage in → ABSTAIN as a fail (was pass=true/10).
+        // A flaky model can't rubber-stamp a broken diff; it exhausts the
+        // bounded fix-loop instead.
         let r = parse_verifier_response("I don't know how to format JSON");
-        assert!(r.pass);
-        assert_eq!(r.score, 10);
-        assert!(r.feedback.is_empty());
+        assert!(!r.pass);
+        assert_eq!(r.score, 0);
+        assert!(!r.feedback.is_empty(), "should explain the abstention");
     }
 
     #[test]
@@ -2664,12 +3200,21 @@ mod tests {
     }
 
     #[test]
-    fn verifier_missing_fields_use_permissive_defaults() {
-        // Only `score` present → pass defaults to true, feedback empty.
-        let r = parse_verifier_response(r#"{"score": 6}"#);
-        assert_eq!(r.score, 6);
+    fn verifier_rounds_float_scores() {
+        // roast RC-A MED-5: a float score must round, not silently become 0
+        // (or, in the old code, the max). 8.5 → 9, with pass honored.
+        let r = parse_verifier_response(r#"{"score": 8.5, "pass": true, "feedback": ""}"#);
+        assert_eq!(r.score, 9);
         assert!(r.pass);
-        assert!(r.feedback.is_empty());
+    }
+
+    #[test]
+    fn verifier_missing_fields_fail_closed() {
+        // roast RC-A HIGH-3: only `score` present → missing `pass` is an
+        // abstention (fail), not a permissive true.
+        let r = parse_verifier_response(r#"{"score": 9}"#);
+        assert_eq!(r.score, 9);
+        assert!(!r.pass, "missing pass field must not default to pass");
     }
 
     // ─── Forge best-round restore + smart stopping (Phase 3 of
@@ -2681,7 +3226,50 @@ mod tests {
             head_sha: sha.map(str::to_string),
             score,
             pass,
+            security_high: false,
         }
+    }
+
+    fn round_sec(
+        n: u32,
+        score: u8,
+        pass: bool,
+        security_high: bool,
+        sha: Option<&str>,
+    ) -> RoundReport {
+        RoundReport {
+            round: n,
+            head_sha: sha.map(str::to_string),
+            score,
+            pass,
+            security_high,
+        }
+    }
+
+    #[test]
+    fn best_round_prefers_passing_over_higher_scoring_fail() {
+        // roast RC-C: a passing round beats a higher-*scoring* failing one.
+        let history = vec![
+            round(0, 9, false, Some("aaaa")),
+            round(1, 8, true, Some("bbbb")),
+        ];
+        let best = best_round(&history).unwrap();
+        assert_eq!(best.round, 1, "the passing round must win");
+    }
+
+    #[test]
+    fn best_round_prefers_security_clean_over_higher_scoring_vulnerable() {
+        // roast RC-C C1: a high-scoring round with a HIGH finding must NOT be
+        // restored over a clean lower-scoring one.
+        let history = vec![
+            round_sec(0, 9, false, true, Some("aaaa")), // score 9 but HIGH XSS
+            round_sec(1, 7, false, false, Some("bbbb")), // clean
+        ];
+        let best = best_round(&history).unwrap();
+        assert_eq!(
+            best.round, 1,
+            "the security-clean round must win over the vulnerable one"
+        );
     }
 
     #[test]

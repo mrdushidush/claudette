@@ -78,10 +78,17 @@ pub fn enabled() -> bool {
 pub fn scan_diff(diff: &str) -> Vec<Finding> {
     let mut out = Vec::new();
     let mut file = String::from("?");
+    let mut skip_file = false;
     for raw in diff.lines() {
         if let Some(rest) = raw.strip_prefix("+++ ") {
             let p = rest.trim();
             file = p.strip_prefix("b/").unwrap_or(p).to_string();
+            // Skip test/fixture/doc/minified/lockfile paths. Now that a HIGH
+            // finding actually BLOCKS submission (roast RC-C), a sink that
+            // appears in a *security test*, a fixture, or prose documentation
+            // must not wrongly gate the PR — these files don't ship runnable
+            // production code (roast scanner M1).
+            skip_file = is_excluded_path(&file);
             continue;
         }
         if raw.starts_with("+++") {
@@ -90,6 +97,9 @@ pub fn scan_diff(diff: &str) -> Vec<Finding> {
         let Some(added) = raw.strip_prefix('+') else {
             continue;
         };
+        if skip_file {
+            continue;
+        }
         let snippet: String = added.trim().chars().take(160).collect();
         for (severity, rule, message) in classify(added) {
             out.push(Finding {
@@ -102,6 +112,58 @@ pub fn scan_diff(diff: &str) -> Vec<Finding> {
         }
     }
     out
+}
+
+/// True for diff paths that hold test/fixture/doc/generated content rather than
+/// shippable production code, so the scanner shouldn't gate on them (roast
+/// scanner M1). Path-segment aware so it doesn't over-match (e.g. "latest.js"
+/// is not a test file just because it contains "test").
+fn is_excluded_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    let filename = lower.rsplit(['/', '\\']).next().unwrap_or(&lower);
+    // Directory segments that mark non-production trees.
+    const EXCLUDED_SEGMENTS: &[&str] = &[
+        "test",
+        "tests",
+        "__tests__",
+        "__mocks__",
+        "spec",
+        "specs",
+        "fixture",
+        "fixtures",
+        "testdata",
+        "doc",
+        "docs",
+        "examples",
+        "example",
+    ];
+    if lower
+        .split(['/', '\\'])
+        .any(|seg| EXCLUDED_SEGMENTS.contains(&seg))
+    {
+        return true;
+    }
+    // Documentation / generated / lock files by extension or name. `filename`
+    // is already lowercased, so the extension compare is case-insensitive.
+    let ext = std::path::Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    if matches!(ext, "md" | "markdown" | "rst" | "txt" | "lock")
+        || filename.contains(".min.")
+        || matches!(
+            filename,
+            "package-lock.json" | "yarn.lock" | "pnpm-lock.yaml" | "cargo.lock" | "poetry.lock"
+        )
+    {
+        return true;
+    }
+    // Common test-file naming conventions: foo.test.js, foo.spec.ts,
+    // test_foo.py, foo_test.go.
+    filename.contains(".test.")
+        || filename.contains(".spec.")
+        || filename.starts_with("test_")
+        || filename.contains("_test.")
 }
 
 /// Build the Coder-facing remediation feedback from a set of findings
@@ -398,7 +460,10 @@ mod tests {
     use super::*;
 
     fn diff(added_lines: &[&str], file: &str) -> String {
-        let mut s = format!("--- a/{file}\n+++ b/{file}\n@@ -1,1 +1,{} @@\n", added_lines.len());
+        let mut s = format!(
+            "--- a/{file}\n+++ b/{file}\n@@ -1,1 +1,{} @@\n",
+            added_lines.len()
+        );
         for line in added_lines {
             s.push('+');
             s.push_str(line);
@@ -420,8 +485,47 @@ mod tests {
     }
 
     #[test]
+    fn excludes_test_fixture_and_doc_paths() {
+        // roast scanner M1: now that HIGH blocks submission, a sink in a test
+        // file / fixture / doc must NOT gate the PR.
+        let sink = &["  el.innerHTML = userInput;"];
+        for path in [
+            "src/app.test.js",
+            "tests/xss.js",
+            "__tests__/render.js",
+            "spec/render_spec.js",
+            "fixtures/payloads.js",
+            "test_render.py",
+            "render_test.go",
+            "docs/security.md",
+            "README.md",
+            "dist/bundle.min.js",
+            "package-lock.json",
+        ] {
+            assert!(
+                scan_diff(&diff(sink, path)).is_empty(),
+                "{path} should be excluded from scanning"
+            );
+        }
+    }
+
+    #[test]
+    fn does_not_over_exclude_production_paths() {
+        // Substring "test"/"doc" inside a normal filename must NOT exclude it.
+        for path in ["src/latest.js", "lib/document_store.js", "app/contest.py"] {
+            assert!(
+                !scan_diff(&diff(&["  el.innerHTML = userInput;"], path)).is_empty(),
+                "{path} must still be scanned"
+            );
+        }
+    }
+
+    #[test]
     fn ignores_innerhtml_clear() {
-        let f = scan_diff(&diff(&["  list.innerHTML = '';", "  box.innerHTML = \"\";"], "a.js"));
+        let f = scan_diff(&diff(
+            &["  list.innerHTML = '';", "  box.innerHTML = \"\";"],
+            "a.js",
+        ));
         assert!(f.is_empty(), "clearing innerHTML must not flag: {f:?}");
     }
 
@@ -439,52 +543,88 @@ mod tests {
 
     #[test]
     fn flags_shell_true_and_os_system() {
-        assert!(rules(&scan_diff(&diff(&["    subprocess.run(cmd, shell=True)"], "x.py")))
-            .contains(&"shell-injection"));
-        assert!(rules(&scan_diff(&diff(&["    os.system(f'rm {p}')"], "x.py")))
-            .contains(&"shell-os-system"));
+        assert!(rules(&scan_diff(&diff(
+            &["    subprocess.run(cmd, shell=True)"],
+            "x.py"
+        )))
+        .contains(&"shell-injection"));
+        assert!(
+            rules(&scan_diff(&diff(&["    os.system(f'rm {p}')"], "x.py")))
+                .contains(&"shell-os-system")
+        );
     }
 
     #[test]
     fn flags_pickle_and_unsafe_yaml() {
-        assert!(rules(&scan_diff(&diff(&["    obj = pickle.loads(blob)"], "x.py")))
-            .contains(&"insecure-deserialization"));
-        assert!(rules(&scan_diff(&diff(&["    cfg = yaml.load(text)"], "x.py")))
-            .contains(&"insecure-yaml"));
+        assert!(
+            rules(&scan_diff(&diff(&["    obj = pickle.loads(blob)"], "x.py")))
+                .contains(&"insecure-deserialization")
+        );
+        assert!(
+            rules(&scan_diff(&diff(&["    cfg = yaml.load(text)"], "x.py")))
+                .contains(&"insecure-yaml")
+        );
         // SafeLoader present → no finding.
-        assert!(rules(&scan_diff(&diff(&["    cfg = yaml.load(text, Loader=yaml.SafeLoader)"], "x.py")))
-            .is_empty());
+        assert!(rules(&scan_diff(&diff(
+            &["    cfg = yaml.load(text, Loader=yaml.SafeLoader)"],
+            "x.py"
+        )))
+        .is_empty());
     }
 
     #[test]
     fn flags_javascript_url_and_doc_write() {
-        assert!(rules(&scan_diff(&diff(&["  a.href = 'javascript:alert(1)';"], "a.js")))
-            .contains(&"xss-javascript-url"));
-        assert!(rules(&scan_diff(&diff(&["  document.write(html);"], "a.js")))
-            .contains(&"xss-document-write"));
+        assert!(rules(&scan_diff(&diff(
+            &["  a.href = 'javascript:alert(1)';"],
+            "a.js"
+        )))
+        .contains(&"xss-javascript-url"));
+        assert!(
+            rules(&scan_diff(&diff(&["  document.write(html);"], "a.js")))
+                .contains(&"xss-document-write")
+        );
     }
 
     #[test]
     fn flags_aws_key_shape() {
-        assert!(rules(&scan_diff(&diff(&["  const k = 'AKIAIOSFODNN7EXAMPLE';"], "a.js")))
-            .contains(&"aws-access-key"));
+        assert!(rules(&scan_diff(&diff(
+            &["  const k = 'AKIAIOSFODNN7EXAMPLE';"],
+            "a.js"
+        )))
+        .contains(&"aws-access-key"));
     }
 
     #[test]
     fn hardcoded_secret_heuristic_skips_placeholders_and_env() {
-        assert!(rules(&scan_diff(&diff(&["  password = \"hunter2pass\""], "x.py")))
-            .contains(&"hardcoded-secret"));
-        assert!(rules(&scan_diff(&diff(&["  password = os.environ['PW']"], "x.py"))).is_empty());
-        assert!(rules(&scan_diff(&diff(&["  api_key = \"your_key_here\""], "x.py"))).is_empty());
+        assert!(
+            rules(&scan_diff(&diff(&["  password = \"hunter2pass\""], "x.py")))
+                .contains(&"hardcoded-secret")
+        );
+        assert!(rules(&scan_diff(&diff(
+            &["  password = os.environ['PW']"],
+            "x.py"
+        )))
+        .is_empty());
+        assert!(rules(&scan_diff(&diff(
+            &["  api_key = \"your_key_here\""],
+            "x.py"
+        )))
+        .is_empty());
     }
 
     #[test]
     fn flags_sql_concat_but_not_parameterized() {
-        assert!(rules(&scan_diff(&diff(&["  q = \"SELECT * FROM t WHERE id = \" + id"], "x.py")))
-            .contains(&"sql-injection"));
+        assert!(rules(&scan_diff(&diff(
+            &["  q = \"SELECT * FROM t WHERE id = \" + id"],
+            "x.py"
+        )))
+        .contains(&"sql-injection"));
         // Parameterized %s form must NOT be flagged (it is the safe pattern).
-        assert!(rules(&scan_diff(&diff(&["  cur.execute(\"SELECT * FROM t WHERE id = %s\", (id,))"], "x.py")))
-            .is_empty());
+        assert!(rules(&scan_diff(&diff(
+            &["  cur.execute(\"SELECT * FROM t WHERE id = %s\", (id,))"],
+            "x.py"
+        )))
+        .is_empty());
     }
 
     #[test]
@@ -496,7 +636,10 @@ mod tests {
 
     #[test]
     fn feedback_lists_high_and_medium() {
-        let f = scan_diff(&diff(&["  el.innerHTML = x;", "  cfg = yaml.load(t)"], "a.js"));
+        let f = scan_diff(&diff(
+            &["  el.innerHTML = x;", "  cfg = yaml.load(t)"],
+            "a.js",
+        ));
         let fb = findings_feedback(&f);
         assert!(fb.contains("xss-innerhtml"));
         assert!(fb.contains("insecure-yaml"));
