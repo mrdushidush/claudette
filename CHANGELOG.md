@@ -8,6 +8,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Until we tag `1.0.0`, minor-version bumps may contain breaking changes; patch
 bumps are non-breaking bugfixes only.
 
+## [0.8.0] - 2026-05-29
+
+### Added — daily-driver code-search & editing (qwen3.6-35b q3 hardening)
+
+Sprint to make claudette a viable daily coding driver on a local
+`qwen3.6-35b-a3b@q3_k_xl` brain. Root causes were found by capturing the
+model's full reasoning + tool calls via `lms log stream`.
+
+- **`grep_search` is now ripgrep-grade** — regular-expression matching
+  (case-insensitive; was literal-substring only, so the regex patterns coding
+  models naturally write matched nothing), `.gitignore`/`.ignore`/hidden-aware
+  via the `ignore` crate (was crawling `target/` and `*.log` build logs and
+  hitting the file cap before reaching `src/`), and higher caps (5000 files /
+  100 matches). Invalid regex falls back to literal substring.
+- **`read_file` paging** — new `offset` / `limit` params and a 400-line default
+  window with a "page with offset/limit or grep" notice. Previously every read
+  returned the whole file, which blew a small brain's context window and, when
+  re-read in a search loop, caused multi-minute hangs.
+- **`repo_map` tool** (new, Search group) — Aider-style ranked symbol outline:
+  `repo_map(query)` walks the workspace gitignore-aware, extracts top-level
+  definitions (Rust / Python / JS-TS / Go) with line numbers and signature
+  snippets, and returns the files whose symbols best match the query. Localize
+  code by concept instead of guessing grep patterns; the signature snippet often
+  carries the answer (a default value, a signature) directly.
+- **`CLAUDETTE_AUTO_APPROVE`** — opt-in accept-edits mode for the interactive
+  secretary (REPL / one-shot / TUI): edits, file creation, bash, and git writes
+  run without a `[y/N]` prompt. Makes one-shot `claudette "fix the bug"` apply
+  edits end-to-end. Off by default; the normal WorkspaceWrite+prompt flow is
+  unchanged when unset.
+- **`write_file` / `generate_code` write into your project** — when no mission is
+  active, both now resolve into the explicit `CLAUDETTE_WORKSPACE` roots instead
+  of forcing output to `~/.claudette/files/` scratch. Narrowly scoped to the
+  workspace roots — never the full `$HOME` read envelope (no `~/.ssh` clobber).
+
+### Changed
+
+- **Conversation loop hardening** — exact-duplicate read/search calls are now
+  suppressed (a small brain re-issuing the identical grep/read no longer spirals
+  into the iteration cap), and after several consecutive searches the loop nudges
+  the brain to commit to an answer (enumeration-aware).
+- System prompt steers the brain to `repo_map` first for localization, to
+  confirm code facts from the defining source line rather than docs/CHANGELOG,
+  and to call edit tools directly instead of asking "want me to apply?".
+
+### Added — forge security-review stage (opt-in; first shipped release)
+
+- **`CLAUDETTE_FORGE_SECURITY_REVIEW=1`** adds a deterministic security-review
+  stage to the forge fix-loop and broadens the scanner to ~12 vulnerability
+  classes (code-exec, SSTI, XXE, TLS-bypass, SSRF, path traversal, prototype
+  pollution, NoSQL, weak hash/cipher, open redirect, …). In-place forge edits
+  (`edit_file` / `apply_diff` / `apply_patch`) are confined to the mission tree.
+  Closes the forge-roast root causes (verifier fail-closed, repo-safety
+  pre-flight, dispatch-time role isolation).
+
 ## [0.7.0] - 2026-05-27
 
 ### Added — forge-mode upgrades (harvested from the Beast experiment)

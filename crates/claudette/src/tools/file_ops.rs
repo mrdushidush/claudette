@@ -22,6 +22,25 @@ use super::{
 
 const MAX_LIST_ENTRIES: usize = 200;
 
+/// Default number of lines `read_file` returns when the caller passes no
+/// explicit `limit`. Whole-file reads of large files (e.g. run.rs ~2k lines)
+/// blow a small local model's context window and, re-issued in a search
+/// spiral, drive multi-minute hangs (observed on qwen3.6-35b q3 @ 32k: a
+/// "where is X configured" locate read the same 2k-line file three times and
+/// timed out). Capping the default — with a clear "use offset/limit or
+/// grep_search" notice — keeps each read cheap and nudges targeted
+/// navigation, mirroring Claude Code's windowed Read. Override via
+/// `CLAUDETTE_READ_DEFAULT_LINES`.
+const DEFAULT_READ_LINES: usize = 400;
+
+fn read_default_line_cap() -> usize {
+    std::env::var("CLAUDETTE_READ_DEFAULT_LINES")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(DEFAULT_READ_LINES)
+}
+
 /// File extensions that `write_file` refuses, redirecting the brain to
 /// `generate_code` instead (Sprint 13.3 — bulletproof code routing).
 ///
@@ -54,11 +73,13 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "read_file",
-                "description": "Read a text file under the user's home directory (max 100 KB).",
+                "description": "Read a text file (max 100 KB). Returns up to 400 lines by default; for a larger file pass `offset`/`limit` to page through it, or use grep_search to jump straight to the line you need. Do not re-read the same range.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "path": { "type": "string", "description": "File path (absolute or ~/)" }
+                        "path":   { "type": "string", "description": "File path (absolute, ~/, or relative to the workspace)" },
+                        "offset": { "type": "integer", "description": "1-based line number to start at (default: start of file)" },
+                        "limit":  { "type": "integer", "description": "Max lines to return (default: 400)" }
                     },
                     "required": ["path"]
                 }
@@ -113,6 +134,10 @@ fn run_read_file(input: &str) -> Result<String, String> {
         .get("path")
         .and_then(Value::as_str)
         .ok_or("read_file: missing 'path'")?;
+    // 1-based start line; 0 or absent = start of file.
+    let offset = v.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
+    // Explicit line cap; absent = the default windowed cap.
+    let explicit_limit = v.get("limit").and_then(Value::as_u64).map(|n| n as usize);
 
     let path = validate_read_path(path_str)?;
 
@@ -142,13 +167,43 @@ fn run_read_file(input: &str) -> Result<String, String> {
         ));
     }
 
-    let content = fs::read_to_string(&path)
+    let raw = fs::read_to_string(&path)
         .map_err(|e| format!("read_file: read {} failed: {e}", path.display()))?;
+
+    let lines: Vec<&str> = raw.lines().collect();
+    let total = lines.len();
+    let start = offset.saturating_sub(1).min(total);
+    let cap = explicit_limit.unwrap_or_else(read_default_line_cap);
+    let end = start.saturating_add(cap).min(total);
+    let mut content = lines[start..end].join("\n");
+    // Keep a trailing newline for a whole-small-file read so callers see the
+    // file exactly as on disk.
+    if end == total && raw.ends_with('\n') && !content.is_empty() {
+        content.push('\n');
+    }
+
+    let truncated = end < total;
+    if truncated {
+        use std::fmt::Write;
+        let _ = write!(
+            content,
+            "\n\n[read_file: showed lines {}-{} of {}. The file continues — \
+             re-read with offset={} to page on, or use grep_search to jump \
+             straight to a symbol. Do NOT re-read the same range.]",
+            start + 1,
+            end,
+            total,
+            end + 1,
+        );
+    }
 
     Ok(json!({
         "ok": true,
         "path": path.display().to_string(),
         "bytes": size,
+        "lines_shown": format!("{}-{}", start + 1, end),
+        "total_lines": total,
+        "truncated": truncated,
         "content": content,
     })
     .to_string())
@@ -204,8 +259,14 @@ fn run_write_file(input: &str) -> Result<String, String> {
     {
         path_str.to_string()
     } else {
+        // Bare relative path. Resolve against, in priority order: the active
+        // mission tree → the user's explicit workspace CWD (daily-driver:
+        // "save README.md here" means the project) → the scratch sandbox
+        // (pure personal-assistant default when no workspace is set).
         let base = if crate::missions::active_mission().is_some() {
             crate::missions::active_cwd()
+        } else if let Some(ws_cwd) = super::workspace_cwd() {
+            ws_cwd
         } else {
             files_dir()
         };
@@ -353,6 +414,81 @@ mod tests {
         }
         // No extension → allow.
         assert!(!is_code_extension("README"));
+    }
+
+    #[test]
+    fn read_file_caps_default_window_and_flags_truncation() {
+        // A file bigger than the default window must come back truncated, with
+        // the paging notice — this is the fix for the large-file read spiral.
+        let target = files_dir().join("claudette-readcap-test.txt");
+        let _ = fs::remove_file(&target);
+        let body = (1..=1000)
+            .map(|n| format!("line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        fs::write(&target, &body).unwrap();
+
+        let input = json!({ "path": target.to_str().unwrap() }).to_string();
+        let out = run_read_file(&input).expect("read should succeed");
+        let v: Value = serde_json::from_str(&out).unwrap();
+
+        assert_eq!(v["truncated"], json!(true), "big file must be truncated");
+        assert_eq!(v["total_lines"], json!(1000));
+        let content = v["content"].as_str().unwrap();
+        assert!(content.contains("line 1\n"), "shows the start");
+        assert!(
+            !content.contains("line 500"),
+            "stops before the default cap"
+        );
+        assert!(
+            content.contains("re-read with offset="),
+            "includes the paging notice: {content}"
+        );
+
+        let _ = fs::remove_file(&target);
+    }
+
+    #[test]
+    fn read_file_honors_offset_and_limit() {
+        let target = files_dir().join("claudette-readwin-test.txt");
+        let _ = fs::remove_file(&target);
+        let body = (1..=100)
+            .map(|n| format!("L{n}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        fs::write(&target, &body).unwrap();
+
+        let input =
+            json!({ "path": target.to_str().unwrap(), "offset": 10, "limit": 3 }).to_string();
+        let out = run_read_file(&input).expect("read should succeed");
+        let v: Value = serde_json::from_str(&out).unwrap();
+        let content = v["content"].as_str().unwrap();
+
+        assert_eq!(v["lines_shown"], json!("10-12"));
+        assert!(content.contains("L10\nL11\nL12"), "exact window: {content}");
+        assert!(!content.contains("L9"), "excludes before offset");
+        assert!(!content.contains("L13"), "excludes after limit");
+
+        let _ = fs::remove_file(&target);
+    }
+
+    #[test]
+    fn read_file_small_file_returns_whole_without_notice() {
+        let target = files_dir().join("claudette-readsmall-test.txt");
+        let _ = fs::remove_file(&target);
+        fs::write(&target, "alpha\nbeta\ngamma\n").unwrap();
+
+        let input = json!({ "path": target.to_str().unwrap() }).to_string();
+        let out = run_read_file(&input).expect("read should succeed");
+        let v: Value = serde_json::from_str(&out).unwrap();
+
+        assert_eq!(v["truncated"], json!(false));
+        assert_eq!(v["total_lines"], json!(3));
+        assert_eq!(v["content"], json!("alpha\nbeta\ngamma\n"));
+
+        let _ = fs::remove_file(&target);
     }
 
     #[test]

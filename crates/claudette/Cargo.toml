@@ -1,6 +1,6 @@
 [package]
 name = "claudette"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 rust-version = "1.88"
 license = "Apache-2.0"
@@ -32,6 +32,17 @@ dotenvy = "0.15"
 toml = "1"
 colored = "3"
 glob = "0.3"
+# Regex engine for grep_search. Coding models write ripgrep-style regex
+# patterns (alternation, `.?`, char classes); the old literal-substring
+# grep matched none of them, sending the brain on a search spiral. `regex`
+# is the standard, dependency-light (no syntax extensions) choice.
+regex = "1"
+# ripgrep's own directory walker: respects .gitignore/.ignore + skips hidden
+# and VCS dirs. Without it, grep_search/glob_search crawl target/, *.log build
+# logs, node_modules — drowning real source matches and feeding the brain
+# self-referential noise. This is what makes code search behave like the tools
+# coding models are trained on.
+ignore = "0.4"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 crossterm = "0.29"
 scopeguard = "1"

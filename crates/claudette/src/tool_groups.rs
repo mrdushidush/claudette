@@ -129,7 +129,7 @@ impl ToolGroup {
             Self::Meta => "self-introspection: config, tool inventory, limits",
             Self::Git => "git workflows: status, diff, log, add, commit, branch, checkout, push",
             Self::Ide => "IDE integration: open_in_editor, reveal_in_explorer, open_url",
-            Self::Search => "search: web_search (Brave), web_fetch, glob_search, grep_search",
+            Self::Search => "search: repo_map (localize code by concept — use first), grep_search (regex), glob_search, web_search (Brave), web_fetch",
             Self::Advanced => "power tools: bash (sync), bash_background + bash_status + bash_tail, apply_diff (fuzzy before/after edit), edit_file (legacy), spawn_agent, ask_user (turn-suspending clarifier)",
             Self::Facts => "reference lookups: wikipedia (summary or search via `mode`), weather (no API key needed)",
             Self::Registry => "package registries: crates.io and npm package metadata (version, downloads, homepage)",
@@ -239,7 +239,9 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         "git_status" | "git_diff" | "git_log" | "git_add" | "git_commit" | "git_branch"
         | "git_checkout" | "git_push" | "git_clone" => Some(ToolGroup::Git),
         "open_in_editor" | "reveal_in_explorer" | "open_url" => Some(ToolGroup::Ide),
-        "glob_search" | "grep_search" | "web_fetch" | "web_search" => Some(ToolGroup::Search),
+        "glob_search" | "grep_search" | "web_fetch" | "web_search" | "repo_map" => {
+            Some(ToolGroup::Search)
+        }
         "bash" | "edit_file" | "apply_diff" | "spawn_agent" | "bash_background" | "bash_status"
         | "bash_tail" | "ask_user" => Some(ToolGroup::Advanced),
         // wikipedia_search/wikipedia_summary and weather_current/weather_forecast

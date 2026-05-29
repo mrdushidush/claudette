@@ -42,6 +42,7 @@ mod patch;
 mod quality;
 mod recall;
 mod registry;
+mod repomap;
 mod schedule;
 mod search;
 mod semantic;
@@ -58,6 +59,25 @@ mod web_search;
 // the stable `crate::tools::set_current_turn_paths` / `...extract_user_prompt_paths`
 // paths.
 pub use codegen::{extract_user_prompt_paths, set_current_turn_paths};
+
+/// Directories the code-search tools (`grep_search`, `repo_map`) never descend
+/// into: build output, dependency caches, and VCS metadata. Single source of
+/// truth shared across the search modules. `.gitignore` already covers most of
+/// these in a real repo; this is the belt-and-braces for trees with no
+/// `.gitignore` (a plain folder of code still shouldn't crawl `target/`).
+pub(super) const SEARCH_SKIP_DIRS: &[&str] = &[
+    "target",
+    "node_modules",
+    "dist",
+    "build",
+    "vendor",
+    "__pycache__",
+    "venv",
+    "out",
+    ".git",
+    ".venv",
+    ".cache",
+];
 
 // ────────────────────────────────────────────────────────────────────────────
 // Group registry — single source of truth for schemas + dispatch
@@ -95,6 +115,7 @@ const GROUPS: &[(SchemasFn, DispatchFn)] = &[
     (quality::schemas, quality::dispatch),
     (recall::schemas, recall::dispatch),
     (registry::schemas, registry::dispatch),
+    (repomap::schemas, repomap::dispatch),
     (schedule::schemas, schedule::dispatch),
     (search::schemas, search::dispatch),
     (semantic::schemas, semantic::dispatch),
@@ -740,7 +761,43 @@ fn path_is_allowed(path: &Path, roots: &WorkspaceRoots, canonical: bool) -> bool
     })
 }
 
-/// Validate a write path: must resolve under `~/.claudette/files/`.
+/// True when `path` resolves under an explicit `CLAUDETTE_WORKSPACE` root.
+///
+/// This is the *narrow* write-allow envelope for the no-mission daily-driver
+/// case: the user explicitly designated a project directory, so creating /
+/// editing files inside it is expected (the whole point of using claudette as
+/// a coding daily-driver). Unlike the *read* envelope ([`validate_read_path`])
+/// this deliberately does NOT open all of `$HOME` to writes — a confabulated
+/// `~/.ssh/config` or `~/.aws/credentials` write stays refused.
+pub(super) fn path_under_workspace(path: &Path) -> bool {
+    let roots = parse_workspace_env();
+    if roots.is_empty() {
+        return false;
+    }
+    let p = normalize_path(path);
+    roots.iter().any(|r| p.starts_with(normalize_path(r)))
+}
+
+/// The process CWD when it is itself under a `CLAUDETTE_WORKSPACE` root, else
+/// `None`. Used to resolve *bare relative* write targets (`write_file`,
+/// `generate_code`) to the user's project instead of the scratch sandbox: a
+/// user who `cd`'d into their workspace and said "create helpers.py here"
+/// means the project, not `~/.claudette/files/`.
+pub(super) fn workspace_cwd() -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    if path_under_workspace(&cwd) {
+        Some(cwd)
+    } else {
+        None
+    }
+}
+
+/// Validate a write path. Allowed roots:
+/// 1. `~/.claudette/files/` (scratch) — always.
+/// 2. The active mission tree, when a brownfield/forge mission is attached.
+/// 3. Any explicit `CLAUDETTE_WORKSPACE` root, when no mission is active —
+///    the daily-driver case (create/edit files in the project the user
+///    pointed claudette at). Never the full `$HOME` read envelope.
 pub(super) fn validate_write_path(input: &str) -> Result<PathBuf, String> {
     let resolved = resolve_input_path(input)?;
     let scratch = normalize_path(&files_dir());
@@ -764,8 +821,15 @@ pub(super) fn validate_write_path(input: &str) -> Result<PathBuf, String> {
             mission_root.display(),
         ));
     }
+    // No mission: allow the user's explicit workspace (daily-driver project
+    // edits). This mirrors validate_edit_path's no-mission fallback, but
+    // scoped to the explicit CLAUDETTE_WORKSPACE roots only.
+    if path_under_workspace(&resolved) {
+        return Ok(resolved);
+    }
     Err(format!(
-        "writes are sandboxed to {}. Use a path under that directory.",
+        "writes are sandboxed to {} (or set CLAUDETTE_WORKSPACE to your \
+         project dir to write there). Use a path under one of those.",
         scratch.display()
     ))
 }
@@ -1257,6 +1321,91 @@ mod tests {
             allowed.is_ok(),
             "workspace set, expected ok, got {allowed:?}"
         );
+    }
+
+    #[test]
+    fn validate_write_path_allows_explicit_workspace_when_no_mission() {
+        // Daily-driver fix: with no mission active, writes into an explicit
+        // CLAUDETTE_WORKSPACE root are allowed (create/edit files in the
+        // project the user pointed claudette at) — but a path OUTSIDE it stays
+        // refused (no $HOME-wide write envelope; ~/.ssh etc. protected).
+        #[cfg(unix)]
+        let (root, inside, outside) = (
+            "/claudette-wsw-test-9f12",
+            "/claudette-wsw-test-9f12/src/new_file.rs",
+            "/some-other-place-2a/secrets.env",
+        );
+        #[cfg(not(unix))]
+        let (root, inside, outside) = (
+            r"Z:\claudette-wsw-test-9f12",
+            r"Z:\claudette-wsw-test-9f12\src\new_file.rs",
+            r"Y:\some-other-place-2a\secrets.env",
+        );
+
+        let _guard = crate::test_env_lock();
+        let prev = std::env::var("CLAUDETTE_WORKSPACE").ok();
+
+        // No workspace → both refused (only scratch/mission allowed).
+        std::env::remove_var("CLAUDETTE_WORKSPACE");
+        let no_ws = validate_write_path(inside);
+
+        // Workspace set → inside allowed, outside still refused.
+        std::env::set_var("CLAUDETTE_WORKSPACE", root);
+        let inside_res = validate_write_path(inside);
+        let outside_res = validate_write_path(outside);
+
+        if let Some(v) = prev {
+            std::env::set_var("CLAUDETTE_WORKSPACE", v);
+        } else {
+            std::env::remove_var("CLAUDETTE_WORKSPACE");
+        }
+
+        assert!(no_ws.is_err(), "no workspace set: expected reject");
+        assert!(
+            inside_res.is_ok(),
+            "workspace set: path inside it should be writable, got {inside_res:?}"
+        );
+        assert!(
+            outside_res.is_err(),
+            "workspace set: path OUTSIDE it must stay refused, got {outside_res:?}"
+        );
+    }
+
+    #[test]
+    fn path_under_workspace_only_matches_explicit_roots() {
+        #[cfg(unix)]
+        let (root, inside, outside) = (
+            "/claudette-puw-test-7c",
+            "/claudette-puw-test-7c/a/b.txt",
+            "/claudette-puw-test-7c-sibling/a.txt",
+        );
+        #[cfg(not(unix))]
+        let (root, inside, outside) = (
+            r"Z:\claudette-puw-test-7c",
+            r"Z:\claudette-puw-test-7c\a\b.txt",
+            r"Z:\claudette-puw-test-7c-sibling\a.txt",
+        );
+        let _guard = crate::test_env_lock();
+        let prev = std::env::var("CLAUDETTE_WORKSPACE").ok();
+
+        std::env::remove_var("CLAUDETTE_WORKSPACE");
+        let none = path_under_workspace(Path::new(inside));
+
+        std::env::set_var("CLAUDETTE_WORKSPACE", root);
+        let yes = path_under_workspace(Path::new(inside));
+        // Sibling dir sharing a name PREFIX must not match (starts_with on
+        // normalized path components, not raw string prefix).
+        let sibling = path_under_workspace(Path::new(outside));
+
+        if let Some(v) = prev {
+            std::env::set_var("CLAUDETTE_WORKSPACE", v);
+        } else {
+            std::env::remove_var("CLAUDETTE_WORKSPACE");
+        }
+
+        assert!(!none, "no workspace set → not under workspace");
+        assert!(yes, "path inside the workspace root → under workspace");
+        assert!(!sibling, "prefix-sharing sibling dir must not match");
     }
 
     #[cfg(unix)]

@@ -349,15 +349,24 @@ fn run_generate_code(input: &str) -> Result<String, String> {
     let code = crate::codet::generate_code(description, language, &references)
         .ok_or("generate_code: coder model returned no usable output")?;
 
-    // Write via the same sandbox logic as write_file (bare relative paths
-    // resolve under ~/.claudette/files/).
+    // Write via the same sandbox logic as write_file. Bare relative paths
+    // resolve against, in priority order: the active mission tree → the
+    // user's explicit workspace CWD (daily-driver: "create helpers.py here"
+    // means the project) → the scratch sandbox (~/.claudette/files/).
     let resolved_input = if Path::new(filename).is_absolute()
         || filename.starts_with("~/")
         || filename.starts_with("~\\")
     {
         filename.to_string()
     } else {
-        files_dir().join(filename).display().to_string()
+        let base = if crate::missions::active_mission().is_some() {
+            crate::missions::active_cwd()
+        } else if let Some(ws_cwd) = super::workspace_cwd() {
+            ws_cwd
+        } else {
+            files_dir()
+        };
+        base.join(filename).display().to_string()
     };
     let path = validate_write_path(&resolved_input)?;
 
