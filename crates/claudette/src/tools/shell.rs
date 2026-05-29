@@ -19,7 +19,7 @@
 //!   which avoids the multi-job write race the brief flagged.
 //!
 //! Self-contained: `BASH_OUTPUT_MAX_CHARS` is private. Handlers reuse
-//! the parent-module `validate_read_path` (pub(super)) for edit_file's
+//! the parent-module `validate_edit_path` (pub(super)) for edit_file's
 //! path gate, and `run_command_with_timeout` from crate::test_runner
 //! directly for bash's subprocess.
 
@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::{claudette_home, ensure_dir, parse_json_input, validate_read_path};
+use super::{claudette_home, ensure_dir, parse_json_input, validate_edit_path};
 use crate::test_runner::run_command_with_timeout;
 
 const BASH_OUTPUT_MAX_CHARS: usize = 8192;
@@ -222,9 +222,12 @@ fn run_edit_file(input: &str) -> Result<String, String> {
         .and_then(Value::as_str)
         .ok_or("edit_file: missing 'new_text'")?;
 
-    // $HOME-gated (broader than write_file's sandbox) because the user
-    // explicitly confirmed via the permission prompt.
-    let path = validate_read_path(path_str)?;
+    // Boundary follows the active context (roast RC-B): in the interactive
+    // secretary (no mission) this is $HOME-gated, the user having confirmed
+    // via the permission prompt; under a forge/brownfield mission it is
+    // confined to the mission tree so the autonomous Coder can't edit files
+    // outside it (e.g. ~/.ssh/config). See `validate_edit_path`.
+    let path = validate_edit_path(path_str)?;
 
     let content = fs::read_to_string(&path)
         .map_err(|e| format!("edit_file: read {} failed: {e}", path.display()))?;
