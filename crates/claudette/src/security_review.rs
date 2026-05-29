@@ -334,6 +334,109 @@ fn classify(line: &str) -> Vec<(Severity, &'static str, &'static str)> {
         ));
     }
 
+    // ── Arbitrary code execution (Python / PHP) ────────────────────────
+    // `exec(` as a bare call is Python/PHP code execution. `something.exec(`
+    // (JS regex / child_process) is excluded by `has_call` (it rejects a
+    // leading `.`), and Go's `exec.Command(` has no `exec(` token.
+    if has_call(l, "exec") {
+        v.push((
+            High,
+            "code-exec",
+            "exec() runs arbitrary code from a string; avoid dynamic execution",
+        ));
+    }
+    if l.contains("__import__(") {
+        v.push((
+            Medium,
+            "dynamic-import",
+            "__import__() with an untrusted name can load arbitrary modules",
+        ));
+    }
+
+    // ── Server-side template injection (Flask/Jinja) ───────────────────
+    if l.contains("render_template_string(") {
+        v.push((
+            High,
+            "ssti",
+            "render_template_string renders input as a template (SSTI→RCE); render a static template with context vars",
+        ));
+    }
+
+    // ── TLS / certificate verification disabled ────────────────────────
+    if tls_verification_disabled(l, &lower) {
+        v.push((
+            High,
+            "tls-verification-disabled",
+            "TLS certificate verification disabled enables MITM; never disable it in production",
+        ));
+    }
+
+    // ── XXE (XML external-entity resolution enabled) ───────────────────
+    if xxe_enabled(&lower) {
+        v.push((
+            High,
+            "xxe",
+            "XML parser set to resolve external entities (XXE); disable DTD/entity resolution",
+        ));
+    }
+
+    // ── Weak / broken cryptography ─────────────────────────────────────
+    if weak_hash(&lower) {
+        v.push((
+            Medium,
+            "weak-hash",
+            "MD5/SHA-1 are broken for security use; use SHA-256+ (or bcrypt/argon2/scrypt for passwords)",
+        ));
+    }
+    if weak_cipher(&lower) {
+        v.push((
+            Medium,
+            "weak-cipher",
+            "DES/3DES/RC4/ECB-mode are insecure; use AES-GCM or ChaCha20-Poly1305",
+        ));
+    }
+
+    // ── Request-derived sinks (SSRF / open redirect / path traversal) ──
+    if ssrf(&lower) {
+        v.push((
+            Medium,
+            "ssrf",
+            "outbound request built from user input can be abused for SSRF; validate and allow-list the host",
+        ));
+    }
+    if open_redirect(&lower) {
+        v.push((
+            Medium,
+            "open-redirect",
+            "redirect target derived from user input enables open redirect; allow-list destinations",
+        ));
+    }
+    if path_traversal(&lower) {
+        v.push((
+            Medium,
+            "path-traversal",
+            "file path built from user input enables path traversal; resolve and confine to a base directory",
+        ));
+    }
+
+    // ── Prototype pollution (JS) ───────────────────────────────────────
+    if proto_pollution(l) {
+        v.push((
+            Medium,
+            "prototype-pollution",
+            "writing through __proto__/prototype from dynamic keys enables prototype pollution",
+        ));
+    }
+
+    // ── NoSQL injection (Mongo & friends) ──────────────────────────────
+    if nosql_injection(l, &lower) {
+        v.push((
+            Medium,
+            "nosql-injection",
+            "query operator/object built from user input (e.g. $where) enables NoSQL injection; validate types",
+        ));
+    }
+
     v
 }
 
@@ -453,6 +556,166 @@ fn looks_like_sql_concat(l: &str, lower: &str) -> bool {
         || l.contains(".format(")
         || (l.contains("f\"") && l.contains('{'))
         || (l.contains("f'") && l.contains('{'))
+}
+
+/// True when the (lowercased) line names a request/user-input source. Used by
+/// the SSRF / open-redirect / path-traversal heuristics, which only fire when a
+/// dangerous sink AND a user-controlled value are visible on the same line —
+/// keeping false positives low at the cost of missing cross-line taint.
+fn user_input_present(lower: &str) -> bool {
+    const SOURCES: &[&str] = &[
+        "request.",
+        "request[",
+        "req.",
+        "req[",
+        "params[",
+        "params.",
+        ".query",
+        "query[",
+        "argv[",
+        "user_input",
+        "userinput",
+        "$_get",
+        "$_post",
+        "$_request",
+        "ctx.query",
+    ];
+    SOURCES.iter().any(|s| lower.contains(s))
+}
+
+/// TLS/cert verification turned off across common stacks (requests, httpx,
+/// Node, Go, Python ssl, libcurl). HIGH: this is an unambiguous MITM exposure.
+fn tls_verification_disabled(l: &str, lower: &str) -> bool {
+    lower.contains("verify=false")
+        || lower.contains("verify = false")
+        || lower.contains("rejectunauthorized:false")
+        || lower.contains("rejectunauthorized: false")
+        || (lower.contains("node_tls_reject_unauthorized") && lower.contains('0'))
+        || lower.contains("insecureskipverify:true")
+        || lower.contains("insecureskipverify: true")
+        || lower.contains("insecureskipverify=true")
+        || lower.contains("insecureskipverify = true")
+        || l.contains("_create_unverified_context")
+        || lower.contains("check_hostname=false")
+        || lower.contains("check_hostname = false")
+        || (lower.contains("curlopt_ssl_verifypeer")
+            && (lower.contains(", 0") || lower.contains(",0") || lower.contains("false")))
+}
+
+/// XML parser explicitly configured to resolve external entities (lxml /
+/// libxml2 / SAX feature flags). HIGH: enables XXE.
+fn xxe_enabled(lower: &str) -> bool {
+    lower.contains("resolve_entities=true")
+        || lower.contains("resolve_entities = true")
+        || lower.contains("noent=true")
+        || lower.contains("noent = true")
+        || lower.contains("load_dtd=true")
+        || lower.contains("load_dtd = true")
+        || lower.contains("feature_external_ges, true")
+        || lower.contains("feature_external_ges,true")
+}
+
+/// MD5 / SHA-1 used via a hashing API (not just the bare word, to avoid
+/// flagging comments / identifiers that merely contain "md5").
+fn weak_hash(lower: &str) -> bool {
+    const NEEDLES: &[&str] = &[
+        "hashlib.md5(",
+        "hashlib.sha1(",
+        "createhash('md5')",
+        "createhash(\"md5\")",
+        "createhash('sha1')",
+        "createhash(\"sha1\")",
+        "messagedigest.getinstance(\"md5\")",
+        "messagedigest.getinstance(\"sha1\")",
+        "md5.new(",
+        "sha1.new(",
+    ];
+    NEEDLES.iter().any(|n| lower.contains(n))
+}
+
+/// Insecure ciphers / modes named as quoted algorithm strings.
+fn weak_cipher(lower: &str) -> bool {
+    const NEEDLES: &[&str] = &[
+        "\"des\"",
+        "'des'",
+        "\"3des\"",
+        "'3des'",
+        "des-cbc",
+        "desede",
+        "triple_des",
+        "\"rc4\"",
+        "'rc4'",
+        "arcfour",
+        "/ecb",
+        "aes-128-ecb",
+        "aes-256-ecb",
+        "aes_ecb",
+        "modeofoperation.ecb",
+    ];
+    NEEDLES.iter().any(|n| lower.contains(n))
+}
+
+/// An outbound HTTP fetch whose URL line also references user input → SSRF.
+fn ssrf(lower: &str) -> bool {
+    const FETCHERS: &[&str] = &[
+        "requests.get(",
+        "requests.post(",
+        "requests.request(",
+        "urlopen(",
+        "axios.get(",
+        "axios.post(",
+        "http.get(",
+        "httpx.get(",
+        "fetch(",
+    ];
+    FETCHERS.iter().any(|f| lower.contains(f)) && user_input_present(lower)
+}
+
+/// A redirect whose destination comes from user input → open redirect. Safe
+/// server-side route builders (`url_for` / `reverse`) are excluded.
+fn open_redirect(lower: &str) -> bool {
+    if !lower.contains("redirect(") {
+        return false;
+    }
+    if lower.contains("url_for(") || lower.contains("reverse(") {
+        return false;
+    }
+    user_input_present(lower)
+}
+
+/// A filesystem sink whose path references user input → path traversal.
+fn path_traversal(lower: &str) -> bool {
+    const SINKS: &[&str] = &[
+        "open(",
+        "send_file(",
+        "sendfile(",
+        "createreadstream(",
+        "readfilesync(",
+        "readfile(",
+        "os.path.join(",
+        "path.join(",
+    ];
+    SINKS.iter().any(|s| lower.contains(s)) && user_input_present(lower)
+}
+
+/// Writes through `__proto__` / `prototype` from dynamic keys (JS prototype
+/// pollution). Referencing `__proto__` in source is rare outside this bug class.
+fn proto_pollution(l: &str) -> bool {
+    l.contains("__proto__")
+        || l.contains(".prototype[")
+        || l.contains("[\"prototype\"]")
+        || l.contains("['prototype']")
+}
+
+/// Mongo-style query built from user input: a `$where` operator, or a
+/// `find`/`aggregate` call interpolating a user value into the query object.
+fn nosql_injection(l: &str, lower: &str) -> bool {
+    lower.contains("$where")
+        || ((lower.contains(".find(")
+            || lower.contains(".findone(")
+            || lower.contains(".aggregate("))
+            && l.contains("${")
+            && user_input_present(lower))
 }
 
 #[cfg(test)]
@@ -644,5 +907,155 @@ mod tests {
         assert!(fb.contains("xss-innerhtml"));
         assert!(fb.contains("insecure-yaml"));
         assert!(fb.contains("textContent"));
+    }
+
+    #[test]
+    fn flags_python_exec_and_dynamic_import() {
+        assert!(rules(&scan_diff(&diff(&["    exec(user_code)"], "x.py"))).contains(&"code-exec"));
+        assert!(
+            rules(&scan_diff(&diff(&["    m = __import__(name)"], "x.py")))
+                .contains(&"dynamic-import")
+        );
+        // Member-access exec (JS regex / child_process) must NOT flag as code-exec.
+        assert!(
+            !rules(&scan_diff(&diff(&["  const m = re.exec(s);"], "a.js"))).contains(&"code-exec")
+        );
+        assert!(!rules(&scan_diff(&diff(&["  child.exec(cmd);"], "a.js"))).contains(&"code-exec"));
+    }
+
+    #[test]
+    fn flags_ssti_render_template_string() {
+        assert!(rules(&scan_diff(&diff(
+            &["    return render_template_string(page)"],
+            "app.py"
+        )))
+        .contains(&"ssti"));
+        // A static template render is the safe pattern.
+        assert!(rules(&scan_diff(&diff(
+            &["    return render_template('page.html', name=name)"],
+            "app.py"
+        )))
+        .is_empty());
+    }
+
+    #[test]
+    fn flags_tls_verification_disabled() {
+        for line in [
+            "  r = requests.get(url, verify=False)",
+            "  const a = axios.create({ httpsAgent: new https.Agent({ rejectUnauthorized: false }) });",
+            "  tr := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}",
+            "  ctx = ssl._create_unverified_context()",
+            "  curl_setopt(c, CURLOPT_SSL_VERIFYPEER, 0)",
+        ] {
+            assert!(
+                rules(&scan_diff(&diff(&[line], "x.py"))).contains(&"tls-verification-disabled"),
+                "should flag: {line}"
+            );
+        }
+        // Verification left on must NOT flag.
+        assert!(rules(&scan_diff(&diff(
+            &["  r = requests.get(url, verify=True)"],
+            "x.py"
+        )))
+        .is_empty());
+    }
+
+    #[test]
+    fn flags_xxe_entity_resolution() {
+        assert!(rules(&scan_diff(&diff(
+            &["  parser = etree.XMLParser(resolve_entities=True)"],
+            "x.py"
+        )))
+        .contains(&"xxe"));
+        // Default (entities not resolved) must NOT flag.
+        assert!(rules(&scan_diff(&diff(
+            &["  parser = etree.XMLParser(resolve_entities=False)"],
+            "x.py"
+        )))
+        .is_empty());
+    }
+
+    #[test]
+    fn flags_weak_hash_and_cipher() {
+        assert!(rules(&scan_diff(&diff(
+            &["  h = hashlib.md5(data).hexdigest()"],
+            "x.py"
+        )))
+        .contains(&"weak-hash"));
+        assert!(rules(&scan_diff(&diff(
+            &["  const h = crypto.createHash('sha1');"],
+            "a.js"
+        )))
+        .contains(&"weak-hash"));
+        assert!(rules(&scan_diff(&diff(
+            &["  cipher = Cipher.getInstance(\"DES\");"],
+            "A.java"
+        )))
+        .contains(&"weak-cipher"));
+        assert!(rules(&scan_diff(&diff(
+            &["  c = Cipher.getInstance(\"AES/ECB/PKCS5Padding\");"],
+            "A.java"
+        )))
+        .contains(&"weak-cipher"));
+        // SHA-256 is fine.
+        assert!(rules(&scan_diff(&diff(&["  h = hashlib.sha256(data)"], "x.py"))).is_empty());
+    }
+
+    #[test]
+    fn flags_ssrf_open_redirect_path_traversal_with_user_input() {
+        assert!(rules(&scan_diff(&diff(
+            &["  r = requests.get(request.args['url'])"],
+            "app.py"
+        )))
+        .contains(&"ssrf"));
+        assert!(rules(&scan_diff(&diff(
+            &["  res.redirect(req.query.next);"],
+            "a.js"
+        )))
+        .contains(&"open-redirect"));
+        assert!(rules(&scan_diff(&diff(
+            &["  return send_file(request.args.get('name'))"],
+            "app.py"
+        )))
+        .contains(&"path-traversal"));
+    }
+
+    #[test]
+    fn request_sinks_without_user_input_do_not_flag() {
+        // A static URL / route / path must NOT trip the user-input heuristics.
+        assert!(rules(&scan_diff(&diff(
+            &["  r = requests.get('https://api.example.com/health')"],
+            "app.py"
+        )))
+        .is_empty());
+        assert!(rules(&scan_diff(&diff(
+            &["  return redirect(url_for('home'))"],
+            "app.py"
+        )))
+        .is_empty());
+        assert!(rules(&scan_diff(&diff(
+            &["  p = path.join(__dirname, 'static')"],
+            "a.js"
+        )))
+        .is_empty());
+        assert!(rules(&scan_diff(&diff(
+            &["  with open('config.json') as f:"],
+            "app.py"
+        )))
+        .is_empty());
+    }
+
+    #[test]
+    fn flags_prototype_pollution_and_nosql() {
+        assert!(rules(&scan_diff(&diff(
+            &["  target[key].__proto__[prop] = value;"],
+            "a.js"
+        )))
+        .contains(&"prototype-pollution"));
+        assert!(rules(&scan_diff(&diff(
+            &["  db.users.find({ $where: 'this.name == \\'' + name + '\\'' })"],
+            "a.js"
+        )))
+        .contains(&"nosql-injection"));
     }
 }
