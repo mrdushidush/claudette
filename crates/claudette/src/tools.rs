@@ -770,6 +770,42 @@ pub(super) fn validate_write_path(input: &str) -> Result<PathBuf, String> {
     ))
 }
 
+/// Validate the path of an *in-place mutating edit* — `edit_file`,
+/// `apply_diff`, `apply_patch`.
+///
+/// These three historically reused [`validate_read_path`], so an edit could
+/// land anywhere the agent can *read* (`$HOME` + `CLAUDETTE_WORKSPACE`).
+/// That is fine for the interactive secretary — the user asks it to edit a
+/// project file or a dotfile — but in **forge-mode** the autonomous Coder
+/// must not be able to reach outside the mission tree (e.g. rewrite
+/// `~/.ssh/config` or `~/.aws/credentials`). That was the residual half of
+/// roast RC-B: `write_file`/`generate_code` were already confined by
+/// [`validate_write_path`], but the in-place editors were not.
+///
+/// Policy (matches `write_file`, so all mutating tools share one boundary):
+/// - **A mission is active** (forge / brownfield): confine to the scratch
+///   dir or the mission tree, exactly like [`validate_write_path`]. A
+///   relative path resolves under the mission root (see `resolve_input_path`),
+///   so the Coder's `apply_diff("src/foo.rs", …)` still works; only an
+///   absolute / `~`-rooted path outside the tree is refused.
+/// - **No mission active** (plain secretary): fall back to the broader
+///   [`validate_read_path`] envelope, unchanged — no regression for normal
+///   interactive editing.
+pub(super) fn validate_edit_path(input: &str) -> Result<PathBuf, String> {
+    validate_edit_path_inner(input, crate::missions::active_mission().is_some())
+}
+
+/// Inner form of [`validate_edit_path`] with the mission-active decision
+/// passed in, so the branch is unit-testable without mutating the
+/// process-wide mission singleton.
+fn validate_edit_path_inner(input: &str, mission_active: bool) -> Result<PathBuf, String> {
+    if mission_active {
+        validate_write_path(input)
+    } else {
+        validate_read_path(input)
+    }
+}
+
 // File ops group (read_file, write_file, list_dir) lives in
 // src/tools/file_ops.rs.
 
@@ -1493,6 +1529,46 @@ mod tests {
         let bad = "~/.claudette/files/../../etc/passwd";
         let result = validate_write_path(bad);
         assert!(result.is_err(), "expected reject, got {result:?}");
+    }
+
+    #[test]
+    fn validate_edit_path_secretary_allows_home_paths() {
+        // No mission active → delegates to validate_read_path: a file under
+        // $HOME but outside the scratch sandbox stays editable, as the
+        // interactive secretary has always allowed. (No regression — roast RC-B.)
+        let home_doc = user_home().join("Documents").join("notes.md");
+        let result = validate_edit_path_inner(home_doc.to_str().unwrap(), false);
+        assert!(
+            result.is_ok(),
+            "secretary edit under $HOME should be allowed, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn validate_edit_path_mission_refuses_arbitrary_home_paths() {
+        // Mission active → delegates to validate_write_path: the very same
+        // $HOME path the secretary could edit is now refused, so a forge
+        // Coder cannot reach outside the mission tree. ~/.ssh/config is the
+        // canonical escape target the roast called out (RC-B).
+        let ssh = user_home().join(".ssh").join("config");
+        let result = validate_edit_path_inner(ssh.to_str().unwrap(), true);
+        assert!(
+            result.is_err(),
+            "mission edit of ~/.ssh/config must be refused, got {result:?}"
+        );
+        assert!(result.unwrap_err().contains("sandboxed"));
+    }
+
+    #[test]
+    fn validate_edit_path_mission_allows_scratch() {
+        // Scratch is always writable, mission or not — the Coder can still
+        // stash working notes there.
+        let scratch = files_dir().join("scratch-edit.txt");
+        let result = validate_edit_path_inner(scratch.to_str().unwrap(), true);
+        assert!(
+            result.is_ok(),
+            "scratch edit should be allowed under a mission, got {result:?}"
+        );
     }
 
     // File-ops behavior tests (write_file_*, read_file_round_trip,

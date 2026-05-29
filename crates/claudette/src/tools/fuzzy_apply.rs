@@ -17,15 +17,17 @@
 //!    and replace the full original window (preserving the file's original
 //!    line endings outside the replaced region).
 //!
-//! Path safety: paths are validated through `super::validate_read_path` the
-//! same way `apply_patch`/`edit_file` do, so we can't escape the `$HOME` /
-//! `CLAUDETTE_WORKSPACE` sandbox.
+//! Path safety: paths are validated through `super::validate_edit_path` the
+//! same way `apply_patch`/`edit_file` do — $HOME-gated for the interactive
+//! secretary, but confined to the mission tree while a forge/brownfield
+//! mission is active (roast RC-B), so the autonomous Coder can't patch files
+//! outside it.
 
 use std::fs;
 
 use serde_json::{json, Value};
 
-use super::{parse_json_input, validate_read_path};
+use super::{parse_json_input, validate_edit_path};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum FuzzyError {
@@ -76,7 +78,7 @@ fn run_apply_diff(input: &str) -> Result<String, String> {
         .and_then(Value::as_str)
         .ok_or("apply_diff: missing 'after'")?;
 
-    let path = validate_read_path(raw_path).map_err(|e| format!("apply_diff: {raw_path}: {e}"))?;
+    let path = validate_edit_path(raw_path).map_err(|e| format!("apply_diff: {raw_path}: {e}"))?;
     let original = fs::read_to_string(&path)
         .map_err(|e| format!("apply_diff: read {} failed: {e}", path.display()))?;
 

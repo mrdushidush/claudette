@@ -12,16 +12,17 @@
 //! `edit_file` replacement for multi-line edits where the brain emits a
 //! diff already (Claude Code and Aider both do this).
 //!
-//! Path safety: paths are validated through `super::validate_read_path`
-//! the same way `edit_file` does, so we can't escape the `$HOME` /
-//! `CLAUDETTE_WORKSPACE` sandbox.
+//! Path safety: paths are validated through `super::validate_edit_path`
+//! the same way `edit_file` does — $HOME-gated in the interactive secretary,
+//! but confined to the mission tree while a forge/brownfield mission is
+//! active (roast RC-B), so the autonomous Coder can't patch files outside it.
 
 use std::fs;
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
 
-use super::{parse_json_input, validate_read_path};
+use super::{parse_json_input, validate_edit_path};
 
 /// Lossless usize → i64 conversion; we only ever apply this to
 /// `Vec::len()` of small in-memory line buffers, so the cast cannot
@@ -101,7 +102,7 @@ fn run_apply_patch(input: &str) -> Result<String, String> {
     let mut applied_hunks: Vec<Value> = Vec::new();
 
     for file in &files {
-        let path = validate_read_path(&file.path)
+        let path = validate_edit_path(&file.path)
             .map_err(|e| format!("apply_patch: {}: {e}", file.path))?;
         let original = fs::read_to_string(&path)
             .map_err(|e| format!("apply_patch: read {} failed: {e}", path.display()))?;
