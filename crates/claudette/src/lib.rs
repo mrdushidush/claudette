@@ -56,6 +56,7 @@ pub mod recall;
 pub mod run;
 pub mod scheduler;
 pub mod secrets;
+pub mod security_review;
 pub mod telegram_mode;
 pub mod test_runner;
 pub mod theme;

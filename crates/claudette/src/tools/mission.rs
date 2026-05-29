@@ -449,12 +449,20 @@ fn run_mission_submit(input: &str) -> Result<String, String> {
         starting_branch
     };
 
-    // 3. Stage everything. Inside a freshly cloned brownfield tree this is
-    //    safe: there's no .venv noise or dotfile churn that the workspace
-    //    `git_add` tool's `-A` ban was guarding against. The mission was
-    //    created from a clean clone — anything that's modified is a real
-    //    edit the brain made on purpose.
-    git_in(&mission.path, &["add", "-A"], GIT_TIMEOUT_SECS)?;
+    // 3. Stage changes. Inside a freshly cloned brownfield tree `-A` is safe:
+    //    there's no .venv noise or dotfile churn, and anything modified is a
+    //    real edit the brain made on purpose. But an EPHEMERAL mission is
+    //    rooted at the user's LIVE repo (roast RC-D MED-3), where `-A` would
+    //    sweep unrelated untracked files — build artifacts, local config, even
+    //    a stray `secrets.env` — into the commit and the PR. For ephemeral
+    //    missions stage only tracked modifications (`-u`); the Coder is told
+    //    to `git_add` any new files it deliberately created during the loop.
+    let add_args: &[&str] = if mission.ephemeral {
+        &["add", "-u"]
+    } else {
+        &["add", "-A"]
+    };
+    git_in(&mission.path, add_args, GIT_TIMEOUT_SECS)?;
 
     // 4. Build the commit message: title, blank line, body, and a "Fixes #N"
     //    trailer if requested. The same string is reused as the PR body so

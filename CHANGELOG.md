@@ -42,6 +42,25 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Added — forge security-review stage (opt-in)
+
+- **`CLAUDETTE_FORGE_SECURITY_REVIEW=1`** adds a security-review stage to the
+  forge fix-loop. A cheap, deterministic pattern scan over the **added** lines
+  of the Coder's diff flags well-known unsafe constructs — XSS sinks
+  (`innerHTML`/`outerHTML` assignment, `insertAdjacentHTML`, `document.write`,
+  `dangerouslySetInnerHTML`, `javascript:` URLs), `eval`/`new Function`,
+  `shell=True`/`os.system`, `pickle.loads`, unsafe `yaml.load`, string-built
+  SQL, and hardcoded secrets / AWS keys. HIGH-severity findings flip the round
+  to not-passing and feed remediation feedback to the Coder so it fixes them
+  within the loop (bounded by `CLAUDETTE_MAX_FIX_ROUNDS`); MEDIUM/LOW are
+  advisory. A final gate warns before the PR is opened if any HIGH survives.
+  Off by default; secretary/TUI unaffected. Tuned for low false positives
+  (ignores `innerHTML = ''`, `==` comparisons, parameterized `%s` SQL, env
+  reads, placeholder secrets). New module `security_review.rs`.
+- Validated end-to-end: a Markdown previewer that shipped a HIGH `innerHTML`
+  XSS was driven, via the stage's feedback, to safe DOM-based rendering (0
+  `innerHTML` assignments) over 3 fix-loop rounds.
+
 ### Tool surface rework: −18 / +10 (Sprint v0.6.0, 2026-05-21)
 
 After the 2026-05-20 8-agent tool-inventory roast, this sprint reshapes
