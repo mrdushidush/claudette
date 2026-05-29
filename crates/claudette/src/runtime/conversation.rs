@@ -256,6 +256,20 @@ where
         let mut assistant_messages = Vec::new();
         let mut tool_results = Vec::new();
         let mut iterations = 0;
+        // Loop-breaker state: exact (name, args) of read-only navigation calls
+        // already executed this turn. Small local brains routinely re-issue the
+        // identical read_file/grep when they fail to converge, spiraling into
+        // the iteration cap (and, on slow models, multi-minute hangs). A repeat
+        // is suppressed with a pointer to the earlier result. Any non-navigation
+        // tool (an edit, bash, git op, …) may change state, so it clears the set
+        // and subsequent re-reads are allowed against the new state.
+        let mut seen_nav: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // Count of consecutive read-only navigation calls with no intervening
+        // mutation or final answer. A small brain that has searched many times
+        // in a row is usually stuck refining queries instead of committing to
+        // an answer; past SEARCH_NUDGE_AT we append a "stop and answer" hint to
+        // its search results (see the Allow arm below).
+        let mut consecutive_nav = 0usize;
 
         loop {
             iterations += 1;
@@ -321,6 +335,27 @@ where
                     continue;
                 }
 
+                // Loop-breaker: suppress an exact repeat of a read-only
+                // navigation call (read_file/grep/glob/list/semantic_grep) —
+                // its result is already in the context above. A non-navigation
+                // tool may have changed state, so it resets the dedup set.
+                let is_nav = is_navigation_tool(&tool_name);
+                if is_nav {
+                    let key = format!("{tool_name}\u{1f}{input}");
+                    if !seen_nav.insert(key) {
+                        let body = duplicate_call_body(&tool_name);
+                        let result_message =
+                            ConversationMessage::tool_result(tool_use_id, tool_name, body, true);
+                        self.session.messages.push(result_message.clone());
+                        tool_results.push(result_message);
+                        continue;
+                    }
+                    consecutive_nav += 1;
+                } else {
+                    seen_nav.clear();
+                    consecutive_nav = 0;
+                }
+
                 let permission_outcome = if let Some(prompt) = prompter.as_mut() {
                     self.permission_policy
                         .authorize(&tool_name, &input, Some(*prompt))
@@ -359,6 +394,12 @@ where
                                 post_hook_result.is_denied(),
                             );
 
+                            // Search-budget nudge: too many consecutive
+                            // searches/reads → push the brain to answer from
+                            // what it already has instead of refining forever.
+                            if is_nav && !is_error && consecutive_nav >= SEARCH_NUDGE_AT {
+                                output.push_str(&search_budget_nudge(consecutive_nav));
+                            }
                             ConversationMessage::tool_result(
                                 tool_use_id,
                                 tool_name,
@@ -519,6 +560,52 @@ fn build_unknown_tool_body(tool_name: &str, suggestions: &[String]) -> String {
     let escaped_name = tool_name.replace('\\', "\\\\").replace('"', "\\\"");
     format!(
         "{{\"error\":\"unknown tool: {escaped_name}\",\"did_you_mean\":{suggestions_json},\"hint\":\"Use one of the listed tools, or call enable_tools to activate a tool group.\"}}"
+    )
+}
+
+/// After this many consecutive read-only navigation calls with no answer, the
+/// loop starts appending [`search_budget_nudge`] to each search result. Tuned
+/// for a small local brain (qwen3.6-35b q3) that over-searches a large repo:
+/// high enough to allow genuine multi-step work (repo_map + a few greps + a
+/// read, or assembling a list) before nudging, low enough to break the "refine
+/// the query forever" spiral before it burns the iteration budget.
+const SEARCH_NUDGE_AT: usize = 9;
+
+/// Hint appended to a search/read result once the consecutive-navigation count
+/// crosses [`SEARCH_NUDGE_AT`]. Pushes the brain to commit — while still
+/// allowing exhaustive enumeration tasks to finish gathering first.
+fn search_budget_nudge(n: usize) -> String {
+    format!(
+        "\n\n[search-budget: {n} consecutive searches/reads this turn. You very \
+         likely have what you need above. If you can answer, do so now (cite \
+         file:line). If you are assembling a COMPLETE list, run ONE broad search \
+         (e.g. grep the shared prefix) and read ALL its matches at once instead \
+         of many narrow searches.]"
+    )
+}
+
+/// Read-only "navigation" tools whose output bloats context and whose exact
+/// repeat within a turn is (almost) always a non-converging spiral rather than
+/// useful work. These are the calls the loop-breaker dedups; a repeat returns
+/// [`duplicate_call_body`] instead of re-running the tool. Mutating tools are
+/// deliberately excluded — re-reading after an edit is legitimate.
+fn is_navigation_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "read_file" | "grep_search" | "glob_search" | "list_dir" | "semantic_grep" | "repo_map"
+    )
+}
+
+/// Tool result returned when a navigation call is an exact duplicate of one
+/// already executed this turn. Phrased to push the brain off the spiral:
+/// answer from what it already has, or change tactic.
+fn duplicate_call_body(tool_name: &str) -> String {
+    format!(
+        "{{\"error\":\"duplicate call suppressed\",\"tool\":\"{tool_name}\",\"hint\":\"You \
+         already ran this exact call earlier in this turn — its result is in the conversation \
+         above. Re-reading it changes nothing. Either answer now from what you have, or take a \
+         DIFFERENT action: grep_search for the specific symbol, or read_file with an offset/limit \
+         to page to a new region.\"}}"
     )
 }
 
@@ -712,6 +799,110 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn navigation_tool_classifier_matches_readers_only() {
+        for nav in [
+            "read_file",
+            "grep_search",
+            "glob_search",
+            "list_dir",
+            "semantic_grep",
+        ] {
+            assert!(super::is_navigation_tool(nav), "{nav} should be navigation");
+        }
+        for other in [
+            "edit_file",
+            "apply_diff",
+            "bash",
+            "git_commit",
+            "write_file",
+            "add",
+        ] {
+            assert!(
+                !super::is_navigation_tool(other),
+                "{other} must NOT be navigation (re-running it can be legitimate)"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_navigation_call_is_suppressed_not_re_executed() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // The brain re-issues the IDENTICAL read_file twice (the observed q3
+        // spiral), then answers. The loop must execute it once, suppress the
+        // exact repeat with a "duplicate" tool_result, and still finish.
+        struct SpiralApiClient {
+            calls: usize,
+        }
+        impl ApiClient for SpiralApiClient {
+            fn stream(
+                &mut self,
+                _request: &ApiRequest<'_>,
+            ) -> Result<Vec<AssistantEvent>, RuntimeError> {
+                self.calls += 1;
+                match self.calls {
+                    1 | 2 => Ok(vec![
+                        AssistantEvent::ToolUse {
+                            id: format!("rf-{}", self.calls),
+                            name: "read_file".to_string(),
+                            input: "{\"path\":\"x.rs\"}".to_string(),
+                        },
+                        AssistantEvent::MessageStop,
+                    ]),
+                    _ => Ok(vec![
+                        AssistantEvent::TextDelta("done".to_string()),
+                        AssistantEvent::MessageStop,
+                    ]),
+                }
+            }
+        }
+
+        let exec_count = Rc::new(Cell::new(0usize));
+        let ec = Rc::clone(&exec_count);
+        let tool_executor = StaticToolExecutor::new().register("read_file", move |_input| {
+            ec.set(ec.get() + 1);
+            Ok("FILE BODY".to_string())
+        });
+        let permission_policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("read_file", PermissionMode::ReadOnly);
+
+        let mut runtime = ConversationRuntime::new(
+            Session::new(),
+            SpiralApiClient { calls: 0 },
+            tool_executor,
+            permission_policy,
+            vec!["sys".to_string()],
+        );
+
+        let summary = runtime
+            .run_turn("where is x configured?", None)
+            .expect("loop should finish");
+
+        assert_eq!(
+            exec_count.get(),
+            1,
+            "read_file must execute once; the identical repeat is suppressed"
+        );
+        assert_eq!(summary.iterations, 3);
+        // Second tool_result is the suppressed duplicate (is_error = true).
+        let dup = runtime
+            .session()
+            .messages
+            .iter()
+            .find_map(|m| {
+                m.blocks.iter().find_map(|b| match b {
+                    ContentBlock::ToolResult {
+                        output, is_error, ..
+                    } if *is_error => Some(output.clone()),
+                    _ => None,
+                })
+            })
+            .expect("a suppressed duplicate tool_result should exist");
+        assert!(dup.contains("duplicate call suppressed"), "got: {dup}");
     }
 
     #[test]

@@ -8,7 +8,7 @@
 //! strip_html, MAX_FILE_BYTES. `expand_tilde` is pub(crate) already.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::{json, Value};
 
@@ -17,9 +17,16 @@ use super::{
 };
 
 const MAX_GLOB_RESULTS: usize = 200;
-const MAX_GREP_MATCHES: usize = 50;
-const MAX_GREP_FILES: usize = 200;
+const MAX_GREP_MATCHES: usize = 100;
+const MAX_GREP_FILES: usize = 5000;
 const MAX_GREP_LINE_CHARS: usize = 200;
+
+/// Directories grep_search never descends into (build output, dep caches, VCS
+/// metadata). Shared with repo_map via the parent module so the two code-search
+/// tools stay in lockstep. Without it, a single grep on a Rust/Node project
+/// drowns in `target/` or `node_modules/` and hits the file cap before reaching
+/// the source tree — the observed cause of the q3 "locate" spiral.
+use super::SEARCH_SKIP_DIRS as SKIP_DIRS;
 const WEB_FETCH_MAX_CHARS: usize = 8192;
 const WEB_FETCH_TIMEOUT_SECS: u64 = 15;
 
@@ -57,12 +64,12 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "grep_search",
-                "description": "Search file contents for a substring (case-insensitive) under a directory.",
+                "description": "Search file contents with a regular expression (ripgrep-style, case-insensitive) under a directory. Defaults to the active workspace/project; skips build & dependency dirs (target, node_modules, .git). Use a precise pattern like CLAUDETTE_MAX_FIX_ROUNDS or fn\\s+max_rounds.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "pattern": { "type": "string", "description": "Text to search for" },
-                        "path":    { "type": "string", "description": "Directory to search (default: home)" }
+                        "pattern": { "type": "string", "description": "Regex to search for (e.g. 'TODO|FIXME', 'fn\\s+\\w+'). Invalid regex falls back to literal substring." },
+                        "path":    { "type": "string", "description": "Directory to search (default: the workspace/project root)" }
                     },
                     "required": ["pattern"]
                 }
@@ -204,71 +211,87 @@ fn run_grep_search(input: &str) -> Result<String, String> {
         ));
     }
 
+    // Compile the pattern as a case-insensitive regex (ripgrep semantics —
+    // what coding models reach for: alternation, `.?`, char classes). If it
+    // isn't valid regex (a small brain occasionally passes a raw string with
+    // stray metacharacters), fall back to a literal case-insensitive
+    // substring match so the search still does something useful.
+    let regex = regex::RegexBuilder::new(pattern)
+        .case_insensitive(true)
+        .size_limit(1 << 20)
+        .build()
+        .ok();
+    let mode = if regex.is_some() { "regex" } else { "literal" };
     let needle = pattern.to_lowercase();
+    let line_matches = |line: &str| -> bool {
+        match &regex {
+            Some(re) => re.is_match(line),
+            None => line.to_lowercase().contains(&needle),
+        }
+    };
     let mut matches: Vec<Value> = Vec::new();
     let mut files_scanned: usize = 0;
     let mut truncated = false;
 
-    // Iterative DFS over the directory tree. Skips hidden directories
-    // (`.cache`, `.git`, etc.) so a personal-secretary grep doesn't drown
-    // in dotfile noise. The MAX_GREP_FILES + MAX_GREP_MATCHES caps are the
-    // belt-and-braces against runaway walks.
-    let mut stack: Vec<PathBuf> = vec![root.clone()];
-    'walk: while let Some(dir) = stack.pop() {
-        let Ok(read) = fs::read_dir(&dir) else {
+    // Walk with ripgrep's `ignore` crate: respects .gitignore / .ignore,
+    // skips hidden files, and never descends into VCS metadata. `filter_entry`
+    // additionally prunes build/dependency dirs even when the project has no
+    // .gitignore (SKIP_DIRS), so a plain folder of code still doesn't crawl
+    // target/ or node_modules/. This is what stops the search from drowning in
+    // *.log build logs and target/ artifacts (the observed q3 spiral cause).
+    let walker = ignore::WalkBuilder::new(&root)
+        .hidden(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .parents(true)
+        .follow_links(false)
+        .filter_entry(|entry| {
+            if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+                let name = entry.file_name().to_string_lossy();
+                if SKIP_DIRS.contains(&name.as_ref()) {
+                    return false;
+                }
+            }
+            true
+        })
+        .build();
+
+    'walk: for result in walker {
+        let Ok(entry) = result else { continue };
+        // Only regular files (the walker also yields directories + the root).
+        if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+            continue;
+        }
+        // Bail-out checked per-file so we always finish the current file's
+        // matches before stopping.
+        if files_scanned >= MAX_GREP_FILES {
+            truncated = true;
+            break 'walk;
+        }
+        files_scanned += 1;
+        let p = entry.path();
+
+        // Skip oversized files — same 100 KB cap as read_file.
+        let Ok(meta) = entry.metadata() else { continue };
+        if meta.len() > MAX_FILE_BYTES as u64 {
+            continue;
+        }
+        // Read as text; binary files fail UTF-8 and get skipped.
+        let Ok(content) = fs::read_to_string(p) else {
             continue;
         };
-        for entry in read {
-            let Ok(entry) = entry else { continue };
-            let p = entry.path();
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            // Skip hidden entries (Unix dot-prefix; we don't try to detect
-            // Windows hidden attribute, that needs a separate API call).
-            if name_str.starts_with('.') {
-                continue;
-            }
-            let Ok(ft) = entry.file_type() else { continue };
-            if ft.is_symlink() {
-                // Don't follow symlinks — could loop or escape sandbox.
-                continue;
-            }
-            if ft.is_dir() {
-                stack.push(p);
-                continue;
-            }
-            if !ft.is_file() {
-                continue;
-            }
-            // Bail-out conditions checked per-file so we always finish the
-            // current entry's matches before stopping.
-            if files_scanned >= MAX_GREP_FILES {
-                truncated = true;
-                break 'walk;
-            }
-            files_scanned += 1;
-
-            // Skip oversized files — same 100 KB cap as read_file.
-            let Ok(meta) = entry.metadata() else { continue };
-            if meta.len() > MAX_FILE_BYTES as u64 {
-                continue;
-            }
-            // Read as text; binary files fail UTF-8 and get skipped.
-            let Ok(content) = fs::read_to_string(&p) else {
-                continue;
-            };
-            for (lineno, line) in content.lines().enumerate() {
-                if line.to_lowercase().contains(&needle) {
-                    let snippet: String = line.chars().take(MAX_GREP_LINE_CHARS).collect();
-                    matches.push(json!({
-                        "file": p.display().to_string(),
-                        "line": lineno + 1,
-                        "text": snippet,
-                    }));
-                    if matches.len() >= MAX_GREP_MATCHES {
-                        truncated = true;
-                        break 'walk;
-                    }
+        for (lineno, line) in content.lines().enumerate() {
+            if line_matches(line) {
+                let snippet: String = line.chars().take(MAX_GREP_LINE_CHARS).collect();
+                matches.push(json!({
+                    "file": p.display().to_string(),
+                    "line": lineno + 1,
+                    "text": snippet,
+                }));
+                if matches.len() >= MAX_GREP_MATCHES {
+                    truncated = true;
+                    break 'walk;
                 }
             }
         }
@@ -276,6 +299,7 @@ fn run_grep_search(input: &str) -> Result<String, String> {
 
     Ok(json!({
         "pattern": pattern,
+        "mode": mode,
         "root": root.display().to_string(),
         "files_scanned": files_scanned,
         "match_count": matches.len(),
@@ -368,6 +392,65 @@ mod tests {
     fn grep_search_rejects_empty_pattern_inline() {
         let err = run_grep_search(r#"{"pattern":""}"#).unwrap_err();
         assert!(err.contains("empty"), "got: {err}");
+    }
+
+    #[test]
+    fn grep_search_uses_regex_and_skips_build_dirs() {
+        let base = user_home()
+            .join(".claudette")
+            .join("files")
+            .join("claudette-greptest-x7q");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(base.join("src")).unwrap();
+        fs::create_dir_all(base.join("target")).unwrap();
+        fs::write(
+            base.join("src").join("run.rs"),
+            "fn max_fix_rounds() -> u32 { 3 }\nconst CLAUDETTE_MAX_FIX_ROUNDS: u32 = 3;\n",
+        )
+        .unwrap();
+        // Same symbol in a build artifact — must be skipped, not returned.
+        fs::write(
+            base.join("target").join("junk.rs"),
+            "CLAUDETTE_MAX_FIX_ROUNDS in a build artifact\n",
+        )
+        .unwrap();
+
+        // Regex alternation + `.?` (the exact shape the q3 brain wrote) matches.
+        let input = json!({
+            "pattern": "max.?fix.?rounds|MAX_FIX_ROUNDS",
+            "path": base.to_str().unwrap()
+        })
+        .to_string();
+        let out = run_grep_search(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["mode"], json!("regex"), "got: {out}");
+        assert!(
+            v["match_count"].as_u64().unwrap() >= 1,
+            "regex should match the source symbol: {out}"
+        );
+        let files: Vec<String> = v["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["file"].as_str().unwrap().replace('\\', "/"))
+            .collect();
+        assert!(
+            files.iter().any(|f| f.contains("/src/run.rs")),
+            "should find src/run.rs: {files:?}"
+        );
+        assert!(
+            !files.iter().any(|f| f.contains("/target/")),
+            "must skip target/: {files:?}"
+        );
+
+        // Unbalanced paren → invalid regex → literal-substring fallback.
+        let input2 =
+            json!({ "pattern": "max_fix_rounds(", "path": base.to_str().unwrap() }).to_string();
+        let out2 = run_grep_search(&input2).unwrap();
+        let v2: Value = serde_json::from_str(&out2).unwrap();
+        assert_eq!(v2["mode"], json!("literal"), "got: {out2}");
+
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]

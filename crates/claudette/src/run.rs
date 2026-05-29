@@ -345,6 +345,17 @@ fn env_flag_enabled(name: &str) -> bool {
     )
 }
 
+/// Opt-in: run the *interactive secretary* (REPL / one-shot / TUI) in
+/// auto-approve mode — `PermissionMode::Allow`, so DangerFullAccess tools
+/// (edit_file, apply_diff, bash, git writes) run without a `[y/N]` prompt.
+/// This is the daily-driver "accept-edits / just-do-it" knob and the only way
+/// one-shot (`claudette "fix the bug"`) can apply an edit, since one-shot has
+/// no prompter to answer. OFF by default — the normal flow still prompts.
+/// Enable only when you trust the prompt + workspace (`CLAUDETTE_AUTO_APPROVE=1`).
+pub(crate) fn secretary_auto_approve_enabled() -> bool {
+    env_flag_enabled("CLAUDETTE_AUTO_APPROVE")
+}
+
 /// Opt-in (roast RC-C): proceed with the Submitter even when a HIGH-severity
 /// security finding survived the fix-loop. Off by default — a surviving HIGH
 /// hard-blocks PR creation. Only set this once you've reviewed the finding.
@@ -1828,7 +1839,15 @@ fn build_runtime_with_brain_inner(
     // gets a useful "did you mean?" list instead of an empty array.
     let hinter_registry = Arc::clone(&registry);
     let executor = SecretaryToolExecutor::with_registry(registry);
-    let policy = build_permission_policy();
+    // Daily-driver accept-edits: when CLAUDETTE_AUTO_APPROVE is set, the
+    // interactive secretary auto-allows every tool (no [y/N]); otherwise the
+    // normal WorkspaceWrite + prompt policy applies. Single chokepoint for
+    // REPL, one-shot, and TUI (all build their runtime here).
+    let policy = if secretary_auto_approve_enabled() {
+        build_permission_policy().with_active_mode(crate::PermissionMode::Allow)
+    } else {
+        build_permission_policy()
+    };
     let memory = try_load_memory();
 
     let system_prompt = system_override
@@ -2156,6 +2175,9 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         // semantic_grep reads workspace files (capped) and ranks by
         // token-overlap. Pure read — ReadOnly tier is fine.
         .with_tool_requirement("semantic_grep", ReadOnly)
+        // repo_map reads workspace source files (capped, gitignore-aware) and
+        // returns a ranked symbol outline. Pure read — ReadOnly.
+        .with_tool_requirement("repo_map", ReadOnly)
         // ── v0.6.0 Phase 3.4b: clipboard text I/O ───────────────────
         // Both can leak sensitive content (passwords on the clipboard,
         // arbitrary text written into a user-visible buffer) — gate at
