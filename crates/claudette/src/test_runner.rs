@@ -597,16 +597,22 @@ mod tests {
     fn run_command_drains_large_output_without_timeout() {
         // Regression: previously the parent only read pipes after the child
         // exited, so any child that wrote more than the OS pipe buffer
-        // (~64 KB) would block on write and we would burn the full 30 s
-        // timeout. With concurrent drainers this completes in well under
-        // the timeout budget.
+        // (~64 KB) would block on write and we would burn the full timeout.
+        // With concurrent drainers the child runs to completion.
+        //
+        // The regression is captured by `!timed_out` + `success` +
+        // `stdout.len() == 200_000`: a non-concurrent drain would block the
+        // child on its 200 KB write (well over the pipe buffer), the 10 s
+        // timeout would fire, and `timed_out`/`success` would flip. We do
+        // NOT assert an absolute wall-clock bound — python cold-start plus
+        // scheduling jitter on a loaded CI runner makes that flaky without
+        // adding signal the timeout guard doesn't already give.
         //
         // Python is the most portable "spew 200 KB" we have on the runners
         // that already cover the rest of this module. If python isn't
-        // installed we skip — the assertion would be meaningful only when
-        // the subprocess actually ran.
+        // installed we skip — the assertion is meaningful only when the
+        // subprocess actually ran.
         let body = "import sys; sys.stdout.write('x' * 200_000); sys.stdout.flush()";
-        let started = Instant::now();
         let result = run_command_with_timeout("python", &["-c", body], 10, None);
         if !result.success
             && result.exit_code.is_none()
@@ -618,11 +624,6 @@ mod tests {
         assert!(!result.timed_out, "should not time out: {result:?}");
         assert!(result.success, "child should exit 0: {result:?}");
         assert_eq!(result.stdout.len(), 200_000);
-        assert!(
-            started.elapsed() < Duration::from_secs(8),
-            "drain should be fast, took {:?}",
-            started.elapsed()
-        );
     }
 
     #[test]
