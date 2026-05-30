@@ -5,19 +5,33 @@
 # usage: bash run_battery.sh [id-prefix]   (e.g. "A", "I", "B3" — empty = all)
 set -u
 BAT="/d/dev/claudette/runs/eval-2026-05-29/battery"
-BIN="/d/dev/claudette/target/release/claudette.exe"
-export CLAUDETTE_MODEL=qwen3.6-35b-a3b@q3_k_xl
-export CLAUDETTE_CODER_MODEL=qwen3.6-35b-a3b@q3_k_xl
+# Binary: default to the cargo-installed claudette on PATH. The freshly-built
+# target/release exe is blocked by Windows Application Control (WDAC) on this box
+# and pops a per-launch dialog; the PATH binary is already approved and is the
+# same v0.8.1 (it's what users `cargo install`). Override with CLAUDETTE_BIN.
+# NOTE: we deliberately do NOT probe target/release here — probing it triggers
+# the WDAC popup. Set CLAUDETTE_BIN explicitly if you want a specific build.
+BIN="${CLAUDETTE_BIN:-$(command -v claudette)}"
+# Model + context are overridable from the environment so the SAME battery can be
+# run across many models for a comparison. Defaults reproduce the q3 baseline.
+: "${CLAUDETTE_MODEL:=qwen3.6-35b-a3b@q3_k_xl}"
+: "${CLAUDETTE_CODER_MODEL:=$CLAUDETTE_MODEL}"
+: "${CLAUDETTE_NUM_CTX:=32768}"
+: "${CLAUDETTE_CODER_NUM_CTX:=$CLAUDETTE_NUM_CTX}"
+export CLAUDETTE_MODEL CLAUDETTE_CODER_MODEL CLAUDETTE_NUM_CTX CLAUDETTE_CODER_NUM_CTX
 export CLAUDETTE_OPENAI_COMPAT=1
 export OLLAMA_HOST=http://localhost:1234
 export CLAUDETTE_SKIP_OLLAMA_PROBE=1
-export CLAUDETTE_NUM_CTX=32768
-export CLAUDETTE_CODER_NUM_CTX=32768
 export CLAUDETTE_AUTO_APPROVE=1
+# BATTERY_TAG suffixes the scores file + logs dir so models don't clobber each other.
+TAG="${BATTERY_TAG:-}"
 
 filter="${1:-}"
-SCORES="$BAT/SCORES.tsv"
+SCORES="$BAT/SCORES${TAG:+-$TAG}.tsv"
+LOGDIR="$BAT/logs${TAG:+-$TAG}"
+mkdir -p "$LOGDIR"
 [ -z "$filter" ] && : > "$SCORES"   # full run resets; filtered run appends
+echo "[battery] model=$CLAUDETTE_MODEL  ctx=$CLAUDETTE_NUM_CTX  tag='${TAG:-<none>}'  scores=$(basename "$SCORES")"
 
 # The "bigrepo" fixture (I1-I8) is a copy of claudette's own src+docs — the
 # large-repo-with-conflicting-docs stressor. It's gitignored (it's a dup of the
@@ -37,7 +51,7 @@ while IFS=$'\t' read -r id lang type fixture timeout; do
   case "$id" in \#*) continue;; esac
   if [ -n "$filter" ]; then case "$id" in $filter*) ;; *) continue;; esac; fi
 
-  work="$BAT/work/$id"; log="$BAT/logs/$id.log"
+  work="$BAT/work/$id"; log="$LOGDIR/$id.log"
   rm -rf "$work"
   cp -r "$BAT/fixtures/$fixture" "$work"
   [ -f "$BAT/setup/$id.sh" ] && bash "$BAT/setup/$id.sh" "$work" >/dev/null 2>&1
