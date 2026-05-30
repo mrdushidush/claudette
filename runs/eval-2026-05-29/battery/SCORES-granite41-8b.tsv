@@ -1,0 +1,50 @@
+A1	rust	bugfix	FAIL	24s	EC=0	recall=na	FAIL — cargo test failed:\nerror[E0308]: mismatched types
+A2	rust	add-feature	PASS	30s	EC=0	recall=na	PASS — cargo test succeeded (median added)
+A3	rust	run-tests	PASS	9s	EC=0	recall=na	PASS — transcript reports 4 tests passed
+A4	rust	refactor	PASS	121s	EC=0	recall=na	PASS — add renamed to sum2 throughout; tests pass
+A5	rust	multi-file	PASS	40s	EC=0	recall=na	PASS — MAX_RETRIES raised to 5; retry test passes
+A6	rust	explain	PASS	35s	EC=0	recall=na	PASS — explanation covers dedup of consecutive/adjacent duplicates
+A7	rust	debug-error	FAIL	43s	EC=0	recall=na	FAIL — cargo build still failing:\nerror[E0425]: cannot find value `count` in this scope
+B1	python	bugfix	PASS	34s	EC=0	recall=na	PASS — test_stats passes (mean fixed): OK
+B2	python	add-feature	FAIL(TIMEOUT)	161s	EC=124	recall=na	FAIL — variance test failing (rc=1): Ran 1 test in 0.000s  FAILED (errors=1) 
+B3	python	multi-file	PASS	8s	EC=0	recall=na	PASS — tests pass and circle.py PI updated to 3.14159
+B4	python	create-file	PASS	18s	EC=0	recall=na	PASS — utils.py created and clamp test passes: OK
+B5	python	debug-error	PASS	9s	EC=0	recall=na	PASS — app.py runs and counts 'l' as 2: {'h': 1, 'e': 1, 'l': 2, 'o': 1}
+B7	python	run-tests	PASS	6s	EC=0	recall=na	PASS — transcript reports 3 tests passing
+B8	python	answer-codebase	PASS	7s	EC=0	recall=na	PASS — transcript identifies the real retry count as 2 (MAX_ATTEMPTS)
+C1	js	bugfix	FAIL	12s	EC=0	recall=na	FAIL — node test.js exited 1:   throw new Error(`cartTotal expected ${want} but got ${got}`);
+C2	js	add-feature	PASS	22s	EC=0	recall=na	PASS — test.js passes (applyDiscount added)
+C3	js	run-tests	PASS	6s	EC=0	recall=na	PASS — tests green and agent reported 5 passed
+C4	js	create-file	FAIL	29s	EC=0	recall=na	FAIL — node test.js exited 1:   throw new Error(`slugify('Hello World!') expected 'hello-world' but got '${a}'`);
+C5	js	multi-file	PASS	12s	EC=0	recall=na	PASS — tax rate updated to 0.08 and test.js passes
+C6	js	explain	PASS	23s	EC=0	recall=na	PASS — explanation covers grouping, object return, and collection-valued buckets
+C7	js	debug-error	PASS	15s	EC=0	recall=na	PASS — report.js runs and prints member names (incl. Ada)
+D1	ts	bugfix	FAIL	17s	EC=0	recall=na	FAIL — node test.ts exited 1: SyntaxError: Identifier 'isValidEmail' has already been declared
+D2	ts	locate	PASS	4s	EC=0	recall=na	PASS — located refreshToken in src/auth/session.ts (full path given)
+D4	ts	multi-file	PASS	20s	EC=0	recall=na	PASS — User.role added and label() returns 'name (role)'; node test.ts passed
+D6	ts	run-tests	PASS	6s	EC=0	recall=na	PASS — tests green and agent reported 6 passed
+E1	go	bugfix	PASS	8s	EC=0	recall=na	PASS — calc.go Max fixed to return the larger value (buggy line removed)
+E2	go	refactor	PASS	12s	EC=0	recall=na	PASS — GetUserName renamed to DisplayName everywhere (defn in user.go + 2 call sites; 3 total)
+E3	go	locate	PASS	4s	EC=0	recall=na	PASS — transcript identifies handlers/checkout.go as defining handleCheckout
+E4	go	explain	PASS	21s	EC=0	recall=na	PASS — explanation covers both deduplication and sorting
+F1	shell	bugfix	FAIL	9s	EC=0	recall=na	FAIL — greet.sh exited 2: greet.sh: line 9: syntax error near unexpected token `do'
+F2	shell	create-file	PASS	13s	EC=0	recall=na	PASS — count.sh prints 5 for the 5-line data.txt
+F3	shell	explain	PASS	16s	EC=0	recall=na	PASS — explanation conveys 3/3 concepts incl. counting unique occurrences
+F4	shell	refactor	PASS	11s	EC=0	recall=na	PASS — process_file fully renamed to handle_file (3 occurrences)
+G1	html	add-feature	PASS	16s	EC=0	recall=na	PASS — Contact->contact.html added inside nav/ul; Home+About intact (3 nav links)
+G4	css	refactor	PASS	10s	EC=0	recall=na	PASS — btn-primary -> button-main renamed in styles.css rule + 2 html usages (3 total); styles intact
+H2	sql	add-feature	FAIL	7s	EC=0	recall=na	FAIL — top_customer.sql did not produce a usable result: ERR: query returned no rows 
+H3	sql	create-file	PASS	13s	EC=0	recall=na	PASS — products table created with id/name/price and 2 seeded rows
+H4	sql	debug-error	FAIL	10s	EC=0	recall=na	FAIL — report.sql still broken or wrong totals: ERR: OperationalError: no such column: o.order_amount 
+I1	bigrepo	enumerate	FAIL	5s	EC=0	recall=2/6	FAIL — only 2/6 CLAUDETTE_FORGE_ vars (need >=5; enumeration weak spot)
+I2	bigrepo	enumerate	PASS	21s	EC=0	recall=8/8	PASS — enumerated 8/8 forge roles
+I3	bigrepo	locate	FAIL	17s	EC=0	recall=na	FAIL — did not land on source value 3 w/ location (deep-localization weak spot; likely trusted docs=2)
+I4	bigrepo	answer-codebase	PASS	20s	EC=0	recall=na	PASS — named qwen3-coder default + source location
+I5	bigrepo	locate	PASS	16s	EC=0	recall=na	PASS — named conversation.rs
+I6	bigrepo	enumerate	PASS	37s	EC=0	recall=7/7	PASS — enumerated 7/7 CLI modes
+I7	bigrepo	answer-codebase	PASS	9s	EC=0	recall=na	PASS — correctly states no telemetry / local-first
+I8	bigrepo	answer-codebase	PASS	20s	EC=0	recall=na	PASS — described threshold+summarize mechanism
+J1	git	git-workflow	PASS	7s	EC=0	recall=na	PASS — named the modified file notes.txt
+J2	git	git-workflow	PASS	7s	EC=0	recall=na	PASS — committed greet.py with subject: Add greeting script
+J3	git	git-workflow	PASS	6s	EC=0	recall=na	PASS — reported the latest commit subject (null pointer in handler)
+J4	git	git-workflow	PASS	7s	EC=0	recall=na	PASS — branch feature/login exists

@@ -121,7 +121,27 @@ The defaults (`qwen3.5:4b` brain / `qwen3-coder:30b` coder) are tuned for **broa
 | 16 GB VRAM / 32 GB RAM | **`qwen3.6-35b-a3b`** | Best overall by a wide margin. MoE — 35 B total / ~3 B active per token, needs CPU-MoE offload. ~24 t/s baseline / ~43 t/s with MTP on RTX 5060 Ti. |
 | 24 GB+ VRAM | **`qwen3.6-35b-a3b`** (full GPU) | Top quality, full GPU residency. |
 
-`qwen3.6-35b-a3b` is currently distributed via [LM Studio](https://lmstudio.ai/) (Unsloth GGUF) rather than packaged on Ollama. Flip the backend with `CLAUDETTE_OPENAI_COMPAT=1` — see [`docs/power-user.md`](docs/power-user.md#lm-studio-or-any-openai-compatible-server). When multiple quants are on disk, pin one explicitly (`CLAUDETTE_MODEL=qwen3.6-35b-a3b@q4_k_xl`) — LM Studio picks the smallest match otherwise.
+`qwen3.6-35b-a3b` is currently distributed via [LM Studio](https://lmstudio.ai/) (Unsloth GGUF) rather than packaged on Ollama. Flip the backend with `CLAUDETTE_OPENAI_COMPAT=1` — see [`docs/power-user.md`](docs/power-user.md#lm-studio-or-any-openai-compatible-server). When multiple quants are on disk, pin one explicitly (`CLAUDETTE_MODEL=qwen3.6-35b-a3b@q3_k_xl`) — LM Studio picks the smallest match otherwise. On 16 GB, prefer **`q3_k_xl`** over `q4_k_xl`: the benchmark below shows q3 fits VRAM and finishes more tasks, while q4 spills to RAM and *loses* tasks to timeouts.
+
+### Benchmark — 50-task daily-driver battery
+
+Every brain runs the *same* objective 50-task battery — 11 languages/surfaces (Rust, Python, JS, TS, Go, shell, HTML, CSS, SQL, a large real repo, git) × 12 task types (bugfix, add-feature, multi-file, refactor, create-file, explain, locate, enumerate, run-tests, debug-error, git-workflow, answer-from-codebase) — through claudette's real tool loop, then an automated verifier (build/test passes, the file is correct, or ground-truth tokens appear in the transcript). **No self-grading.** All runs: **24k context, `--parallel 1`, RTX 5060 Ti 16 GB** (2026-05-30).
+
+| Brain | Quant | VRAM | Pass @ 50 | Wall | Best for |
+|-------|-------|------|-----------|------|----------|
+| **`qwen3.6-35b-a3b`** | `q3_k_xl` | 16 GB (MoE offload) | **92%** | 38 min | **Best accuracy** — the daily-driver default |
+| `qwen3.5-4b` | Q4–Q8 | **8 GB** | 90% | **8 min** | **Best value** — runs on almost any GPU |
+| `qwen3.5-9b` | Q4 | 11 GB | 88% | 16 min | Solid mid-tier |
+| `qwen3.6-35b-a3b` | `q4_k_xl` | 24 GB (spills at 16) | 88% | 48 min | More precision, but RAM-bound on 16 GB → timeouts |
+| `gpt-oss-20b` | MXFP4 | 13 GB (resident) | 86% | **5 min** | **Fastest** — fully in-VRAM, coolest |
+| `granite-4.1-8b` | Q4–Q6 | 9 GB | 78% | 17 min | Reliable tool-calling, weaker raw coder |
+| `qwen3.6-27b` (dense) | Q3 | 14 GB | ≈86% \* | ~67 s/task | **Precision tier** — accurate but slow; not interactive |
+
+<sub>\* `qwen3.6-27b` stopped at 37/50 (86% of scored). Dense → every parameter active per token → ~67 s/task and it loses generation-heavy tasks to the timeout, so it's a one-shot/batch "precision" pick, not an interactive driver.</sub>
+
+**Reading the table:** *fitting in VRAM matters more than parameter count.* `q3_k_xl` (fits 16 GB) beats `q4_k_xl` (spills to RAM → ~20% slower → loses tasks to timeouts) despite lower precision — so `q3_k_xl` is the 16 GB pick. The small models punch far above their weight: a 4 B model hits 90% in 8 minutes. MoE brains keep the GPU cool (~55 °C); the dense `qwen3.6-27b` is the slow precision tier, not for interactive use.
+
+> **Didn't make the table — config/fit issues, *not* quality:** `nemotron-3-nano-omni-30b` (reasoning MoE) loads and reasons well but runs ~73 s/task at 16 GB (RAM spill + thinking blocks) — too slow. `glm-4.7-flash` is promising (SWE-bench 59.2) but its stock GGUF didn't emit tool calls in our LM Studio runtime — needs a post-2026-01 quant + corrected template. `gemma-4-26b` and `qwen3-coder-30b` stock GGUFs return HTTP 400 on tool calls in LM Studio's template engine. **Lesson: pull `lmstudio-community`/`unsloth` GGUFs and validate one real tool call before trusting a model — chat-template compatibility is the #1 local-model failure mode.** Full per-task data + reasoning notes: [`runs/eval-2026-05-29/battery/MODEL-COMPARISON.md`](runs/eval-2026-05-29/battery/MODEL-COMPARISON.md).
 
 ### Codet sidecar coder
 

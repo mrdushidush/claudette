@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Until we tag `1.0.0`, minor-version bumps may contain breaking changes; patch
 bumps are non-breaking bugfixes only.
 
+## [0.8.2] - 2026-05-31
+
+### Documentation — local-model benchmark & recommendations
+
+Published a benchmark table in the README, backed by the objective 50-task
+daily-driver battery run across the local-model lineup at 24k context /
+`--parallel 1` on a 16 GB GPU (RTX 5060 Ti). No code changes — this republishes
+the README on crates.io with the recommendation table.
+
+- **Benchmark table** under `## Recommended models`: `qwen3.6-35b-a3b@q3_k_xl`
+  92% (best accuracy / default), `qwen3.5-4b` 90% in 8 min (best value, fits
+  8 GB), `qwen3.5-9b` 88%, `gpt-oss-20b` 86% (fastest, MXFP4-resident),
+  `granite-4.1-8b` 78%. The dense `qwen3.6-27b` is the slow "precision" tier.
+- **16 GB pin corrected** from `q4_k_xl` to `q3_k_xl` — q3 fits VRAM and finishes
+  more tasks within the per-task timeout, while q4 spills to RAM and loses tasks.
+- **Template-compatibility note** — `gemma-4-26b` / `qwen3-coder-30b` stock GGUFs
+  fail tool-calling in LM Studio (HTTP 400); use `lmstudio-community` repacks.
+- Full per-model rows, Findings, and a scouted "Claudette Certified" candidate
+  queue land under `runs/eval-2026-05-29/battery/` (`MODEL-COMPARISON.md`,
+  `CANDIDATES.md`) along with the reusable per-model eval driver.
+
 ## [0.8.1] - 2026-05-30
 
 ### Fixed — daily-driver tool actuation on the local q3 brain
