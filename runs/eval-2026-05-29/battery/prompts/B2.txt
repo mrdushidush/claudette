@@ -1,0 +1,1 @@
+Add a `variance(xs)` function to stats.py computing the SAMPLE variance (divide by n-1). A test expects variance([2,4,6]) == 4.0.

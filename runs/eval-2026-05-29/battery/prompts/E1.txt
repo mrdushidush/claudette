@@ -1,0 +1,1 @@
+The `Max` function in calc.go has a bug — it returns the wrong value. Fix it so Max returns the larger of the two arguments, matching its doc comment.

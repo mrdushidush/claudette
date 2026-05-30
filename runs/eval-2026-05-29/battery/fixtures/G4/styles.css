@@ -1,0 +1,15 @@
+body {
+  font-family: system-ui, sans-serif;
+  margin: 2rem;
+}
+
+.btn-primary {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  text-decoration: none;
+  cursor: pointer;
+}

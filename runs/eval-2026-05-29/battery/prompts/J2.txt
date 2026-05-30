@@ -1,0 +1,1 @@
+Commit the staged changes with the message: Add greeting script

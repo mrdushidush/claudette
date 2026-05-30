@@ -1,0 +1,1 @@
+test.ts fails: invalid emails are being accepted. Fix the email validation in validate.ts so addresses without an @ are rejected. Don't edit the test.

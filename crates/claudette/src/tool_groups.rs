@@ -176,6 +176,24 @@ impl ToolGroup {
         ]
     }
 
+    /// The lean **coding core**: the actuation groups a coding session needs
+    /// immediately — read/write/list (`Files`), grep/glob/repo_map (`Search`),
+    /// edit_file/apply_diff/bash (`Advanced`), and run_tests/diagnostics/
+    /// apply_patch (`Quality`). Pre-enabled when claudette is pointed at a
+    /// workspace (see `run::build_runtime_with_brain_inner`) and used as the
+    /// forgiving fallback when the model calls `enable_tools` with no group
+    /// (see `executor::run_enable_tools`). Costs ~2.2k tokens of schema; the
+    /// integration/long-tail groups (github, gmail, calendar, …) stay lazy.
+    ///
+    /// Why this exists: small local brains frequently emit
+    /// `<function=enable_tools></function>` with the `group` arg dropped, then
+    /// spiral on the error until timeout. Shipping these tools when a repo is
+    /// in scope removes the round-trip the brain can't reliably win.
+    #[must_use]
+    pub fn coding_core() -> [ToolGroup; 4] {
+        [Self::Files, Self::Search, Self::Advanced, Self::Quality]
+    }
+
     /// Case-insensitive parse with a couple of common aliases.
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
@@ -392,6 +410,16 @@ impl ToolRegistry {
     /// been enabled in this registry's lifetime (useful for reporting).
     pub fn enable(&mut self, group: ToolGroup) -> bool {
         self.enabled.insert(group)
+    }
+
+    /// Enable every group in the lean [`ToolGroup::coding_core`]. Returns the
+    /// number of groups newly enabled by this call (idempotent — re-enabling
+    /// already-active groups counts zero).
+    pub fn enable_coding_core(&mut self) -> usize {
+        ToolGroup::coding_core()
+            .into_iter()
+            .filter(|g| self.enable(*g))
+            .count()
     }
 
     /// Whether `group` is currently enabled.
@@ -858,5 +886,60 @@ mod tests {
         assert!(advanced.contains(&"edit_file".to_string()));
         assert!(advanced.contains(&"apply_diff".to_string()));
         assert!(advanced.contains(&"spawn_agent".to_string()));
+    }
+
+    #[test]
+    fn coding_core_is_the_lean_actuation_set() {
+        let core = ToolGroup::coding_core();
+        assert_eq!(
+            core,
+            [
+                ToolGroup::Files,
+                ToolGroup::Search,
+                ToolGroup::Advanced,
+                ToolGroup::Quality
+            ]
+        );
+        // Sanity: the integration long-tail must NOT be in the lean core.
+        assert!(!core.contains(&ToolGroup::Github));
+        assert!(!core.contains(&ToolGroup::Git)); // git is reached on demand
+        assert!(!core.contains(&ToolGroup::Calendar));
+    }
+
+    #[test]
+    fn enable_coding_core_enables_exactly_the_core_groups() {
+        let mut reg = ToolRegistry::new();
+        let newly = reg.enable_coding_core();
+        assert_eq!(newly, 4, "all four coding-core groups newly enabled");
+        for g in ToolGroup::coding_core() {
+            assert!(reg.is_enabled(g), "{g:?} should be enabled");
+        }
+        // The actuation tools the brain needs are now advertised.
+        let tools = reg.current_tools().to_string();
+        for t in [
+            "read_file",
+            "write_file",
+            "edit_file",
+            "grep_search",
+            "run_tests",
+        ] {
+            assert!(tools.contains(t), "coding core should advertise {t}");
+        }
+        // Idempotent: re-enabling reports zero newly-enabled.
+        assert_eq!(reg.enable_coding_core(), 0);
+    }
+
+    #[test]
+    fn coding_core_schema_stays_lean() {
+        // Guardrail: the pre-enabled coding core must stay well under the
+        // "+all" weight (~37k chars). Keeps the workspace-mode base prompt
+        // affordable on a 32k window. ~14k chars headroom is generous.
+        let mut reg = ToolRegistry::new();
+        reg.enable_coding_core();
+        let chars = reg.current_schema_chars();
+        assert!(
+            chars < 16_000,
+            "coding-core schema grew to {chars} chars (>16k) — re-check the bundle"
+        );
     }
 }

@@ -1,0 +1,1 @@
+Create utils.py with a `clamp(x, lo, hi)` function that constrains x to the [lo, hi] range. There's a test_utils.py that uses it.

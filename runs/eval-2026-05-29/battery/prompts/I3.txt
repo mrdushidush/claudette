@@ -1,0 +1,1 @@
+What is the default maximum number of forge fix-loop rounds, and where is that value set? Answer from the actual source code.

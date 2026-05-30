@@ -1,0 +1,1 @@
+greet.sh is supposed to print 'Hello, NAME!' (with an exclamation mark) for each name argument, one per line. It's not working right — fix it.

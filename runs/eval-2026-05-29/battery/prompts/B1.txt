@@ -1,0 +1,1 @@
+test_stats.py fails because `mean` is wrong. Fix the bug in stats.py — don't touch the test.

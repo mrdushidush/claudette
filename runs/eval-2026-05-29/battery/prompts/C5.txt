@@ -1,0 +1,1 @@
+Sales tax should be 8%. The rate is defined in config.js — update it so prices include 8% tax. A test expects withTax(100)===108.

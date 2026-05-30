@@ -1784,6 +1784,13 @@ pub(crate) fn build_runtime_with_brain(
     build_runtime_with_brain_inner(session, brain, streaming, telegram, None)
 }
 
+/// True when claudette is pointed at a code workspace — i.e. `CLAUDETTE_WORKSPACE`
+/// is set to a non-empty value. Gates the pre-enabled coding core in
+/// [`build_runtime_with_brain_inner`]. A bare/whitespace value counts as unset.
+fn coding_workspace_active() -> bool {
+    std::env::var("CLAUDETTE_WORKSPACE").is_ok_and(|s| !s.trim().is_empty())
+}
+
 /// Same as [`build_runtime_with_brain`] but the caller supplies a fully-
 /// formed `system_prompt`. Used by CTO sub-sessions
 /// ([`crate::cto::run_cto_decomposition`]) so the persona / format
@@ -1812,14 +1819,27 @@ fn build_runtime_with_brain_inner(
     // calls `enable_tools`. Both halves hold a clone of the Arc so the
     // mutations are immediately visible on the next chat turn.
     //
-    // No mode (REPL, single-shot, Telegram) pre-enables groups any more.
-    // Pre-rewrite, Telegram auto-enabled five groups so the model could
-    // call tools without the enable_tools → tool two-step. The cost
-    // (~2,500 tokens of schema on every turn, ~15% of a 16K window) was
-    // dominating one-word interactions like "hey". Now everything goes
-    // through enable_tools; the brain pays one extra round-trip for the
-    // first tool call in a session and saves ~2,300 tokens per turn.
-    let reg = ToolRegistry::new();
+    // Tool-schema policy is workspace-gated:
+    //
+    //   • Secretary mode (no CLAUDETTE_WORKSPACE) — minimal core (~210 tok).
+    //     Pre-rewrite, Telegram auto-enabled five groups; the cost (~2,500
+    //     tokens on every turn, ~15% of a 16K window) dominated one-word
+    //     interactions like "hey". So a bare secretary stays lazy and reaches
+    //     tools via enable_tools — which is now *forgiving*: a no-group call
+    //     enables the coding core instead of erroring (see executor.rs).
+    //
+    //   • Coding mode (CLAUDETTE_WORKSPACE set) — pre-enable the lean coding
+    //     core (files/search/advanced/quality, ~2.2k tok). When the user
+    //     points claudette at a repo they intend to read/edit/run code, so
+    //     the brain should not have to first win the enable_tools(group)
+    //     round-trip — which small local models frequently malform (dropping
+    //     the group arg) and then spiral on until timeout. The integration
+    //     long-tail (github/gmail/calendar/…) stays lazy and is reached via
+    //     enable_tools on demand.
+    let mut reg = ToolRegistry::new();
+    if coding_workspace_active() {
+        reg.enable_coding_core();
+    }
     let registry = Arc::new(Mutex::new(reg));
 
     let mut api_client = OllamaApiClient::with_registry(brain.model.clone(), registry.clone())

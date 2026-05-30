@@ -1,0 +1,1 @@
+Explain what `dedupeAndSort` does, step by step, and what it returns.

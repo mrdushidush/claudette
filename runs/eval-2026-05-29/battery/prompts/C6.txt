@@ -1,0 +1,1 @@
+Explain what `groupBy` does, including what its return value looks like.

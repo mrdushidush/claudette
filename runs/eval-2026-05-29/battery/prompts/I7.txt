@@ -1,0 +1,1 @@
+Does claudette send any telemetry or usage data to remote servers by default? Answer based on the code and docs.

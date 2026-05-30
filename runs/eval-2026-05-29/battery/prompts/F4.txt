@@ -1,0 +1,1 @@
+Rename the shell function `process_file` to `handle_file` everywhere — its definition in lib.sh and both call sites in run.sh.

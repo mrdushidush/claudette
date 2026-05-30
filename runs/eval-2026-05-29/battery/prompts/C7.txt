@@ -1,0 +1,6 @@
+node report.js throws:
+```
+TypeError: Cannot read properties of undefined (reading 'map')
+    at Object.<anonymous> (report.js:4:20)
+```
+Fix it so it prints the member names.

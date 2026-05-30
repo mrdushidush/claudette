@@ -1,0 +1,1 @@
+How does claudette decide when to compact (summarize) the conversation? Describe what triggers it.

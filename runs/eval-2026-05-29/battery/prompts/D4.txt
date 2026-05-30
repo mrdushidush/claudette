@@ -1,0 +1,1 @@
+Users now have a `role` field. Add `role: string` to the User interface in types.ts and update `label` in format.ts to return "name (role)". A test expects label of Ada/admin to be 'Ada (admin)'.

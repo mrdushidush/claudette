@@ -1,0 +1,1 @@
+Add a public function `median(xs: &[i64]) -> f64` to src/lib.rs that returns the median (average of the two middle values for even-length slices). There's a test in tests/median.rs.

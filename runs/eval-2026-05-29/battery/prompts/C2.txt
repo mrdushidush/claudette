@@ -1,0 +1,1 @@
+Add an `applyDiscount(total, pct)` function to cart.js that reduces total by pct percent, and export it. A test in test.js expects applyDiscount(100,10)===90.

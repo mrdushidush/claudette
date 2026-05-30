@@ -1,0 +1,1 @@
+Rename the CSS class `btn-primary` to `button-main` everywhere — both the rule in styles.css and every element using it in index.html. Don't change any styles.

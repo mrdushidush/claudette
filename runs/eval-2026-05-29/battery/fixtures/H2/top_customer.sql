@@ -1,0 +1,2 @@
+-- TODO: Write a query that returns the name of the customer with the
+-- highest total order amount. Use the customers and orders tables.

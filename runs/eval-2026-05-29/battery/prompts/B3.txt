@@ -1,0 +1,1 @@
+Make PI more precise (use 3.14159) — note it's used across the geometry package, so make sure circle.py and anything importing it stay consistent.

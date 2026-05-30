@@ -1,0 +1,1 @@
+Rename the function `add` to `sum2` throughout this crate (definition and all call sites). Keep behavior identical.
