@@ -1,0 +1,8 @@
+Running app.py raises:
+```
+Traceback (most recent call last):
+  File "app.py", line 6, in <module>
+    counts[c] += 1
+KeyError: 'h'
+```
+Fix it so it prints the character counts of 'hello'.

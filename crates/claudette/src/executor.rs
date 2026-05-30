@@ -90,7 +90,37 @@ fn run_enable_tools(
     let group_name = v
         .get("group")
         .and_then(Value::as_str)
-        .ok_or("enable_tools: missing 'group' parameter")?;
+        .map(str::trim)
+        .unwrap_or_default();
+
+    // Forgiving fallback. Small local brains routinely emit the call with the
+    // `group` arg dropped entirely (`<function=enable_tools></function>`), then
+    // spiral on a hard "missing 'group'" error until the turn times out (this
+    // was the single biggest failure source in the v0.8.0 daily-driver eval).
+    // Treat "I want tools but didn't name a group" as a request for the lean
+    // coding core — the most universally useful actuation set — so even a bare
+    // secretary session (which doesn't pre-enable it) makes progress instead of
+    // looping. Explicit, valid group names below are honored exactly as before.
+    if group_name.is_empty() {
+        let mut reg = lock_registry(registry);
+        let newly = reg.enable_coding_core();
+        let groups: Vec<&str> = ToolGroup::coding_core().iter().map(|g| g.name()).collect();
+        let tools: Vec<String> = ToolGroup::coding_core()
+            .into_iter()
+            .flat_map(|g| reg.group_tool_names(g))
+            .collect();
+        let current_count = reg.current_len();
+        return Ok(json!({
+            "ok": true,
+            "note": "No 'group' was provided, so I enabled the coding core (files, search, advanced, quality). Call these tools directly on your next turn. For a different group (e.g. git, github) call enable_tools with {\"group\":\"git\"}.",
+            "groups_enabled": groups,
+            "newly_enabled_groups": newly,
+            "tools_now_available": tools,
+            "total_advertised_tools": current_count,
+        })
+        .to_string());
+    }
+
     let group = ToolGroup::parse(group_name).ok_or_else(|| {
         // Dynamically enumerate all groups so adding a new one in
         // `tool_groups.rs` doesn't silently leave this error message
@@ -103,15 +133,7 @@ fn run_enable_tools(
         )
     })?;
 
-    // Poisoned lock means another thread panicked with the registry held;
-    // the mutation model here is single-threaded (the runtime drives calls
-    // serially) so poisoning in practice means a test panicked. Fall back
-    // to the inner payload so we stay operational.
-    let mut reg = match registry.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-
+    let mut reg = lock_registry(registry);
     let newly_enabled = reg.enable(group);
     let tool_names = reg.group_tool_names(group);
     let current_count = reg.current_len();
@@ -125,6 +147,18 @@ fn run_enable_tools(
         "note": "The new tools take effect on the next model call — call them directly on your next turn.",
     })
     .to_string())
+}
+
+/// Lock the shared registry, recovering from a poisoned mutex. A poisoned lock
+/// means another thread panicked while holding it; the mutation model here is
+/// single-threaded (the runtime drives calls serially) so in practice poisoning
+/// only happens when a test panicked. Fall back to the inner payload so we stay
+/// operational rather than propagating the poison.
+fn lock_registry(registry: &Arc<Mutex<ToolRegistry>>) -> std::sync::MutexGuard<'_, ToolRegistry> {
+    match registry.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    }
 }
 
 #[cfg(test)]
@@ -201,11 +235,36 @@ mod tests {
     }
 
     #[test]
-    fn wired_executor_missing_group_param_errors() {
-        let registry = Arc::new(Mutex::new(ToolRegistry::new()));
-        let mut exec = SecretaryToolExecutor::with_registry(registry);
-        let err = exec.execute("enable_tools", "{}").unwrap_err().to_string();
-        assert!(err.contains("missing 'group'"), "got: {err}");
+    fn wired_executor_missing_group_enables_coding_core() {
+        // Forgiving fallback: a no-group call (the malformed shape small local
+        // models emit) must NOT error — it enables the lean coding core so the
+        // brain can keep working instead of spiraling.
+        for input in ["{}", r#"{"group":""}"#, r#"{"group":"   "}"#] {
+            let registry = Arc::new(Mutex::new(ToolRegistry::new()));
+            let mut exec = SecretaryToolExecutor::with_registry(Arc::clone(&registry));
+            let out = exec
+                .execute("enable_tools", input)
+                .unwrap_or_else(|e| panic!("input {input:?} should not error: {e}"));
+            assert!(out.contains("\"ok\":true"), "input {input:?}: {out}");
+            // The actuation tools the brain needs must now be advertised.
+            for tool in [
+                "read_file",
+                "write_file",
+                "edit_file",
+                "grep_search",
+                "run_tests",
+            ] {
+                assert!(out.contains(tool), "input {input:?} missing {tool}: {out}");
+            }
+            // And the registry actually reflects the coding-core groups.
+            let reg = registry.lock().unwrap();
+            for g in ToolGroup::coding_core() {
+                assert!(
+                    reg.is_enabled(g),
+                    "group {g:?} not enabled for input {input:?}"
+                );
+            }
+        }
     }
 
     #[test]

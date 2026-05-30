@@ -1,0 +1,1 @@
+What files have uncommitted changes in this repo? Give me a quick git status summary.

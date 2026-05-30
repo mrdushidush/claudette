@@ -1,0 +1,1 @@
+Which source file implements the loop-breaker / search-budget nudge that stops the model from searching forever?

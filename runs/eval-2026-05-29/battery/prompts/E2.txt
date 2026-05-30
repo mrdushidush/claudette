@@ -1,0 +1,1 @@
+Rename the function `GetUserName` to `DisplayName` everywhere (definition in user.go and both call sites in main.go). Keep behavior the same.

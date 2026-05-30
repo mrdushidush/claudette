@@ -1,0 +1,36 @@
+A1	rust	bugfix	FAIL	31s	EC=0	recall=na	FAIL — cargo test failed:\n
+A2	rust	add-feature	PASS	145s	EC=0	recall=na	PASS — cargo test succeeded (median added)
+A3	rust	run-tests	PASS	33s	EC=0	recall=na	PASS — transcript reports 4 tests passed
+A4	rust	refactor	PASS	32s	EC=0	recall=na	PASS — add renamed to sum2 throughout; tests pass
+A5	rust	multi-file	PASS	97s	EC=0	recall=na	PASS — MAX_RETRIES raised to 5; retry test passes
+A6	rust	explain	PASS	27s	EC=0	recall=na	PASS — explanation covers dedup of consecutive/adjacent duplicates
+A7	rust	debug-error	PASS	30s	EC=0	recall=na	PASS — cargo build succeeded (type error fixed)
+B1	python	bugfix	FAIL(TIMEOUT)	151s	EC=124	recall=na	FAIL — test_stats still failing (rc=1): Ran 1 test in 0.001s  FAILED (failures=1) 
+B2	python	add-feature	FAIL(TIMEOUT)	160s	EC=124	recall=na	FAIL — variance test failing (rc=1): Ran 1 test in 0.000s  FAILED (errors=1) 
+B3	python	multi-file	PASS	63s	EC=0	recall=na	PASS — tests pass and circle.py PI updated to 3.14159
+B4	python	create-file	PASS	84s	EC=0	recall=na	PASS — utils.py created and clamp test passes: OK
+B5	python	debug-error	FAIL	45s	EC=0	recall=na	FAIL — app.py still crashing (rc=1):     counts[c] += 1     ~~~~~~^^^ KeyError: 'h' 
+B7	python	run-tests	PASS	96s	EC=0	recall=na	PASS — transcript reports 3 tests passing
+B8	python	answer-codebase	PASS	22s	EC=0	recall=na	PASS — transcript identifies the real retry count as 2 (MAX_ATTEMPTS)
+C1	js	bugfix	FAIL	90s	EC=1	recall=na	FAIL — node test.js exited 1:   throw new Error(`cartTotal expected ${want} but got ${got}`);
+C2	js	add-feature	PASS	93s	EC=0	recall=na	PASS — test.js passes (applyDiscount added)
+C3	js	run-tests	PASS	34s	EC=0	recall=na	PASS — tests green and agent reported 5 passed
+C4	js	create-file	PASS(TIMEOUT)	150s	EC=124	recall=na	PASS — slug.js created and test.js passes
+C5	js	multi-file	FAIL	131s	EC=1	recall=na	FAIL — node test.js exited 1:   throw new Error(`withTax(100) expected ${want} but got ${got}`);
+C6	js	explain	FAIL(TIMEOUT)	120s	EC=124	recall=na	FAIL — did not describe an object/map keyed by the fn with arrays of items as values
+C7	js	debug-error	PASS	37s	EC=0	recall=na	PASS — report.js runs and prints member names (incl. Ada)
+D1	ts	bugfix	PASS	63s	EC=0	recall=na	PASS — node test.ts passed — emails without @ are now rejected
+D2	ts	locate	PASS	10s	EC=0	recall=na	PASS — located refreshToken in src/auth/session.ts (full path given)
+D4	ts	multi-file	PASS	167s	EC=0	recall=na	PASS — User.role added and label() returns 'name (role)'; node test.ts passed
+D6	ts	run-tests	PASS	85s	EC=0	recall=na	PASS — tests green and agent reported 6 passed
+E1	go	bugfix	PASS	52s	EC=0	recall=na	PASS — calc.go Max fixed to return the larger value (buggy line removed)
+E2	go	refactor	FAIL(TIMEOUT)	180s	EC=124	recall=na	FAIL — old name 'GetUserName' still present:\n/d/dev/claudette/runs/eval-2026-05-29/battery/work/E2/main.go:9:	fmt.Println(GetUserName(alice))
+E3	go	locate	PASS	18s	EC=0	recall=na	PASS — transcript identifies handlers/checkout.go as defining handleCheckout
+E4	go	explain	PASS	24s	EC=0	recall=na	PASS — explanation covers both deduplication and sorting
+F1	shell	bugfix	PASS	64s	EC=0	recall=na	PASS — greet.sh prints 'Hello, Ada!' and 'Hello, Grace!'
+F2	shell	create-file	FAIL	61s	EC=0	recall=na	FAIL — count.sh was not created in workdir
+F3	shell	explain	PASS	57s	EC=0	recall=na	PASS — explanation conveys 3/3 concepts incl. counting unique occurrences
+F4	shell	refactor	PASS	43s	EC=0	recall=na	PASS — process_file fully renamed to handle_file (3 occurrences)
+G1	html	add-feature	PASS	18s	EC=0	recall=na	PASS — Contact->contact.html added inside nav/ul; Home+About intact (3 nav links)
+G4	css	refactor	PASS	77s	EC=0	recall=na	PASS — btn-primary -> button-main renamed in styles.css rule + 2 html usages (3 total); styles intact
+H2	sql	add-feature	PASS	64s	EC=0	recall=na	PASS — top_customer.sql returns exactly one row: Ada

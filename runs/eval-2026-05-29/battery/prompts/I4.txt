@@ -1,0 +1,1 @@
+According to the built-in defaults (default_model_map), what model is assigned to the forge Coder role, and in which file is that defined?

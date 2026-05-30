@@ -1,0 +1,1 @@
+Change the maximum retry count to 5. The value lives in src/config.rs but make sure everything still lines up.

@@ -1,0 +1,1 @@
+Create slug.js exporting a `slugify(str)` function that lowercases, trims, and turns runs of non-alphanumeric chars into single hyphens (no leading/trailing hyphen). test.js uses it.

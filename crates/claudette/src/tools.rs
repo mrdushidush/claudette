@@ -1908,9 +1908,13 @@ mod tests {
         let input = json!({ "pattern": bad }).to_string();
         let result = dispatch_tool("glob_search", &input);
         assert!(result.is_err(), "expected reject, got {result:?}");
+        // The sandbox envelope is now $HOME + CLAUDETTE_WORKSPACE (matching
+        // grep_search), so the message names the allowed roots rather than
+        // just $HOME. A system dir under neither is still rejected.
+        let err = result.unwrap_err();
         assert!(
-            result.unwrap_err().contains("outside $HOME"),
-            "wrong error message"
+            err.contains("outside the allowed roots") && err.contains("$HOME"),
+            "wrong error message: {err}"
         );
     }
 

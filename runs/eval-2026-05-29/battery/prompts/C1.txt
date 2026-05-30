@@ -1,0 +1,1 @@
+test.js fails — cart totals are wrong. Fix the bug in cart.js (don't edit the test).

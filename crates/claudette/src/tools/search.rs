@@ -13,7 +13,8 @@ use std::path::Path;
 use serde_json::{json, Value};
 
 use super::{
-    normalize_path, strip_html, user_home, validate_read_path, wrap_untrusted, MAX_FILE_BYTES,
+    default_workspace_root, normalize_path, path_is_allowed, strip_html, user_home,
+    validate_read_path, wrap_untrusted, WorkspaceRoots, MAX_FILE_BYTES,
 };
 
 const MAX_GLOB_RESULTS: usize = 200;
@@ -107,11 +108,20 @@ fn run_glob_search(input: &str) -> Result<String, String> {
     } else if Path::new(raw_pattern).is_absolute() {
         raw_pattern.to_string()
     } else {
-        // Bare-relative pattern: resolve under the active mission tree
-        // when one is active, else under $HOME (the pre-T2 default — keeps
-        // "find me PDFs" style ad-hoc searches working).
+        // Bare-relative pattern. Resolve under the same root priority
+        // grep_search uses, so `glob_search("**/foo.py")` searches the
+        // project the user pointed claudette at — not their whole $HOME:
+        //   1. active mission tree,
+        //   2. the CLAUDETTE_WORKSPACE root (cwd's root if cwd is inside one,
+        //      else the first root) — this is the daily-driver coding path,
+        //   3. $HOME (ad-hoc "find me PDFs" searches with no workspace set).
+        // Pre-fix this fell straight through to $HOME, so a workspace on
+        // another drive (e.g. D:\repo while $HOME is C:\Users\...) was never
+        // searched and the brain read decoy files from $HOME instead.
         let base = if crate::missions::active_mission().is_some() {
             crate::missions::active_cwd()
+        } else if let Some(root) = default_workspace_root() {
+            root
         } else {
             user_home()
         };
@@ -120,18 +130,22 @@ fn run_glob_search(input: &str) -> Result<String, String> {
 
     // Sandbox check on the literal prefix (everything before the first glob
     // metachar). The literal prefix is the part of the path glob will
-    // actually walk into; if THAT escapes $HOME we reject. Without this
-    // check the user could pass `../etc/**/*` and walk outside $HOME.
+    // actually walk into; if THAT escapes the allowed envelope we reject.
+    // Without this check the user could pass `../etc/**/*` and walk out.
+    // The envelope is the same one grep_search / validate_read_path enforce:
+    // $HOME + cwd-if-under-home + CLAUDETTE_WORKSPACE roots — so a workspace
+    // on another drive is allowed, but arbitrary filesystem walks are not.
     let prefix_end = resolved_pattern
         .find(['*', '?', '['])
         .unwrap_or(resolved_pattern.len());
     let literal_prefix = &resolved_pattern[..prefix_end];
     let literal_path = normalize_path(Path::new(literal_prefix));
-    let home = normalize_path(&user_home());
-    if !literal_path.starts_with(&home) {
+    let roots = WorkspaceRoots::from_env();
+    if !path_is_allowed(&literal_path, &roots, false) {
         return Err(format!(
-            "glob_search: pattern resolves outside $HOME ({}); searches are restricted for safety",
-            home.display()
+            "glob_search: pattern resolves outside the allowed roots — $HOME ({}) \
+             and CLAUDETTE_WORKSPACE; searches are restricted for safety",
+            roots.home.display()
         ));
     }
 
@@ -380,6 +394,51 @@ mod tests {
     fn glob_search_rejects_missing_pattern() {
         let err = run_glob_search("{}").unwrap_err();
         assert!(err.contains("missing"), "got: {err}");
+    }
+
+    #[test]
+    fn glob_search_allows_workspace_outside_home() {
+        // Regression: glob_search used to root at $HOME and reject any pattern
+        // resolving elsewhere, so a workspace on another drive (D:\repo while
+        // $HOME is C:\Users\...) was unreachable — the brain then read decoy
+        // files from $HOME. The sandbox now honours CLAUDETTE_WORKSPACE, the
+        // same envelope grep_search uses. Invented non-existent root so the
+        // glob walker simply yields nothing (Ok) — we assert the *gate*, not
+        // file matching, which keeps this independent of FS contents.
+        #[cfg(unix)]
+        let (root, pat) = ("/claudette-glob-ws-xyz", "/claudette-glob-ws-xyz/**/*.py");
+        #[cfg(not(unix))]
+        let (root, pat) = (
+            r"Z:\claudette-glob-ws-xyz",
+            r"Z:\claudette-glob-ws-xyz\**\*.py",
+        );
+        let input = json!({ "pattern": pat }).to_string();
+
+        let _guard = crate::test_env_lock();
+        let prev = std::env::var("CLAUDETTE_WORKSPACE").ok();
+
+        // No workspace set → pattern is outside $HOME → rejected.
+        std::env::remove_var("CLAUDETTE_WORKSPACE");
+        let denied = run_glob_search(&input);
+
+        // Workspace points at the root → the sandbox accepts it.
+        std::env::set_var("CLAUDETTE_WORKSPACE", root);
+        let allowed = run_glob_search(&input);
+
+        // Restore env before asserting so a panic can't poison other tests.
+        match prev {
+            Some(v) => std::env::set_var("CLAUDETTE_WORKSPACE", v),
+            None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+        }
+
+        assert!(
+            denied.is_err(),
+            "outside $HOME with no workspace must be rejected: {denied:?}"
+        );
+        assert!(
+            allowed.is_ok(),
+            "a CLAUDETTE_WORKSPACE root outside $HOME must be allowed: {allowed:?}"
+        );
     }
 
     #[test]

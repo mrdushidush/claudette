@@ -1,0 +1,1 @@
+List all the top-level run modes the claudette CLI supports (the different ways to launch it / the mode flags).

@@ -1,0 +1,1 @@
+Create a script `count.sh` that prints the number of lines in the file given as its first argument (just the number). E.g. `bash count.sh data.txt` on a 5-line file prints 5.

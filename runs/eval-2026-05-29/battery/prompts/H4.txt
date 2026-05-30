@@ -1,0 +1,5 @@
+Running report.sql gives this error:
+```
+sqlite3.OperationalError: no such column: o.total
+```
+Fix report.sql so it runs and returns each customer's total order amount.

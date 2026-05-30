@@ -1,0 +1,1 @@
+The test `test_average` in this crate is failing. Find and fix the bug in src/lib.rs so the test passes — don't change the test.

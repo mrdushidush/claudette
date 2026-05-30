@@ -1,0 +1,1 @@
+Explain what the function `dedup_sorted` does and what it returns. Be specific about the algorithm.

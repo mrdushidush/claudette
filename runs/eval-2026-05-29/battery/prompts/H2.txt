@@ -1,0 +1,1 @@
+Write a SQL query in top_customer.sql that returns the name of the customer with the highest total order amount. Use the customers and orders tables from schema.sql.

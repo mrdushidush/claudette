@@ -8,7 +8,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Until we tag `1.0.0`, minor-version bumps may contain breaking changes; patch
 bumps are non-breaking bugfixes only.
 
-## [0.8.0] - 2026-05-29
+## [0.8.1] - 2026-05-30
+
+### Fixed — daily-driver tool actuation on the local q3 brain
+
+A 50-task interactive eval battery (5+ languages, 12 task types, objective
+verifiers) found two harness gaps that, on `qwen3.6-35b-a3b@q3_k_xl`, dominated
+the failures. Root-caused from `lms log stream` captures. The fixes moved the
+aggregate from 72% to 88–92% on the identical task set (≥80% daily-driver bar
+met) without lowering any verifier's standard.
+
+- **Coding tools are pre-enabled when a workspace is set.** Claudette gates
+  actuation tools (`files`/`search`/`advanced`/`quality`) behind the
+  `enable_tools(group)` meta-tool to keep the base schema tiny. Small local
+  brains routinely emit that call with the required `group` argument dropped
+  (`<function=enable_tools></function>`) and then spiral on the error until the
+  turn times out — the single biggest failure source. Now, when
+  `CLAUDETTE_WORKSPACE` is set (i.e. claudette is pointed at a repo), the lean
+  **coding core** (Files + Search + Advanced + Quality, ~2.2k tokens) is
+  pre-enabled so the brain can read/edit/search/run without first winning that
+  round-trip. Secretary mode (no workspace) stays at the ~210-token minimal
+  core. See `ToolGroup::coding_core`.
+- **`enable_tools` is now forgiving.** A call with a missing or empty `group`
+  enables the coding core (the most universally useful actuation set) instead of
+  erroring — so even a no-workspace session recovers instead of looping. Valid,
+  explicit group names behave exactly as before.
+- **`glob_search` now roots at the workspace, not `$HOME`.** It previously
+  resolved bare patterns under `$HOME` and *hardcoded* a `starts_with($HOME)`
+  sandbox, so `glob_search("**/foo.py")` against a repo on another drive
+  (`D:\repo` while `$HOME` is `C:\Users\…`) searched the wrong tree entirely and
+  the brain read decoy files. It now uses the same root priority (active mission
+  → `CLAUDETTE_WORKSPACE` → `$HOME`) and the same `validate_read_path` envelope
+  as `grep_search` (which already had this fix).
+
+
 
 ### Added — daily-driver code-search & editing (qwen3.6-35b q3 hardening)
 
