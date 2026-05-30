@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Until we tag `1.0.0`, minor-version bumps may contain breaking changes; patch
 bumps are non-breaking bugfixes only.
 
+## [0.8.3] - 2026-05-31
+
+### Documentation — README rewrite: privacy-first / air-gapped positioning
+
+No code changes — republishes the crate README on crates.io. The README was
+rewritten from scratch to lead with Claudette's defining trait (the AI never
+leaves your machine) and to match the current project (v0.8.2 feature set +
+the Claudette Certified benchmark program).
+
+- **Air-gapped is now the headline.** New `🔒 Air-gapped by design` section:
+  no cloud-brain code path exists, every outbound call is opt-in/feature-gated,
+  `CLAUDETTE_SKIP_OLLAMA_PROBE=1` enables fully-offline operation, and the
+  regulated/classified-machine deployment story is stated up front.
+- **Claudette Certified** reframed as a repeatable program around the objective
+  50-task battery, with the v0.8.2 results table and the four headline lessons
+  (VRAM-fit > params, small models punch up, template-compat is the #1 failure,
+  thermals follow architecture).
+- **New `🚀 Roadmap` section** with a contributor-facing "Where you come in"
+  list (certify a model, rescue a chat template, sharpen the coder, grow the
+  security scanner, extend voice/vision, docs) pointing at the scouted
+  candidate queue.
+- Stale figures refreshed (test count `703` → `1,000+`); feature sections
+  (Forge, missions, Codet, recall, sub-agents, voice/vision, 22 tool groups)
+  rewritten tighter.
+
 ## [0.8.2] - 2026-05-31
 
 ### Documentation — local-model benchmark & recommendations

@@ -1,8 +1,22 @@
 # Claudette
 
-**A local-first AI secretary that runs on your own laptop.** REPL, fullscreen TUI, one-shot CLI, and a Telegram bot — all driving the same [Ollama](https://ollama.com) backend. No cloud brain, no subscription, no [telemetry](PRIVACY.md). Single Rust binary.
+**Your AI never leaves your laptop.** Claudette is a personal AI assistant *and* coding agent that runs entirely on local hardware — REPL, fullscreen TUI, one-shot CLI, and a Telegram bot, all driving one local model through [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai/). No cloud brain. No API key. No subscription. No [telemetry](PRIVACY.md). One Rust binary.
 
-### Install in 30 seconds
+> **Pull a model, unplug the network, and she still works.** The whole core — chat, notes, todos, file editing, code search, repo work, even the autonomous code-change pipeline — runs with zero internet. See [Air-gapped by design](#-air-gapped-by-design).
+
+[![Crates.io](https://img.shields.io/crates/v/claudette.svg)](https://crates.io/crates/claudette)
+[![CI](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml/badge.svg)](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml)
+[![Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+[![Local-only](https://img.shields.io/badge/cloud_brain-none-success.svg)](PRIVACY.md)
+
+![Claudette TUI — chat + live tool-call panel side-by-side, one turn covering notes, weather, BTC price, and calendar](docs/images/claudette-tui.png)
+
+> One turn driving four tool groups (`note_list`, `weather_forecast`, `tv_get_quote`, `calendar_list_events`) — the model enables groups on demand and dispatches the calls. TUI tabs: `[1]Chat [2]Tools [3]Notes [4]Todos [5]HW`.
+
+---
+
+## Install in 30 seconds
 
 **Linux / macOS:**
 
@@ -23,109 +37,83 @@ ollama pull qwen3.5:4b           # 3.4 GB brain — one-time download
 claudette "what time is it?"
 ```
 
-> Prefer not to pipe the network into a shell? Grab a signed archive from [Releases](https://github.com/mrdushidush/claudette/releases/latest) and unzip `claudette` (or `claudette.exe`) onto your `PATH`. SHA256 sidecar on every artifact.
+> **Prefer not to pipe the network into a shell?** Grab a signed archive from [Releases](https://github.com/mrdushidush/claudette/releases/latest) and drop `claudette` (or `claudette.exe`) onto your `PATH`. Every artifact ships a SHA256 sidecar.
 >
-> **Rust user?** `cargo install claudette` still works.
-> **Don't have a GPU?** See [CPU-only mode](docs/hardware.md#no-gpu-cpu-only-mode) — the 4b brain runs on plain CPU, just slower.
-> **First time?** Open [`docs/show-me.md`](docs/show-me.md) for plain-English examples — calendar, notes, weather, screenshots, voice from your phone.
+> **Rust user?** `cargo install claudette`.
+> **No GPU?** The 4B brain runs on plain CPU — slower, but it works. See [CPU-only mode](docs/hardware.md#no-gpu-cpu-only-mode).
+> **First time?** [`docs/show-me.md`](docs/show-me.md) is plain-English examples — calendar, notes, weather, screenshots, voice from your phone.
 
-[![Crates.io](https://img.shields.io/crates/v/claudette.svg)](https://crates.io/crates/claudette)
-[![CI](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml/badge.svg)](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml)
-[![Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+---
 
-![Claudette TUI — chat + live tool-call panel side-by-side, one turn covering notes, weather, BTC price, and calendar](docs/images/claudette-tui.png)
+## 🔒 Air-gapped by design
 
-> One turn driving four tool groups (`note_list`, `weather_forecast`, `tv_get_quote`, `calendar_list_events`) — the brain enables groups on demand and dispatches calls. TUI tabs: `[1]Chat [2]Tools [3]Notes [4]Todos [5]HW`.
+Most "local AI" tools quietly phone home — telemetry, model downloads, a cloud fallback when the local model struggles. **Claudette has no such path.** There is no cloud-brain code in the binary to begin with.
+
+- **One required dependency:** a model server (Ollama or LM Studio) on `localhost`. That's it.
+- **Every outbound call is opt-in and feature-gated** — voice TTS, Telegram, web search, GitHub, Google Calendar/Gmail. Each one only exists if *you* turn it on with a token. The full inventory of every place a byte could leave your machine is in [`PRIVACY.md`](PRIVACY.md).
+- **Truly offline:** `CLAUDETTE_SKIP_OLLAMA_PROBE=1` skips even the localhost startup check. Pull your model, disconnect the network, and the entire core works — chat, notes, todos, files, code search, repo editing, and the [Forge](#-forge-mode-an-autonomous-code-change-pipeline) autonomous code-change pipeline.
+- **Nothing is written outside `~/.claudette/`** without an explicit permission prompt.
+
+If you work on a regulated, classified, or simply trust-no-cloud machine, this is the headline feature — not an afterthought. Your code and your conversations never touch someone else's servers.
 
 ---
 
 ## Why Claudette
 
-The open-source AI agent space is crowded with coding-focused tools (Aider, Cline, OpenHands, opencode). Claudette is aimed at a different slot: **a general-purpose personal assistant you can voice-note from a bus stop, that runs entirely on your own laptop, with no cloud brain in the loop.**
+The open-source agent space is crowded with cloud-API coding tools. Claudette aims at a different slot: **a general-purpose assistant *and* a capable coding agent that run entirely on your own hardware, with no cloud brain in the loop.**
 
-- **Truly local by default.** No cloud-brain code path exists. Ollama on `localhost` is the only required dependency. Every outbound network call (voice TTS, Telegram, web search, GitHub, Google Calendar/Gmail) is opt-in and gated behind a feature you have to turn on. Full inventory in [`PRIVACY.md`](PRIVACY.md).
-- **Fits a single 3060-class GPU.** The default `qwen3.5:4b` brain uses ~3.4 GB VRAM; auto-fallback to `qwen3.5:9b` only fires on stuck signals. No 32 GB-VRAM hidden requirement.
-- **Messaging-first.** None of the comparable tools ship a Telegram bot interface — voice in (Whisper), voice out (edge-tts), and full agent control from your phone.
-- **Personal, not just code.** Tool groups cover Google Calendar, Gmail, scheduler/briefings, notes, todos, markets, weather, web search — code-gen is *one* capability (via the Codet sidecar), not the whole point.
-
-Honest side-by-side vs. OpenHands, Aider, opencode, Cline, Continue: [`docs/comparison.md`](docs/comparison.md). Claudette isn't the winner in most of them — it's the only one aimed at this specific slot.
+- **Private by construction.** Not "private mode" — there is no other mode. See above.
+- **Fits real hardware.** The default `qwen3.5:4b` brain uses ~3.4 GB VRAM and runs on an 8 GB GPU or plain CPU. Step up to `qwen3.6-35b-a3b` on a 16 GB GPU for near-frontier quality. No hidden 32 GB-VRAM requirement.
+- **Personal, not just code.** Calendar, Gmail, scheduler/briefings, notes, todos, markets, weather, web search — code generation is *one* capability, not the whole product.
+- **Messaging-first.** A first-class Telegram bot with voice in (Whisper) and voice out (edge-tts) — drive the whole agent from your phone at a bus stop.
+- **Honest about itself.** Side-by-side vs. OpenHands, Aider, opencode, Cline, Continue: [`docs/comparison.md`](docs/comparison.md). Claudette doesn't win every column — it's the only one built for *this* slot.
 
 ---
 
-## Highlights
+## What she can do
 
-### Four interfaces, one brain
+### Four interfaces, one local brain
 | Mode | Command | What it's for |
 |------|---------|---------------|
 | **REPL** | `claudette` | Conversational shell. Autosaves every turn. |
 | **One-shot** | `claudette "your question"` | Print a reply and exit. Pipe-friendly. |
-| **TUI** | `claudette --tui` | Ratatui fullscreen UI with 5 tabs. |
-| **Telegram bot** | `claudette --telegram` | Voice-capable remote chat. |
+| **TUI** | `claudette --tui` | Ratatui fullscreen UI, 5 tabs, live tool panel. |
+| **Telegram bot** | `claudette --telegram` | Voice-capable remote chat from your phone. |
 
-### 80+ tools, ~200 token base schema
-Every tool except `enable_tools`, `get_current_time`, and `load_workspace_rules` lives in a group the model opts into via `enable_tools(group)`. **22 groups as of v0.6.0** (notes, todos, files, code, meta, git, ide, search, advanced, facts, registry, github, markets, telegram, calendar, schedule, gmail, recall, **quality** [run_tests / diagnostics / apply_patch], **semantic** [semantic_grep], **vision** [screenshot_capture / image_describe], **clipboard**) — schema cost stays flat until the model actually needs the surface.
+### 80+ tools, ~200-token base schema
+Almost every tool lives in a **group the model opts into** via `enable_tools(group)`, so the prompt stays tiny until the surface is actually needed. **22 groups:** notes, todos, files, code, meta, git, ide, search, advanced, facts, registry, github, markets, telegram, calendar, schedule, gmail, recall, **quality** (`run_tests` / `diagnostics` / `apply_patch`), **semantic** (`semantic_grep`), **vision** (`screenshot_capture` / `image_describe`), and **clipboard**. Point Claudette at a repo (`CLAUDETTE_WORKSPACE`) and the lean coding core (Files + Search + Advanced + Quality) is pre-enabled so she can read, edit, search, and run tests immediately.
 
-### Brownfield missions: clone, edit, ship a PR — in one tool chain
-`mission_start("owner/repo")` clones into `~/.claudette/missions/<slug>/` and silently re-routes `git_status` / `glob_search` / `grep_search` / `write_file` / `bash` into the mission tree. `mission_submit` auto-branches, commits, pushes, and opens the PR via `gh_create_pr`. Resumable across sessions via `mission_attach`.
+### 🛠️ Forge-mode: an autonomous code-change pipeline
+`claudette --forge "<prompt>"` runs a **Planner → Coder → Verifier** loop against a git repo, with a configurable fix-loop (default 2 rounds) and an optional deterministic security-review stage, before it opens a PR. Inside an existing repo it auto-bootstraps an ephemeral mission at the repo root — no clone needed. Roles are independently routable, so you can pin a stronger model to the Verifier and a cheap one to the Coder. Full walkthrough: [`docs/forge.md`](docs/forge.md).
 
-### Forge-mode: autonomous code-change pipeline
-`claudette --forge "<prompt>"` or `/forge <prompt>` runs a Planner → Coder → Verifier loop against the active mission, with a configurable fix-loop (default 2 rounds) before the PR opens. Roles are routable via `~/.claudettes-forge/models.toml` so you can pin a stronger model to Verifier and keep a cheap model on Coder. Inside an existing git repo with no mission active, forge auto-bootstraps an ephemeral mission rooted at the repo toplevel — no clone required. Full walkthrough: [`docs/forge.md`](docs/forge.md).
+### 🌿 Brownfield missions: clone, edit, ship a PR in one chain
+`mission_start("owner/repo")` clones into `~/.claudette/missions/<slug>/` and transparently re-routes `git_status` / `glob_search` / `grep_search` / `write_file` / `bash` into the mission tree. `mission_submit` auto-branches, commits, pushes, and opens the PR. Resumable across sessions with `mission_attach`.
 
-### Tiered-brain auto-fallback
-Three presets (Fast / Auto / Smart). Auto runs `qwen3.5:4b` and escalates to `qwen3.5:9b` on stuck signals (empty response after retry, max-iterations hit with no text, ≥ 3 consecutive tool errors). Per-turn revert — not session-sticky. **For 16 GB+ VRAM, pin `qwen3.6-35b-a3b` instead** — see [Recommended models](#recommended-models).
+### 🧠 Tiered-brain auto-fallback
+Three presets — Fast / Auto / Smart. Auto runs `qwen3.5:4b` and escalates to `qwen3.5:9b` only on real stuck signals (empty response after retry, max-iterations with no text, ≥3 consecutive tool errors), reverting per-turn rather than sticking. On a 16 GB GPU, pin `qwen3.6-35b-a3b` instead — see [Claudette Certified](#-claudette-certified--the-local-model-benchmark).
 
-### Voice in, voice out, and vision in
-Whisper transcription for Telegram voice notes, edge-tts for replies (English or Hebrew). Image attachments in the TUI/REPL via Alt+V (clipboard), drag-drop, or `@/path/to/img.png` when the loaded brain is multimodal.
+### 🎙️ Voice in, voice out, vision in
+Whisper transcription for Telegram voice notes, edge-tts replies (English or Hebrew), and image attachments in TUI/REPL via Alt+V (clipboard), drag-drop, or `@/path/to/img.png` — when the loaded brain is multimodal.
 
-### Codet sidecar for code generation
-`generate_code` routes through a dedicated coder model (default `qwen3-coder:30b`, fallback `qwen2.5-coder:14b`; **recommended upgrade `qwen3.6-35b-a3b`** — same model as the brain, no swap dance — see [Recommended models](#recommended-models)). Runs a real syntax check (`py_compile`, `rustc --emit=metadata`, `tsc --noEmit`, etc. — 5 languages), then an Aider-style SEARCH/REPLACE fix loop on failure, then optional pytest/cargo-test/jest. Hot-swaps into VRAM on demand on memory-constrained boxes.
+### ⚙️ Codet sidecar for code generation
+`generate_code` routes through a dedicated coder model (default `qwen3-coder:30b`), runs a real syntax check across 5 languages (`py_compile`, `rustc --emit=metadata`, `tsc --noEmit`, …), then an Aider-style SEARCH/REPLACE fix loop on failure, then optional pytest / cargo-test / jest. Hot-swaps into VRAM on demand on memory-constrained boxes.
 
-### Cross-session semantic recall
-`/recall <query>` searches past conversation turns across sessions via an embedding index (works on Ollama or LM Studio's `/v1/embeddings`). Drops fragments of relevant past turns straight into the current context.
+### 🔎 Cross-session semantic recall
+`/recall <query>` searches every past conversation turn across sessions via a local embedding index, dropping the relevant fragments straight into the current context.
 
-### Three sub-agents
-`spawn_agent` delegates to a Researcher (web + file + code search, 10 turn cap), GitOps (rebase/squash/push, 8 turn cap), or Code Reviewer (read-only, 5 turn cap). Only the final text comes back — sub-agent chatter doesn't pollute the main context.
+### 🤝 Sub-agents
+`spawn_agent` delegates to a Researcher (web + file + code search), GitOps (rebase/squash/push), or Code Reviewer (read-only). Only the final answer comes back — sub-agent chatter never pollutes the main context.
 
-### Per-tool permission gating
-ReadOnly tools auto-allow, WorkspaceWrite tools auto-allow, DangerFullAccess prompts `[y/N]` every time (bash, `edit_file`, `git add/commit/push/checkout`, cross-org PRs). Telegram default-denies DangerFullAccess (no TTY).
-
----
-
-## Hardware
-
-The numbers below describe the *comfortable* setup. **You don't need a GPU** — Ollama runs on plain CPU (slower, but viable for a 1b/3b brain). See [`docs/hardware.md#no-gpu-cpu-only-mode`](docs/hardware.md#no-gpu-cpu-only-mode) if you don't have one.
-
-| Component | Comfortable minimum | Recommended | Tested on |
-|-----------|---------------------|-------------|-----------|
-| GPU | 6 GB VRAM (or CPU-only with a smaller brain) | 8 GB VRAM | RTX 3060 Ti 8 GB |
-| RAM | 16 GB | 32 GB | 32 GB DDR4 |
-| Disk | ~3 GB (brain only) | ~27 GB (brain + fallback + 30b coder) | NVMe SSD |
-| OS | Windows 10+, Linux, macOS | Windows 11 / Ubuntu 24.04 / macOS 14+ | Windows 11 Pro |
-
-Full model footprint table, CPU-only recipes, and the 30b-coder-on-8GB-VRAM env recipe: [`docs/hardware.md`](docs/hardware.md).
-
-> For the recommended `qwen3.6-35b-a3b` setup (best quality), see the [Recommended models](#recommended-models) section below — 16 GB VRAM or 32 GB RAM with CPU-MoE offload is the practical tier.
+### 🛡️ Per-tool permission gating
+ReadOnly and WorkspaceWrite tools auto-allow; DangerFullAccess (`bash`, `edit_file`, `git add/commit/push`, cross-org PRs) prompts `[y/N]` every time. Telegram default-denies DangerFullAccess (no TTY to confirm at).
 
 ---
 
-## Recommended models
+## 🏅 Claudette Certified — the local-model benchmark
 
-The defaults (`qwen3.5:4b` brain / `qwen3-coder:30b` coder) are tuned for **broad hardware compatibility** — they install in under a minute and work on any 8 GB GPU or modern CPU. Beyond that, extensive testing (most recently the [100-prompt regression sweep on 2026-05-20](crates/claudette/tests/claudette100_prompts.txt) — 80% raw / ~98% adjusted, zero true regressions) has shown what works best at each tier:
+A local agent is only as good as the model behind it, and "which model should I run?" is the question every new user asks. So we answer it with data, not vibes.
 
-### Brain
-
-| Hardware tier | Recommended brain | Notes |
-|---------------|-------------------|-------|
-| 8 GB VRAM / 16 GB RAM | `qwen3.5:4b` (Q8) | Default. Fast, fits everywhere, tool-calling solid. |
-| 16 GB VRAM / 32 GB RAM | **`qwen3.6-35b-a3b`** | Best overall by a wide margin. MoE — 35 B total / ~3 B active per token, needs CPU-MoE offload. ~24 t/s baseline / ~43 t/s with MTP on RTX 5060 Ti. |
-| 24 GB+ VRAM | **`qwen3.6-35b-a3b`** (full GPU) | Top quality, full GPU residency. |
-
-`qwen3.6-35b-a3b` is currently distributed via [LM Studio](https://lmstudio.ai/) (Unsloth GGUF) rather than packaged on Ollama. Flip the backend with `CLAUDETTE_OPENAI_COMPAT=1` — see [`docs/power-user.md`](docs/power-user.md#lm-studio-or-any-openai-compatible-server). When multiple quants are on disk, pin one explicitly (`CLAUDETTE_MODEL=qwen3.6-35b-a3b@q3_k_xl`) — LM Studio picks the smallest match otherwise. On 16 GB, prefer **`q3_k_xl`** over `q4_k_xl`: the benchmark below shows q3 fits VRAM and finishes more tasks, while q4 spills to RAM and *loses* tasks to timeouts.
-
-### Benchmark — 50-task daily-driver battery
-
-Every brain runs the *same* objective 50-task battery — 11 languages/surfaces (Rust, Python, JS, TS, Go, shell, HTML, CSS, SQL, a large real repo, git) × 12 task types (bugfix, add-feature, multi-file, refactor, create-file, explain, locate, enumerate, run-tests, debug-error, git-workflow, answer-from-codebase) — through claudette's real tool loop, then an automated verifier (build/test passes, the file is correct, or ground-truth tokens appear in the transcript). **No self-grading.** All runs: **24k context, `--parallel 1`, RTX 5060 Ti 16 GB** (2026-05-30).
+**Every candidate brain runs the same objective 50-task battery** — 11 languages/surfaces (Rust, Python, JS, TS, Go, shell, HTML, CSS, SQL, a large real repo, git) × 12 task types (bugfix, add-feature, multi-file, refactor, create-file, explain, locate, enumerate, run-tests, debug-error, git-workflow, answer-from-codebase) — through Claudette's *real* tool loop, then an automated verifier checks the result (build/test passes, the file is correct, or ground-truth tokens appear in the transcript). **No model grades itself.** All runs below: **24k context, `--parallel 1`, RTX 5060 Ti 16 GB** (2026-05-30). The harness is reusable and lives at [`runs/eval-2026-05-29/battery/`](runs/eval-2026-05-29/battery/) — bring your own model.
 
 | Brain | Quant | VRAM | Pass @ 50 | Wall | Best for |
 |-------|-------|------|-----------|------|----------|
@@ -135,49 +123,60 @@ Every brain runs the *same* objective 50-task battery — 11 languages/surfaces 
 | `qwen3.6-35b-a3b` | `q4_k_xl` | 24 GB (spills at 16) | 88% | 48 min | More precision, but RAM-bound on 16 GB → timeouts |
 | `gpt-oss-20b` | MXFP4 | 13 GB (resident) | 86% | **5 min** | **Fastest** — fully in-VRAM, coolest |
 | `granite-4.1-8b` | Q4–Q6 | 9 GB | 78% | 17 min | Reliable tool-calling, weaker raw coder |
-| `qwen3.6-27b` (dense) | Q3 | 14 GB | ≈86% \* | ~67 s/task | **Precision tier** — accurate but slow; not interactive |
+| `qwen3.6-27b` (dense) | Q3 | 14 GB | ≈86% \* | ~67 s/task | **Precision tier** — accurate but slow, not interactive |
 
 <sub>\* `qwen3.6-27b` stopped at 37/50 (86% of scored). Dense → every parameter active per token → ~67 s/task and it loses generation-heavy tasks to the timeout, so it's a one-shot/batch "precision" pick, not an interactive driver.</sub>
 
-**Reading the table:** *fitting in VRAM matters more than parameter count.* `q3_k_xl` (fits 16 GB) beats `q4_k_xl` (spills to RAM → ~20% slower → loses tasks to timeouts) despite lower precision — so `q3_k_xl` is the 16 GB pick. The small models punch far above their weight: a 4 B model hits 90% in 8 minutes. MoE brains keep the GPU cool (~55 °C); the dense `qwen3.6-27b` is the slow precision tier, not for interactive use.
+**The lessons that shaped the recommendations:**
 
-> **Didn't make the table — config/fit issues, *not* quality:** `nemotron-3-nano-omni-30b` (reasoning MoE) loads and reasons well but runs ~73 s/task at 16 GB (RAM spill + thinking blocks) — too slow. `glm-4.7-flash` is promising (SWE-bench 59.2) but its stock GGUF didn't emit tool calls in our LM Studio runtime — needs a post-2026-01 quant + corrected template. `gemma-4-26b` and `qwen3-coder-30b` stock GGUFs return HTTP 400 on tool calls in LM Studio's template engine. **Lesson: pull `lmstudio-community`/`unsloth` GGUFs and validate one real tool call before trusting a model — chat-template compatibility is the #1 local-model failure mode.** Full per-task data + reasoning notes: [`runs/eval-2026-05-29/battery/MODEL-COMPARISON.md`](runs/eval-2026-05-29/battery/MODEL-COMPARISON.md).
+1. **Fitting in VRAM beats parameter count.** `q3_k_xl` (fits 16 GB) *beats* `q4_k_xl` (spills to RAM → ~20% slower → loses tasks to timeouts) despite lower precision. On 16 GB, pick **`q3_k_xl`**.
+2. **Small models punch up.** A 4B model hits 90% in 8 minutes and runs on an 8 GB GPU — the value/accessibility star.
+3. **Chat-template compatibility is the #1 local-model failure mode.** `gemma-4-26b` and `qwen3-coder-30b` stock GGUFs return HTTP 400 on tool calls in LM Studio's template engine; `glm-4.7-flash` narrated prose instead of emitting tool calls. **Always pull a `lmstudio-community` / `unsloth` repack and validate one real tool call before trusting a model.**
+4. **Thermals follow architecture, not size.** MoE brains keep the GPU ~55 °C at any size; the dense `qwen3.6-27b` runs hot (72 °C) — it's the slow precision tier, not for sustained interactive use.
 
-### Codet sidecar coder
+Full per-task data and reasoning notes: [`runs/eval-2026-05-29/battery/MODEL-COMPARISON.md`](runs/eval-2026-05-29/battery/MODEL-COMPARISON.md). The next batch of candidates queued for certification (GLM-4.7-Flash, Qwen3-Coder-30B, Granite-4.1-8B, Mistral/Ministral, and more) is in [`CANDIDATES.md`](runs/eval-2026-05-29/battery/CANDIDATES.md) — **this is one of the best ways to contribute** (see [Roadmap](#-roadmap)).
 
-When you use `generate_code` or `--forge`:
+> `qwen3.6-35b-a3b` is distributed via [LM Studio](https://lmstudio.ai/) (Unsloth GGUF) rather than packaged on Ollama. Flip the backend with `CLAUDETTE_OPENAI_COMPAT=1` and pin the quant explicitly (`CLAUDETTE_MODEL=qwen3.6-35b-a3b@q3_k_xl`) — LM Studio picks the smallest match otherwise. Recipe in [`docs/power-user.md`](docs/power-user.md#lm-studio-or-any-openai-compatible-server).
 
-1. **`qwen3.6-35b-a3b`** — best if the VRAM/RAM budget is there. Same model as the brain means no swap dance between turns.
-2. **`qwen3-coder:30b`** — current default. Quality coder, available on Ollama, MoE-friendly on 8 GB VRAM with the [env recipe](docs/hardware.md#running-the-30b-coder-on-8-gb-vram--32-gb-ram).
-3. **`qwen3.6-27b` (dense)** — top quality but **very tight on 16 GB VRAM** even at Q4; comfortable on 24 GB+.
+---
 
-Pin a non-default brain via `~/.claudette/.env` (`CLAUDETTE_MODEL=...`) or `/brain <model>` at runtime. Pin the coder via `CLAUDETTE_CODER_MODEL=...`.
+## Hardware
+
+The numbers describe the *comfortable* setup. **You don't need a GPU** — Ollama runs on plain CPU (slower, but viable for a 1B/3B/4B brain). See [`docs/hardware.md#no-gpu-cpu-only-mode`](docs/hardware.md#no-gpu-cpu-only-mode).
+
+| Component | Comfortable minimum | Recommended | Tested on |
+|-----------|---------------------|-------------|-----------|
+| GPU | 6 GB VRAM (or CPU-only with a smaller brain) | 8 GB VRAM (16 GB for the 35b brain) | RTX 5060 Ti 16 GB |
+| RAM | 16 GB | 32 GB | 32 GB DDR4 |
+| Disk | ~3 GB (brain only) | ~27 GB (brain + fallback + 30b coder) | NVMe SSD |
+| OS | Windows 10+, Linux, macOS | Windows 11 / Ubuntu 24.04 / macOS 14+ | Windows 11 Pro |
+
+Full model-footprint table, CPU-only recipes, and the 30b-coder-on-8GB-VRAM env recipe: [`docs/hardware.md`](docs/hardware.md).
 
 ---
 
 ## Quick start (full setup)
 
 ```bash
-# 1a. Default path — Ollama with the 3.5 family (works on 8 GB VRAM).
+# 1a. Default path — Ollama with the 3.5 family (works on 8 GB VRAM, or CPU).
 ollama pull qwen3.5:4b           # brain (default Auto preset)
 ollama pull qwen3.5:9b           # fallback brain (optional)
-ollama pull qwen3-coder:30b      # Codet coder, only if you'll use generate_code
+ollama pull qwen3-coder:30b      # Codet coder — only if you'll use generate_code
 
 # 1b. Recommended path — LM Studio with qwen3.6 (best on 16 GB+ VRAM).
-# Pull `qwen3.6-35b-a3b` from inside LM Studio, then in ~/.claudette/.env:
+# Pull `qwen3.6-35b-a3b` inside LM Studio, then in ~/.claudette/.env:
 #   CLAUDETTE_OPENAI_COMPAT=1
 #   OLLAMA_HOST=http://localhost:1234
-#   CLAUDETTE_MODEL=qwen3.6-35b-a3b@q4_k_xl
-#   CLAUDETTE_CODER_MODEL=qwen3.6-35b-a3b@q4_k_xl
-# See `docs/power-user.md` for the full LM Studio recipe.
+#   CLAUDETTE_MODEL=qwen3.6-35b-a3b@q3_k_xl
+#   CLAUDETTE_CODER_MODEL=qwen3.6-35b-a3b@q3_k_xl
+# Full LM Studio recipe: docs/power-user.md
 
 # 2. Install Claudette — pick one.
 curl -fsSL https://raw.githubusercontent.com/mrdushidush/claudette/main/install.sh | sh   # Linux/macOS
 iwr -useb https://raw.githubusercontent.com/mrdushidush/claudette/main/install.ps1 | iex  # Windows
 cargo install claudette                                                                    # Rust users
-# Or download an archive from https://github.com/mrdushidush/claudette/releases/latest
 
-# 3. (Optional) Tokens for tools that need them.
+# 3. (Optional) Tokens for opt-in tools that reach the network.
 export BRAVE_API_KEY=...         # web_search
 export GITHUB_TOKEN=ghp_...      # github group
 export TELEGRAM_BOT_TOKEN=...    # --telegram mode
@@ -186,14 +185,40 @@ export TELEGRAM_BOT_TOKEN=...    # --telegram mode
 claudette                        # REPL
 claudette --tui                  # TUI
 claudette "what time is it?"     # one-shot
+claudette --forge "fix the failing test in src/parser.rs"   # autonomous pipeline
 claudette --resume               # resume last session
 claudette --telegram             # Telegram bot
-claudette --doctor               # diagnose Ollama, models, tokens, permissions
+claudette --doctor               # diagnose model server, models, tokens, permissions
 ```
 
-First launch auto-creates `~/.claudette/` and probes `http://localhost:11434`. Bypass the probe with `CLAUDETTE_SKIP_OLLAMA_PROBE=1` for offline sessions.
+First launch auto-creates `~/.claudette/` and probes `http://localhost:11434`. Going fully offline? `CLAUDETTE_SKIP_OLLAMA_PROBE=1`.
 
-Out of the box: notes, todos, files, time, weather, Wikipedia, code search. Brave / GitHub / Google Calendar / Gmail tools light up when you set the relevant token — full table in [`docs/configuration.md`](docs/configuration.md). Want to see what to actually type? Open [`docs/show-me.md`](docs/show-me.md).
+Out of the box (no tokens, no network): notes, todos, files, time, code search, repo editing, forge. Brave / GitHub / Google Calendar / Gmail tools light up when you set the relevant token — full table in [`docs/configuration.md`](docs/configuration.md).
+
+---
+
+## 🚀 Roadmap
+
+Claudette has a clear north star: **be the most private, most universally-runnable local code assistant in the world.** Here's where she's headed — and these are exactly the places a new contributor can leave a mark.
+
+### The vision
+
+- **🔒 Hardened air-gap mode.** A first-class, audited offline profile: a `--air-gapped` flag that hard-disables every network-capable tool, a reproducible offline install bundle (binary + model + Whisper weights), and a documented "regulated-machine" deployment story.
+- **🧠 A model-agnostic, curated brain menu.** Not one blessed model — a recommendation for *every* hardware tier, from a 4 GB laptop GPU to a 24 GB workstation, so anyone can run her well on what they already own.
+- **🏅 The Claudette Certified program, expanded.** Keep running the objective [50-task battery](#-claudette-certified--the-local-model-benchmark) on every promising new local model and publish a living, badged recommendation table. The [candidate queue](runs/eval-2026-05-29/battery/CANDIDATES.md) is already scouted — GLM-4.7-Flash, Qwen3-Coder-30B, Granite-4.1-8B, the Mistral/Ministral family, and more.
+
+### Where you come in 🙌
+
+New contributors welcome — these are real, scoped, high-impact ways to help:
+
+- **🏅 Certify a model.** Have a GPU and a model we haven't benched? Run the reusable battery at [`runs/eval-2026-05-29/battery/`](runs/eval-2026-05-29/battery/) and open a PR with the scores. This is the single most valuable contribution right now and needs no Rust.
+- **📦 Rescue a template.** `gemma-4-26b`, `qwen3-coder-30b`, and `glm-4.7-flash` are strong models gated only by broken stock chat templates. Find/build a working `lmstudio-community`/`unsloth` GGUF, validate one tool call, and document the fix.
+- **⚙️ Sharpen the coder.** Route trivial create-file requests straight to `write_file` so they don't race the `generate_code` timeout; widen the syntax-check language set; improve the SEARCH/REPLACE fix loop.
+- **🛡️ Grow the security-review stage.** The Forge security scanner is line-based on diff additions — extend its rule coverage (multi-line sinks, SSRF, path traversal, prototype pollution) and shrink false positives.
+- **🎙️ Extend voice & vision.** More TTS languages, better multimodal image handling, richer Telegram voice flows.
+- **📚 Tell the story.** Tutorials, a homelab/Pi deploy guide, screencasts — `docs/show-me.md` is where the new-user journey lives.
+
+Known open items live on the issue tracker, including the current [Dependabot advisories](https://github.com/mrdushidush/claudette/security/dependabot). Start at [`CONTRIBUTING.md`](CONTRIBUTING.md), grab a thread above, and say hi in an issue.
 
 ---
 
@@ -210,7 +235,7 @@ Out of the box: notes, todos, files, time, weather, Wikipedia, code search. Brav
 - [`docs/comparison.md`](docs/comparison.md) — honest side-by-side vs. opencode / Aider / OpenHands / Cline / Continue
 - [`docs/google_setup.md`](docs/google_setup.md) — Calendar + Gmail OAuth walkthrough
 - [`docs/deploy.md`](docs/deploy.md) — Pi / VPS / home-server deploy via docker-compose
-- [`editor/vscode/`](editor/vscode/README.md) — VS Code extension (REPL/TUI/forge/"ask about selection" commands)
+- [`editor/vscode/`](editor/vscode/README.md) — VS Code extension (REPL / TUI / forge / "ask about selection")
 - [`PRIVACY.md`](PRIVACY.md) — every place data can leave your machine, and the conditions for each
 
 ---
@@ -233,7 +258,7 @@ Out of the box: notes, todos, files, time, weather, Wikipedia, code search. Brav
 └── CLAUDETTE.MD      # Optional user memory (800-char cap)
 ```
 
-Nothing outside `~/.claudette/` is written without explicit permission.
+Nothing outside `~/.claudette/` is written without an explicit permission prompt.
 
 ---
 
@@ -246,13 +271,13 @@ cargo build --release -p claudette
 ./target/release/claudette --help
 ```
 
-Tests: **703 passing, 6 ignored** (4 POSIX-only hook tests, 2 live-recall smokes that need an LM Studio embedding server). Before committing: `cargo fmt --all && cargo clippy --all-targets --no-deps -- -D warnings && cargo test --lib`.
+**1,000+ tests passing.** Before committing: `cargo fmt --all && cargo clippy --all-targets --no-deps -- -D warnings && cargo test --lib`.
 
 ---
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). Quick version:
+See [`CONTRIBUTING.md`](CONTRIBUTING.md), and the [Roadmap](#-roadmap) above for high-impact starting points. Quick version:
 
 - File bugs at <https://github.com/mrdushidush/claudette/issues>.
 - Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `style:`, `ci:`.
