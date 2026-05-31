@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Until we tag `1.0.0`, minor-version bumps may contain breaking changes; patch
 bumps are non-breaking bugfixes only.
 
+## [0.8.4] - 2026-05-31
+
+### Documentation — benchmark honesty fix
+
+A 20-angle adversarial review flagged that the README model-recommendation table
+mixed denominators: `qwen3.6-27b` (dense) was shown at "≈86%" computed over only
+the ~38 tasks that ran, in the same "Pass @ 50" column as models that genuinely
+completed all 50. Its sweep was actually cut short by a mid-run model unload — the
+12 hardest tasks (8 large-repo + 4 git-workflow) never executed (0-second
+`HTTP 400 "No models loaded"`), so no comparable `/50` exists.
+
+- **Removed `qwen3.6-27b` from the ranked table**, replacing it with a clearly
+  labelled "incomplete run — not ranked" aside: the model-unload is explained, and
+  34/50 = 68% is stated as a *floor* (≈89% on the ~38 tasks that ran), not a
+  capability score next to the full-50 numbers.
+- Corrected the same mixed-denominator presentation in
+  `runs/eval-2026-05-29/battery/MODEL-COMPARISON.md`.
+
 ## [0.8.3] - 2026-05-31
 
 ### Documentation — README rewrite: privacy-first / air-gapped positioning

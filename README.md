@@ -123,9 +123,8 @@ A local agent is only as good as the model behind it, and "which model should I 
 | `qwen3.6-35b-a3b` | `q4_k_xl` | 24 GB (spills at 16) | 88% | 48 min | More precision, but RAM-bound on 16 GB → timeouts |
 | `gpt-oss-20b` | MXFP4 | 13 GB (resident) | 86% | **5 min** | **Fastest** — fully in-VRAM, coolest |
 | `granite-4.1-8b` | Q4–Q6 | 9 GB | 78% | 17 min | Reliable tool-calling, weaker raw coder |
-| `qwen3.6-27b` (dense) | Q3 | 14 GB | ≈86% \* | ~67 s/task | **Precision tier** — accurate but slow, not interactive |
 
-<sub>\* `qwen3.6-27b` stopped at 37/50 (86% of scored). Dense → every parameter active per token → ~67 s/task and it loses generation-heavy tasks to the timeout, so it's a one-shot/batch "precision" pick, not an interactive driver.</sub>
+> **Not ranked — `qwen3.6-27b` (dense), incomplete run.** Its sweep was cut short when the model unloaded partway through (the dense 27b runs hot, ~72 °C, and got evicted): the 12 hardest tasks — all 8 large-repo + 4 git-workflow — never actually executed (they log a 0-second `HTTP 400 "No models loaded"`, i.e. an infrastructure halt, not a real attempt). So there is **no comparable `/50` to rank it by** — a score over only the ~38 tasks that ran isn't apples-to-apples with the full-50 numbers above, so we leave it out rather than flatter it. It held up fine on what it did run, but it's the slow dense "precision" tier regardless (~67 s/task — accurate, not interactive). Raw per-task rows: [`SCORES-qwen36-27b.tsv`](runs/eval-2026-05-29/battery/SCORES-qwen36-27b.tsv).
 
 **The lessons that shaped the recommendations:**
 
