@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Until we tag `1.0.0`, minor-version bumps may contain breaking changes; patch
 bumps are non-breaking bugfixes only.
 
+## [0.8.5] - 2026-05-31
+
+### Changed — relicensed to MIT OR Apache-2.0 (dual)
+
+Claudette is now **dual-licensed under `MIT OR Apache-2.0`**, the Rust ecosystem
+standard. Downstream users may pick whichever they prefer: MIT for maximum
+simplicity, or Apache-2.0 for its explicit patent grant. This is strictly more
+permissive than the prior Apache-2.0-only terms — no capability is removed.
+
+- `LICENSE` → renamed to `LICENSE-APACHE`; added `LICENSE-MIT`.
+- `license = "MIT OR Apache-2.0"` in `crates/claudette/Cargo.toml` and the VS Code
+  extension `package.json`.
+- README, CONTRIBUTING, and the editor README updated; contributions are now
+  inbound dual-licensed under the same terms (no CLA, no copyright assignment).
+
 ## [0.8.4] - 2026-05-31
 
 ### Documentation — benchmark honesty fix
