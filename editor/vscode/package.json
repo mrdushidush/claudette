@@ -4,7 +4,7 @@
     "description": "Run Claudette — the local-first AI secretary — from VS Code. Adds commands for REPL, TUI, forge mode, doctor, and 'ask about selection'.",
     "version": "0.1.0",
     "publisher": "mrdushidush",
-    "license": "Apache-2.0",
+    "license": "MIT OR Apache-2.0",
     "repository": {
         "type": "git",
         "url": "https://github.com/mrdushidush/claudette.git",

@@ -6,7 +6,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/claudette.svg)](https://crates.io/crates/claudette)
 [![CI](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml/badge.svg)](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml)
-[![Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
 [![Local-only](https://img.shields.io/badge/cloud_brain-none-success.svg)](PRIVACY.md)
 
@@ -280,7 +280,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md), and the [Roadmap](#-roadmap) above for
 
 - File bugs at <https://github.com/mrdushidush/claudette/issues>.
 - Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `style:`, `ci:`.
-- By contributing, you agree your work is licensed under Apache 2.0.
+- By contributing, you agree your work is dual-licensed under MIT OR Apache-2.0.
 
 Security issues: please use the private advisory flow in [`SECURITY.md`](SECURITY.md) — don't open a public issue.
 
@@ -290,6 +290,13 @@ Be kind — [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) has the short version.
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE). Use, modify, redistribute commercially or personally. No trademark grant; don't imply endorsement.
+Dual-licensed under either of:
+
+- **MIT** — see [`LICENSE-MIT`](LICENSE-MIT)
+- **Apache License 2.0** — see [`LICENSE-APACHE`](LICENSE-APACHE)
+
+at your option. Use, modify, redistribute commercially or personally. The Apache option adds an explicit patent grant; neither grants a trademark — don't imply endorsement.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual-licensed as above, without any additional terms or conditions.
 
 Copyright © 2026 [mrdushidush](https://github.com/mrdushidush).

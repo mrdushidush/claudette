@@ -1,9 +1,9 @@
 [package]
 name = "claudette"
-version = "0.8.4"
+version = "0.8.5"
 edition = "2021"
 rust-version = "1.88"
-license = "Apache-2.0"
+license = "MIT OR Apache-2.0"
 description = "Local-first AI personal secretary for Ollama. Telegram bot, voice, persistent scheduler, Gmail and Calendar. Single-binary Rust."
 readme = "../../README.md"
 repository = "https://github.com/mrdushidush/claudette"

@@ -55,4 +55,4 @@ A future version may add a streaming chat WebView. That requires a structured JS
 
 ## License
 
-Apache-2.0, same as the rest of the Claudette repo.
+MIT OR Apache-2.0, same as the rest of the Claudette repo.

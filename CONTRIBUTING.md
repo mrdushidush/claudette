@@ -136,7 +136,8 @@ A minimal reproducer is worth more than a paragraph of description.
 
 ## License
 
-Claudette is licensed under Apache-2.0. By contributing, you agree
-that your contributions are licensed under the same terms. No CLA,
-no copyright assignment — just the implicit licence grant from the
-license file.
+Claudette is dual-licensed under **MIT OR Apache-2.0** (the Rust
+ecosystem standard) — downstream users pick whichever they prefer. By
+contributing, you agree that your contributions are dual-licensed under
+the same terms. No CLA, no copyright assignment — just the implicit
+licence grant from the license files (`LICENSE-MIT`, `LICENSE-APACHE`).
