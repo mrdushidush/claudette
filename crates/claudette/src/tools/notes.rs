@@ -1,8 +1,7 @@
 //! Notes group — 4 tools (note_create, note_list, note_read, note_delete).
 //! v0.6.0 dropped the standalone note_update — note_create is now an
 //! upsert: pass `id` to update an existing note, omit it to create a new
-//! one. The old `note_update` name keeps dispatching through an alias
-//! shim for one release.
+//! one.
 //!
 //! Storage: one `.md` file per note under `~/.claudette/notes/`. The
 //! filename is `{ISO timestamp}-{slug}.md` so the ISO prefix gives a
@@ -125,10 +124,6 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
         "note_create" => run_note_create(input),
         "note_list" => run_note_list(input),
         "note_read" => run_note_read(input),
-        // v0.6.0 deprecated alias — drop in next minor release. Old shape
-        // is `{id, title?, body?, tags?}` and matches the inner update
-        // path exactly, so we just forward.
-        "note_update" => run_note_update(input),
         "note_delete" => run_note_delete(input),
         _ => return None,
     };
@@ -666,28 +661,7 @@ mod tests {
         let _ = run_note_delete(&json!({ "id": &id }).to_string());
     }
 
-    #[test]
-    fn note_update_alias_still_dispatches() {
-        // The old note_update tool must keep working through the dispatch
-        // alias. Exercise via the public dispatcher to prove the alias
-        // arm is wired even though the schema no longer advertises it.
-        let id = create_note_for_update_test("alias_test", "before", "");
-        let out = super::dispatch(
-            "note_update",
-            &json!({ "id": &id, "body": "after via alias" }).to_string(),
-        )
-        .expect("note_update alias must dispatch")
-        .expect("note_update alias must succeed");
-        assert!(out.contains("\"ok\":true"));
-
-        let read = run_note_read(&json!({ "id": &id }).to_string()).expect("note_read");
-        let r: Value = serde_json::from_str(&read).unwrap();
-        assert_eq!(r["body"].as_str().unwrap(), "after via alias");
-
-        let _ = run_note_delete(&json!({ "id": &id }).to_string());
-    }
-
-    // ── note_update ─────────────────────────────────────────────────────
+    // ── note_update (upsert path behind note_create) ─────────────────────
 
     /// Helper: create a note and return its id. Caller is responsible for
     /// deletion at the end of the test (try a `let _ = run_note_delete(...)`

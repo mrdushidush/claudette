@@ -1,7 +1,7 @@
 # LanceDB rich memory — decision record
 
 **Date:** 2026-05-19
-**Phase:** 8 of `docs/sprint_import_2026_05_19.md`
+**Phase:** 8 of `docs/archive/sprint_import_2026_05_19.md`
 **Status:** **NOT NOW** — `recall.rs` + `antipatterns.rs` Jaccard cover the use case at v0.5.x scale. Re-evaluate when Phase 6 bench produces evidence that flat embeddings can't keep up.
 
 ## Question
@@ -48,7 +48,7 @@ These are all manageable when the data justifies them. They aren't manageable wh
 
 ## Open exit criteria for revisiting
 
-Add a one-line check to `docs/lancedb_decision_2026_05_19.md` (this file) each time the bench harness emits a new run:
+Add a one-line check to `docs/archive/lancedb_decision_2026_05_19.md` (this file) each time the bench harness emits a new run:
 
 ```
 [YYYY-MM-DD] bench run-id <id>: recall miss-rate <pct>% (template <name>). LanceDB decision: defer / build.
@@ -60,5 +60,5 @@ When three consecutive entries show miss-rate > 20%, flip the decision and open 
 
 - [[project-recall-embedding-probe-gap-fix]] — claudette's current embedding stack
 - [[project-import-sweep-2026-05-19]] §3.1 — original Tier-2 entry justifying the deferral
-- `docs/sprint_import_2026_05_19.md` Phase 8 — sprint plan slot
-- `docs/import_sweep_2026_05_19.md` §5 — Hadar-touched code restriction (lift ideas, not code)
+- `docs/archive/sprint_import_2026_05_19.md` Phase 8 — sprint plan slot
+- `docs/archive/import_sweep_2026_05_19.md` §5 — Hadar-touched code restriction (lift ideas, not code)

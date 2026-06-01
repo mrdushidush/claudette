@@ -2073,9 +2073,8 @@ mod tests {
     // note_list_*) live in src/tools/notes.rs alongside their handlers.
 
     // Todo-handler tests (todo_add_rejects_*, todo_set_status_rejects_*,
-    // todo_delete_rejects_*, todo_list_pending_only_flag_passes_through,
-    // todo_complete_alias_*, todo_uncomplete_alias_*) live in
-    // src/tools/todos.rs alongside their handlers.
+    // todo_delete_rejects_*, todo_list_pending_only_flag_passes_through)
+    // live in src/tools/todos.rs alongside their handlers.
 
     #[test]
     fn note_and_todo_tools_classified_into_their_groups() {
@@ -2095,8 +2094,8 @@ mod tests {
                 "{tool} must classify as Notes"
             );
         }
-        // v0.6.0: note_update is a dispatch-only alias for the upsert path
-        // in note_create — it must NOT classify into any group.
+        // v0.6.0 dropped the note_update tool (upsert via note_create id) —
+        // the name must NOT classify into any group.
         assert_eq!(group_of("note_update"), None);
         for tool in &["todo_add", "todo_list", "todo_set_status", "todo_delete"] {
             assert!(
@@ -2175,15 +2174,6 @@ mod tests {
         )
         .expect("todo_set_status uncomplete");
         assert!(uncomp_out.contains("\"done\":false"));
-
-        // Legacy aliases must keep working: drive the same todo through
-        // todo_complete + todo_uncomplete to prove the v0.6.0 shims are wired.
-        let alias_comp = dispatch_tool("todo_complete", &json!({ "id": todo_id }).to_string())
-            .expect("todo_complete alias");
-        assert!(alias_comp.contains("\"done\":true"));
-        let alias_uncomp = dispatch_tool("todo_uncomplete", &json!({ "id": todo_id }).to_string())
-            .expect("todo_uncomplete alias");
-        assert!(alias_uncomp.contains("\"done\":false"));
 
         // pending_only list should now include it.
         let list_out = dispatch_tool("todo_list", r#"{"pending_only":true}"#).expect("todo_list");

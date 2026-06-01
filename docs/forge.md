@@ -115,8 +115,8 @@ local mission** rooted at the repo's toplevel:
 If the forge pipeline errors anywhere between bootstrap and the
 Submitter's success, the ephemeral mission is **auto-cleared** so the
 next `/forge` call can re-bootstrap from scratch. User-initiated
-missions (`/brownfield`, `mission_attach`) are left alone after a
-forge failure — they're the user's state, not ours.
+missions (`/brownfield`, `mission_state(action="attach")`) are left
+alone after a forge failure — they're the user's state, not ours.
 
 Out-of-envelope repos (e.g. `/etc/secret-stuff` with no
 `CLAUDETTE_WORKSPACE` opt-in) are refused with a clear hint:

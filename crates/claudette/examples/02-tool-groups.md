@@ -38,7 +38,7 @@ weather question, for instance, reliably triggers the `facts` group:
 ```
 $ claudette "What's the weather in Tel Aviv right now?"
   ▸ enable_tools({"group": "facts"})
-  ▸ get_weather_current({"latitude": 32.0853, "longitude": 34.7818})
+  ▸ weather({"location": "Tel Aviv"})
 It's 22°C and partly cloudy in Tel Aviv. Humidity is 65%, wind from
 the north-west at 14 km/h. No precipitation.
 
@@ -46,7 +46,7 @@ the north-west at 14 km/h. No precipitation.
 ```
 
 Three iterations: (1) model calls `enable_tools("facts")`, (2)
-receives the expanded schema and calls `get_weather_current`, (3)
+receives the expanded schema and calls `weather`, (3)
 summarizes the JSON response.
 
 ## Listing available tools
@@ -62,15 +62,15 @@ advertisable tool — core plus every optional group with the
     • get_current_time: Returns the current date, time, weekday, and timezone.
     • get_capabilities: Show the secretary's config, available tools, and limits.
     • note_create, note_list, note_read, note_delete
-    • todo_add, todo_list, todo_complete, todo_uncomplete, todo_delete
+    • todo_add, todo_list, todo_set_status, todo_delete
     • read_file, write_file, list_dir
     • web_search, generate_code, spawn_agent
 
   ⚡ git — 8 tool(s), enable with enable_tools({group: "git"})
     • git_status, git_diff, git_log, git_add, git_commit, git_branch, git_checkout, git_push
 
-  ⚡ facts — 4 tool(s), enable with enable_tools({group: "facts"})
-    • wikipedia_search, wikipedia_summary, weather_current, weather_forecast
+  ⚡ facts — 2 tool(s), enable with enable_tools({group: "facts"})
+    • wikipedia, weather
 
   [… 10 more groups: ide, search, advanced, registry, github, markets,
      telegram, calendar, schedule, gmail …]
@@ -86,7 +86,7 @@ the model (or just ask "what tools do you have right now?").
 
 Groups stay enabled until the session ends or `/clear` is called. A
 second weather question in the same session is a direct
-`get_weather_current` call — no re-enable needed.
+`weather` call — no re-enable needed.
 
 ## Pre-loading for Telegram and TUI
 

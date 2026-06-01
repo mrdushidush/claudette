@@ -12,7 +12,7 @@
 
 ![Claudette TUI — chat + live tool-call panel side-by-side, one turn covering notes, weather, BTC price, and calendar](docs/images/claudette-tui.png)
 
-> One turn driving four tool groups (`note_list`, `weather_forecast`, `tv_get_quote`, `calendar_list_events`) — the model enables groups on demand and dispatches the calls. TUI tabs: `[1]Chat [2]Tools [3]Notes [4]Todos [5]HW`.
+> One turn driving four tool groups (`note_list`, `weather`, `tv_get_quote`, `calendar_list_events`) — the model enables groups on demand and dispatches the calls. TUI tabs: `[1]Chat [2]Tools [3]Notes [4]Todos [5]HW`.
 
 ---
 
@@ -87,7 +87,7 @@ Almost every tool lives in a **group the model opts into** via `enable_tools(gro
 `claudette --forge "<prompt>"` runs a **Planner → Coder → Verifier** loop against a git repo, with a configurable fix-loop (default 2 rounds) and an optional deterministic security-review stage, before it opens a PR. Inside an existing repo it auto-bootstraps an ephemeral mission at the repo root — no clone needed. Roles are independently routable, so you can pin a stronger model to the Verifier and a cheap one to the Coder. Full walkthrough: [`docs/forge.md`](docs/forge.md).
 
 ### 🌿 Brownfield missions: clone, edit, ship a PR in one chain
-`mission_start("owner/repo")` clones into `~/.claudette/missions/<slug>/` and transparently re-routes `git_status` / `glob_search` / `grep_search` / `write_file` / `bash` into the mission tree. `mission_submit` auto-branches, commits, pushes, and opens the PR. Resumable across sessions with `mission_attach`.
+`mission_start("owner/repo")` clones into `~/.claudette/missions/<slug>/` and transparently re-routes `git_status` / `glob_search` / `grep_search` / `write_file` / `bash` into the mission tree. `mission_submit` auto-branches, commits, pushes, and opens the PR. Resumable across sessions with `mission_state(action="attach")`.
 
 ### 🧠 Tiered-brain auto-fallback
 Three presets — Fast / Auto / Smart. Auto runs `qwen3.5:4b` and escalates to `qwen3.5:9b` only on real stuck signals (empty response after retry, max-iterations with no text, ≥3 consecutive tool errors), reverting per-turn rather than sticking. On a 16 GB GPU, pin `qwen3.6-35b-a3b` instead — see [Claudette Certified](#-claudette-certified--the-local-model-benchmark).

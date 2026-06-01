@@ -102,9 +102,6 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
         "calendar_create_event" => run_create_event(input),
         "calendar_update_event" => run_update_event(input),
         "calendar_delete_event" => run_delete_event(input),
-        // v0.6.0 deprecated alias — drop in next minor release. Routes
-        // through calendar_update_event's `rsvp` field.
-        "calendar_respond_to_event" => run_respond_to_event_alias(input),
         _ => return None,
     };
     Some(result)
@@ -411,9 +408,8 @@ fn run_delete_event(input: &str) -> Result<String, String> {
     .to_string())
 }
 
-/// RSVP path lifted out of the dropped calendar_respond_to_event tool so
-/// it can run both from the legacy alias and from the v0.6.0
-/// `calendar_update_event(rsvp=...)` entry point.
+/// RSVP path behind `calendar_update_event(rsvp=...)`. Kept as a separate
+/// helper so the update handler stays readable.
 fn rsvp_event(event_id: &str, calendar_id: &str, response: &str) -> Result<String, String> {
     if !matches!(response, "accepted" | "declined" | "tentative") {
         return Err(format!(
@@ -493,18 +489,6 @@ fn rsvp_event(event_id: &str, calendar_id: &str, response: &str) -> Result<Strin
     .to_string())
 }
 
-/// Backwards-compat shim for the dropped `calendar_respond_to_event`
-/// schema (`{event_id, response, calendar_id?}`). Forwards to the
-/// shared rsvp_event helper using the same arg order. Drop in the next
-/// minor release after v0.6.0.
-fn run_respond_to_event_alias(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "calendar_respond_to_event")?;
-    let event_id = extract_str(&v, "event_id", "calendar_respond_to_event")?;
-    let response = extract_str(&v, "response", "calendar_respond_to_event")?;
-    let calendar_id = default_calendar_id(&v);
-    rsvp_event(event_id, &calendar_id, response)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -578,37 +562,12 @@ mod tests {
     }
 
     #[test]
-    fn respond_to_event_alias_rejects_missing_event_id() {
-        let err = run_respond_to_event_alias(r#"{"response":"accepted"}"#).unwrap_err();
-        assert!(err.contains("event_id"), "got: {err}");
-    }
-
-    #[test]
-    fn respond_to_event_alias_rejects_bad_response_value() {
-        // The rsvp_event helper validates the response value BEFORE calling
+    fn update_event_rsvp_rejects_bad_value() {
+        // rsvp_event validates the response value BEFORE calling
         // access_token, so this case is covered regardless of whether the
         // user is actually authenticated.
-        let err =
-            run_respond_to_event_alias(r#"{"event_id":"abc","response":"maybe"}"#).unwrap_err();
-        assert!(err.contains("invalid rsvp"), "got: {err}");
-    }
-
-    #[test]
-    fn update_event_rsvp_rejects_bad_value() {
-        // Same path, reached via the new merged schema.
         let err = run_update_event(r#"{"event_id":"abc","rsvp":"banana"}"#).unwrap_err();
         assert!(err.contains("invalid rsvp"), "got: {err}");
-    }
-
-    #[test]
-    fn calendar_respond_to_event_alias_still_dispatches() {
-        // Old tool name must keep resolving through dispatch() even after
-        // its schema entry was removed.
-        assert!(super::dispatch(
-            "calendar_respond_to_event",
-            r#"{"event_id":"x","response":"y"}"#
-        )
-        .is_some());
     }
 
     #[test]

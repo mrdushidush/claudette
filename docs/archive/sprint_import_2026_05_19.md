@@ -1,6 +1,6 @@
 # Sprint plan — `import_2026_05_19`
 
-**Goal:** Land the Tier-1 import set from `docs/import_sweep_2026_05_19.md` into claudette, then fold the `claudettes-forge` scaffold and archive it. After this sprint sequence, only claudette ships.
+**Goal:** Land the Tier-1 import set from `docs/archive/import_sweep_2026_05_19.md` into claudette, then fold the `claudettes-forge` scaffold and archive it. After this sprint sequence, only claudette ships.
 
 **Out of scope:** Tier-2 items not on the user's list (LanceDB rich memory considered tentatively in Phase 8; Independence reviewer / voice banks / MCP / swarm / multi-tenant RBAC explicitly deferred per `import_sweep_2026_05_19.md` §3).
 

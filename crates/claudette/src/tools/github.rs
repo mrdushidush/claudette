@@ -7,8 +7,7 @@
 //!   PRs you authored, `scope="assigned"` lists open issues assigned to
 //!   you, `scope="repo_issues"` (with owner+repo) lists issues in any
 //!   repo. v0.6.0 collapsed the old `gh_list_my_prs` and
-//!   `gh_list_assigned_issues` into this polymorphic entry; both legacy
-//!   names still dispatch as aliases.
+//!   `gh_list_assigned_issues` into this polymorphic entry.
 //! - Repo-scoped (the brownfield set): `gh_get_issue`, `gh_create_issue`,
 //!   `gh_comment_issue`, `gh_search_code`, `gh_list_repo_issues`,
 //!   `gh_pr_status`, `gh_fork`, `gh_create_pr`. `gh_list_repo_issues`
@@ -214,9 +213,6 @@ pub(super) fn schemas() -> Vec<Value> {
 pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>> {
     let result = match name {
         "gh_inbox" => run_gh_inbox(input),
-        // v0.6.0 deprecated aliases — drop in next minor release.
-        "gh_list_my_prs" => run_gh_list_my_prs(),
-        "gh_list_assigned_issues" => run_gh_list_assigned_issues(),
         "gh_get_issue" => run_gh_get_issue(input),
         "gh_create_issue" => run_gh_create_issue(input),
         "gh_comment_issue" => run_gh_comment_issue(input),
@@ -1394,15 +1390,6 @@ mod tests {
         // field error from run_gh_list_repo_issues, not a generic scope error.
         let err = run_gh_inbox(r#"{"scope":"repo_issues"}"#).unwrap_err();
         assert!(err.contains("owner") || err.contains("repo"), "got: {err}");
-    }
-
-    #[test]
-    fn gh_inbox_legacy_aliases_dispatch() {
-        // Both old names must keep dispatching through the github group's
-        // dispatch function — failure is fine (no token), success is fine
-        // too (real token in env); the assertion is that the arm is wired.
-        assert!(super::dispatch("gh_list_my_prs", "{}").is_some());
-        assert!(super::dispatch("gh_list_assigned_issues", "{}").is_some());
     }
 
     #[test]

@@ -136,7 +136,7 @@ fn format_rehydrate_outcome_for_tui(outcome: &crate::missions::RehydrateOutcome)
         RehydrateOutcome::None => None,
         RehydrateOutcome::Rehydrated(m) => Some(format!(
             "resumed mission: {} ({})\n\
-             clear it with /mission_exit (or the mission_exit tool) if you didn't intend this",
+             clear it with /mission_exit (or mission_state action=exit) if you didn't intend this",
             m.slug,
             m.path.display(),
         )),

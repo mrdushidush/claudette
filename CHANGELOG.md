@@ -8,6 +8,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Until we tag `1.0.0`, minor-version bumps may contain breaking changes; patch
 bumps are non-breaking bugfixes only.
 
+## [Unreleased]
+
+### Removed — v0.6.0 tool-name aliases (dispatch-only)
+
+The dispatch-only backwards-compat aliases left over from the v0.6.0 tool
+consolidation — each commented "drop in next minor release" and now two minors
+overdue — have been removed. These names were **never advertised in the tool
+schema** (the model has only ever been offered the canonical names), so this is
+invisible in normal operation; a stray legacy name now resolves to the usual
+"unknown tool" path with a fuzzy suggestion of the replacement.
+
+Removed names → replacement:
+
+- `todo_complete` / `todo_uncomplete` → `todo_set_status(done)`
+- `wikipedia_search` / `wikipedia_summary` → `wikipedia(mode)`
+- `weather_current` / `weather_forecast` → `weather(days)`
+- `note_update` → `note_create(id, …)` (upsert)
+- `calendar_respond_to_event` → `calendar_update_event(rsvp)`
+- `tg_send_photo` → `tg_send(photo)`
+- `gh_list_my_prs` / `gh_list_assigned_issues` → `gh_inbox(scope)`
+- `mission_status` / `mission_list` / `mission_attach` / `mission_exit` →
+  `mission_state(action)` (the `/mission_exit` *slash command* is unchanged)
+
+The polymorphic replacements and their backing implementations are untouched.
+Permission-policy entries, agent permission-tiers, and ~30 alias-only tests for
+the removed names were dropped accordingly.
+
+### Internal — repo & docs tidy
+
+- Dated/historical docs moved under `docs/archive/` (with an index): the
+  `import_sweep` / `sprint_import` / `lancedb_decision` sprint records,
+  `life_agent.md`, `mtp_benchmark.md`, and the two `tui-test-prompts*` manual
+  QA checklists (relocated out of the repo root).
+- Refreshed `examples/02-tool-groups.md` and a few doc/README references that
+  named the removed tools.
+
 ## [0.8.5] - 2026-05-31
 
 ### Changed — relicensed to MIT OR Apache-2.0 (dual)

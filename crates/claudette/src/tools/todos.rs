@@ -1,7 +1,6 @@
 //! Todos group — 4 tools (todo_add, todo_list, todo_set_status,
 //! todo_delete). v0.6.0 merged the old todo_complete + todo_uncomplete
-//! pair into the polymorphic todo_set_status(id, done) — the old names
-//! still dispatch via aliases for one release.
+//! pair into the polymorphic todo_set_status(id, done).
 //!
 //! Storage: a single `todos.json` file under `~/.claudette/`. Reads the
 //! whole file on every call and writes it back — fine at personal-agent
@@ -119,9 +118,6 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
         "todo_add" => run_todo_add(input),
         "todo_list" => run_todo_list(input),
         "todo_set_status" => run_todo_set_status(input),
-        // v0.6.0 deprecated aliases — drop in next minor release.
-        "todo_complete" => run_todo_complete_alias(input),
-        "todo_uncomplete" => run_todo_uncomplete_alias(input),
         "todo_delete" => run_todo_delete(input),
         _ => return None,
     };
@@ -233,34 +229,6 @@ fn run_todo_set_status(input: &str) -> Result<String, String> {
     Ok(json!({ "ok": true, "id": id, "text": text, "done": done }).to_string())
 }
 
-/// Backwards-compat shim for the old `todo_complete` shape (`{id}`).
-/// Forwards to `todo_set_status` with `done=true`. Drop in the next
-/// minor release after v0.6.0.
-fn run_todo_complete_alias(input: &str) -> Result<String, String> {
-    let v: Value = serde_json::from_str(input)
-        .map_err(|e| format!("todo_complete: invalid JSON ({e}): {input}"))?;
-    let id = v
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or("todo_complete: missing 'id'")?;
-    let payload = json!({ "id": id, "done": true });
-    run_todo_set_status(&payload.to_string())
-}
-
-/// Backwards-compat shim for the old `todo_uncomplete` shape (`{id}`).
-/// Forwards to `todo_set_status` with `done=false`. Drop in the next
-/// minor release after v0.6.0.
-fn run_todo_uncomplete_alias(input: &str) -> Result<String, String> {
-    let v: Value = serde_json::from_str(input)
-        .map_err(|e| format!("todo_uncomplete: invalid JSON ({e}): {input}"))?;
-    let id = v
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or("todo_uncomplete: missing 'id'")?;
-    let payload = json!({ "id": id, "done": false });
-    run_todo_set_status(&payload.to_string())
-}
-
 fn run_todo_delete(input: &str) -> Result<String, String> {
     let v: Value = serde_json::from_str(input)
         .map_err(|e| format!("todo_delete: invalid JSON ({e}): {input}"))?;
@@ -327,38 +295,6 @@ mod tests {
         let err =
             run_todo_set_status(r#"{"id":"t_does_not_exist_99999","done":true}"#).unwrap_err();
         assert!(err.contains("no todo with id"), "got: {err}");
-    }
-
-    #[test]
-    fn todo_complete_alias_dispatches() {
-        // Alias must still route through dispatch — execution would touch
-        // disk, so we only verify the dispatch branch is wired by trying
-        // an unknown id (which gets through arg validation, then errors
-        // at the lookup step).
-        let result = dispatch("todo_complete", r#"{"id":"t_unknown_xyz_123"}"#);
-        assert!(result.is_some(), "todo_complete alias must dispatch");
-        let err = result.unwrap().unwrap_err();
-        assert!(err.contains("no todo with id"), "got: {err}");
-    }
-
-    #[test]
-    fn todo_uncomplete_alias_dispatches() {
-        let result = dispatch("todo_uncomplete", r#"{"id":"t_unknown_xyz_123"}"#);
-        assert!(result.is_some(), "todo_uncomplete alias must dispatch");
-        let err = result.unwrap().unwrap_err();
-        assert!(err.contains("no todo with id"), "got: {err}");
-    }
-
-    #[test]
-    fn todo_complete_alias_rejects_missing_id() {
-        let err = run_todo_complete_alias("{}").unwrap_err();
-        assert!(err.contains("missing 'id'"), "got: {err}");
-    }
-
-    #[test]
-    fn todo_uncomplete_alias_rejects_missing_id() {
-        let err = run_todo_uncomplete_alias("{}").unwrap_err();
-        assert!(err.contains("missing 'id'"), "got: {err}");
     }
 
     #[test]

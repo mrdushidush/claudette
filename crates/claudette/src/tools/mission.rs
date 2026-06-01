@@ -37,7 +37,7 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "mission_start",
-                "description": "Clone a brownfield repo into ~/.claudette/missions/<slug>/ and make it the session's active mission. While active, git_*, bash, edit_file, read_file, write_file, and search calls run inside the mission tree. Use mission_exit to clear.",
+                "description": "Clone a brownfield repo into ~/.claudette/missions/<slug>/ and make it the session's active mission. While active, git_*, bash, edit_file, read_file, write_file, and search calls run inside the mission tree. Use mission_state(action='exit') to clear.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -87,13 +87,6 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
     let r = match name {
         "mission_start" => run_mission_start(input),
         "mission_state" => run_mission_state(input),
-        // v0.6.0 deprecated aliases — drop in next minor release. The four
-        // single-purpose state tools are still reachable for one release
-        // so existing prompts keep working.
-        "mission_status" => run_mission_status(),
-        "mission_list" => run_mission_list(),
-        "mission_attach" => run_mission_attach(input),
-        "mission_exit" => run_mission_exit(),
         "mission_submit" => run_mission_submit(input),
         _ => return None,
     };
@@ -101,8 +94,8 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
 }
 
 /// `mission_state(action, slug?)` — polymorphic mission state ops.
-/// Routes to the same backends as the legacy mission_status/list/attach/
-/// exit tools. `attach` is the only action that needs `slug` — the others
+/// Dispatches the `status` / `list` / `attach` / `exit` actions to their
+/// handlers. `attach` is the only action that needs `slug` — the others
 /// ignore it.
 fn run_mission_state(input: &str) -> Result<String, String> {
     let v = parse_json_input(input, "mission_state")?;
@@ -212,7 +205,7 @@ fn run_mission_start(input: &str) -> Result<String, String> {
 
     if let Some(active) = active_mission() {
         return Err(format!(
-            "mission_start: '{}' is already active — exit it first with mission_exit",
+            "mission_start: '{}' is already active — exit it first with mission_state(action='exit')",
             active.slug
         ));
     }
@@ -350,7 +343,7 @@ fn run_mission_list() -> Result<String, String> {
         let n = orphans.len();
         let plural = if n == 1 { "y" } else { "ies" };
         out["note"] = Value::String(format!(
-            "{n} director{plural} under ~/.claudette/missions/ have no marker — likely pre-T2 git_clone leftovers; mission_attach won't find them. Investigate or remove."
+            "{n} director{plural} under ~/.claudette/missions/ have no marker — likely pre-T2 git_clone leftovers; mission_state(action='attach') won't find them. Investigate or remove."
         ));
     }
     Ok(out.to_string())
@@ -377,7 +370,7 @@ fn run_mission_attach(input: &str) -> Result<String, String> {
 
     if let Some(active) = active_mission() {
         return Err(format!(
-            "mission_attach: '{}' is already active — exit it first with mission_exit",
+            "mission_attach: '{}' is already active — exit it first with mission_state(action='exit')",
             active.slug
         ));
     }
@@ -828,17 +821,6 @@ mod tests {
             err.contains("slug") || err.contains("missing"),
             "got: {err}"
         );
-    }
-
-    #[test]
-    fn mission_state_legacy_aliases_dispatch() {
-        // Each legacy mission_* state name must keep dispatching through
-        // the group's dispatch function — the arm being wired is what we
-        // assert; success vs error depends on session state.
-        assert!(super::dispatch("mission_status", "{}").is_some());
-        assert!(super::dispatch("mission_list", "{}").is_some());
-        assert!(super::dispatch("mission_attach", r#"{"slug":"x"}"#).is_some());
-        assert!(super::dispatch("mission_exit", "{}").is_some());
     }
 
     #[test]

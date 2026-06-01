@@ -180,15 +180,10 @@ fn gitops_tools() -> BTreeSet<String> {
         "gh_pr_status",
         "gh_fork",
         "gh_create_pr",
-        // T2: mission_* drives the brownfield clone→submit loop.
-        // v0.6.0: mission_status/list/attach/exit collapsed into
-        // mission_state(action=...). Aliases still dispatch.
+        // T2: mission_* drives the brownfield clone→submit loop. v0.6.0
+        // collapsed status/list/attach/exit into mission_state(action=...).
         "mission_start",
         "mission_state",
-        "mission_status",
-        "mission_list",
-        "mission_attach",
-        "mission_exit",
         "mission_submit",
     ]
     .into_iter()
@@ -321,12 +316,10 @@ fn build_agent_permission_policy(allowed: &BTreeSet<String>) -> PermissionPolicy
         "gh_search_code",
         "gh_list_repo_issues",
         "gh_pr_status",
-        // T2: mission_attach reads a marker + flips an in-memory slot.
-        // Downstream cwd-routed writes still go through their own gates.
-        // v0.6.0: mission_state(action='attach') routes through the same
-        // backend; classified as ReadOnly when the agent allows it.
+        // T2: mission_state(action='attach') reads a marker + flips an
+        // in-memory slot. Downstream cwd-routed writes still go through
+        // their own gates, so the state tool itself is ReadOnly.
         "mission_state",
-        "mission_attach",
     ] {
         if allowed.contains(name) {
             policy = policy.with_tool_requirement(name, ReadOnly);
@@ -340,10 +333,9 @@ fn build_agent_permission_policy(allowed: &BTreeSet<String>) -> PermissionPolicy
         "git_clone",
         "gh_fork",
         "gh_create_pr",
-        // T2: clone-and-PR live in this tier; mission_status/list are
-        // read-only and stay in the loop above.
+        // T2: clone-and-PR live in this tier; mission_state (status/list/
+        // attach/exit) is read-only and stays in the loop above.
         "mission_start",
-        "mission_exit",
         "mission_submit",
     ] {
         if allowed.contains(name) {

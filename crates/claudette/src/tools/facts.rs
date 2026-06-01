@@ -49,11 +49,6 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
     let result = match name {
         "wikipedia" => run_wikipedia(input),
         "weather" => run_weather(input),
-        // v0.6.0 deprecated aliases — drop in next minor release.
-        "wikipedia_search" => run_wikipedia_search_alias(input),
-        "wikipedia_summary" => run_wikipedia_summary_alias(input),
-        "weather_current" => run_weather_current_alias(input),
-        "weather_forecast" => run_weather_forecast_alias(input),
         _ => return None,
     };
     Some(result)
@@ -170,26 +165,6 @@ fn wikipedia_summary_impl(title: &str) -> Result<String, String> {
             .unwrap_or(""),
     })
     .to_string())
-}
-
-/// Backwards-compat shim for the old `wikipedia_search` shape (`{query}`).
-/// Routes through the new unified handler with `mode='search'`. Drop in
-/// the next minor release after v0.6.0.
-fn run_wikipedia_search_alias(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "wikipedia_search")?;
-    let query = extract_str(&v, "query", "wikipedia_search")?;
-    let payload = json!({ "query": query, "mode": "search" });
-    run_wikipedia(&payload.to_string())
-}
-
-/// Backwards-compat shim for the old `wikipedia_summary` shape (`{title}`).
-/// Routes through the new unified handler with `mode='summary'`. Drop in
-/// the next minor release after v0.6.0.
-fn run_wikipedia_summary_alias(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "wikipedia_summary")?;
-    let title = extract_str(&v, "title", "wikipedia_summary")?;
-    let payload = json!({ "query": title, "mode": "summary" });
-    run_wikipedia(&payload.to_string())
 }
 
 // ────── Open-Meteo weather ───────────────────────────────────────────────
@@ -491,28 +466,6 @@ fn weather_forecast_impl(location: &str, days: i64) -> Result<String, String> {
     .to_string())
 }
 
-/// Backwards-compat shim for the old `weather_current` shape
-/// (`{location}`). Forwards to `weather` with `days=0`. Drop in the next
-/// minor release after v0.6.0.
-fn run_weather_current_alias(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "weather_current")?;
-    let location = extract_str(&v, "location", "weather_current")?;
-    let payload = json!({ "location": location, "days": 0 });
-    run_weather(&payload.to_string())
-}
-
-/// Backwards-compat shim for the old `weather_forecast` shape
-/// (`{location, days?}`). Forwards to `weather` preserving `days` (default
-/// 3 to match the old behaviour). Drop in the next minor release after
-/// v0.6.0.
-fn run_weather_forecast_alias(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "weather_forecast")?;
-    let location = extract_str(&v, "location", "weather_forecast")?;
-    let days = v.get("days").and_then(Value::as_i64).unwrap_or(3);
-    let payload = json!({ "location": location, "days": days });
-    run_weather(&payload.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -532,49 +485,9 @@ mod tests {
     }
 
     #[test]
-    fn wikipedia_search_alias_rejects_missing_query() {
-        let err = run_wikipedia_search_alias("{}").unwrap_err();
-        assert!(err.contains("missing"), "got: {err}");
-    }
-
-    #[test]
-    fn wikipedia_summary_alias_rejects_missing_title() {
-        let err = run_wikipedia_summary_alias("{}").unwrap_err();
-        assert!(err.contains("missing"), "got: {err}");
-    }
-
-    #[test]
-    fn wikipedia_aliases_dispatch() {
-        // Both legacy names must still resolve through `dispatch` even
-        // though they're not advertised in the schema. We only check the
-        // dispatch branch is wired — execution will fail at the network
-        // call but that's after the alias resolution.
-        assert!(dispatch("wikipedia_search", r#"{"query":"x"}"#).is_some());
-        assert!(dispatch("wikipedia_summary", r#"{"title":"x"}"#).is_some());
-    }
-
-    #[test]
     fn weather_rejects_missing_location() {
         let err = run_weather("{}").unwrap_err();
         assert!(err.contains("missing"), "got: {err}");
-    }
-
-    #[test]
-    fn weather_current_alias_rejects_missing_location() {
-        let err = run_weather_current_alias("{}").unwrap_err();
-        assert!(err.contains("missing"), "got: {err}");
-    }
-
-    #[test]
-    fn weather_forecast_alias_rejects_missing_location() {
-        let err = run_weather_forecast_alias("{}").unwrap_err();
-        assert!(err.contains("missing"), "got: {err}");
-    }
-
-    #[test]
-    fn weather_aliases_dispatch() {
-        assert!(dispatch("weather_current", r#"{"location":"Paris"}"#).is_some());
-        assert!(dispatch("weather_forecast", r#"{"location":"Paris"}"#).is_some());
     }
 
     // Offline unit tests for the facts-private helpers — no network.

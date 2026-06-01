@@ -245,11 +245,11 @@ pub const CORE_TOOL_NAMES: &[&str] = &["enable_tools", "get_current_time", "load
 #[must_use]
 pub fn group_of(tool: &str) -> Option<ToolGroup> {
     match tool {
-        // note_update is a v0.6.0 dispatch-only alias for note_create
-        // (upsert via optional `id`) — not classified here.
+        // note_create is a v0.6.0 upsert — pass `id` to update an existing
+        // note (the standalone note_update tool was dropped).
         "note_create" | "note_list" | "note_read" | "note_delete" => Some(ToolGroup::Notes),
-        // todo_complete + todo_uncomplete are v0.6.0 dispatch-only aliases
-        // for todo_set_status(done?). Not classified here.
+        // todo_set_status(done?) replaced the v0.6.0 todo_complete +
+        // todo_uncomplete pair.
         "todo_add" | "todo_list" | "todo_set_status" | "todo_delete" => Some(ToolGroup::Todos),
         "read_file" | "write_file" | "list_dir" => Some(ToolGroup::Files),
         "generate_code" => Some(ToolGroup::Code),
@@ -262,17 +262,13 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         }
         "bash" | "edit_file" | "apply_diff" | "spawn_agent" | "bash_background" | "bash_status"
         | "bash_tail" | "ask_user" => Some(ToolGroup::Advanced),
-        // wikipedia_search/wikipedia_summary and weather_current/weather_forecast
-        // are v0.6.0 dispatch-only aliases for `wikipedia(mode?)` and
-        // `weather(days?)` respectively — not classified here because they're
-        // not in the advertised schema.
+        // wikipedia(mode?) and weather(days?) subsume the v0.6.0
+        // wikipedia_search/summary and weather_current/forecast names.
         "wikipedia" | "weather" => Some(ToolGroup::Facts),
         "crate_info" | "npm_info" => Some(ToolGroup::Registry),
-        // gh_list_my_prs / gh_list_assigned_issues are v0.6.0
-        // dispatch-only aliases for gh_inbox(scope=...).
-        // mission_status / mission_list / mission_attach / mission_exit
-        // are v0.6.0 dispatch-only aliases for mission_state(action=...).
-        // None of those legacy names are classified into a group.
+        // gh_inbox(scope=...) subsumes the v0.6.0 gh_list_my_prs +
+        // gh_list_assigned_issues names; mission_state(action=...) subsumes
+        // mission_status / mission_list / mission_attach / mission_exit.
         "gh_inbox"
         | "gh_get_issue"
         | "gh_create_issue"
@@ -288,11 +284,10 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         | "mission_state"
         | "mission_submit" => Some(ToolGroup::Github),
         "tv_get_quote" => Some(ToolGroup::Markets),
-        // tg_send_photo is a v0.6.0 dispatch-only alias for tg_send(photo?) —
-        // not classified here because it's not in the advertised schema.
+        // tg_send(photo?) subsumes the v0.6.0 tg_send_photo name.
         "tg_send" => Some(ToolGroup::Telegram),
-        // calendar_respond_to_event is a v0.6.0 dispatch-only alias for
-        // calendar_update_event(rsvp=...) — not classified here.
+        // calendar_update_event(rsvp=...) subsumes the v0.6.0
+        // calendar_respond_to_event name.
         "calendar_list_events"
         | "calendar_create_event"
         | "calendar_update_event"
@@ -571,7 +566,8 @@ mod tests {
         // Sprint 9 Phase 0a additions.
         assert_eq!(group_of("wikipedia"), Some(ToolGroup::Facts));
         assert_eq!(group_of("weather"), Some(ToolGroup::Facts));
-        // v0.6.0: legacy facts-group names are dispatch-only aliases.
+        // v0.6.0: these merged into wikipedia(mode?)/weather(days?) and
+        // are no longer tool names.
         assert_eq!(group_of("wikipedia_search"), None);
         assert_eq!(group_of("wikipedia_summary"), None);
         assert_eq!(group_of("weather_current"), None);
@@ -581,7 +577,8 @@ mod tests {
         assert_eq!(group_of("gh_inbox"), Some(ToolGroup::Github));
         assert_eq!(group_of("gh_create_issue"), Some(ToolGroup::Github));
         assert_eq!(group_of("mission_state"), Some(ToolGroup::Github));
-        // v0.6.0: legacy listing + mission state names are dispatch-only aliases.
+        // v0.6.0: these merged into gh_inbox/mission_state and are no
+        // longer tool names.
         assert_eq!(group_of("gh_list_my_prs"), None);
         assert_eq!(group_of("gh_list_assigned_issues"), None);
         assert_eq!(group_of("mission_status"), None);
@@ -590,7 +587,7 @@ mod tests {
         assert_eq!(group_of("mission_exit"), None);
         assert_eq!(group_of("tv_get_quote"), Some(ToolGroup::Markets));
         assert_eq!(group_of("tg_send"), Some(ToolGroup::Telegram));
-        // v0.6.0: tg_send_photo is a dispatch-only alias, not classified.
+        // v0.6.0: tg_send_photo merged into tg_send(photo?) — no longer a tool name.
         assert_eq!(group_of("tg_send_photo"), None);
         // v0.6.0 decom: these tools no longer exist anywhere.
         assert_eq!(group_of("crate_search"), None);

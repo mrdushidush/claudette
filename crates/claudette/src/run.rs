@@ -2129,15 +2129,11 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("git_branch", ReadOnly)
         // ── Workspace-write (auto-allowed) ──────────────────────────
         .with_tool_requirement("note_create", WorkspaceWrite)
-        .with_tool_requirement("note_update", WorkspaceWrite)
         .with_tool_requirement("note_delete", WorkspaceWrite)
         .with_tool_requirement("todo_add", WorkspaceWrite)
         // v0.6.0: todo_complete + todo_uncomplete merged into
-        // todo_set_status(done?). Aliases still dispatch so policy
-        // entries stay for compat.
+        // todo_set_status(done?).
         .with_tool_requirement("todo_set_status", WorkspaceWrite)
-        .with_tool_requirement("todo_complete", WorkspaceWrite)
-        .with_tool_requirement("todo_uncomplete", WorkspaceWrite)
         .with_tool_requirement("todo_delete", WorkspaceWrite)
         .with_tool_requirement("write_file", WorkspaceWrite)
         .with_tool_requirement("generate_code", WorkspaceWrite)
@@ -2150,15 +2146,10 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("spawn_agent", WorkspaceWrite)
         // ── Sprint 9 Phase 0a: facts group (read-only REST calls) ───
         // v0.6.0: wikipedia_search + wikipedia_summary merged into
-        // wikipedia(mode?), and weather_current + weather_forecast merged
-        // into weather(days?). The legacy names still dispatch through
-        // alias shims so the policy entries stay for compat.
+        // wikipedia(mode?); weather_current + weather_forecast merged
+        // into weather(days?).
         .with_tool_requirement("wikipedia", ReadOnly)
-        .with_tool_requirement("wikipedia_search", ReadOnly)
-        .with_tool_requirement("wikipedia_summary", ReadOnly)
         .with_tool_requirement("weather", ReadOnly)
-        .with_tool_requirement("weather_current", ReadOnly)
-        .with_tool_requirement("weather_forecast", ReadOnly)
         // ── Sprint 9 Phase 0a: registry group (read-only) ────────────
         // crate_search + npm_search were dropped in v0.6.0 — web_search
         // covers the same need with better recall and an already-loaded
@@ -2216,10 +2207,8 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         // Reads: auto-allowed. Writes: WorkspaceWrite (hit the network
         // on the user's behalf but don't touch the filesystem).
         // v0.6.0: gh_list_my_prs + gh_list_assigned_issues merged into
-        // gh_inbox(scope?). Both old names still dispatch.
+        // gh_inbox(scope?).
         .with_tool_requirement("gh_inbox", ReadOnly)
-        .with_tool_requirement("gh_list_my_prs", ReadOnly)
-        .with_tool_requirement("gh_list_assigned_issues", ReadOnly)
         .with_tool_requirement("gh_get_issue", ReadOnly)
         .with_tool_requirement("gh_search_code", ReadOnly)
         .with_tool_requirement("gh_list_repo_issues", ReadOnly)
@@ -2241,17 +2230,15 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         // ── Sprint 10: telegram group ────────────────────────────────
         // Sends: WorkspaceWrite (posts messages on the user's behalf but
         // doesn't touch the filesystem). v0.6.0 decom: tg_get_updates
-        // dropped (prompt-injection footgun), tg_send_photo merged into
-        // tg_send via optional `photo` arg — alias still dispatches.
+        // dropped (prompt-injection footgun); tg_send_photo merged into
+        // tg_send via an optional `photo` arg.
         .with_tool_requirement("tg_send", WorkspaceWrite)
-        .with_tool_requirement("tg_send_photo", WorkspaceWrite)
         // ── Life Agent (v0.2.0): calendar group ──────────────────────
         // Reads: auto-allowed. Writes/RSVP: WorkspaceWrite. Delete is
         // irreversible from claudette's side, so DangerFullAccess.
         .with_tool_requirement("calendar_list_events", ReadOnly)
         .with_tool_requirement("calendar_create_event", WorkspaceWrite)
         .with_tool_requirement("calendar_update_event", WorkspaceWrite)
-        .with_tool_requirement("calendar_respond_to_event", WorkspaceWrite)
         .with_tool_requirement("calendar_delete_event", DangerFullAccess)
         // ── Life Agent: gmail group (gmail.readonly OAuth scope) ─────
         .with_tool_requirement("gmail_list", ReadOnly)
@@ -2276,26 +2263,15 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         // ~/.claudette/missions/ root. Auto-allowed (WorkspaceWrite).
         .with_tool_requirement("git_clone", WorkspaceWrite)
         // ── T2 brownfield: mission_* tools ──────────────────────────────
-        // mission_status / mission_list / mission_attach only read state
-        // (attach loads a marker + flips an in-memory slot; downstream
-        // writes still go through their own gates). mission_exit mutates
-        // session state with no FS writes. mission_start clones into
-        // ~/.claudette/missions/ (WorkspaceWrite, matching git_clone).
-        // mission_submit stages/commits/pushes/opens a PR — must be
-        // DangerFullAccess to match its worst action (`git push -u`).
+        // mission_start clones into ~/.claudette/missions/ (WorkspaceWrite,
+        // matching git_clone). mission_state (status/list/attach/exit) only
+        // reads or flips in-memory session state with no FS writes, so it
+        // sits at the lowest tier (ReadOnly); downstream cwd-routed writes
+        // still go through their own gates. mission_submit stages/commits/
+        // pushes/opens a PR — DangerFullAccess to match its worst action
+        // (`git push -u`).
         .with_tool_requirement("mission_start", WorkspaceWrite)
-        // v0.6.0: mission_status/list/attach/exit merged into
-        // mission_state(action?). Aliases dispatch so policy entries stay.
-        // mission_state is broadly ReadOnly except action='exit' which
-        // mutates session state — but the legacy mission_exit entry
-        // already had WorkspaceWrite, and we keep that there. mission_state
-        // itself is gated at the lowest tier (ReadOnly) since most actions
-        // are reads; the brain will rarely call action='exit' unprompted.
         .with_tool_requirement("mission_state", ReadOnly)
-        .with_tool_requirement("mission_status", ReadOnly)
-        .with_tool_requirement("mission_list", ReadOnly)
-        .with_tool_requirement("mission_attach", ReadOnly)
-        .with_tool_requirement("mission_exit", WorkspaceWrite)
         .with_tool_requirement("mission_submit", DangerFullAccess)
 }
 
@@ -2386,7 +2362,7 @@ pub(crate) fn print_rehydrate_outcome(outcome: crate::missions::RehydrateOutcome
             eprintln!(
                 "  {} {}",
                 theme::dim("∘"),
-                theme::dim("clear it with /mission_exit (or the mission_exit tool) if you didn't intend this"),
+                theme::dim("clear it with /mission_exit (or mission_state action=exit) if you didn't intend this"),
             );
         }
         RehydrateOutcome::Cleared { reason, path } => {

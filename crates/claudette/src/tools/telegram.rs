@@ -11,10 +11,7 @@
 //!    doesn't get to drive that polling itself.
 //!  - merged `tg_send_photo` into `tg_send` via an optional `photo` arg
 //!    (URL). When `photo` is set, `text` becomes the caption and the
-//!    request hits `/sendPhoto` instead of `/sendMessage`. The old
-//!    `tg_send_photo` name still dispatches for one release as a
-//!    backwards-compatible alias but is no longer advertised — see the
-//!    `legacy_aliases_dispatch` test.
+//!    request hits `/sendPhoto` instead of `/sendMessage`.
 //!
 //! Self-contained: all helpers (`telegram_token`, `tg_extract_chat_id`,
 //! `tg_api_url`) are private to this module. Handlers reuse the pub(super)
@@ -46,9 +43,6 @@ pub(super) fn schemas() -> Vec<Value> {
 pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>> {
     let result = match name {
         "tg_send" => run_tg_send(input),
-        // v0.6.0 deprecated alias — drop in next minor release. Old shape:
-        // {chat_id, url, caption?} → new shape: {chat_id, text=caption, photo=url}
-        "tg_send_photo" => run_tg_send_photo_alias(input),
         _ => return None,
     };
     Some(result)
@@ -146,23 +140,6 @@ fn run_tg_send(input: &str) -> Result<String, String> {
     .to_string())
 }
 
-/// Backwards-compat shim for the old `tg_send_photo` shape
-/// (`{chat_id, url, caption?}`). Reshapes to the unified `tg_send`
-/// payload and forwards. Drop in the next minor release after v0.6.0.
-fn run_tg_send_photo_alias(input: &str) -> Result<String, String> {
-    let v = parse_json_input(input, "tg_send_photo")?;
-    let chat_id = tg_extract_chat_id(&v, "tg_send_photo")?;
-    let url = extract_str(&v, "url", "tg_send_photo")?;
-    let caption = v.get("caption").and_then(Value::as_str).unwrap_or("");
-
-    let payload = json!({
-        "chat_id": chat_id,
-        "text": caption,
-        "photo": url,
-    });
-    run_tg_send(&payload.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,18 +154,6 @@ mod tests {
     fn tg_send_rejects_missing_text() {
         let err = run_tg_send(r#"{"chat_id":"123"}"#).unwrap_err();
         assert!(err.contains("text"), "got: {err}");
-    }
-
-    #[test]
-    fn tg_send_photo_alias_rejects_missing_url() {
-        let err = run_tg_send_photo_alias(r#"{"chat_id":"123"}"#).unwrap_err();
-        assert!(err.contains("url"), "got: {err}");
-    }
-
-    #[test]
-    fn tg_send_photo_alias_rejects_missing_chat_id() {
-        let err = run_tg_send_photo_alias(r#"{"url":"https://example.com/img.jpg"}"#).unwrap_err();
-        assert!(err.contains("chat_id"), "got: {err}");
     }
 
     #[test]
@@ -210,26 +175,5 @@ mod tests {
             .filter_map(|v| v.pointer("/function/name").and_then(Value::as_str))
             .collect();
         assert_eq!(names, ["tg_send"]);
-    }
-
-    #[test]
-    fn legacy_aliases_dispatch() {
-        // The old tg_send_photo name must still be reachable through
-        // dispatch even though it's no longer advertised. We get past
-        // the shape check (chat_id+url+caption) but fail at the network
-        // call because telegram_token isn't set — that's enough to prove
-        // the alias is wired.
-        let result = dispatch(
-            "tg_send_photo",
-            r#"{"chat_id":"123","url":"https://example.com/x.jpg","caption":"hi"}"#,
-        );
-        assert!(result.is_some(), "tg_send_photo alias must dispatch");
-        let err = result.unwrap().unwrap_err();
-        // We should have made it past arg validation — error must mention
-        // the token problem, not a missing field.
-        assert!(
-            err.contains("token") || err.contains("BotFather") || err.contains("HTTP"),
-            "expected token/HTTP error, got: {err}"
-        );
     }
 }

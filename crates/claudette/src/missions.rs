@@ -129,7 +129,7 @@ pub fn set_active(mission: Mission) -> Result<(), String> {
         .map_err(|_| "mission: active slot poisoned".to_string())?;
     if let Some(existing) = guard.as_ref() {
         return Err(format!(
-            "mission: '{}' is already active — exit it first with mission_exit",
+            "mission: '{}' is already active — exit it first with mission_state(action='exit')",
             existing.slug
         ));
     }
