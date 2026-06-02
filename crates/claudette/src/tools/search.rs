@@ -325,9 +325,10 @@ fn run_grep_search(input: &str) -> Result<String, String> {
 
 // ────── web_fetch ────────────────────────────────────────────────────────
 //
-// MVP: no scheme allowlist beyond http/https, no SSRF guard (the threat
-// model is a local secretary on the user's own machine), no JS rendering.
-// 8 KB cap on output keeps the context window safe even on giant pages.
+// http/https only, 8 KB output cap, no JS rendering. SSRF guard
+// ([`validate_fetch_target`]) blocks loopback / private / link-local targets
+// (incl. the cloud metadata endpoint) so a prompt-injected model can't pivot
+// `web_fetch` into the user's LAN or a metadata service.
 
 fn run_web_fetch(input: &str) -> Result<String, String> {
     let v: Value = serde_json::from_str(input)
@@ -341,6 +342,7 @@ fn run_web_fetch(input: &str) -> Result<String, String> {
             "web_fetch: only http:// and https:// URLs are allowed, got: {url}"
         ));
     }
+    validate_fetch_target(url)?;
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(WEB_FETCH_TIMEOUT_SECS))
@@ -386,9 +388,132 @@ fn run_web_fetch(input: &str) -> Result<String, String> {
     .to_string())
 }
 
+/// SSRF guard for `web_fetch`. Refuses URLs whose host is loopback, private
+/// (RFC1918), carrier-grade-NAT, link-local (169.254/16 — incl. the cloud
+/// metadata endpoint 169.254.169.254), or otherwise internal. Hostnames are
+/// resolved so a public name pointing at an internal address is also caught.
+/// Opt out with `CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE=1` (users fetching their
+/// own LAN services). (roast 2026-06-02 H2)
+fn validate_fetch_target(url: &str) -> Result<(), String> {
+    if std::env::var("CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE").as_deref() == Ok("1") {
+        return Ok(());
+    }
+    // Caller already validated the scheme as lowercase http:// or https://.
+    let (rest, default_port) = if let Some(r) = url.strip_prefix("https://") {
+        (r, 443u16)
+    } else if let Some(r) = url.strip_prefix("http://") {
+        (r, 80u16)
+    } else {
+        return Ok(());
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    let hostport = authority.rsplit('@').next().unwrap_or(authority);
+    let (host, port) = if let Some(after) = hostport.strip_prefix('[') {
+        // IPv6 literal: [::1]:port
+        let Some((h, tail)) = after.split_once(']') else {
+            return Err("web_fetch: malformed IPv6 host".to_string());
+        };
+        let port = tail
+            .strip_prefix(':')
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(default_port);
+        (h.to_string(), port)
+    } else if let Some((h, p)) = hostport.rsplit_once(':') {
+        p.parse::<u16>().map_or_else(
+            |_| (hostport.to_string(), default_port),
+            |pn| (h.to_string(), pn),
+        )
+    } else {
+        (hostport.to_string(), default_port)
+    };
+
+    if host.is_empty() {
+        return Err("web_fetch: URL has no host".to_string());
+    }
+    let host_l = host.to_ascii_lowercase();
+    if host_l == "localhost"
+        || host_l.ends_with(".localhost")
+        || host_l == "metadata.google.internal"
+    {
+        return Err(blocked_target_msg(&host));
+    }
+
+    // IP literal → check directly. Hostname → resolve and check every address.
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        if is_blocked_fetch_ip(&ip) {
+            return Err(blocked_target_msg(&host));
+        }
+        return Ok(());
+    }
+    use std::net::ToSocketAddrs;
+    if let Ok(addrs) = (host.as_str(), port).to_socket_addrs() {
+        for addr in addrs {
+            if is_blocked_fetch_ip(&addr.ip()) {
+                return Err(blocked_target_msg(&host));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn blocked_target_msg(host: &str) -> String {
+    format!(
+        "web_fetch: refusing to fetch internal/loopback/private host '{host}' (SSRF guard; \
+         set CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE=1 to allow LAN fetches)"
+    )
+}
+
+/// True for addresses a fetch must never reach: loopback, RFC1918 private,
+/// CGNAT, link-local (incl. 169.254.169.254 metadata), unspecified, broadcast,
+/// IPv6 ULA/link-local, and IPv4-mapped forms of all the above.
+fn is_blocked_fetch_ip(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            let o = v4.octets();
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                || o[0] == 0
+                || (o[0] == 100 && (64..=127).contains(&o[1])) // 100.64.0.0/10 CGNAT
+        }
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00 // ULA fc00::/7
+                || (v6.segments()[0] & 0xffc0) == 0xfe80 // link-local fe80::/10
+                || v6
+                    .to_ipv4_mapped()
+                    .is_some_and(|m| is_blocked_fetch_ip(&std::net::IpAddr::V4(m)))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn web_fetch_blocks_ssrf_targets() {
+        // roast 2026-06-02 H2: localhost / private / metadata are refused.
+        for url in [
+            "http://localhost:8080/",
+            "http://127.0.0.1/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://10.0.0.5/",
+            "http://192.168.1.1/admin",
+            "http://[::1]:9000/",
+            "https://metadata.google.internal/computeMetadata/v1/",
+        ] {
+            assert!(
+                validate_fetch_target(url).is_err(),
+                "expected SSRF block for {url}"
+            );
+        }
+        // A normal public IP literal is allowed.
+        assert!(validate_fetch_target("https://1.1.1.1/").is_ok());
+    }
 
     #[test]
     fn glob_search_rejects_missing_pattern() {

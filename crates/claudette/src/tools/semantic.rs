@@ -344,6 +344,12 @@ mod tests {
     fn end_to_end_finds_a_self_referential_token() {
         // Run against the actual workspace and expect to find this very
         // file (or another tools/* source) by searching for a rare token.
+        // Serialize against the process-wide cwd lock: this test reads the
+        // process cwd (via missions::active_cwd) while other tests
+        // (runtime::prompt) mutate it with set_current_dir under the same
+        // lock. Without this guard they raced and this test flaked red —
+        // the exact `cargo test --lib` CI/release gate. (roast 2026-06-02)
+        let _guard = crate::test_env_lock();
         let cwd = std::env::current_dir().expect("cwd");
         let out = run_semantic_grep(&json!({ "query": "MAX_CHUNK_LINES", "k": 3 }).to_string());
         match out {

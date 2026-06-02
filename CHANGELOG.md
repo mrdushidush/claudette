@@ -242,7 +242,7 @@ model's full reasoning + tool calls via `lms log stream`.
   missions resolved — 3 brownfield bug-fixes (Planner localized + `apply_diff`
   used, tests pass) and 2 greenfield builds (Space Invaders, storefront page).
 
-## [Unreleased]
+## [0.6.0] - 2026-05-21
 
 ### Added — forge security-review stage (opt-in)
 
@@ -445,6 +445,30 @@ notes (id-arg upsert via note_create), and so on. Pre-commit
   compaction, `/clear`, fallback swap, agent spawn, fresh REPL boot)
   clones a pre-built Value instead of rebuilding the ~12 KB schema. No
   behavioural change.
+
+## [0.5.4] - 2026-05-17
+
+### Fixed — mission/forge safety (F5 + F8)
+
+Two safety bugs found in the 2026-05-17 TUI sweep: `/forge` could silently
+auto-bootstrap an ephemeral mission against the wrong tree (F8), and a related
+mission-routing gap (F5). Both fixed and covered by tests.
+
+## [0.5.3] - 2026-05-15
+
+### Fixed — release packaging
+
+`v0.5.2` published to crates.io but failed the Windows packaging step (no
+`shasum` on Git Bash for `windows-latest`). Portable `shasum` → `sha256sum`
+fallback so all five matrix legs ship native binaries.
+
+## [0.5.2] - 2026-05-15
+
+### Added — audience-expansion bundle
+
+First release with native binaries attached to GitHub Releases. `install.sh` /
+`install.ps1` fetch and SHA256-verify the matching archive for Windows / Linux /
+macOS (x64 + arm64).
 
 ## [0.5.1] - 2026-05-13
 

@@ -86,7 +86,7 @@ Codet is invoked exclusively through the `generate_code` tool. The main conversa
 Pipeline:
 
 1. Writes the code with a dedicated coder model (default `qwen3-coder:30b`, fallback `qwen2.5-coder:14b`).
-2. Runs a syntax check (`python -m py_compile`, `rustc --emit=metadata`, `tsc --noEmit`, etc. — 5 languages).
+2. Runs a syntax check (`python -m py_compile`, `rustc --emit=metadata`, `tsc --noEmit` for JS + TS — 4 languages).
 3. On failure, runs a **surgical SEARCH/REPLACE fix loop** (Aider-style patches, ~50 output tokens per attempt) before falling back to full-file regeneration.
 4. Optionally runs associated pytest/cargo-test/jest suites.
 5. Retries up to 3 times, then reports honestly if it can't fix the file.

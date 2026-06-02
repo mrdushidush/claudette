@@ -198,11 +198,15 @@ fn redact_for_display(var: &str, val: &str) -> String {
     if !looks_secret {
         return val.to_string();
     }
-    if val.len() <= 6 {
+    if val.chars().count() <= 6 {
         return "***".to_string();
     }
-    let tail = &val[val.len().saturating_sub(4)..];
-    format!("*** ({} chars, …{tail})", val.len())
+    // Last 4 *chars*, not bytes — a byte slice at `len-4` panics when it splits
+    // a multibyte glyph, and `panic="abort"` would take the whole `doctor` run
+    // down. (roast 2026-06-02)
+    let chars: Vec<char> = val.chars().collect();
+    let tail: String = chars[chars.len().saturating_sub(4)..].iter().collect();
+    format!("*** ({} chars, …{tail})", chars.len())
 }
 
 // ─── Brain ───────────────────────────────────────────────────────────────

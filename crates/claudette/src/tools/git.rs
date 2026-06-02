@@ -465,6 +465,17 @@ fn run_git_checkout(input: &str) -> Result<String, String> {
         .ok_or("git_checkout: missing 'target'")?;
 
     reject_destructive(&[target])?;
+    // A target beginning with '-' would be parsed by git as a flag (e.g. `-B`,
+    // `--orphan`), turning a checkout into branch creation / other operations.
+    // Git branch names can't start with '-', so rejecting it is loss-free and
+    // closes the option-injection hole. We can't use a `--` separator here:
+    // `git checkout -- <x>` changes the semantics (restores a *pathspec*
+    // instead of switching branch). (roast 2026-06-02)
+    if target.starts_with('-') {
+        return Err(format!(
+            "git_checkout: target may not start with '-' (refusing possible flag injection): {target}"
+        ));
+    }
     let output = run_git(&["checkout", target])?;
     Ok(json!({ "ok": true, "checked_out": target, "output": output }).to_string())
 }

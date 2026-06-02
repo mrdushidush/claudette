@@ -13,10 +13,11 @@ members = [
 opt-level = "z"
 lto = true
 strip = true
-# Removes unwind landing pads from the release binary — smaller binary,
+# Removes unwind landing pads from the release binary — smaller binary and a
 # tighter security posture (panics never cross the FFI boundary into
-# attacker-controlled code), and matches what `panic_abort` workloads
-# actually do at runtime. The crate has no `#[should_panic]` integration
-# tests that depend on unwinding, and the runtime treats panics as
-# fatal anyway (the agent loop logs and exits the iteration).
+# attacker-controlled code). NOTE: with `abort`, ANY panic terminates the whole
+# process immediately — there is no `catch_unwind` recovery and the agent loop
+# does NOT survive a panicked turn. So a panic on untrusted/external input is a
+# hard crash: keep fallible parsing/slicing panic-free (e.g. char-boundary
+# clamps over raw byte slices) rather than relying on unwind recovery.
 panic = "abort"

@@ -292,7 +292,16 @@ impl RecallStore {
         // version, but extreme inputs (think: the assistant pasting a
         // 100KB log) shouldn't bloat the DB.
         let stored: &str = if trimmed.len() > 8 * 1024 {
-            &trimmed[..8 * 1024]
+            // Clamp to the largest char boundary ≤ 8 KB. A raw byte slice at
+            // `8*1024` panics when that index lands inside a multibyte glyph
+            // — exactly the >8 KB non-ASCII inputs this cap targets (CJK,
+            // emoji, image-OCR transcripts) — and `panic="abort"` turns that
+            // into a whole-process abort. (roast 2026-06-02 / issue #26 §C)
+            let mut end = 8 * 1024;
+            while end > 0 && !trimmed.is_char_boundary(end) {
+                end -= 1;
+            }
+            &trimmed[..end]
         } else {
             trimmed
         };
@@ -973,6 +982,24 @@ mod tests {
             hits[0].snippet.len() <= 8 * 1024,
             "snippet should be capped at 8KB, got {}",
             hits[0].snippet.len()
+        );
+    }
+
+    #[test]
+    fn long_multibyte_snippet_does_not_panic_on_cap() {
+        // Regression for the byte-boundary slice (issue #26 §C): the 8 KB
+        // cap used to slice `&trimmed[..8*1024]` raw, which panics when the
+        // boundary lands inside a multibyte glyph. `é` is 2 bytes, so a string
+        // of `é` straddles 8192. With `panic="abort"` this aborted the process.
+        let mut store = RecallStore::open_in_memory(Box::new(HashEmbedder::new())).expect("open");
+        let huge = "é".repeat(20_000); // 40 KB, boundary at 8192 splits a glyph
+        store.index(Role::User, &huge).unwrap();
+        let hits = store.query("é", 1).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].snippet.len() <= 8 * 1024);
+        assert!(
+            hits[0].snippet.is_char_boundary(hits[0].snippet.len()),
+            "stored snippet must end on a char boundary"
         );
     }
 

@@ -7,7 +7,7 @@
 [![Crates.io](https://img.shields.io/crates/v/claudette.svg)](https://crates.io/crates/claudette)
 [![CI](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml/badge.svg)](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![Rust 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 [![Local-only](https://img.shields.io/badge/cloud_brain-none-success.svg)](PRIVACY.md)
 
 ![Claudette TUI — chat + live tool-call panel side-by-side, one turn covering notes, weather, BTC price, and calendar](docs/images/claudette-tui.png)
@@ -37,7 +37,7 @@ ollama pull qwen3.5:4b           # 3.4 GB brain — one-time download
 claudette "what time is it?"
 ```
 
-> **Prefer not to pipe the network into a shell?** Grab a signed archive from [Releases](https://github.com/mrdushidush/claudette/releases/latest) and drop `claudette` (or `claudette.exe`) onto your `PATH`. Every artifact ships a SHA256 sidecar.
+> **Prefer not to pipe the network into a shell?** Grab a prebuilt archive from [Releases](https://github.com/mrdushidush/claudette/releases/latest) and drop `claudette` (or `claudette.exe`) onto your `PATH`. Every artifact ships a SHA256 sidecar so you can verify the download wasn't corrupted in transit.
 >
 > **Rust user?** `cargo install claudette`.
 > **No GPU?** The 4B brain runs on plain CPU — slower, but it works. See [CPU-only mode](docs/hardware.md#no-gpu-cpu-only-mode).
@@ -96,7 +96,7 @@ Three presets — Fast / Auto / Smart. Auto runs `qwen3.5:4b` and escalates to `
 Whisper transcription for Telegram voice notes, edge-tts replies (English or Hebrew), and image attachments in TUI/REPL via Alt+V (clipboard), drag-drop, or `@/path/to/img.png` — when the loaded brain is multimodal.
 
 ### ⚙️ Codet sidecar for code generation
-`generate_code` routes through a dedicated coder model (default `qwen3-coder:30b`), runs a real syntax check across 5 languages (`py_compile`, `rustc --emit=metadata`, `tsc --noEmit`, …), then an Aider-style SEARCH/REPLACE fix loop on failure, then optional pytest / cargo-test / jest. Hot-swaps into VRAM on demand on memory-constrained boxes.
+`generate_code` routes through a dedicated coder model (default `qwen3-coder:30b`), runs a real syntax check across 4 languages (Python `py_compile`, `rustc --emit=metadata`, JavaScript + TypeScript via `tsc --noEmit`), then an Aider-style SEARCH/REPLACE fix loop on failure, then optional pytest / cargo-test / jest. Hot-swaps into VRAM on demand on memory-constrained boxes.
 
 ### 🔎 Cross-session semantic recall
 `/recall <query>` searches every past conversation turn across sessions via a local embedding index, dropping the relevant fragments straight into the current context.

@@ -379,9 +379,18 @@ fn is_compat_value_truthy(value: Option<&str>) -> bool {
 #[must_use]
 pub fn is_local_ollama_url(url: &str) -> bool {
     // Strip scheme if present, case-insensitively. We only need the host.
-    let rest = if url.len() >= 8 && url[..8].eq_ignore_ascii_case("https://") {
+    // `str::get(..n)` returns `None` when `n` is out of range *or* not a char
+    // boundary, so this never panics on a URL whose first bytes are multibyte
+    // (unlike the old length-guarded `url[..8]` byte slice).
+    let rest = if url
+        .get(..8)
+        .is_some_and(|p| p.eq_ignore_ascii_case("https://"))
+    {
         &url[8..]
-    } else if url.len() >= 7 && url[..7].eq_ignore_ascii_case("http://") {
+    } else if url
+        .get(..7)
+        .is_some_and(|p| p.eq_ignore_ascii_case("http://"))
+    {
         &url[7..]
     } else {
         url

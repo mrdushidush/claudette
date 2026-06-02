@@ -5,11 +5,13 @@ name: Release
 #   1. `verify`           — full test/clippy/fmt gate on the tagged commit.
 #   2. `tag-version-match`— guards against forgot-to-bump in release prep.
 #   3. `publish`          — `cargo publish` to crates.io via OIDC (no stored
-#                           token); `build-binaries` matrix produces prebuilt
-#                           archives for win/linux/macos in parallel.
-#   4. `release`          — once publish + every matrix leg is green, attach
-#                           all binary archives + their SHA256 sidecars to a
-#                           GitHub Release with auto-generated notes.
+#                           token); idempotent (already-published = success).
+#                           `build-binaries` matrix produces prebuilt archives
+#                           for win/linux/macos in parallel.
+#   4. `release`          — once every matrix leg is green (independent of the
+#                           crates.io publish), attach all binary archives +
+#                           their SHA256 sidecars to a GitHub Release with
+#                           auto-generated notes.
 #
 # One-time setup on crates.io (UI):
 #   1. Visit https://crates.io/crates/claudette/settings (logged in as
@@ -96,7 +98,25 @@ jobs:
       - name: Publish to crates.io
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        run: cargo publish --locked -p claudette
+        # Idempotent publish: if the version is already on crates.io (e.g. a
+        # manual `cargo publish` before tagging, or a workflow re-run), treat
+        # the "already exists/uploaded" error as success instead of failing the
+        # job. Previously this red X also skipped the `release` job via its
+        # `needs: [publish]`, silently shipping NO GitHub binaries for the tag
+        # (happened on v0.7.0 / v0.8.0 / v0.8.1). `release` is now decoupled
+        # too, but keep publish green when the crate is already up. (roast 2026-06-02)
+        run: |
+          set +e
+          out="$(cargo publish --locked -p claudette 2>&1)"
+          code=$?
+          echo "$out"
+          if [ $code -ne 0 ]; then
+            if echo "$out" | grep -qiE 'already (exists|uploaded)'; then
+              echo "::notice::version already on crates.io — treating as success (idempotent publish)"
+              exit 0
+            fi
+            exit $code
+          fi
 
   build-binaries:
     name: build ${{ matrix.target }}
@@ -178,7 +198,12 @@ jobs:
   release:
     name: GitHub Release (attach binaries)
     runs-on: ubuntu-latest
-    needs: [publish, build-binaries]
+    # Decoupled from `publish`: the GitHub Release (binaries + SHA256 sidecars)
+    # is independent of crates.io, so a publish hiccup must NOT skip it.
+    # `build-binaries` transitively requires `verify` + `tag-version-match`.
+    # (roast 2026-06-02 — was `needs: [publish, build-binaries]`, which dropped
+    # binaries for three consecutive tags when publish failed on already-exists.)
+    needs: [build-binaries]
     # Tag-push only — workflow_dispatch dry-runs stop after build-binaries
     # so the archives are inspectable via the workflow run's artifacts tab
     # without creating a GitHub Release.

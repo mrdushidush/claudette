@@ -32,7 +32,28 @@ pub fn default_memory_path() -> PathBuf {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".claudette").join("CLAUDETTE.MD")
+    let dir = PathBuf::from(home).join(".claudette");
+    let canonical = dir.join("CLAUDETTE.MD");
+    if canonical.exists() {
+        return canonical;
+    }
+    // Case-insensitive recovery: docs/prompt refer to the file as
+    // `CLAUDETTE.md`, and a user may have created any casing. On case-sensitive
+    // filesystems the exact-case path above misses it and silently drops the
+    // user's memory — and a later write would create a second, divergent file.
+    // Reuse an existing file under any casing for both read and write.
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case("CLAUDETTE.MD")
+            {
+                return entry.path();
+            }
+        }
+    }
+    canonical
 }
 
 /// Try to load the memory file from the default path. Returns `None` if the

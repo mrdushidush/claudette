@@ -44,7 +44,7 @@ cargo clippy --all-targets --no-deps -- -D warnings
 cargo test --lib --bins
 ```
 
-All must pass. Tests currently sit at **703 passing, 6 ignored** (4
+All must pass. The `--lib` suite has 1000+ tests plus 6 ignored (4
 POSIX-only hook tests, 2 live-recall smokes that need an LM Studio
 embedding server) — a PR that drops the pass count needs a
 justification in the description.

@@ -2138,7 +2138,10 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("write_file", WorkspaceWrite)
         .with_tool_requirement("generate_code", WorkspaceWrite)
         .with_tool_requirement("web_search", WorkspaceWrite)
-        .with_tool_requirement("web_fetch", WorkspaceWrite)
+        // web_fetch is network EGRESS to a model-supplied URL — the exfil sink
+        // in the prompt-injection chain (roast 2026-06-02 H2). Gated at
+        // DangerFullAccess so it prompts by default; CLAUDETTE_AUTO_APPROVE /
+        // forge Allow-mode still pass it through. See the Dangerous block below.
         .with_tool_requirement("open_in_editor", WorkspaceWrite)
         .with_tool_requirement("reveal_in_explorer", WorkspaceWrite)
         .with_tool_requirement("open_url", WorkspaceWrite)
@@ -2228,11 +2231,11 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         // tv_economic_calendar, and all vestige_* tools dropped.
         .with_tool_requirement("tv_get_quote", ReadOnly)
         // ── Sprint 10: telegram group ────────────────────────────────
-        // Sends: WorkspaceWrite (posts messages on the user's behalf but
-        // doesn't touch the filesystem). v0.6.0 decom: tg_get_updates
-        // dropped (prompt-injection footgun); tg_send_photo merged into
-        // tg_send via an optional `photo` arg.
-        .with_tool_requirement("tg_send", WorkspaceWrite)
+        // tg_send is network EGRESS (posts arbitrary text to an arbitrary
+        // chat) — a second exfil sink, so it's gated at DangerFullAccess in
+        // the Dangerous block below rather than auto-allowed. v0.6.0 decom:
+        // tg_get_updates dropped (prompt-injection footgun); tg_send_photo
+        // merged into tg_send via an optional `photo` arg.
         // ── Life Agent (v0.2.0): calendar group ──────────────────────
         // Reads: auto-allowed. Writes/RSVP: WorkspaceWrite. Delete is
         // irreversible from claudette's side, so DangerFullAccess.
@@ -2254,6 +2257,10 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("recall", ReadOnly)
         // ── Dangerous (ALWAYS prompts for [y/N] confirmation) ────��──
         .with_tool_requirement("bash", DangerFullAccess)
+        // Network egress to model-supplied destinations — prompt before each
+        // call so an injected instruction can't silently exfiltrate (H2).
+        .with_tool_requirement("web_fetch", DangerFullAccess)
+        .with_tool_requirement("tg_send", DangerFullAccess)
         .with_tool_requirement("edit_file", DangerFullAccess)
         .with_tool_requirement("git_add", DangerFullAccess)
         .with_tool_requirement("git_commit", DangerFullAccess)

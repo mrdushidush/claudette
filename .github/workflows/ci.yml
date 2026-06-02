@@ -54,17 +54,22 @@ jobs:
   audit:
     name: cargo audit (RustSec advisories)
     runs-on: ubuntu-latest
-    # rustsec/audit-check posts annotations as a check run, which needs
-    # checks:write. Default-deny at workflow level zeros everything not
-    # listed, so we must opt in here.
     permissions:
       contents: read
-      checks: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998  # v2.0.0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2.9.1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          key: cargo-audit
+      # Run cargo-audit directly instead of rustsec/audit-check: the latter is a
+      # Node 20 action (GitHub forces Node 20 actions off from 2026-06-16) and
+      # needs checks:write to post annotations. The CLI keeps the job
+      # self-contained and drops the extra permission. (roast 2026-06-02)
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Run cargo audit
+        run: cargo audit
 
   test:
     name: test (${{ matrix.os }})

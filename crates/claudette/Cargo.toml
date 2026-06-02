@@ -4,14 +4,18 @@ version = "0.8.5"
 edition = "2021"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
-description = "Local-first AI personal secretary for Ollama. Telegram bot, voice, persistent scheduler, Gmail and Calendar. Single-binary Rust."
+description = "Privacy-first, air-gapped AI coding agent and personal assistant that drives one local model (LM Studio or Ollama). Single-binary Rust CLI + TUI."
 readme = "../../README.md"
 repository = "https://github.com/mrdushidush/claudette"
 homepage = "https://github.com/mrdushidush/claudette"
-documentation = "https://github.com/mrdushidush/claudette#readme"
 authors = ["mrdushidush <mrdushidush@gmail.com>"]
-keywords = ["ollama", "llm", "assistant", "telegram", "cli"]
-categories = ["command-line-utilities"]
+keywords = ["coding-agent", "local-llm", "privacy", "tui", "ollama"]
+categories = ["command-line-utilities", "development-tools"]
+# Keep the published crate lean: the tests/ tree is benchmark-harness data
+# (run logs, results dirs, shell scripts, prompt fixtures) with no .rs targets,
+# so it's pure weight on crates.io. examples/*.md are doc walkthroughs that
+# live on GitHub. (roast 2026-06-02)
+exclude = ["tests/**", "examples/*.md"]
 
 [[bin]]
 name = "claudette"
@@ -20,6 +24,14 @@ path = "src/main.rs"
 [lib]
 name = "claudette"
 path = "src/lib.rs"
+
+[features]
+# Off-by-default scaffolds awaiting wiring: the SWE-bench / A-B benchmark
+# runner (`bench`) and the TUI typewriter renderer (`tui::typewriter`). Kept
+# in-tree for planned integration but excluded from the default build so they
+# don't bloat the shipped binary or the public API / docs.rs surface.
+# (roast 2026-06-02)
+experimental = []
 
 [dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json", "multipart"] }

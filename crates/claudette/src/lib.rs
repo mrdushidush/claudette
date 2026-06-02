@@ -36,6 +36,10 @@ pub mod usage;
 pub mod agents;
 pub mod antipatterns;
 pub mod api;
+// Off-by-default scaffold (SWE-bench / A-B benchmark runner) awaiting wiring —
+// kept in-tree behind the `experimental` feature so it doesn't bloat the
+// shipped binary or public API. (roast 2026-06-02)
+#[cfg(feature = "experimental")]
 pub mod bench;
 pub mod brain_selector;
 pub mod briefing;

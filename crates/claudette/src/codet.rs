@@ -1311,31 +1311,45 @@ fn fuzzy_find(haystack: &str, needle: &str) -> Option<(usize, usize)> {
     if needle_lines.is_empty() {
         return None;
     }
-    let haystack_lines: Vec<&str> = haystack.lines().collect();
+    // Build byte offsets for each line of the ORIGINAL haystack using
+    // `split_inclusive('\n')` so every entry carries its real terminator. The
+    // old `off += line.len() + 1` assumed a 1-byte '\n'; on CRLF files
+    // `lines()` strips a 2-byte "\r\n", so each line undercounted by one byte
+    // and the splice landed mid-line (silent corruption) or on a non-char
+    // boundary (panic, fatal under `panic="abort"`). Counting actual byte
+    // lengths is EOL-agnostic. (roast 2026-06-02 / issue #26 §B)
+    let haystack_lines: Vec<&str> = haystack.split_inclusive('\n').collect();
     let mut line_offsets: Vec<usize> = Vec::with_capacity(haystack_lines.len() + 1);
     let mut off = 0usize;
     for line in &haystack_lines {
         line_offsets.push(off);
-        off += line.len() + 1; // +1 for '\n'
+        off += line.len();
     }
     line_offsets.push(off);
 
-    for (i, _) in haystack_lines.iter().enumerate() {
+    for i in 0..haystack_lines.len() {
         if i + needle_lines.len() > haystack_lines.len() {
             break;
         }
-        let mut ok = true;
-        for (j, nline) in needle_lines.iter().enumerate() {
-            if haystack_lines[i + j].trim_end() != *nline {
-                ok = false;
-                break;
-            }
+        // `trim_end()` strips trailing whitespace AND the line terminator
+        // (\n / \r\n) that `split_inclusive` kept, matching the trimmed needle.
+        let matched = needle_lines
+            .iter()
+            .enumerate()
+            .all(|(j, nline)| haystack_lines[i + j].trim_end() == *nline);
+        if !matched {
+            continue;
         }
-        if ok {
-            let start = line_offsets[i];
-            let end = line_offsets[i + needle_lines.len()].saturating_sub(1);
-            return Some((start, end.min(haystack.len())));
-        }
+        let last = i + needle_lines.len() - 1;
+        let last_line = haystack_lines[last];
+        // Preserve the block's final line terminator in the remainder (the old
+        // code did this via `-1`, which left a stray '\r' on CRLF). Subtract
+        // the actual terminator width — 0 (EOF, no terminator), 1 (LF) or 2
+        // (CRLF).
+        let eol_len = last_line.len() - last_line.trim_end_matches(['\r', '\n']).len();
+        let start = line_offsets[i];
+        let end = (line_offsets[last] + last_line.len()).saturating_sub(eol_len);
+        return Some((start, end.min(haystack.len())));
     }
     None
 }
@@ -1655,5 +1669,31 @@ mod tests {
         }];
         let result = apply_patches(content, &patches).unwrap();
         assert!(result.contains("```'),"));
+    }
+
+    #[test]
+    fn apply_fuzzy_match_handles_crlf_without_corruption() {
+        // Regression (issue #26 §B): on a CRLF haystack the old byte-offset
+        // math (`+1` for a 1-byte '\n') drifted, splicing the replacement into
+        // the wrong place and duplicating the closing line. The search block
+        // uses LF so the exact-match path is skipped and the fuzzy path runs.
+        let content = "fn a() {\r\n    let x = 1;\r\n}\r\n";
+        let patches = vec![Patch {
+            search: "fn a() {\n    let x = 1;\n}".to_string(),
+            replace: "fn a() {\r\n    let y = 2;\r\n}".to_string(),
+        }];
+        let result = apply_patches(content, &patches).unwrap();
+        assert_eq!(result, "fn a() {\r\n    let y = 2;\r\n}\r\n");
+    }
+
+    #[test]
+    fn fuzzy_find_crlf_offsets_stay_on_char_boundary() {
+        // A multibyte glyph before the match would land `end` on a non-char
+        // boundary under the old math → panic (fatal with panic="abort").
+        let haystack = "let s = \"héllo\";\r\nTARGET\r\nlet z = 9;\r\n";
+        let (start, end) = fuzzy_find(haystack, "TARGET").unwrap();
+        assert!(haystack.is_char_boundary(start));
+        assert!(haystack.is_char_boundary(end));
+        assert_eq!(&haystack[start..end], "TARGET");
     }
 }

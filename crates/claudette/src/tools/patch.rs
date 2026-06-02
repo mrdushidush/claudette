@@ -323,10 +323,19 @@ fn apply_hunks(original: &str, hunks: &[Hunk]) -> Result<(String, Vec<Value>), S
         }));
     }
 
+    // Preserve the file's dominant line ending. `original.lines()` above
+    // stripped every '\r', so re-joining with bare "\n" silently rewrote a
+    // CRLF file (Windows default) to LF — one tiny patch produced a whole-file
+    // diff. Re-encode with the EOL the file actually uses. (roast 2026-06-02)
+    let eol = if original.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
     let trailing_newline = original.ends_with('\n');
-    let mut out = lines.join("\n");
+    let mut out = lines.join(eol);
     if trailing_newline {
-        out.push('\n');
+        out.push_str(eol);
     }
     Ok((out, summary))
 }
@@ -406,6 +415,22 @@ mod tests {
         assert_eq!(summary.len(), 1);
         assert_eq!(summary[0]["removed"], 1);
         assert_eq!(summary[0]["added"], 1);
+    }
+
+    #[test]
+    fn apply_hunks_preserves_crlf_line_endings() {
+        // Regression (roast 2026-06-02): apply_hunks rewrote CRLF files to LF,
+        // turning a one-line patch into a whole-file diff on Windows.
+        let original = "alpha\r\nbeta\r\ngamma\r\n";
+        let hunk = Hunk {
+            old_start: 2,
+            old_lines: vec!["beta".to_string()],
+            new_lines: vec!["BETA".to_string()],
+        };
+        let (out, _) = apply_hunks(original, &[hunk]).unwrap();
+        assert_eq!(out, "alpha\r\nBETA\r\ngamma\r\n");
+        // No bare LF survived the round-trip.
+        assert_eq!(out.matches('\n').count(), out.matches("\r\n").count());
     }
 
     #[test]

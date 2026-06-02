@@ -711,6 +711,13 @@ pub(super) fn validate_read_path_with(
         ));
     }
 
+    // Credential denylist: refuse secret stores / private keys even though
+    // they sit under $HOME. Checked lexically here and on the canonical path
+    // below so a symlink can't smuggle a secret past it.
+    if let Some(reason) = sensitive_read_denial(&resolved, &roots.home) {
+        return Err(reason);
+    }
+
     // Symlink-escape defence: if the target exists, canonicalise it and
     // re-check against canonicalised allowed roots. Skipped for paths that
     // don't exist yet (there's no symlink to follow).
@@ -721,6 +728,11 @@ pub(super) fn validate_read_path_with(
                 resolved.display(),
                 canonical.display()
             ));
+        }
+        let home_canonical =
+            std::fs::canonicalize(&roots.home).unwrap_or_else(|_| roots.home.clone());
+        if let Some(reason) = sensitive_read_denial(&canonical, &home_canonical) {
+            return Err(reason);
         }
     }
 
@@ -776,6 +788,73 @@ pub(super) fn path_under_workspace(path: &Path) -> bool {
     }
     let p = normalize_path(path);
     roots.iter().any(|r| p.starts_with(normalize_path(r)))
+}
+
+/// Refuse to surface credential stores / private keys to the read tools
+/// (`read_file`, `list_dir`), even though they live under `$HOME` (otherwise
+/// readable). This is the mechanical backstop for the prompt-injection →
+/// secret-read → network-egress chain (roast 2026-06-02 H1): the soft "never
+/// read secrets" system-prompt line can't bind a weak local model, so the
+/// policy refuses here regardless of what the model is talked into asking for.
+///
+/// `home` is the (possibly canonicalised) home root `path` is being checked
+/// against. Returns the denial reason when `path` is sensitive, else `None`.
+/// Opt out wholesale with `CLAUDETTE_ALLOW_SECRET_READS=1`.
+fn sensitive_read_denial(path: &Path, home: &Path) -> Option<String> {
+    if std::env::var("CLAUDETTE_ALLOW_SECRET_READS").as_deref() == Ok("1") {
+        return None;
+    }
+
+    // Credential directories — the entire subtree is off-limits.
+    let denied_dirs: [&[&str]; 5] = [
+        &[".ssh"],
+        &[".aws"],
+        &[".gnupg"],
+        &[".config", "gcloud"],
+        &[".claudette", "secrets"],
+    ];
+    for parts in denied_dirs {
+        let mut dir = home.to_path_buf();
+        for p in parts {
+            dir.push(p);
+        }
+        if path.starts_with(&dir) {
+            return Some(format!(
+                "read blocked: {} is a credential store and is off-limits to the \
+                 model. Set CLAUDETTE_ALLOW_SECRET_READS=1 to override.",
+                dir.display()
+            ));
+        }
+    }
+
+    // Files claudette itself stores secrets in.
+    if path == home.join(".claudette").join(".env") || path == home.join(".netrc") {
+        return Some(
+            "read blocked: that file holds credentials and is off-limits to the \
+             model. Set CLAUDETTE_ALLOW_SECRET_READS=1 to override."
+                .to_string(),
+        );
+    }
+
+    // Private-key / credential file shapes by name + extension.
+    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+        let lower = name.to_ascii_lowercase();
+        const DENIED_NAMES: &[&str] = &["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"];
+        const DENIED_EXTS: &[&str] = &[
+            "pem", "key", "p12", "pfx", "pkcs12", "keystore", "jks", "token",
+        ];
+        let ext_blocked = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| DENIED_EXTS.contains(&e.to_ascii_lowercase().as_str()));
+        if DENIED_NAMES.contains(&lower.as_str()) || ext_blocked {
+            return Some(format!(
+                "read blocked: '{name}' looks like a private key / credential and is \
+                 off-limits to the model. Set CLAUDETTE_ALLOW_SECRET_READS=1 to override."
+            ));
+        }
+    }
+    None
 }
 
 /// The process CWD when it is itself under a `CLAUDETTE_WORKSPACE` root, else
@@ -1255,6 +1334,41 @@ mod tests {
         let target = home.join("some-doc.txt");
         let result = validate_read_path(target.to_str().unwrap());
         assert!(result.is_ok(), "expected ok, got {result:?}");
+    }
+
+    #[test]
+    fn validate_read_path_blocks_credential_stores() {
+        // roast 2026-06-02 H1: secret stores under $HOME are off-limits to the
+        // read tools so a prompt-injected model can't read keys to exfil them.
+        let _guard = crate::test_env_lock();
+        let prev = std::env::var("CLAUDETTE_ALLOW_SECRET_READS").ok();
+        std::env::remove_var("CLAUDETTE_ALLOW_SECRET_READS");
+        let home = user_home();
+
+        let ssh_key = home.join(".ssh").join("id_rsa");
+        assert!(
+            validate_read_path(ssh_key.to_str().unwrap())
+                .unwrap_err()
+                .contains("blocked"),
+            "~/.ssh/id_rsa should be blocked"
+        );
+        assert!(
+            validate_read_path(home.join(".aws").join("credentials").to_str().unwrap()).is_err(),
+            "~/.aws/credentials should be blocked"
+        );
+        assert!(
+            validate_read_path(home.join("certs").join("server.pem").to_str().unwrap()).is_err(),
+            "*.pem should be blocked"
+        );
+
+        // The escape hatch re-opens reads for the rare legitimate case.
+        std::env::set_var("CLAUDETTE_ALLOW_SECRET_READS", "1");
+        assert!(validate_read_path(ssh_key.to_str().unwrap()).is_ok());
+
+        std::env::remove_var("CLAUDETTE_ALLOW_SECRET_READS");
+        if let Some(v) = prev {
+            std::env::set_var("CLAUDETTE_ALLOW_SECRET_READS", v);
+        }
     }
 
     #[test]
