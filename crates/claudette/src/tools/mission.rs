@@ -414,13 +414,21 @@ fn run_mission_submit(input: &str) -> Result<String, String> {
         format!("mission_submit: malformed repo identifier `{repo}` (expected owner/repo)")
     })?;
 
-    // 1. Confirm there's something to commit. `git status --porcelain` is
-    //    empty iff working tree + index are clean, in which case we should
-    //    refuse rather than push an empty branch.
+    // 1. Confirm there's something to ship. The Coder is instructed to COMMIT
+    //    its work (the Verifier diffs `base..HEAD`), so a clean working tree is
+    //    the EXPECTED state at submit time — it means the change is already
+    //    committed, not that nothing was done. Refuse only when the tree is
+    //    clean AND the branch has no commits beyond the upstream default
+    //    (genuinely nothing to push). Previously any clean tree was refused,
+    //    making the brownfield happy-path unsatisfiable: commit (as required)
+    //    → clean tree → refused → no PR. (issue #23 / roast 2026-06-02)
     let porcelain = git_in(&mission.path, &["status", "--porcelain"], GIT_TIMEOUT_SECS)?;
-    if porcelain.trim().is_empty() {
+    let tree_dirty = !porcelain.trim().is_empty();
+    let has_commits_to_push = head_ahead_of_default(&mission.path);
+    if !tree_dirty && !has_commits_to_push {
         return Err(
-            "mission_submit: working tree clean — nothing to commit. Edit some files first."
+            "mission_submit: nothing to submit — the working tree is clean and the branch \
+             has no new commits over the base. Make (and commit) a change first."
                 .to_string(),
         );
     }
@@ -450,12 +458,17 @@ fn run_mission_submit(input: &str) -> Result<String, String> {
     //    a stray `secrets.env` — into the commit and the PR. For ephemeral
     //    missions stage only tracked modifications (`-u`); the Coder is told
     //    to `git_add` any new files it deliberately created during the loop.
-    let add_args: &[&str] = if mission.ephemeral {
-        &["add", "-u"]
-    } else {
-        &["add", "-A"]
-    };
-    git_in(&mission.path, add_args, GIT_TIMEOUT_SECS)?;
+    // Stage + commit only when the tree has uncommitted work. When it's clean
+    // the Coder already committed (the common brownfield path), so we skip
+    // straight to pushing the existing commits. (issue #23)
+    if tree_dirty {
+        let add_args: &[&str] = if mission.ephemeral {
+            &["add", "-u"]
+        } else {
+            &["add", "-A"]
+        };
+        git_in(&mission.path, add_args, GIT_TIMEOUT_SECS)?;
+    }
 
     // 4. Build the commit message: title, blank line, body, and a "Fixes #N"
     //    trailer if requested. The same string is reused as the PR body so
@@ -468,16 +481,18 @@ fn run_mission_submit(input: &str) -> Result<String, String> {
         }
         let _ = write!(body_full, "Fixes #{num}");
     }
-    let commit_msg = if body_full.is_empty() {
-        title.to_string()
-    } else {
-        format!("{title}\n\n{body_full}")
-    };
-    git_in(
-        &mission.path,
-        &["commit", "-m", &commit_msg],
-        GIT_TIMEOUT_SECS,
-    )?;
+    if tree_dirty {
+        let commit_msg = if body_full.is_empty() {
+            title.to_string()
+        } else {
+            format!("{title}\n\n{body_full}")
+        };
+        git_in(
+            &mission.path,
+            &["commit", "-m", &commit_msg],
+            GIT_TIMEOUT_SECS,
+        )?;
+    }
 
     // 5. Push -u origin <branch>. If the user lacks push access this errors
     //    with whatever git printed; the brain reads the error and can
@@ -575,6 +590,24 @@ fn current_branch_in(cwd: &std::path::Path) -> Result<String, String> {
         GIT_TIMEOUT_SECS,
     )?;
     Ok(out.trim().to_string())
+}
+
+/// True when HEAD has at least one commit beyond the upstream default branch
+/// (`origin/HEAD` → `origin/main` → `origin/master`, first that resolves).
+/// Lets `mission_submit` accept an already-committed (clean) tree instead of
+/// refusing it (issue #23). If no base ref resolves we assume there may be
+/// commits and return `true` rather than over-refuse a legitimate submit —
+/// the subsequent push surfaces any real "nothing to push" error from git.
+fn head_ahead_of_default(cwd: &std::path::Path) -> bool {
+    for base in ["origin/HEAD", "origin/main", "origin/master"] {
+        let spec = format!("{base}..HEAD");
+        if let Ok(out) = git_in(cwd, &["rev-list", "--count", &spec], GIT_TIMEOUT_SECS) {
+            if let Ok(n) = out.trim().parse::<u64>() {
+                return n > 0;
+            }
+        }
+    }
+    true
 }
 
 // ─── tests ───────────────────────────────────────────────────────────────
@@ -712,6 +745,44 @@ mod tests {
         }
         let err = run_mission_submit(r#"{"title":"x"}"#).unwrap_err();
         assert!(err.contains("no active mission"), "got: {err}");
+    }
+
+    #[test]
+    fn head_ahead_of_default_accepts_committed_clean_tree() {
+        // issue #23: the brownfield Coder COMMITS its work, so at submit time
+        // the tree is clean. mission_submit must still ship it — proven here by
+        // head_ahead_of_default detecting the commit over the base.
+        let dir = std::env::temp_dir().join(format!(
+            "claudette-mission-ahead-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let g = |args: &[&str]| git_in(&dir, args, GIT_TIMEOUT_SECS).unwrap();
+        g(&["init", "-q", "-b", "main"]);
+        g(&["config", "user.email", "t@example.com"]);
+        g(&["config", "user.name", "Test"]);
+        std::fs::write(dir.join("seed.txt"), "seed\n").unwrap();
+        g(&["add", "seed.txt"]);
+        g(&["commit", "-q", "-m", "seed"]);
+        // Simulate the cloned base: origin/main pinned at the seed commit.
+        g(&["update-ref", "refs/remotes/origin/main", "HEAD"]);
+
+        // Clean tree, no commits beyond base → genuinely nothing to submit.
+        assert!(!head_ahead_of_default(&dir));
+
+        // Coder commits its change; tree is clean but a commit is now ahead.
+        std::fs::write(dir.join("feature.txt"), "work\n").unwrap();
+        g(&["add", "feature.txt"]);
+        g(&["commit", "-q", "-m", "feature"]);
+        assert!(
+            head_ahead_of_default(&dir),
+            "a committed-but-clean tree must be detected as submittable (issue #23)"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
