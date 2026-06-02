@@ -706,6 +706,35 @@ fn run_briefing_setup(time: Option<&str>, days: Option<&str>) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // `parse_args` reads CLAUDETTE_TELEGRAM_CHAT, so the test that SETS it and
+    // every test that asserts the default (unset) chat behaviour must serialise
+    // on this lock — otherwise they race in the shared `--bins` test process and
+    // a reader sees the setter's "ANY" (observed as a flaky CI failure of
+    // `parse_args_telegram_with_chat`). This binary crate can't reach the lib's
+    // `test_env_lock`, so it keeps its own.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// `parse_args` with CLAUDETTE_TELEGRAM_CHAT pinned UNSET, under the env
+    /// lock, restoring the previous value afterwards. Use for any test that
+    /// asserts chat-allowlist / accept-all defaults.
+    fn parse_args_clean(args: &[String]) -> CliArgs {
+        let _g = lock_env();
+        let prev = std::env::var("CLAUDETTE_TELEGRAM_CHAT").ok();
+        std::env::remove_var("CLAUDETTE_TELEGRAM_CHAT");
+        let out = parse_args(args);
+        if let Some(v) = prev {
+            std::env::set_var("CLAUDETTE_TELEGRAM_CHAT", v);
+        }
+        out
+    }
 
     #[test]
     fn parse_args_no_flags() {
@@ -752,7 +781,7 @@ mod tests {
 
     #[test]
     fn parse_args_telegram_with_chat() {
-        let a = parse_args(&[
+        let a = parse_args_clean(&[
             "--telegram".into(),
             "--resume".into(),
             "--chat".into(),
@@ -770,7 +799,7 @@ mod tests {
         // numeric chat ID. Bot refuses to start without either an
         // explicit allowlist or this flag, so the default-deny posture
         // depends on `any` being parsed correctly.
-        let a = parse_args(&["--telegram".into(), "--chat".into(), "any".into()]);
+        let a = parse_args_clean(&["--telegram".into(), "--chat".into(), "any".into()]);
         assert!(a.telegram);
         assert!(a.allow_any_chat);
         assert!(a.chat_ids.is_empty());
@@ -778,15 +807,16 @@ mod tests {
 
     #[test]
     fn parse_args_chat_any_case_insensitive() {
-        let a = parse_args(&["--telegram".into(), "--chat".into(), "ANY".into()]);
+        let a = parse_args_clean(&["--telegram".into(), "--chat".into(), "ANY".into()]);
         assert!(a.allow_any_chat);
     }
 
     #[test]
     fn parse_args_chat_env_any_sets_accept_all() {
-        // CLAUDETTE_TELEGRAM_CHAT also accepts the "any" sentinel. Set
-        // and restore around the test to stay polite with parallel runs
-        // (other tests don't touch this var).
+        // CLAUDETTE_TELEGRAM_CHAT also accepts the "any" sentinel. Hold the env
+        // lock across set→parse→restore so a concurrent reader (e.g.
+        // parse_args_telegram_with_chat) can't observe the "ANY" mid-flight.
+        let _g = lock_env();
         let prev = std::env::var("CLAUDETTE_TELEGRAM_CHAT").ok();
         std::env::set_var("CLAUDETTE_TELEGRAM_CHAT", "ANY");
         let a = parse_args(&["--telegram".into()]);
