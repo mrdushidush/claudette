@@ -72,7 +72,7 @@ getrandom = "0.4"
 # don't need a system sqlite — same trade-off as keeping the whole CLI a
 # single-binary install. No `chrono`/`serde` features pulled — the only
 # columns we round-trip are TEXT (timestamp+role+snippet) and BLOB (vec).
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 [lints.rust]
 unsafe_code = "forbid"
