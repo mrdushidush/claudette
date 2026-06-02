@@ -101,7 +101,13 @@ pub fn scan_diff(diff: &str) -> Vec<Finding> {
             continue;
         }
         let snippet: String = added.trim().chars().take(160).collect();
-        for (severity, rule, message) in classify(added) {
+        // Classify with trailing comments dropped (issue #28): a sink named only
+        // in a comment/docstring must not flag, or a PR that merely *documents*
+        // how to avoid a vuln is hard-rejected, training the Coder to delete
+        // accurate docs. String-literal handling happens per-rule inside
+        // classify (code-construct rules ignore strings; value rules don't).
+        let scanned = strip_comments(added);
+        for (severity, rule, message) in classify(&scanned) {
             out.push(Finding {
                 severity,
                 rule,
@@ -194,6 +200,103 @@ pub fn findings_feedback(findings: &[Finding]) -> String {
     s
 }
 
+/// Drop a trailing line comment from a single source line, preserving string
+/// literals (issue #28). A conservative single-line lexer tracks `'`/`"`/`` ` ``
+/// quoting so a `//` or `#` *inside* a string (a URL, a hash color) isn't
+/// mistaken for a comment. `#` is treated as a comment start only when followed
+/// by whitespace/end-of-line, so JS private fields (`this.#x`) and Rust
+/// attributes (`#[derive]`) aren't truncated. Comments never carry a real
+/// finding, so stripping them kills the "PR documents how to avoid a vuln →
+/// hard-rejected" false positive without weakening any detection.
+fn strip_comments(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    let mut quote: Option<char> = None;
+    while let Some(c) = chars.next() {
+        match quote {
+            Some(q) => {
+                out.push(c);
+                if c == '\\' {
+                    if let Some(n) = chars.next() {
+                        out.push(n); // escaped char stays inside the string
+                    }
+                } else if c == q {
+                    quote = None;
+                }
+            }
+            None => {
+                if c == '#' && chars.peek().is_none_or(|n| n.is_whitespace()) {
+                    break; // Python / shell / YAML line comment
+                }
+                if c == '/' && chars.peek() == Some(&'/') {
+                    break; // C / JS / Rust / Go line comment
+                }
+                if c == '"' || c == '\'' || c == '`' {
+                    quote = Some(c);
+                }
+                out.push(c);
+            }
+        }
+    }
+    out
+}
+
+/// Blank out the *contents* of string literals (keeping the surrounding quotes),
+/// producing a "code-only" view. Used only by the code-construct rules (issue
+/// #28): a sink token like `os.system(`, `eval(`, or `.innerHTML =` inside a
+/// string literal is prose/logging, never an executable sink, so those rules
+/// scan this view; value-based rules (secrets, SQL, hash algorithm names,
+/// `javascript:` URLs — all of which legitimately live in strings) keep scanning
+/// the raw (comment-stripped) line.
+fn blank_strings(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    let mut quote: Option<char> = None;
+    while let Some(c) = chars.next() {
+        match quote {
+            Some(q) => {
+                if c == '\\' {
+                    out.push(' ');
+                    if chars.next().is_some() {
+                        out.push(' ');
+                    }
+                } else if c == q {
+                    quote = None;
+                    out.push(c);
+                } else {
+                    out.push(' ');
+                }
+            }
+            None => {
+                if c == '"' || c == '\'' || c == '`' {
+                    quote = Some(c);
+                }
+                out.push(c);
+            }
+        }
+    }
+    out
+}
+
+/// True for a `javascript:` URL protocol (script execution), distinguished from
+/// prose such as a book title "JavaScript: The Good Parts" — a real protocol URL
+/// has no whitespace after the colon, prose does (issue #28).
+fn javascript_url(lower: &str) -> bool {
+    let mut from = 0;
+    while let Some(rel) = lower[from..].find("javascript:") {
+        let after = from + rel + "javascript:".len();
+        if lower[after..]
+            .chars()
+            .next()
+            .is_some_and(|c| !c.is_whitespace())
+        {
+            return true;
+        }
+        from = after;
+    }
+    false
+}
+
 /// Apply every rule to a single added line. Returns `(severity, rule, message)`
 /// for each match. Case-sensitive where the construct is (JS APIs), with a
 /// lowercased copy for keyword checks.
@@ -201,38 +304,45 @@ fn classify(line: &str) -> Vec<(Severity, &'static str, &'static str)> {
     use Severity::{High, Medium};
     let l = line;
     let lower = line.to_ascii_lowercase();
+    // Code-only view (string-literal contents blanked) for rules whose sink is
+    // an executable construct — a mention of it inside a string is prose/logging,
+    // never a real sink (issue #28). Value-based rules (secrets, SQL, hash
+    // names, `javascript:` URLs) keep scanning `l`/`lower`, where their signal
+    // legitimately lives inside strings.
+    let code = blank_strings(l);
+    let code_lower = code.to_ascii_lowercase();
     let mut v = Vec::new();
 
     // ── XSS sinks (JS / HTML / React) ──────────────────────────────────
-    if innerhtml_assignment(l) {
+    if innerhtml_assignment(&code) {
         v.push((
             High,
             "xss-innerhtml",
             "assignment to innerHTML/outerHTML injects unescaped HTML (XSS); use textContent or sanitize",
         ));
     }
-    if l.contains("insertAdjacentHTML(") {
+    if code.contains("insertAdjacentHTML(") {
         v.push((
             High,
             "xss-insertadjacenthtml",
             "insertAdjacentHTML renders raw HTML (XSS); sanitize the input first",
         ));
     }
-    if l.contains("document.write(") {
+    if code.contains("document.write(") {
         v.push((
             High,
             "xss-document-write",
             "document.write() with dynamic content is an XSS sink",
         ));
     }
-    if l.contains("dangerouslySetInnerHTML") {
+    if code.contains("dangerouslySetInnerHTML") {
         v.push((
             High,
             "xss-dangerously-set-inner-html",
             "dangerouslySetInnerHTML bypasses React escaping (XSS); sanitize first",
         ));
     }
-    if lower.contains("javascript:") {
+    if javascript_url(&lower) {
         v.push((
             High,
             "xss-javascript-url",
@@ -241,28 +351,28 @@ fn classify(line: &str) -> Vec<(Severity, &'static str, &'static str)> {
     }
 
     // ── Arbitrary code execution ───────────────────────────────────────
-    if has_call(l, "eval") {
+    if has_call(&code, "eval") {
         v.push((
             High,
             "code-eval",
             "eval() executes arbitrary code; avoid it or use a real parser",
         ));
     }
-    if l.contains("new Function(") {
+    if code.contains("new Function(") {
         v.push((
             High,
             "code-new-function",
             "new Function() compiles arbitrary code like eval()",
         ));
     }
-    if l.contains("setTimeout(") && first_arg_is_string(l, "setTimeout(") {
+    if code.contains("setTimeout(") && first_arg_is_string(&code, "setTimeout(") {
         v.push((
             Medium,
             "code-settimeout-string",
             "string argument to setTimeout is evaluated like eval()",
         ));
     }
-    if l.contains("setInterval(") && first_arg_is_string(l, "setInterval(") {
+    if code.contains("setInterval(") && first_arg_is_string(&code, "setInterval(") {
         v.push((
             Medium,
             "code-setinterval-string",
@@ -271,28 +381,28 @@ fn classify(line: &str) -> Vec<(Severity, &'static str, &'static str)> {
     }
 
     // ── Shell / deserialization (Python & friends) ─────────────────────
-    if lower.contains("shell=true") {
+    if code_lower.contains("shell=true") {
         v.push((
             High,
             "shell-injection",
             "subprocess with shell=True enables command injection; pass an argv list",
         ));
     }
-    if l.contains("os.system(") {
+    if code.contains("os.system(") {
         v.push((
             High,
             "shell-os-system",
             "os.system() runs a shell; use subprocess with an argv list",
         ));
     }
-    if l.contains("pickle.loads(") || l.contains("pickle.load(") {
+    if code.contains("pickle.loads(") || code.contains("pickle.load(") {
         v.push((
             High,
             "insecure-deserialization",
             "pickle deserialization executes arbitrary code on untrusted input",
         ));
     }
-    if l.contains("yaml.load(") && !l.contains("Loader") {
+    if code.contains("yaml.load(") && !code.contains("Loader") {
         v.push((
             Medium,
             "insecure-yaml",
@@ -301,7 +411,7 @@ fn classify(line: &str) -> Vec<(Severity, &'static str, &'static str)> {
     }
 
     // ── Command exec (Node) ────────────────────────────────────────────
-    if l.contains("child_process") && (l.contains("exec(") || l.contains("execSync(")) {
+    if code.contains("child_process") && (code.contains("exec(") || code.contains("execSync(")) {
         v.push((
             Medium,
             "command-exec",
@@ -338,14 +448,14 @@ fn classify(line: &str) -> Vec<(Severity, &'static str, &'static str)> {
     // `exec(` as a bare call is Python/PHP code execution. `something.exec(`
     // (JS regex / child_process) is excluded by `has_call` (it rejects a
     // leading `.`), and Go's `exec.Command(` has no `exec(` token.
-    if has_call(l, "exec") {
+    if has_call(&code, "exec") {
         v.push((
             High,
             "code-exec",
             "exec() runs arbitrary code from a string; avoid dynamic execution",
         ));
     }
-    if l.contains("__import__(") {
+    if code.contains("__import__(") {
         v.push((
             Medium,
             "dynamic-import",
@@ -354,7 +464,7 @@ fn classify(line: &str) -> Vec<(Severity, &'static str, &'static str)> {
     }
 
     // ── Server-side template injection (Flask/Jinja) ───────────────────
-    if l.contains("render_template_string(") {
+    if code.contains("render_template_string(") {
         v.push((
             High,
             "ssti",
@@ -745,6 +855,48 @@ mod tests {
         assert!(rules(&f).contains(&"xss-innerhtml"));
         assert_eq!(f[0].severity, Severity::High);
         assert_eq!(f[0].file, "src/app.js");
+    }
+
+    #[test]
+    fn does_not_flag_sinks_mentioned_in_comments_or_strings() {
+        // issue #28: the three reproduced false positives. A sink named only in
+        // a comment, docstring, log, or string literal must NOT gate the PR.
+        let cases = [
+            "// never do el.innerHTML = userInput; use textContent",
+            "const msg = \"do not call os.system() in prod\";",
+            "const title = \"JavaScript: The Good Parts\";",
+            "# os.system() is dangerous — we use subprocess.run([...]) instead",
+            "log.warn(\"refusing eval() of user input\")",
+        ];
+        for line in cases {
+            let f = scan_diff(&diff(&[line], "src/app.js"));
+            assert!(
+                f.is_empty(),
+                "comment/string mention must not flag: {line:?} → {:?}",
+                rules(&f)
+            );
+        }
+    }
+
+    #[test]
+    fn still_flags_real_sinks_after_strip() {
+        // The strip must not hide genuine sinks (code outside comments/strings).
+        let f = scan_diff(&diff(
+            &["  document.getElementById('x').innerHTML = data;"],
+            "src/app.js",
+        ));
+        assert!(
+            rules(&f).contains(&"xss-innerhtml"),
+            "real innerHTML sink must still flag: {:?}",
+            rules(&f)
+        );
+        // os.system as a real call still flags even with a trailing comment.
+        let f2 = scan_diff(&diff(&["  os.system(cmd)  # run it"], "src/run.py"));
+        assert!(
+            rules(&f2).contains(&"shell-os-system"),
+            "real os.system call must still flag: {:?}",
+            rules(&f2)
+        );
     }
 
     #[test]

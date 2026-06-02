@@ -871,16 +871,66 @@ pub(super) fn workspace_cwd() -> Option<PathBuf> {
     }
 }
 
+/// Canonicalise the deepest existing ancestor of `path`. Write targets often
+/// don't exist yet (creating a new file), so we can't canonicalise the leaf —
+/// we resolve the closest parent that *does* exist, which is enough to detect a
+/// symlinked component redirecting the write outside the sandbox. `None` only
+/// if no ancestor exists at all.
+fn canonical_existing_ancestor(path: &Path) -> Option<PathBuf> {
+    let mut cur: Option<&Path> = Some(path);
+    while let Some(p) = cur {
+        if let Ok(c) = std::fs::canonicalize(p) {
+            return Some(c);
+        }
+        cur = p.parent();
+    }
+    None
+}
+
+/// Symlink-escape defence for the WRITE/EDIT sandbox, mirroring the
+/// canonicalise pass [`validate_read_path`] already does (roast 2026-05-31 /
+/// issue #25 §B). A purely lexical `starts_with` check is fooled by a symlinked
+/// component — `~/.claudette/files/x -> /etc`, or a `docs -> /etc` /
+/// `target -> ~/.ssh` symlink committed inside a cloned (untrusted) forge
+/// mission tree. We canonicalise the deepest existing ancestor of both the
+/// target and the matched root and require one to contain the other. A
+/// brand-new file with no existing component to follow passes (no symlink yet),
+/// and a sandbox subtree that hasn't been created is handled by the second
+/// containment direction — but a symlinked component, which must *exist* for
+/// canonicalize to follow it, resolves outside and is rejected.
+fn reject_write_symlink_escape(resolved: &Path, roots: &[PathBuf]) -> Result<(), String> {
+    let Some(target_canon) = canonical_existing_ancestor(resolved) else {
+        return Ok(());
+    };
+    let safe = roots.iter().any(|r| {
+        let root_canon = canonical_existing_ancestor(r).unwrap_or_else(|| normalize_path(r));
+        target_canon.starts_with(&root_canon) || root_canon.starts_with(&target_canon)
+    });
+    if safe {
+        Ok(())
+    } else {
+        Err(format!(
+            "write path resolves via a symlink outside the sandbox: {} → {}",
+            resolved.display(),
+            target_canon.display()
+        ))
+    }
+}
+
 /// Validate a write path. Allowed roots:
 /// 1. `~/.claudette/files/` (scratch) — always.
 /// 2. The active mission tree, when a brownfield/forge mission is attached.
 /// 3. Any explicit `CLAUDETTE_WORKSPACE` root, when no mission is active —
 ///    the daily-driver case (create/edit files in the project the user
 ///    pointed claudette at). Never the full `$HOME` read envelope.
+///
+/// Every allow-site also passes through [`reject_write_symlink_escape`] so a
+/// symlinked component can't redirect the write outside the matched root.
 pub(super) fn validate_write_path(input: &str) -> Result<PathBuf, String> {
     let resolved = resolve_input_path(input)?;
     let scratch = normalize_path(&files_dir());
     if resolved.starts_with(&scratch) {
+        reject_write_symlink_escape(&resolved, std::slice::from_ref(&scratch))?;
         return Ok(resolved);
     }
     // T2: while a brownfield mission is active the write sandbox auto-
@@ -891,6 +941,7 @@ pub(super) fn validate_write_path(input: &str) -> Result<PathBuf, String> {
     if let Some(mission) = crate::missions::active_mission() {
         let mission_root = normalize_path(&mission.path);
         if resolved.starts_with(&mission_root) {
+            reject_write_symlink_escape(&resolved, std::slice::from_ref(&mission_root))?;
             return Ok(resolved);
         }
         return Err(format!(
@@ -904,6 +955,7 @@ pub(super) fn validate_write_path(input: &str) -> Result<PathBuf, String> {
     // edits). This mirrors validate_edit_path's no-mission fallback, but
     // scoped to the explicit CLAUDETTE_WORKSPACE roots only.
     if path_under_workspace(&resolved) {
+        reject_write_symlink_escape(&resolved, &parse_workspace_env())?;
         return Ok(resolved);
     }
     Err(format!(
@@ -1542,6 +1594,63 @@ mod tests {
         assert!(
             result.unwrap_err().contains("via symlink"),
             "wrong error: expected 'via symlink'"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_write_path_rejects_symlink_escape() {
+        // ~/.claudette/files/wtrap → /etc passes the lexical starts_with(scratch)
+        // check but canonicalises outside the sandbox → must be rejected, or
+        // fs::write would follow the symlink and write to /etc (issue #25 §B).
+        use std::os::unix::fs::symlink;
+        let scratch = files_dir();
+        std::fs::create_dir_all(&scratch).expect("create scratch dir");
+        let link = scratch.join("wtrap_symlink_test");
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_dir_all(&link);
+        symlink("/etc", &link).expect("create symlink");
+
+        // Attempt a write *through* the symlinked directory.
+        let target = link.join("evil.txt");
+        let result = validate_write_path(target.to_str().unwrap());
+
+        let _ = std::fs::remove_file(&link);
+
+        assert!(result.is_err(), "expected reject, got {result:?}");
+        assert!(
+            result.unwrap_err().contains("symlink"),
+            "wrong error: expected 'symlink'"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn validate_write_path_rejects_symlink_escape_windows() {
+        // Same defence on the actual ship platform (issue #25 §C — the only
+        // symlink test was `#[cfg(unix)]`). Creating a directory symlink on
+        // Windows needs privilege / Developer Mode; if we can't create one,
+        // skip rather than fail CI on an unprivileged runner.
+        use std::os::windows::fs::symlink_dir;
+        let scratch = files_dir();
+        std::fs::create_dir_all(&scratch).expect("create scratch dir");
+        let link = scratch.join("wtrap_symlink_test_win");
+        let _ = std::fs::remove_dir_all(&link);
+        let _ = std::fs::remove_file(&link);
+        // C:\Windows always exists and is outside the sandbox.
+        if symlink_dir("C:\\Windows", &link).is_err() {
+            return; // no symlink privilege here — skip
+        }
+
+        let target = link.join("evil.txt");
+        let result = validate_write_path(target.to_str().unwrap());
+
+        let _ = std::fs::remove_dir(&link);
+
+        assert!(result.is_err(), "expected reject, got {result:?}");
+        assert!(
+            result.unwrap_err().contains("symlink"),
+            "wrong error: expected 'symlink'"
         );
     }
 

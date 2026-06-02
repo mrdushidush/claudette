@@ -167,6 +167,66 @@ fn normalize_eol(text: &str, crlf: bool) -> String {
     }
 }
 
+/// The leading run of spaces/tabs at the start of `line`, excluding the line
+/// terminator. (`'\r'`/`'\n'` aren't whitespace for this purpose — they stop
+/// the scan, so a blank line `"  \n"` yields `"  "`.)
+fn leading_ws(line: &str) -> &str {
+    let end = line
+        .find(|c: char| c != ' ' && c != '\t')
+        .unwrap_or(line.len());
+    &line[..end]
+}
+
+/// The longest common leading substring of `a` and `b`. Both args are runs of
+/// indentation whitespace, so this is always a char boundary.
+fn common_prefix<'a>(a: &'a str, b: &str) -> &'a str {
+    let n = a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
+    &a[..n]
+}
+
+/// Rebase `block`'s outermost indentation onto `target_indent`, preserving the
+/// block's internal relative nesting. The block's own base indent (the common
+/// leading-whitespace prefix of its non-blank lines) is stripped from each line
+/// and replaced with `target_indent`; blank lines keep only their terminator.
+///
+/// Pass 2 matches on TRIMMED lines, so the model's `after` carries whatever
+/// indentation the model guessed. Splicing it verbatim silently corrupts
+/// whitespace-significant languages (Python/YAML/Makefile: an IndentationError
+/// or a changed scope) and writes inconsistent indentation everywhere else,
+/// reported `ok:true` (roast 2026-05-31 / issue #26 §A). Rebasing to the matched
+/// window's actual indent fixes that while keeping the edit's structure.
+fn reindent_to(block: &str, target_indent: &str) -> String {
+    let lines: Vec<&str> = block.split_inclusive('\n').collect();
+    // The block's base indent = the common leading-ws prefix of its non-blank
+    // lines (blank lines carry no meaningful indentation).
+    let mut base: Option<&str> = None;
+    for line in &lines {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let ws = leading_ws(line);
+        base = Some(match base {
+            None => ws,
+            Some(prev) => common_prefix(prev, ws),
+        });
+    }
+    let base = base.unwrap_or("");
+    let mut out = String::with_capacity(block.len() + target_indent.len() * lines.len());
+    for line in &lines {
+        if line.trim().is_empty() {
+            // Preserve a blank line as just its break (no trailing indent);
+            // normalize_eol re-encodes the terminator afterwards.
+            if line.ends_with('\n') {
+                out.push('\n');
+            }
+            continue;
+        }
+        out.push_str(target_indent);
+        out.push_str(line.strip_prefix(base).unwrap_or(line));
+    }
+    out
+}
+
 /// Replace the first occurrence of `before` in `content` with `after`.
 /// Pass 1: line-anchored exact match. Pass 2: line-trim fallback. Both count
 /// *all* candidate placements (overlapping included) and return `Ambiguous`
@@ -244,11 +304,16 @@ fn fuzzy_replace(content: &str, before: &str, after: &str) -> Result<String, Fuz
         return Err(FuzzyError::NotFound);
     };
 
-    // Reconstruct: pre-window lines + after + post-window lines. Re-encode
-    // `after` to the matched window's EOL style so a CRLF file keeps CRLF
-    // inside the replaced region (roast RC-E H1).
+    // Reconstruct: pre-window lines + after + post-window lines. First rebase
+    // `after`'s indentation onto the matched window (issue #26 §A) — Pass 2
+    // matched on trimmed lines, so `after` carries the model's guessed indent;
+    // splicing it verbatim corrupts whitespace-significant languages. Then
+    // re-encode to the window's EOL style so a CRLF file keeps CRLF inside the
+    // replaced region (roast RC-E H1).
+    let file_indent = leading_ws(content_lines[i]);
+    let reindented = reindent_to(after, file_indent);
     let window_crlf = content_lines[i..i + m].iter().any(|l| l.ends_with("\r\n"));
-    let mut after_norm = normalize_eol(after, window_crlf);
+    let mut after_norm = normalize_eol(&reindented, window_crlf);
     if !after_norm.is_empty()
         && !after_norm.ends_with('\n')
         && content_lines[i..i + m]
@@ -318,6 +383,43 @@ mod tests {
         assert!(got.contains("let x = 99"));
         assert!(got.contains("let y = 100"));
         assert!(!got.contains("let x = 1"));
+        // issue #26 §A: the result must adopt the FILE's 2-space indent, not the
+        // model's 4-space `after` — splicing verbatim would corrupt indentation.
+        assert_eq!(
+            got, "fn foo() {\n  let x = 99;\n  let y = 100;\n}\n",
+            "after must be re-indented to the matched window: {got:?}"
+        );
+    }
+
+    #[test]
+    fn line_trim_reindents_python_block_to_file_indent() {
+        // issue #26 §A: whitespace-significant language. The file body is indented
+        // 4 spaces; the model's `after` guessed 2 spaces. Verbatim splice would
+        // produce an IndentationError; the re-indent must rebase to 4 spaces.
+        let content = "def f():\n    x = 1\n    y = 2\n";
+        let before = "  x = 1\n  y = 2\n"; // model used 2-space (matches on trim)
+        let after = "  x = 10\n  y = 20\n  z = 30\n"; // model's 2-space `after`
+        let got = fuzzy_replace(content, before, after).unwrap();
+        assert_eq!(
+            got, "def f():\n    x = 10\n    y = 20\n    z = 30\n",
+            "block must be rebased to the file's 4-space indent: {got:?}"
+        );
+    }
+
+    #[test]
+    fn line_trim_preserves_internal_relative_nesting_when_reindenting() {
+        // A nested block: the rebase keeps the block's INTERNAL step (the `if`
+        // body sits one level deeper than the `if`) while moving the whole block
+        // to the file's outer indent.
+        let content = "def f():\n    if a:\n        b()\n";
+        let before = "  if a:\n      b()\n"; // model 2-space outer, 6-space inner
+        let after = "  if a:\n      c()\n"; // same shape, body changed
+        let got = fuzzy_replace(content, before, after).unwrap();
+        // Outer `if` rebased to 4 spaces; inner kept its +4 relative step → 8.
+        assert_eq!(
+            got, "def f():\n    if a:\n        c()\n",
+            "internal nesting must be preserved across the rebase: {got:?}"
+        );
     }
 
     #[test]
