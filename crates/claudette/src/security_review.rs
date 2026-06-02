@@ -285,7 +285,11 @@ fn javascript_url(lower: &str) -> bool {
     let mut from = 0;
     while let Some(rel) = lower[from..].find("javascript:") {
         let after = from + rel + "javascript:".len();
-        if lower[after..].chars().next().is_some_and(|c| !c.is_whitespace()) {
+        if lower[after..]
+            .chars()
+            .next()
+            .is_some_and(|c| !c.is_whitespace())
+        {
             return true;
         }
         from = after;
