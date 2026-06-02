@@ -10,6 +10,67 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-06-02
+
+### Security (2026-06-02 roast remediation)
+
+- **Credential read denylist.** The read tools (`read_file`, `list_dir`) now
+  refuse secret stores under `$HOME` — `~/.ssh`, `~/.aws`, `~/.gnupg`,
+  `~/.config/gcloud`, `~/.claudette/secrets`, and `*.pem` / `*.key` / `*.token`
+  files — so a prompt-injected model can't read keys to exfiltrate them.
+  Override with `CLAUDETTE_ALLOW_SECRET_READS=1`.
+- **SSRF guard on `web_fetch`.** Refuses loopback / RFC1918 / CGNAT / link-local
+  targets (incl. the `169.254.169.254` cloud-metadata endpoint) and resolves
+  hostnames so a public name pointing at an internal address is also blocked.
+  Override with `CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE=1`.
+- **Network egress now prompts by default.** `web_fetch` and `tg_send` moved to
+  the `DangerFullAccess` tier, so they require confirmation before sending —
+  closing the silent read → exfiltrate chain. `CLAUDETTE_AUTO_APPROVE` and
+  forge Allow-mode still pass them through.
+- **`git_checkout` rejects `-`-prefixed targets** (option-injection).
+
+### Fixed — CRLF / byte-boundary cluster (issue #26)
+
+- `codet` fuzzy-match computed wrong byte offsets on CRLF files (splice landed
+  mid-line, or panicked on a nearby multibyte char) — now EOL-agnostic.
+- `apply_patch` rewrote CRLF files to LF on every patch — now preserves the
+  file's dominant line ending.
+- `recall`, `doctor`, and the Ollama-URL probe sliced strings on raw byte
+  indices, panicking (fatal under `panic="abort"`) on >8 KB multibyte input —
+  now char-boundary-safe.
+- Case-insensitive lookup for the `CLAUDETTE.MD` memory file.
+
+### Fixed — forge brownfield (issue #23)
+
+- `mission_submit` now accepts an already-committed (clean) tree instead of
+  refusing it, making the brownfield clone → edit → PR happy-path satisfiable
+  (the Coder commits its work, which previously made submit refuse "nothing to
+  commit"). The dirty-tree stage+commit path is unchanged.
+
+### Internal — CI / release
+
+- Release pipeline: `cargo publish` is now idempotent (an already-published
+  version is treated as success), and the GitHub Release job is decoupled from
+  publish — a crates.io hiccup no longer silently drops the prebuilt binaries
+  (which happened on v0.7.0 / v0.8.0 / v0.8.1).
+- Replaced the deprecated Node-20 `rustsec/audit-check` action with a direct
+  `cargo audit` invocation.
+- Feature-gated the not-yet-wired `bench` and `tui::typewriter` scaffolds behind
+  an off-by-default `experimental` feature so they don't bloat the shipped
+  binary or public API.
+- Fixed a flaky `tools::semantic` test (cwd race; now shares the process-wide
+  test lock).
+
+### Changed — packaging / docs
+
+- crates.io `description`, `keywords`, and `categories` rewritten around the
+  privacy-first coding-agent positioning; dropped the redundant `documentation`
+  field; excluded the `tests/` harness data from the published crate.
+- README: Rust 1.88 badge, "checksummed" (not "signed") archives, accurate
+  4-language syntax-check count, and a tracked benchmark TSV (was a 404 link).
+- CHANGELOG backfilled (0.6.0, 0.5.2–0.5.4); SECURITY.md supported versions
+  refreshed; CONTRIBUTING test count de-pinned.
+
 ### Removed — v0.6.0 tool-name aliases (dispatch-only)
 
 The dispatch-only backwards-compat aliases left over from the v0.6.0 tool
