@@ -128,6 +128,15 @@ fn run_glob_search(input: &str) -> Result<String, String> {
         base.join(raw_pattern).display().to_string()
     };
 
+    // Belt (issue #25 §A): reject any `..` path component outright. The
+    // literal-prefix check below only guards the part BEFORE the first glob
+    // metachar, so a `..` AFTER a `*` (`<workspace>/*/../../etc/**`) slips past
+    // it and `glob::glob` walks out. No legitimate search pattern contains a
+    // `..` component, so refusing them closes the traversal vector cleanly.
+    if resolved_pattern.split(['/', '\\']).any(|c| c == "..") {
+        return Err("glob_search: '..' path components are not allowed in patterns".to_string());
+    }
+
     // Sandbox check on the literal prefix (everything before the first glob
     // metachar). The literal prefix is the part of the path glob will
     // actually walk into; if THAT escapes the allowed envelope we reject.
@@ -163,6 +172,16 @@ fn run_glob_search(input: &str) -> Result<String, String> {
         // Permission errors and unreachable paths come back as Err — skip
         // them silently rather than failing the whole search.
         if let Ok(path) = entry {
+            // Re-validate every expanded path (issue #25 §A): the literal-prefix
+            // check only guards the part before the first metachar, and glob
+            // follows symlinks into directories, so a matched path can resolve
+            // outside the envelope even with a clean prefix. glob yields real
+            // on-disk paths, so canonicalise and re-check; drop escapes silently
+            // like permission errors.
+            let canonical = std::fs::canonicalize(&path).unwrap_or_else(|_| normalize_path(&path));
+            if !path_is_allowed(&canonical, &roots, true) {
+                continue;
+            }
             paths.push(path.display().to_string());
         }
     }
@@ -519,6 +538,21 @@ mod tests {
     fn glob_search_rejects_missing_pattern() {
         let err = run_glob_search("{}").unwrap_err();
         assert!(err.contains("missing"), "got: {err}");
+    }
+
+    #[test]
+    fn glob_search_rejects_dotdot_traversal() {
+        // issue #25 §A: a `..` AFTER the first glob metachar escapes the
+        // literal-prefix sandbox check. The `..`-component belt rejects it
+        // before glob ever walks. Absolute pattern so the test doesn't depend
+        // on the workspace base.
+        #[cfg(unix)]
+        let pat = "/tmp/*/../../etc/*";
+        #[cfg(not(unix))]
+        let pat = r"C:\Users\*\..\..\Windows\*";
+        let input = serde_json::json!({ "pattern": pat }).to_string();
+        let err = run_glob_search(&input).unwrap_err();
+        assert!(err.contains(".."), "expected '..' rejection, got: {err}");
     }
 
     #[test]

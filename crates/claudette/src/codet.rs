@@ -33,6 +33,7 @@ use crate::api::OllamaApiClient;
 use crate::test_runner::{
     check_python_imports, has_python_tests, has_rust_tests, run_js_syntax_check,
     run_python_syntax_check, run_python_unittest, run_rust_syntax_check, run_ts_syntax_check,
+    CommandResult,
 };
 
 // Coder defaults now live in `model_config::ModelConfig::from_preset`.
@@ -359,6 +360,85 @@ pub fn drain_pending_coder_lease() -> bool {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Validation guards (roast 2026-05-31 / issue #27)
+// ────────────────────────────────────────────────────────────────────────────
+
+/// `true` when a validator subprocess failed because its toolchain binary is
+/// not installed — the program could not even launch — rather than because the
+/// code is wrong. `run_command_with_timeout` reports an un-spawnable program
+/// with `exit_code: None`, `timed_out: false`, and a `"failed to spawn …"`
+/// stderr; that combination is unambiguous (issue #27 §B).
+///
+/// Claudette is marketed local-first / air-gapped, so many users won't have
+/// `python` / `node` / `rustc` on PATH. Feeding a missing-interpreter error into
+/// the coder fix-loop grades it as a code bug, burning 3 regen attempts + VRAM
+/// swaps per file and returning a misleading `CouldNotFix`. All four validators
+/// share this guard (previously only `validate_ts` skipped on spawn failure).
+fn toolchain_missing(result: &CommandResult) -> bool {
+    !result.timed_out && result.exit_code.is_none() && result.stderr.contains("failed to spawn")
+}
+
+/// Build a `Skipped` result with an explanatory message — used when a
+/// validator's toolchain isn't installed so we report "skipped" rather than a
+/// false syntax failure.
+fn skipped_result(msg: &str) -> CodetResult {
+    CodetResult {
+        syntax_ok: true,
+        tests_found: false,
+        tests_passed: 0,
+        tests_failed: 0,
+        tests_errors: 0,
+        fixes_applied: 0,
+        attempts_made: 0,
+        fix_summary: msg.to_string(),
+        status: CodetStatus::Skipped,
+    }
+}
+
+/// `true` when a failed `rustc` run reflects an actual *parse* error, vs. a
+/// resolution/type error that an isolated single-file compile (no cargo
+/// context, no `-L`/`--extern`) raises for perfectly valid code (issue #27 §A).
+///
+/// `run_rust_syntax_check` compiles the file alone, so any `use some_crate::…;`
+/// or `use crate::…;` yields `error[E0432]`/`error[E0433]` — NOT a syntax bug,
+/// and unfixable by regeneration (the only way to "pass" the isolated compile
+/// would be to delete the imports). rustc prints genuine parse errors as a bare
+/// `error:` line (no `error[Ennnn]` code) with phrasing like
+/// "expected"/"unclosed"/"unexpected"; resolution/type errors always carry a
+/// code. We treat only the codeless parse diagnostics as syntax errors.
+fn rust_failure_is_syntax_error(stderr: &str) -> bool {
+    const PARSE_MARKERS: &[&str] = &[
+        "expected",
+        "unclosed",
+        "unexpected",
+        "unterminated",
+        "mismatched closing delimiter",
+        "unknown start of token",
+        "unknown character",
+        "this file contains an un",
+    ];
+    stderr.lines().any(|line| {
+        // Only a bare `error:` (codeless) line is a parse diagnostic;
+        // `error[E0432]:` etc. are resolution/type errors, not parse errors.
+        line.trim_start()
+            .strip_prefix("error:")
+            .map(str::to_ascii_lowercase)
+            .is_some_and(|rest| PARSE_MARKERS.iter().any(|m| rest.contains(m)))
+    })
+}
+
+/// `true` when a Rust syntax-check result should be treated as "syntax is fine"
+/// — i.e. it succeeded, the toolchain is missing (can't judge), or it failed
+/// only on resolution/type errors (not a true parse error). Used both to decide
+/// whether to enter the fix loop and to judge whether a fix attempt improved
+/// things, so a valid-but-import-bearing file is never looped on.
+fn rust_syntax_check_ok(result: &CommandResult) -> bool {
+    result.success
+        || toolchain_missing(result)
+        || !rust_failure_is_syntax_error(&format!("{}\n{}", result.stdout, result.stderr))
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Python validation
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -369,6 +449,9 @@ fn validate_python(path: &Path, references: &[ReferenceFile]) -> CodetResult {
 
     // ── Step 1: Syntax check ────────────────────────────────────────────
     let syntax = run_python_syntax_check(path);
+    if toolchain_missing(&syntax) {
+        return skipped_result("python not available, syntax check skipped");
+    }
     if !syntax.success {
         // Try to fix the syntax error via the coder model.
         let content = std::fs::read_to_string(path).unwrap_or_default();
@@ -535,7 +618,15 @@ fn validate_rust(path: &Path, references: &[ReferenceFile]) -> CodetResult {
     let mut fix_descriptions: Vec<String> = Vec::new();
 
     let syntax = run_rust_syntax_check(path);
-    if !syntax.success {
+    if toolchain_missing(&syntax) {
+        return skipped_result("rustc not available, syntax check skipped");
+    }
+    // Only enter the fix loop on a genuine parse error. An isolated single-file
+    // `rustc` compile (no cargo / `--extern`) raises E0432/E0433 for any
+    // `use …;` in otherwise-valid code; that's not a syntax bug we can fix by
+    // regenerating, and looping on it burns 3 coder passes + VRAM swaps per
+    // file (issue #27 §A).
+    if !rust_syntax_check_ok(&syntax) {
         let content = std::fs::read_to_string(path).unwrap_or_default();
         let error_msg = format!("{}\n{}", syntax.stdout, syntax.stderr);
         match try_fix_loop(
@@ -601,6 +692,9 @@ fn validate_js(path: &Path, references: &[ReferenceFile]) -> CodetResult {
     let mut fix_descriptions: Vec<String> = Vec::new();
 
     let syntax = run_js_syntax_check(path);
+    if toolchain_missing(&syntax) {
+        return skipped_result("node not available, syntax check skipped");
+    }
     if !syntax.success {
         let content = std::fs::read_to_string(path).unwrap_or_default();
         let error_msg = format!("{}\n{}", syntax.stdout, syntax.stderr);
@@ -661,23 +755,16 @@ fn validate_ts(path: &Path, references: &[ReferenceFile]) -> CodetResult {
 
     let syntax = run_ts_syntax_check(path);
     if !syntax.success {
-        // Check if tsc is actually available — if npx/tsc not installed,
-        // skip rather than reporting a false failure.
-        if syntax.stderr.contains("not found")
+        // Check if tsc is actually available — if npx/tsc not installed, skip
+        // rather than reporting a false failure. The shared `toolchain_missing`
+        // helper catches an un-spawnable `npx`; the string checks additionally
+        // catch the case where `npx` launches but can't resolve `tsc`
+        // ("not found"/"not recognized", exit code present).
+        if toolchain_missing(&syntax)
+            || syntax.stderr.contains("not found")
             || syntax.stderr.contains("not recognized")
-            || syntax.stderr.contains("spawn")
         {
-            return CodetResult {
-                syntax_ok: true,
-                tests_found: false,
-                tests_passed: 0,
-                tests_failed: 0,
-                tests_errors: 0,
-                fixes_applied: 0,
-                attempts_made: 0,
-                fix_summary: "tsc not available, syntax check skipped".to_string(),
-                status: CodetStatus::Skipped,
-            };
+            return skipped_result("tsc not available, syntax check skipped");
         }
 
         let content = std::fs::read_to_string(path).unwrap_or_default();
@@ -823,7 +910,10 @@ fn try_fix_loop(
         // Re-validate — did the fix actually help?
         let improved = match target {
             FixTarget::Syntax => run_python_syntax_check(path).success,
-            FixTarget::RustSyntax => run_rust_syntax_check(path).success,
+            // Re-judge Rust with the same parse-vs-resolution classifier used at
+            // entry, so a valid file whose only "errors" are unresolved imports
+            // counts as fixed instead of looping to exhaustion (issue #27 §A).
+            FixTarget::RustSyntax => rust_syntax_check_ok(&run_rust_syntax_check(path)),
             FixTarget::JsSyntax => run_js_syntax_check(path).success,
             FixTarget::TsSyntax => run_ts_syntax_check(path).success,
             FixTarget::Tests => {
@@ -1424,6 +1514,94 @@ fn find_line_start_fence(s: &str, from: usize) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Build a `CommandResult` for the validation-guard tests.
+    fn cmd_result(
+        success: bool,
+        stderr: &str,
+        exit_code: Option<i32>,
+        timed_out: bool,
+    ) -> CommandResult {
+        CommandResult {
+            success,
+            stdout: String::new(),
+            stderr: stderr.to_string(),
+            timed_out,
+            exit_code,
+        }
+    }
+
+    #[test]
+    fn toolchain_missing_only_on_spawn_failure() {
+        // Spawn failure: exit_code None, not timed out, "failed to spawn" stderr.
+        assert!(toolchain_missing(&cmd_result(
+            false,
+            "failed to spawn `rustc`: program not found",
+            None,
+            false,
+        )));
+        // A real syntax failure (program ran, exit code present) is NOT missing.
+        assert!(!toolchain_missing(&cmd_result(
+            false,
+            "error: expected `;`",
+            Some(1),
+            false,
+        )));
+        // A timeout is NOT a missing toolchain even though exit_code is None.
+        assert!(!toolchain_missing(&cmd_result(
+            false,
+            "timed out after 30s",
+            None,
+            true,
+        )));
+        // Success is obviously not missing.
+        assert!(!toolchain_missing(&cmd_result(true, "", Some(0), false)));
+    }
+
+    #[test]
+    fn rust_failure_distinguishes_parse_from_resolution() {
+        // Genuine parse errors (codeless `error:` with a parse phrase).
+        assert!(rust_failure_is_syntax_error(
+            "error: expected one of `!` or `::`, found `foo`\n --> src/x.rs:3:5"
+        ));
+        assert!(rust_failure_is_syntax_error(
+            "error: this file contains an unclosed delimiter"
+        ));
+        assert!(rust_failure_is_syntax_error(
+            "error: unexpected closing delimiter: `}`"
+        ));
+        // Resolution errors from an isolated compile of VALID code — must NOT
+        // be treated as syntax errors (issue #27 §A).
+        assert!(!rust_failure_is_syntax_error(
+            "error[E0432]: unresolved import `serde`\n --> src/x.rs:1:5"
+        ));
+        assert!(!rust_failure_is_syntax_error(
+            "error[E0433]: failed to resolve: use of undeclared crate or module `helpers`"
+        ));
+        // A type error (E0308) carries a code even though it mentions "expected".
+        assert!(!rust_failure_is_syntax_error(
+            "error[E0308]: mismatched types\n expected `u8`, found `&str`"
+        ));
+    }
+
+    #[test]
+    fn rust_syntax_check_ok_for_valid_file_with_imports() {
+        // Failed compile whose only error is an unresolved import → "syntax ok"
+        // (don't enter the fix loop).
+        let import_only = cmd_result(
+            false,
+            "error[E0432]: unresolved import `serde`",
+            Some(1),
+            false,
+        );
+        assert!(rust_syntax_check_ok(&import_only));
+        // A real parse error → NOT ok (do enter the fix loop).
+        let parse_err = cmd_result(false, "error: expected `;`, found `}`", Some(1), false);
+        assert!(!rust_syntax_check_ok(&parse_err));
+        // Missing rustc → treated as ok (skip, don't loop).
+        let missing = cmd_result(false, "failed to spawn `rustc`: not found", None, false);
+        assert!(rust_syntax_check_ok(&missing));
+    }
 
     #[test]
     fn strip_code_blocks_removes_python_fence() {

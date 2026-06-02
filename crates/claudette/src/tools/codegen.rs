@@ -260,7 +260,7 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "generate_code",
-                "description": "Write code to a file via the specialised coder model (auto-validates syntax + tests). Use instead of write_file for any code file. Reply with path + one sentence — never paste the generated code. For brownfield edits, pass the existing file in reference_files so the coder reads the real API.",
+                "description": "Write code to a file via the specialised coder model (auto-validates syntax + tests). Use for SUBSTANTIAL or complex code, or brownfield edits — pass the existing file in reference_files so the coder reads the real API. For a SHORT, simple file in your project (a small helper/module) call write_file directly instead: it's one fast pass, no model hand-off. Reply with path + one sentence — never paste the generated code.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -281,8 +281,7 @@ pub(super) fn schemas() -> Vec<Value> {
                     "type": "object",
                     "properties": {
                         "agent_type": { "type": "string", "enum": ["researcher", "gitops", "reviewer"], "description": "Agent type" },
-                        "task":       { "type": "string", "description": "Task description for the agent" },
-                        "auto":       { "type": "boolean", "description": "Skip confirmation prompts for dangerous tools (default false)" }
+                        "task":       { "type": "string", "description": "Task description for the agent" }
                     },
                     "required": ["agent_type", "task"]
                 }
@@ -429,7 +428,13 @@ fn run_spawn_agent(input: &str) -> Result<String, String> {
         .get("task")
         .and_then(Value::as_str)
         .ok_or("spawn_agent: missing 'task'")?;
-    let auto_mode = v.get("auto").and_then(Value::as_bool).unwrap_or(false);
+    // The model must NOT be able to flip a child agent into unattended
+    // PermissionMode::Allow (the old model-supplied `auto` flag): a confabulating
+    // / prompt-injected brain could spawn a gitops agent with unsandboxed bash +
+    // git_push and no [y/N] gate (roast 2026-05-31 / issue #24 §A). Inherit the
+    // parent session's posture instead — auto only when the USER opted in via
+    // CLAUDETTE_AUTO_APPROVE; otherwise the child prompts like any other tool.
+    let auto_mode = crate::run::secretary_auto_approve_enabled();
 
     crate::agents::spawn_agent(agent_type, task, auto_mode)
 }
