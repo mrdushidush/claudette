@@ -98,8 +98,10 @@ pub fn secretary_system_prompt_with_memory(memory: Option<&str>, concise: bool) 
          over answering from memory for prices, weather, news, or any current facts. \
          To localize code, call repo_map(query) FIRST — it returns the matching \
          files + symbols + the defining line (often with the value); then read_file \
-         that line. Use grep_search (regex) for exact strings or to enumerate all \
-         matches. Do not read whole large files or re-run the same search. Confirm \
+         that line. Use grep_search (regex) for exact strings or to enumerate. To \
+         list ALL of something, run ONE grep_search for the shared prefix/pattern \
+         and report EVERY distinct match across ALL files — never stop at the first \
+         file or conclude early. Do not read whole large files or re-run the same search. Confirm \
          code facts (a default value, a signature, a constant) from the defining \
          source line, not from docs or CHANGELOG, which can be stale. \
          When asked to edit, fix, or create a file, immediately CALL the edit tool \
