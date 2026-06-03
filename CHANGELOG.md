@@ -10,6 +10,37 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **Forge human-review gate.** Before the Submitter opens a PR, forge now prints
+  the plan + the full final diff and waits for an explicit `y`. Anything else —
+  including a non-interactive stdin — leaves the commits on the mission branch
+  and opens no PR. On by default; skipped under `CLAUDETTE_FORGE_AUTO_APPROVE=1`
+  (unattended) or `CLAUDETTE_FORGE_NO_REVIEW=1`.
+- **Forge Verifier now builds and tests for real.** Each fix-loop round runs the
+  project's actual build + test suite inside the mission tree — `cargo check` +
+  `cargo test` (Rust), `go build` + `go test` (Go), `pytest` (Python),
+  `npm test` (Node). A build break or failing test is a hard fail whose output
+  is fed back to the Coder; infrastructure problems (no framework, tool missing,
+  timeout, no tests collected) stay advisory. On by default; opt out with
+  `CLAUDETTE_FORGE_NO_BUILD_CHECK=1`. Per-step timeout via
+  `CLAUDETTE_FORGE_TEST_TIMEOUT_SECS` (default 180s).
+- **`claudette --doctor` build-toolchains section.** Probes `git`, `cargo`,
+  `python`, `node`, and `go` and prints an OS-appropriate copy-paste `↳ fix:`
+  install command for anything missing — the #1 silent reason "forge said it
+  passed but nothing compiled".
+
+### Changed
+
+- `--doctor` now pairs every red/yellow row with a concrete copy-paste fix:
+  model-server-not-reachable shows the exact start command per backend
+  (`ollama serve` / LM Studio Local Server), brain-not-loaded shows the
+  `ollama pull`/LM Studio load step, and the voice deps show their installers.
+- Rewrote `docs/quickstart.md` for a sub-5-minute path with a `--doctor` verify
+  step, a TUI tour (tabs + key chords), and a Forge walkthrough covering the
+  review and build/test gates. Refreshed `docs/forge.md` (now-stale Submitter
+  contract, fix-loop budget, and diagnostics) to match the current pipeline.
+
 ## [0.8.7] - 2026-06-03
 
 ### Removed

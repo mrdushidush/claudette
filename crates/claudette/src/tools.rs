@@ -39,7 +39,7 @@ mod markets;
 mod mission;
 mod notes;
 mod patch;
-mod quality;
+pub(crate) mod quality;
 mod recall;
 mod registry;
 mod repomap;

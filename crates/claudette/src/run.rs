@@ -392,6 +392,126 @@ fn ephemeral_abort_window_secs() -> u64 {
         .min(30)
 }
 
+/// Whether the Verifier runs the project build + test suite each round (the
+/// deterministic correctness gate). ON by default — a diff that doesn't compile
+/// or breaks tests is exactly what an LLM-reading-the-diff misses. Opt out with
+/// `CLAUDETTE_FORGE_NO_BUILD_CHECK=1` for repos where the suite is slow, needs
+/// network, or requires an install step forge can't perform.
+fn forge_build_check_enabled() -> bool {
+    !env_flag_enabled("CLAUDETTE_FORGE_NO_BUILD_CHECK")
+}
+
+/// Per-step timeout (seconds) for the Verifier's build + test commands. Default
+/// 180; override with `CLAUDETTE_FORGE_TEST_TIMEOUT_SECS`. Clamped to
+/// `[10, 1800]` — below 10s nothing meaningful compiles; above 30 minutes a
+/// hung suite would stall the whole pipeline.
+fn forge_test_timeout_secs() -> u64 {
+    std::env::var("CLAUDETTE_FORGE_TEST_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(180)
+        .clamp(10, 1800)
+}
+
+/// Whether the human-review gate fires before the Submitter opens a PR. ON by
+/// default for attended runs — the user reviews the plan + full diff and
+/// approves before anything is pushed (this is the QA step). Skipped when:
+///   • auto-approve is on (`CLAUDETTE_FORGE_AUTO_APPROVE`) — an explicitly
+///     unattended run has nobody to answer, or
+///   • the user opts out with `CLAUDETTE_FORGE_NO_REVIEW=1` (back to the old
+///     hands-off submit).
+fn forge_human_review_enabled() -> bool {
+    if forge_auto_approve_enabled() {
+        return false;
+    }
+    !env_flag_enabled("CLAUDETTE_FORGE_NO_REVIEW")
+}
+
+/// Max diff lines shown inline at the review gate before truncating. Generous
+/// enough to eyeball a normal change; the full diff is always recoverable from
+/// the mission tree with `git diff`.
+const REVIEW_DIFF_MAX_LINES: usize = 600;
+
+/// Split `diff` into `(shown, omitted_line_count)` at `max` lines so a huge
+/// diff doesn't scroll the approval prompt off-screen.
+fn truncate_diff_for_review(diff: &str, max: usize) -> (String, usize) {
+    let total = diff.lines().count();
+    if total <= max {
+        return (diff.to_string(), 0);
+    }
+    let shown = diff.lines().take(max).collect::<Vec<_>>().join("\n");
+    (shown, total - max)
+}
+
+/// Interactive human-review gate. Prints the plan + the full final diff to
+/// stderr, then reads `y/N` from stdin. Returns `true` ONLY on an explicit
+/// "y"/"yes". Any other answer — including EOF / a non-interactive stdin —
+/// returns `false` (fail-closed: never open a PR nobody approved). This is the
+/// user's QA step before [`run_forge_mission`]'s Submitter phase opens the PR.
+fn forge_confirm_submit(plan: &str, diff: &str, passed: bool) -> bool {
+    let stderr = io::stderr();
+    let mut err = stderr.lock();
+    let _ = writeln!(err);
+    let _ = writeln!(
+        err,
+        "{} {}",
+        theme::BOLT,
+        theme::accent("forge: review — approve before opening the PR")
+    );
+
+    let plan_t = plan.trim();
+    if !plan_t.is_empty() {
+        let _ = writeln!(err, "{}", theme::dim("── plan ──────────────────────────"));
+        for line in plan_t.lines() {
+            let _ = writeln!(err, "  {}", theme::dim(line));
+        }
+    }
+
+    let _ = writeln!(err, "{}", theme::dim("── diff ──────────────────────────"));
+    let (shown, omitted) = truncate_diff_for_review(diff, REVIEW_DIFF_MAX_LINES);
+    if shown.trim().is_empty() {
+        let _ = writeln!(err, "  {}", theme::dim("(empty diff)"));
+    } else {
+        for line in shown.lines() {
+            let _ = writeln!(err, "  {line}");
+        }
+    }
+    if omitted > 0 {
+        let _ = writeln!(
+            err,
+            "  {}",
+            theme::warn(&format!(
+                "… {omitted} more diff line(s) not shown — inspect the full diff with `git diff` \
+                 in the mission tree"
+            ))
+        );
+    }
+
+    let verdict = if passed {
+        theme::ok("automated checks passed").to_string()
+    } else {
+        theme::warn("automated checks did NOT fully pass").to_string()
+    };
+    let _ = writeln!(err, "  {} {verdict}", theme::dim("verdict:"));
+    let _ = write!(
+        err,
+        "  {} Open the PR with these changes? [y/N] ",
+        theme::warn(theme::WARN_GLYPH)
+    );
+    let _ = err.flush();
+
+    let mut buf = String::new();
+    match io::stdin().read_line(&mut buf) {
+        // EOF (Ok(0)) means non-interactive stdin — treat as "not approved".
+        Ok(0) => false,
+        Ok(_) => {
+            let answer = buf.trim().to_lowercase();
+            answer == "y" || answer == "yes"
+        }
+        Err(_) => false,
+    }
+}
+
 /// One Verifier judgement. `pass` is the authoritative gate (a Verifier
 /// can score 8 and still mark fail if it spotted a security bug); `score`
 /// is advisory and shown to the user but not compared against a threshold
@@ -874,6 +994,46 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
             }
         }
 
+        // ── Build + test gate (on by default) ──────────────────────────
+        // The Verifier above only *reads* the diff; it can't see a type error
+        // or a test the change regressed. Run the project's real build + test
+        // suite in the mission tree and turn the result into a deterministic
+        // gate: a build break or a failing test forces pass=false and feeds the
+        // failures back to the Coder for the next round. Infra problems (no
+        // framework, tool missing, timeout) stay advisory so a docs PR isn't
+        // blocked by a flaky/uninstalled suite. Opt out with
+        // CLAUDETTE_FORGE_NO_BUILD_CHECK=1. (Skipped on an empty diff — nothing
+        // changed to verify.)
+        if forge_build_check_enabled() && !diff.trim().is_empty() {
+            eprintln!("{} {}", theme::BOLT, theme::accent("forge: build + test"));
+            let outcome = crate::tools::quality::run_build_and_tests(
+                &mission.path,
+                forge_test_timeout_secs(),
+            );
+            for line in outcome.summary.lines() {
+                eprintln!("  {} {}", theme::dim("∘"), theme::dim(line));
+            }
+            // `ran=false` (no framework detected) leaves build_ok/tests_ok None,
+            // so is_hard_fail() is already false — the LLM Verifier verdict
+            // stands. The summary above explains the skip.
+            if outcome.ran && outcome.is_hard_fail() {
+                verifier.pass = false;
+                // Score the round down so best-round restore never picks a
+                // round whose build/tests are broken over a clean one.
+                verifier.score = 0;
+                let gate = format!(
+                    "Automated build/test gate FAILED (framework: {}). Fix these before the \
+                     change can pass:\n{}",
+                    outcome.framework, outcome.summary
+                );
+                verifier.feedback = if verifier.feedback.trim().is_empty() {
+                    gate
+                } else {
+                    format!("{gate}\n\n{}", verifier.feedback)
+                };
+            }
+        }
+
         // ── Security review stage (opt-in) ─────────────────────────────
         // Scan the round's diff for unsafe constructs. HIGH findings flip
         // the round to "not passing" and prepend remediation feedback so
@@ -1116,6 +1276,39 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
         }
         cleanup.disarm();
         return Ok(empty_turn_summary());
+    }
+
+    // ── Human-review gate (on by default) ───────────────────────────
+    // The user's QA step: by here we KNOW a PR is about to open (brownfield
+    // mission, not security-blocked, loop passed or submit-on-fail). Show the
+    // plan + the full final diff and require an explicit "y" before the
+    // Submitter pushes + opens the PR. Skipped under auto-approve (unattended)
+    // or CLAUDETTE_FORGE_NO_REVIEW=1. Fail-closed — a declined or
+    // non-interactive answer leaves the commits on the mission branch and opens
+    // no PR. Runs after best-round restore so the diff shown is exactly the tree
+    // that would ship.
+    if forge_human_review_enabled() {
+        let review_diff = capture_git_diff(&mission.path, base_sha.as_deref()).unwrap_or_default();
+        if !forge_confirm_submit(&plan, &review_diff, submitted_pass) {
+            eprintln!(
+                "  {} {}",
+                theme::BOLT,
+                theme::warn(&format!(
+                    "forge: PR not opened — change declined at review. Commits remain on the \
+                     mission branch in {} for inspection (`git -C {} log` / `git -C {} diff`). \
+                     Re-run /forge to continue, or set CLAUDETTE_FORGE_NO_REVIEW=1 to skip the \
+                     review gate.",
+                    mission.path.display(),
+                    mission.path.display(),
+                    mission.path.display(),
+                )),
+            );
+            if opts.autosave {
+                save_session(&session)?;
+            }
+            cleanup.disarm();
+            return Ok(empty_turn_summary());
+        }
     }
 
     eprintln!("{} {}", theme::BOLT, theme::accent("forge: submit"));
@@ -3400,5 +3593,94 @@ mod tests {
     fn short_sha_returns_short_inputs_intact() {
         assert_eq!(short_sha("abc"), "abc");
         assert_eq!(short_sha(""), "");
+    }
+
+    // ─── Human-review gate (Forge trust) ──────────────────────────────
+
+    #[test]
+    fn truncate_diff_for_review_keeps_short_diffs_whole() {
+        let d = "line a\nline b\nline c";
+        let (shown, omitted) = truncate_diff_for_review(d, REVIEW_DIFF_MAX_LINES);
+        assert_eq!(shown, d);
+        assert_eq!(omitted, 0);
+    }
+
+    #[test]
+    fn truncate_diff_for_review_caps_long_diffs() {
+        let d = (0..1000)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (shown, omitted) = truncate_diff_for_review(&d, 600);
+        assert_eq!(shown.lines().count(), 600);
+        assert_eq!(omitted, 400);
+        // The omitted tail must be exactly what wasn't shown.
+        assert_eq!(shown.lines().count() + omitted, 1000);
+    }
+
+    #[test]
+    fn human_review_disabled_under_auto_approve() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let prev_aa = std::env::var("CLAUDETTE_FORGE_AUTO_APPROVE").ok();
+        let prev_nr = std::env::var("CLAUDETTE_FORGE_NO_REVIEW").ok();
+        std::env::set_var("CLAUDETTE_FORGE_AUTO_APPROVE", "1");
+        std::env::remove_var("CLAUDETTE_FORGE_NO_REVIEW");
+        // Auto-approve (unattended) bypasses the human-review gate.
+        assert!(!forge_human_review_enabled());
+        restore_env("CLAUDETTE_FORGE_AUTO_APPROVE", prev_aa);
+        restore_env("CLAUDETTE_FORGE_NO_REVIEW", prev_nr);
+    }
+
+    #[test]
+    fn human_review_on_by_default_and_opt_out_works() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let prev_aa = std::env::var("CLAUDETTE_FORGE_AUTO_APPROVE").ok();
+        let prev_nr = std::env::var("CLAUDETTE_FORGE_NO_REVIEW").ok();
+        std::env::remove_var("CLAUDETTE_FORGE_AUTO_APPROVE");
+        std::env::remove_var("CLAUDETTE_FORGE_NO_REVIEW");
+        // Attended, no opt-out → gate is ON.
+        assert!(forge_human_review_enabled());
+        std::env::set_var("CLAUDETTE_FORGE_NO_REVIEW", "1");
+        assert!(!forge_human_review_enabled());
+        restore_env("CLAUDETTE_FORGE_AUTO_APPROVE", prev_aa);
+        restore_env("CLAUDETTE_FORGE_NO_REVIEW", prev_nr);
+    }
+
+    // ─── Build + test gate (Forge trust) ──────────────────────────────
+
+    #[test]
+    fn build_check_on_by_default_and_opt_out_works() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("CLAUDETTE_FORGE_NO_BUILD_CHECK").ok();
+        std::env::remove_var("CLAUDETTE_FORGE_NO_BUILD_CHECK");
+        assert!(forge_build_check_enabled());
+        std::env::set_var("CLAUDETTE_FORGE_NO_BUILD_CHECK", "1");
+        assert!(!forge_build_check_enabled());
+        restore_env("CLAUDETTE_FORGE_NO_BUILD_CHECK", prev);
+    }
+
+    #[test]
+    fn test_timeout_defaults_and_clamps() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let prev = std::env::var("CLAUDETTE_FORGE_TEST_TIMEOUT_SECS").ok();
+        std::env::remove_var("CLAUDETTE_FORGE_TEST_TIMEOUT_SECS");
+        assert_eq!(forge_test_timeout_secs(), 180);
+        std::env::set_var("CLAUDETTE_FORGE_TEST_TIMEOUT_SECS", "1"); // below floor
+        assert_eq!(forge_test_timeout_secs(), 10);
+        std::env::set_var("CLAUDETTE_FORGE_TEST_TIMEOUT_SECS", "99999"); // above ceiling
+        assert_eq!(forge_test_timeout_secs(), 1800);
+        std::env::set_var("CLAUDETTE_FORGE_TEST_TIMEOUT_SECS", "300");
+        assert_eq!(forge_test_timeout_secs(), 300);
+        std::env::set_var("CLAUDETTE_FORGE_TEST_TIMEOUT_SECS", "garbage"); // unparseable → default
+        assert_eq!(forge_test_timeout_secs(), 180);
+        restore_env("CLAUDETTE_FORGE_TEST_TIMEOUT_SECS", prev);
+    }
+
+    /// Restore (or clear) an env var to its captured prior state.
+    fn restore_env(key: &str, prev: Option<String>) {
+        match prev {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
     }
 }
