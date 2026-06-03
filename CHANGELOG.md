@@ -10,6 +10,27 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-06-03
+
+### Removed
+
+Internal dead-code cleanup (~1.7k lines). These were `pub` items with no
+runtime caller — invisible to the compiler's dead-code lint because Claudette
+is a binary, not a library. **No user-facing behavior change.**
+
+- The Linux shell-sandbox module (`runtime/sandbox.rs`), which was never wired
+  into command execution.
+- The MCP / OAuth server-config schema that was parsed from `settings.json` but
+  never acted on — Claudette has no MCP client (Gmail/Calendar are native).
+  Existing `mcpServers` / `oauth` keys continue to be ignored, exactly as before.
+- USD cost estimation in the usage tracker (local models are free; `/cost`
+  reports token counts).
+- The unused `pipeline` and `permissionMode` settings knobs.
+- The antipattern capture→cluster→graduate write pipeline. The read path —
+  injecting hand-authored rules from `~/.claudette/antipatterns/active.toml`
+  into the forge prompt — is retained.
+- The unwired CTO gate-review prompt builder.
+
 ## [0.8.6] - 2026-06-02
 
 ### Security (2026-06-02 roast remediation)
