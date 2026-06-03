@@ -8,17 +8,16 @@ The repo is a Cargo workspace with a single published member: `crates/claudette/
 src/
 ├── main.rs           — Binary entry point (arg parsing, Ollama probe, mode dispatch)
 ├── lib.rs            — Module declarations + public re-exports
-├── runtime/          — Embedded agent-loop kernel (~2K LOC, vendored)
+├── runtime/          — Embedded agent-loop kernel (vendored)
 │   ├── conversation.rs — Turn loop, tool dispatch, hook integration, ApiClient trait
 │   ├── session.rs      — Session / ConversationMessage / ContentBlock types
 │   ├── compact.rs      — Auto-compaction + token estimation
 │   ├── permissions.rs  — Three-tier permission policy
-│   ├── usage.rs        — TokenUsage tracker + pricing lookup (Ollama = free)
+│   ├── usage.rs        — TokenUsage + cumulative-usage tracker (local models = free)
 │   ├── hooks.rs        — Pre/post tool-use hooks (shell snippets)
 │   ├── prompt.rs       — ProjectContext discovery (cwd, git status, instruction files)
-│   ├── config.rs       — Optional configuration loaders
-│   ├── json.rs         — Hand-rolled JSON for the no-serde-dep runtime paths
-│   └── sandbox.rs      — Sandbox config types (Linux-only sandbox runner)
+│   ├── config.rs       — Optional configuration loaders (settings.json: hooks, model)
+│   └── json.rs         — Hand-rolled JSON for the no-serde-dep runtime paths
 ├── api.rs            — OllamaApiClient: /api/chat streamer, truncation, budget math, probe
 ├── run.rs            — Runtime builder, REPL loop, autosave, session compaction, forge pipeline
 ├── executor.rs       — SecretaryToolExecutor: enable_tools meta-tool + dispatch

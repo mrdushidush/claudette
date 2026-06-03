@@ -25,8 +25,6 @@ pub mod json;
 pub mod permissions;
 #[path = "runtime/prompt.rs"]
 pub mod prompt_runtime;
-#[path = "runtime/sandbox.rs"]
-pub mod sandbox;
 #[path = "runtime/session.rs"]
 pub mod session;
 #[path = "runtime/usage.rs"]

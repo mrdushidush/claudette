@@ -15,8 +15,6 @@
 //!
 //! - [`cto_decomposition_system_prompt`] builds the Decomposition prompt
 //!   with optional active-mission grounding.
-//! - [`cto_gate_review_system_prompt`] builds the Gate-Review prompt that
-//!   ingests Coder + Verifier outputs.
 //! - [`default_cto_persona`] bakes the bundled `cto.md` via `include_str!`
 //!   so the binary doesn't depend on a runtime persona file.
 //!
@@ -82,33 +80,6 @@ pub fn cto_decomposition_system_prompt(mission_path: Option<&str>) -> Vec<String
          No preamble before the block, no commentary after it. If the request is so \
          simple it doesn't need decomposition, output one subtask. Honest scoring — \
          inflated complexity wastes routing budget, deflated complexity misses failures."
-    );
-
-    vec![append_persona_overlay(base)]
-}
-
-/// Build the CTO Gate-Review system prompt. Used when the forge pipeline
-/// finishes and the CTO needs to make a ship / no-ship call.
-///
-/// The Verifier already grades the diff for correctness; the Gate Review
-/// is a higher-level pass that weighs the verdict against mission intent,
-/// surface-level risk (security, scope creep), and acknowledged tradeoffs.
-/// Returns a structured one-line JSON verdict so the caller can parse it
-/// the same way [`crate::run::parse_verifier_response`] parses Verifier
-/// output.
-#[must_use]
-pub fn cto_gate_review_system_prompt(mission_path: &str) -> Vec<String> {
-    let base = format!(
-        "You are the CTO performing the Gate Review on a forge mission at {mission_path}. \
-         The user message will contain three blocks: (1) ORIGINAL REQUEST, (2) FINAL DIFF, \
-         (3) VERIFIER VERDICT. Read all three. Decide ship / no-ship. Approve if score ≥ 7 \
-         and no critical findings. Block on any unhandled critical (security, data-loss, \
-         unstated breaking change). Acknowledge tradeoffs explicitly in the summary — \
-         'we chose B over A because B ships today and A would need a week' beats silence.\n\n\
-         Output ONLY one line of JSON in this exact shape, no preamble, no trailing prose:\n\
-         {{\"approved\": <bool>, \"score\": <int 0-10>, \"summary\": <string>, \
-         \"findings\": [<string>, ...]}}. \
-         You do not have access to tools."
     );
 
     vec![append_persona_overlay(base)]
@@ -245,42 +216,6 @@ mod tests {
         std::env::remove_var("CLAUDETTE_FACELESS");
         assert!(!p[0].contains("Voice:"));
         assert!(!p[0].contains("Backstory:"));
-    }
-
-    // ─── Gate-review prompt ────────────────────────────────────────────
-
-    #[test]
-    fn gate_review_prompt_declares_three_input_blocks() {
-        let p = cto_gate_review_system_prompt("/tmp/m/x");
-        assert_eq!(p.len(), 1);
-        let body = &p[0];
-        assert!(body.contains("ORIGINAL REQUEST"));
-        assert!(body.contains("FINAL DIFF"));
-        assert!(body.contains("VERIFIER VERDICT"));
-    }
-
-    #[test]
-    fn gate_review_prompt_demands_json_shape() {
-        let p = cto_gate_review_system_prompt("/m");
-        let body = &p[0];
-        assert!(body.contains("approved"));
-        assert!(body.contains("score"));
-        assert!(body.contains("summary"));
-        assert!(body.contains("findings"));
-    }
-
-    #[test]
-    fn gate_review_prompt_states_critical_block_rule() {
-        let p = cto_gate_review_system_prompt("/m");
-        // Should articulate the persona's "block on any unhandled critical".
-        assert!(p[0].contains("critical"));
-        assert!(p[0].contains("Block") || p[0].contains("block"));
-    }
-
-    #[test]
-    fn gate_review_prompt_threads_mission_path() {
-        let p = cto_gate_review_system_prompt("/some/tree");
-        assert!(p[0].contains("/some/tree"));
     }
 
     // ─── Persona bundle ────────────────────────────────────────────────
