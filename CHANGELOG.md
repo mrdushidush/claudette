@@ -10,6 +10,8 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.8.9] - 2026-06-04
+
 ### Added
 
 - **Enforced offline mode (`--offline` / `CLAUDETTE_OFFLINE=1`).** Turns the
