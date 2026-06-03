@@ -211,6 +211,10 @@ fn run_mission_start(input: &str) -> Result<String, String> {
     }
 
     let parsed = parse_target(target)?;
+    // Brownfield missions clone a remote over the network (a loopback URL
+    // would still be allowed). Refuse cloud clones under offline mode here —
+    // local/ephemeral forge work needs no clone and is unaffected.
+    crate::egress::guard(&parsed.clone_url)?;
     let dest_raw = v
         .get("dest")
         .and_then(Value::as_str)
@@ -398,6 +402,10 @@ fn run_mission_attach(input: &str) -> Result<String, String> {
 // ─── mission_submit (capstone) ───────────────────────────────────────────
 
 fn run_mission_submit(input: &str) -> Result<String, String> {
+    // Submitting pushes to origin and opens a PR via the GitHub API — both
+    // are network egress. Refuse up front under offline mode rather than doing
+    // local git work that can't be shipped.
+    crate::egress::guard_subprocess("mission_submit (push branch + open a pull request)")?;
     let v = parse_json_input(input, "mission_submit")?;
     let title = extract_str(&v, "title", "mission_submit")?;
     let body_in = v.get("body").and_then(Value::as_str).unwrap_or("");

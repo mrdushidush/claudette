@@ -35,6 +35,12 @@ pub fn voice_for_lang(lang: &str) -> &'static str {
 ///
 /// Returns the path to the generated MP3. Caller is responsible for cleanup.
 fn synthesize_to_mp3(text: &str, lang: &str, out_path: &Path) -> Result<(), String> {
+    // edge-tts streams from Microsoft's cloud neural-voice endpoint. Refuse
+    // under offline mode with the uniform air-gap message instead of letting
+    // the python subprocess fail with an opaque connection error.
+    crate::egress::guard_subprocess(
+        "text-to-speech (edge-tts streams from a Microsoft cloud endpoint)",
+    )?;
     let voice = match lang {
         "he" => std::env::var("CLAUDETTE_TTS_VOICE_HE")
             .unwrap_or_else(|_| "he-IL-HilaNeural".to_string()),

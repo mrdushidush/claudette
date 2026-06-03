@@ -10,6 +10,25 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **Enforced offline mode (`--offline` / `CLAUDETTE_OFFLINE=1`).** Turns the
+  "air-gapped by design" posture into an enforced guarantee: every outbound
+  network call is checked against an allow-list — the configured local model
+  backend (Ollama / LM Studio host, including a LAN box opted into via
+  `CLAUDETTE_ALLOW_REMOTE_OLLAMA`) plus loopback — and anything else is
+  hard-blocked with a single uniform message (`blocked by offline mode
+  (--offline / CLAUDETTE_OFFLINE)…`). Two enforcement layers: an HTTP-layer
+  guard in the reqwest path (blocks `web_search`/`web_fetch`, Gmail/Calendar/
+  Google OAuth, markets/weather/Wikipedia, GitHub, Telegram) and a dispatch
+  layer for tools that reach the network via subprocess (remote `git_push`/
+  `git_clone`, the brownfield `mission_start` clone + `mission_submit` push,
+  and edge-tts TTS). The brain, recall embeddings, and local vision keep
+  working. `--offline` + `--telegram` is refused at startup. `--doctor` gains
+  an **egress / air-gap** section that prints the live allow-list and skips the
+  cloud probes. New module `egress.rs`; host-matching + flag/env parsing are
+  unit-tested. Docs: PRIVACY.md, README, quickstart, configuration.
+
 ## [0.8.8] - 2026-06-03
 
 ### Added

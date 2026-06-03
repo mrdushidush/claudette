@@ -50,11 +50,12 @@ claudette "what time is it?"
 Most "local AI" tools quietly phone home — telemetry, model downloads, a cloud fallback when the local model struggles. **Claudette has no such path.** There is no cloud-brain code in the binary to begin with.
 
 - **One required dependency:** a model server (Ollama or LM Studio) on `localhost`. That's it.
-- **Every outbound call is opt-in and feature-gated** — voice TTS, Telegram, web search, GitHub, Google Calendar/Gmail. Each one only exists if *you* turn it on with a token. The full inventory of every place a byte could leave your machine is in [`PRIVACY.md`](PRIVACY.md).
+- **`--offline` *enforces* the air-gap.** Run `claudette --offline` (or set `CLAUDETTE_OFFLINE=1`) and every outbound call except the local model backend + loopback is hard-blocked with a clear "blocked by offline mode" error — web search/fetch, Gmail/Calendar, markets/weather/Wikipedia, GitHub, Telegram, and remote `git push`/`clone` all refuse. The brain and recall keep working. `claudette --offline --doctor` prints the exact allow-list. This is the difference between *configured* not to phone home and *can't* phone home.
+- **Every outbound call is opt-in and feature-gated** even without `--offline` — voice TTS, Telegram, web search, GitHub, Google Calendar/Gmail. Each one only exists if *you* turn it on with a token. The full inventory of every place a byte could leave your machine is in [`PRIVACY.md`](PRIVACY.md).
 - **Truly offline:** `CLAUDETTE_SKIP_OLLAMA_PROBE=1` skips even the localhost startup check. Pull your model, disconnect the network, and the entire core works — chat, notes, todos, files, code search, repo editing, and the [Forge](#-forge-mode-an-autonomous-code-change-pipeline) autonomous code-change pipeline.
 - **Nothing is written outside `~/.claudette/`** without an explicit permission prompt.
 
-If you work on a regulated, classified, or simply trust-no-cloud machine, this is the headline feature — not an afterthought. Your code and your conversations never touch someone else's servers.
+If you work on a regulated, classified, or simply trust-no-cloud machine, this is the headline feature — not an afterthought. Your code and your conversations never touch someone else's servers — and with `--offline`, they *can't*.
 
 ---
 
@@ -202,7 +203,7 @@ Claudette has a clear north star: **be the most private, most universally-runnab
 
 ### The vision
 
-- **🔒 Hardened air-gap mode.** A first-class, audited offline profile: a `--air-gapped` flag that hard-disables every network-capable tool, a reproducible offline install bundle (binary + model + Whisper weights), and a documented "regulated-machine" deployment story.
+- **🔒 Hardened air-gap mode.** The enforced egress kill-switch has **shipped** — [`--offline` / `CLAUDETTE_OFFLINE=1`](#-air-gapped-by-design) hard-blocks every network call except the local backend + loopback. Still ahead: a reproducible offline install bundle (binary + model + Whisper weights) and a documented "regulated-machine" deployment story, plus an outbound-host audit log.
 - **🧠 A model-agnostic, curated brain menu.** Not one blessed model — a recommendation for *every* hardware tier, from a 4 GB laptop GPU to a 24 GB workstation, so anyone can run her well on what they already own.
 - **🏅 The Claudette Certified program, expanded.** Keep running the objective [50-task battery](#-claudette-certified--the-local-model-benchmark) on every promising new local model and publish a living, badged recommendation table. The [candidate queue](runs/eval-2026-05-29/battery/CANDIDATES.md) is already scouted — GLM-4.7-Flash, Qwen3-Coder-30B, Granite-4.1-8B, the Mistral/Ministral family, and more.
 

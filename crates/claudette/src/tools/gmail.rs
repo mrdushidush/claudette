@@ -85,14 +85,19 @@ pub(super) fn schemas() -> Vec<Value> {
 }
 
 pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>> {
-    let result = match name {
-        "gmail_list" => run_gmail_list(input),
-        "gmail_search" => run_gmail_search(input),
-        "gmail_read" => run_gmail_read(input),
-        "gmail_list_labels" => run_gmail_list_labels(),
+    // Resolve the handler before running it so the offline egress guard can
+    // refuse before any request hits gmail.googleapis.com.
+    let handler: fn(&str) -> Result<String, String> = match name {
+        "gmail_list" => run_gmail_list,
+        "gmail_search" => run_gmail_search,
+        "gmail_read" => run_gmail_read,
+        "gmail_list_labels" => |_| run_gmail_list_labels(),
         _ => return None,
     };
-    Some(result)
+    if let Err(e) = crate::egress::guard("https://gmail.googleapis.com") {
+        return Some(Err(e));
+    }
+    Some(handler(input))
 }
 
 fn auth_header(

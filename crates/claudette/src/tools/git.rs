@@ -546,6 +546,9 @@ fn run_git_clone(input: &str) -> Result<String, String> {
     let depth = v.get("depth").and_then(Value::as_u64);
 
     validate_clone_url(url)?;
+    // Cloning a remote is network egress (a loopback URL would still be
+    // allowed); refuse cloud clones under offline mode with the uniform msg.
+    crate::egress::guard(url)?;
     let dest = validate_dest_slug(dest_raw)?;
 
     let root = missions_root();
@@ -611,6 +614,10 @@ fn run_git_clone(input: &str) -> Result<String, String> {
 }
 
 fn run_git_push() -> Result<String, String> {
+    // Pushing reaches the configured remote (cloud); refuse under offline mode
+    // before spawning git, so the user sees the uniform air-gap message rather
+    // than a git transport error.
+    crate::egress::guard_subprocess("git_push (push to the remote repository)")?;
     // Gate enforcement lives at the policy layer: `git_push` is registered
     // as `DangerFullAccess` in `run.rs::build_permission_policy` and in
     // `agents.rs`, so every call path either (a) already runs under

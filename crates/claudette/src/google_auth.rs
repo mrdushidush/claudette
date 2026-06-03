@@ -235,6 +235,7 @@ pub fn access_token(ctx: AuthContext) -> Result<String, String> {
 /// messages can name the right scope; `None` falls back to a generic
 /// "<scope>" placeholder.
 fn refresh_tokens(tokens: &mut GoogleTokens, ctx: Option<AuthContext>) -> Result<(), String> {
+    crate::egress::guard(TOKEN_URL)?;
     let creds = load_client_creds()?;
     let client = http_client()?;
     let params = [
@@ -335,6 +336,7 @@ fn classify_refresh_failure(
 /// confirmation) and `claudette --doctor` (token-staleness probe), so the
 /// two callers stay in lockstep on what "access works" means.
 pub fn verify_scope_live(ctx: AuthContext, token: &str) -> Result<String, String> {
+    crate::egress::guard("https://www.googleapis.com")?;
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
@@ -379,6 +381,7 @@ pub fn verify_scope_live(ctx: AuthContext, token: &str) -> Result<String, String
 /// Revoke the stored refresh token for `ctx` with Google and delete the
 /// corresponding local file. Used by `claudette --auth-google [scope] --revoke`.
 pub fn revoke(ctx: AuthContext) -> Result<(), String> {
+    crate::egress::guard(REVOKE_URL)?;
     let tokens = load_tokens(ctx)?;
     let client = http_client()?;
     let resp = client
@@ -405,6 +408,10 @@ pub fn revoke(ctx: AuthContext) -> Result<(), String> {
 /// listener, opens the browser, captures the `code`, exchanges it for
 /// tokens, saves to the context-specific file.
 pub fn run_auth_flow(ctx: AuthContext) -> Result<(), String> {
+    // The OAuth consent + token exchange talk to accounts.google.com /
+    // oauth2.googleapis.com — refuse early under offline mode rather than
+    // opening a browser the flow can never complete.
+    crate::egress::guard("https://accounts.google.com")?;
     let creds = load_client_creds()?;
 
     // Bind first so we know which port to put in the redirect URI.

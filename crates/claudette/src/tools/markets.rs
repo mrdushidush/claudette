@@ -41,11 +41,15 @@ pub(super) fn schemas() -> Vec<Value> {
 }
 
 pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>> {
-    let result = match name {
-        "tv_get_quote" => run_tv_get_quote(input),
-        _ => return None,
-    };
-    Some(result)
+    if name != "tv_get_quote" {
+        return None;
+    }
+    // tv_get_quote reaches scanner.tradingview.com (cloud); block under
+    // offline mode before any request leaves the process.
+    if let Err(e) = crate::egress::guard("https://scanner.tradingview.com") {
+        return Some(Err(e));
+    }
+    Some(run_tv_get_quote(input))
 }
 
 // ────── TradingView helpers ──────────────────────────────────────────────

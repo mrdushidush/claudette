@@ -40,6 +40,7 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
 }
 
 fn run_web_search(input: &str) -> Result<String, String> {
+    crate::egress::guard("https://api.search.brave.com")?;
     let v: Value = serde_json::from_str(input)
         .map_err(|e| format!("web_search: invalid JSON ({e}): {input}"))?;
     let query = v
