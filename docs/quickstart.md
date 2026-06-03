@@ -1,59 +1,157 @@
 # Quickstart
 
-Five minutes from zero to a first conversation, then a tour of the common flows.
+Zero to a working agent in **under five minutes**, then a 60-second tour of the
+TUI and the Forge code-change pipeline.
 
-## Install
+## 1. Install (2 min)
 
 ```bash
-# 1. Install Ollama from https://ollama.com (one-time).
+# a. Install Ollama from https://ollama.com (one-time).
 ollama serve &
 
-# 2. Pull the default brain.
+# b. Pull the default brain (~3.4 GB on disk, ~3.4 GB VRAM).
 ollama pull qwen3.5:4b
 
-# 3. Install Claudette.
+# c. Install Claudette.
 cargo install claudette
+```
 
-# 4. Smoke-test.
+The `qwen3.5:4b` brain handles every tool-using flow on its own. Prefer LM
+Studio or a bigger model? See [configuration.md](configuration.md) and
+[hardware.md](hardware.md).
+
+## 2. Verify (30 sec)
+
+```bash
+claudette --doctor
+```
+
+`--doctor` probes every dependency and prints a green/red report with a
+**copy-paste `↳ fix:` command** under anything that's broken — model server not
+running, brain not pulled, a missing build toolchain (`git` / `cargo` /
+`python` / `node` / `go`), or absent voice deps. Green "local brain" and "build
+toolchains" rows mean you're ready. Run it any time something misbehaves.
+
+## 3. First conversation (30 sec)
+
+```bash
 claudette "what time is it?"
 ```
 
-That's it for the base install. The `qwen3.5:4b` brain is ~3.4 GB on disk, ~3.4 GB VRAM, and handles all of Claudette's tool-using flows on its own.
-
-## Four ways to talk to Claudette
+Four entry points, one runtime, one session format — switching is just a
+different command:
 
 ```bash
 claudette                            # interactive REPL
-claudette --tui                      # fullscreen TUI (5 tabs)
+claudette --tui                      # fullscreen TUI
 claudette "your prompt here"         # one-shot, prints reply and exits
-claudette --telegram                 # Telegram bot mode
+claudette --telegram --chat any      # Telegram bot
 claudette --resume                   # resume last session
 ```
 
-Each mode runs the same conversation runtime, the same tool set, and the same session format. Switching is just a different entry point.
+## The TUI in 60 seconds
 
-## First flows to try
+```bash
+claudette --tui
+```
 
-### Notes and todos (no tokens needed)
+Five tabs across the top — switch with number keys or cycle with `Tab` /
+`Shift+Tab`:
+
+| Key | Tab | What's there |
+|-----|-----|--------------|
+| `1` | **Chat** | Streaming conversation + inline tool calls |
+| `2` | **Tools** | Full tool-event log (every call, args, result) |
+| `3` | **Notes** | Browse `~/.claudette/notes/` — `↑`/`↓` select, `f` filter by tag |
+| `4` | **Todos** | `↑`/`↓` select, `Space`/`Enter` toggle done |
+| `5` | **HW** | Live GPU / VRAM / temperature |
+
+- **Type and press `Enter`** to send (number keys only switch tabs when the
+  input box is empty, so you can still type "1pm").
+- **Slash commands work here too** — `/help`, `/brownfield`, `/forge`, `/recall`,
+  everything the REPL has.
+- **`Ctrl+V`** pastes an image or text block into your next message.
+- **`Ctrl+C`** (or `Ctrl+D`) quits. (`Ctrl+G` is a coffee break — try it.)
+
+## Forge: hands-off code changes with a review gate
+
+Forge runs an autonomous **Planner → Coder → Verifier → fix-loop → Submitter**
+pipeline against a git repo. It builds, tests, and ends by opening a PR — and it
+asks for your sign-off before the PR goes out.
+
+### Against a GitHub repo (review gate → PR)
+
+```
+> /brownfield owner/some-repo
+> /forge make the --timeout flag accept fractional seconds
+```
+
+`/brownfield` clones into `~/.claudette/missions/<slug>/` and re-routes file ops
+into the clone. `/forge` runs the pipeline; watch the phases stream past:
+
+```text
+forge: planner                 # localizes the code, writes a short plan
+forge: coder (round 0)         # makes the edit, commits to the mission branch
+forge: build + test            # cargo check / cargo test (py/js/go too)
+forge: verifier   score=9 pass=true
+forge: review — approve before opening the PR
+  ── plan ──
+  ...
+  ── diff ──
+  ...
+  ⚠ Open the PR with these changes? [y/N]
+```
+
+Two things make this trustworthy:
+
+1. **The Verifier actually builds and tests.** Each round it runs the project's
+   real build + test suite in the tree (`cargo check`/`cargo test`,
+   `go build`/`go test`, `pytest`, `npm test`). A diff that doesn't compile or
+   breaks a test can't pass — the failures are fed back to the Coder to fix.
+2. **You QA before the PR ships.** The review gate prints the plan + the full
+   final diff and waits for an explicit `y`. Anything else (including a piped,
+   non-interactive stdin) leaves the commits on the mission branch and opens no
+   PR — re-run `/forge` to continue, or push manually.
+
+### Against a local repo (commits to a branch, no PR)
+
+```bash
+cd ~/code/your-project          # any git repo under $HOME
+claudette --forge "make the --timeout flag accept fractional seconds"
+```
+
+Inside an existing repo with no active mission, Forge auto-bootstraps an
+ephemeral mission at the repo root — no clone, no setup. It runs the same
+build-and-test-verified pipeline, then **commits the result to an isolated
+`claudette-mission/*` branch** and restores your working branch untouched. There
+is no PR (and so no review gate) for a local mission — review the branch with
+`git log` / `git diff`, then `git merge` or `git branch -D` as you see fit.
+
+Useful knobs (all optional):
+
+| Env var | Effect |
+|---------|--------|
+| `CLAUDETTE_FORGE_NO_REVIEW=1` | Skip the human-review gate (fully hands-off PR) |
+| `CLAUDETTE_FORGE_NO_BUILD_CHECK=1` | Skip the build+test gate (slow/networked suites) |
+| `CLAUDETTE_FORGE_TEST_TIMEOUT_SECS=300` | Per-step build/test timeout (default 180) |
+| `CLAUDETTE_FORGE_AUTO_APPROVE=1` | Unattended: auto-approve tool calls **and** skip the review gate |
+
+Full pipeline walkthrough + role-routing: [forge.md](forge.md).
+
+## More first flows
+
+### Notes, todos, time, weather, Wikipedia (no tokens needed)
 
 ```
 > take a note: pick up bread tomorrow
-> what's on my todo list?
 > add a todo: review PR #42
-> mark "review PR #42" as done
-```
-
-### Time, weather, Wikipedia (no tokens needed)
-
-```
-> what time is it?
 > what's the weather in Tokyo?
 > summarise the Wikipedia article on the Ariane 6 rocket
 ```
 
 ### Web search (needs `BRAVE_API_KEY`)
 
-Get a key from [api.search.brave.com](https://api.search.brave.com/). Then:
+Get a key from [api.search.brave.com](https://api.search.brave.com/):
 
 ```bash
 export BRAVE_API_KEY=your_key
@@ -70,17 +168,6 @@ claudette
 > what's the status of PR #5?
 ```
 
-### Brownfield missions: clone, edit, ship a PR
-
-```
-> /brownfield owner/some-repo
-> read README.md and find the place that documents the build
-> add a section under "Build" describing the test runner
-> /forge open the PR
-```
-
-`/brownfield` clones into `~/.claudette/missions/<slug>/` and silently re-routes file operations into the mission tree. `/forge` runs a Planner→Coder→Verifier pipeline that ends at `mission_submit`, which auto-branches, commits, pushes, and opens the PR. If you're already cd'd into a git repo, `claudette --forge "<prompt>"` auto-bootstraps an ephemeral mission rooted at the repo toplevel — no `/brownfield` step needed. Full pipeline walkthrough: [forge.md](forge.md).
-
 ### Google Calendar + Gmail (needs OAuth)
 
 Walkthrough: [google_setup.md](google_setup.md).
@@ -90,32 +177,32 @@ claudette --auth-google calendar
 claudette --auth-google gmail
 claudette
 > what's on my calendar tomorrow?
-> any unread email from VIP senders?
 ```
 
 ### Telegram bot with voice
 
-Get a token from `@BotFather`. Set `TELEGRAM_BOT_TOKEN`. Pull a Whisper model under `~/.claudette/models/ggml-large-v3-turbo.bin`.
+Get a token from `@BotFather`, set `TELEGRAM_BOT_TOKEN`, pull a Whisper model
+under `~/.claudette/models/ggml-large-v3-turbo.bin`:
 
 ```bash
-claudette --telegram --chat any   # accept all chats; for production set --chat <id>
+claudette --telegram --chat any   # accept all chats; for production use --chat <id>
 ```
 
-Send a voice note. Claudette transcribes it (Whisper), runs the turn, replies in text. Type `/voice` to also get spoken replies via edge-tts.
+Send a voice note — Claudette transcribes it (Whisper), runs the turn, replies
+in text. Type `/voice` for spoken replies too.
 
 ### Morning briefing
 
-Persistent scheduler entry that fires at 07:00 weekdays and prints calendar + weather + unread email:
-
 ```bash
-claudette --briefing                       # default: 07:00 weekdays
+claudette --briefing                       # 07:00 weekdays: calendar + weather + email
 claudette --briefing --time 08:30 --days weekdays
 ```
 
 ## Where to go next
 
-- [`configuration.md`](configuration.md) — every env var, token file fallbacks, recall settings
-- [`hardware.md`](hardware.md) — what VRAM you need at each preset, 30b-on-8GB recipe
+- [`configuration.md`](configuration.md) — every env var, token fallbacks, recall settings
+- [`forge.md`](forge.md) — the full Forge pipeline, review gate, build/test gate, role-routing
+- [`hardware.md`](hardware.md) — VRAM per preset, the 30b-on-8GB recipe
 - [`usage.md`](usage.md) — full CLI flag reference + every slash command
 - [`architecture.md`](architecture.md) — module layout, tool-group contract, Codet sidecar
 - [`comparison.md`](comparison.md) — honest side-by-side vs. other open-source agents

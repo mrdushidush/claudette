@@ -231,6 +231,239 @@ fn format_result(framework: Framework, result: &CommandResult) -> Value {
     })
 }
 
+// ────── forge Verifier build + test gate ──────────────────────────────────
+//
+// The forge Verifier used to be a tool-less brain turn that only *read* the
+// diff. A model reading a diff can't see a type error, a broken import, or a
+// test the change regressed. `run_build_and_tests` gives the Verifier a
+// deterministic ground truth: it auto-detects the framework, runs the build/
+// typecheck (`cargo check` / `go build`) and then the test suite, and returns a
+// structured outcome the fix-loop turns into pass/fail + Coder feedback.
+//
+// Severity rules (mirrors the security-review gate in run.rs):
+//   • A *build* break (`cargo check` / `go build` non-zero) is a HARD fail —
+//     code that doesn't compile is unambiguously wrong.
+//   • *Test failures* (parsed failed > 0, or a non-zero test command we can't
+//     otherwise explain) are a HARD fail, fed back to the Coder.
+//   • An *infrastructure* problem — no framework, tool not installed, timeout,
+//     "no tests collected" — is ADVISORY: it never flips a pass to a fail,
+//     because punishing a docs PR for a missing `npm install` or a flaky
+//     network test would block legitimate work. It's surfaced in the summary so
+//     the human (and the review gate) can see verification was incomplete.
+
+/// Structured result of the forge build + test gate. See the section notes.
+#[derive(Debug, Clone)]
+pub(crate) struct BuildTestOutcome {
+    /// False when no recognised framework was found — the gate is a no-op and
+    /// the LLM Verifier's verdict stands alone.
+    pub ran: bool,
+    /// Build/typecheck outcome. `None` when the framework has no separate
+    /// compile step (pytest, plain npm) or the build tool couldn't run.
+    pub build_ok: Option<bool>,
+    /// Test outcome. `None` when tests couldn't be *run* (tool missing,
+    /// timeout, no tests collected) — advisory, never a hard fail.
+    pub tests_ok: Option<bool>,
+    /// Multi-line, human- and Coder-readable summary of what ran and failed.
+    pub summary: String,
+    /// Detected framework label ("cargo" / "pytest" / …), or "none".
+    pub framework: &'static str,
+}
+
+impl BuildTestOutcome {
+    /// True when the gate observed a *definitive* failure (build broke or a
+    /// test failed). Infrastructure problems (couldn't run) are NOT failures.
+    pub fn is_hard_fail(&self) -> bool {
+        self.build_ok == Some(false) || self.tests_ok == Some(false)
+    }
+}
+
+/// Run the project's build/typecheck then its test suite inside `dir` and
+/// return a [`BuildTestOutcome`]. `timeout_secs` bounds *each* sub-step.
+/// Never panics; an undetectable framework yields `ran=false`.
+pub(crate) fn run_build_and_tests(dir: &Path, timeout_secs: u64) -> BuildTestOutcome {
+    let Some(framework) = detect_framework(dir) else {
+        return BuildTestOutcome {
+            ran: false,
+            build_ok: None,
+            tests_ok: None,
+            summary: "no test framework detected (no Cargo.toml / package.json / \
+                      pyproject.toml / go.mod) — skipped build+test verification"
+                .to_string(),
+            framework: "none",
+        };
+    };
+
+    let mut lines: Vec<String> = Vec::new();
+
+    // Build / typecheck (the "cargo check" half).
+    let build_ok = run_build_step(framework, dir, timeout_secs, &mut lines);
+
+    // Test suite.
+    let test_result = invoke(framework, None, dir);
+    let combined = format!("{}\n{}", test_result.stdout, test_result.stderr);
+    let (passed, failed) = match framework {
+        Framework::Cargo => parse_cargo_counts(&combined),
+        Framework::Pytest => parse_pytest_counts(&combined),
+        Framework::Go => parse_go_counts(&combined),
+        Framework::Npm => parse_jest_counts(&combined),
+    };
+    let tests_ok = classify_tests(
+        framework,
+        &test_result,
+        &combined,
+        passed,
+        failed,
+        &mut lines,
+    );
+
+    BuildTestOutcome {
+        ran: true,
+        build_ok,
+        tests_ok,
+        summary: lines.join("\n"),
+        framework: framework.label(),
+    }
+}
+
+/// Run the framework's build/typecheck step. Returns `Some(true/false)` when a
+/// build command actually ran, `None` when the framework has no separate
+/// compile step or the tool wasn't runnable (advisory).
+fn run_build_step(
+    framework: Framework,
+    dir: &Path,
+    timeout_secs: u64,
+    lines: &mut Vec<String>,
+) -> Option<bool> {
+    let (program, args): (&str, Vec<&str>) = match framework {
+        Framework::Cargo => ("cargo", vec!["check", "--all-targets"]),
+        Framework::Go => ("go", vec!["build", "./..."]),
+        // pytest / npm have no generic language-level compile step — a
+        // collection-time import/syntax error surfaces in the test run instead.
+        Framework::Pytest | Framework::Npm => return None,
+    };
+    let joined = args.join(" ");
+    let r = run_command_with_timeout(program, &args, timeout_secs, Some(dir));
+    if r.timed_out {
+        lines.push(format!(
+            "build: `{program} {joined}` timed out after {timeout_secs}s (not counted as a failure)"
+        ));
+        return None;
+    }
+    if r.exit_code.is_none() {
+        lines.push(format!(
+            "build: could not run `{program}` (is it installed?) — build check skipped"
+        ));
+        return None;
+    }
+    if r.success {
+        lines.push(format!("build: `{program} {joined}` OK"));
+        Some(true)
+    } else {
+        let detail = if framework == Framework::Cargo {
+            let errs = parse_cargo_messages(&r.stdout);
+            let s = summarize_cargo_errors(&errs);
+            if s.is_empty() {
+                tail(&r.stderr, 1200)
+            } else {
+                s
+            }
+        } else {
+            tail(&r.stderr, 1200)
+        };
+        lines.push(format!("build: `{program} {joined}` FAILED:\n{detail}"));
+        Some(false)
+    }
+}
+
+/// Turn the test subprocess result into an `Option<bool>` plus summary lines.
+fn classify_tests(
+    framework: Framework,
+    result: &CommandResult,
+    combined: &str,
+    passed: u32,
+    failed: u32,
+    lines: &mut Vec<String>,
+) -> Option<bool> {
+    if result.timed_out {
+        lines.push("tests: timed out (not counted as a failure)".to_string());
+        return None;
+    }
+    if result.exit_code.is_none() {
+        lines.push(
+            "tests: could not run the test command (is the test tool installed?) — tests skipped"
+                .to_string(),
+        );
+        return None;
+    }
+    if failed > 0 {
+        lines.push(format!(
+            "tests: {failed} failed, {passed} passed:\n{}",
+            summarize_test_failures(framework, combined)
+        ));
+        return Some(false);
+    }
+    if result.success {
+        lines.push(format!("tests: {passed} passed"));
+        return Some(true);
+    }
+    // pytest exit 5 = "no tests collected" — advisory, not a failure.
+    if framework == Framework::Pytest && result.exit_code == Some(5) {
+        lines.push("tests: no tests collected (nothing to verify)".to_string());
+        return None;
+    }
+    // Non-zero exit, no parsed failures: a compile error in the test target, a
+    // missing dependency, or a harness crash. Surface it as a fail with a tail.
+    lines.push(format!(
+        "tests: command exited {:?} with no parseable test results (build error in the \
+         test target or a harness failure):\n{}",
+        result.exit_code,
+        tail(combined, 1200)
+    ));
+    Some(false)
+}
+
+/// Compact, deterministic listing of the first dozen test failures.
+fn summarize_test_failures(framework: Framework, combined: &str) -> String {
+    let failures = match framework {
+        Framework::Cargo => parse_cargo_failures(combined),
+        Framework::Pytest => parse_pytest_failures(combined),
+        Framework::Go => parse_go_failures(combined),
+        Framework::Npm => parse_jest_failures(combined),
+    };
+    if failures.is_empty() {
+        return tail(combined, 1200);
+    }
+    failures
+        .iter()
+        .take(12)
+        .map(|f| {
+            let name = f.get("name").and_then(Value::as_str).unwrap_or("");
+            let file = f.get("file").and_then(Value::as_str).unwrap_or("");
+            let msg = f.get("message").and_then(Value::as_str).unwrap_or("");
+            format!("  - {name} {file} {msg}").trim_end().to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Compact listing of the first dozen `cargo check` errors (warnings dropped).
+fn summarize_cargo_errors(errs: &[Value]) -> String {
+    errs.iter()
+        .filter(|e| e.get("severity").and_then(Value::as_str) == Some("error"))
+        .take(12)
+        .map(|e| {
+            let file = e.get("file").and_then(Value::as_str).unwrap_or("");
+            let line = e.get("line").and_then(Value::as_u64).unwrap_or(0);
+            let code = e.get("code").and_then(Value::as_str).unwrap_or("");
+            let msg = e.get("message").and_then(Value::as_str).unwrap_or("");
+            format!("  - {file}:{line} {code} {msg}")
+                .trim_end()
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 // ────── diagnostics tool ─────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -941,5 +1174,147 @@ not json at all
     #[test]
     fn active_cwd_returns_path() {
         let _: std::path::PathBuf = crate::missions::active_cwd();
+    }
+
+    // ─── forge build + test gate ──────────────────────────────────────
+
+    fn cmd(success: bool, exit: Option<i32>, timed_out: bool) -> CommandResult {
+        CommandResult {
+            success,
+            stdout: String::new(),
+            stderr: String::new(),
+            timed_out,
+            exit_code: exit,
+        }
+    }
+
+    #[test]
+    fn is_hard_fail_truth_table() {
+        let base = BuildTestOutcome {
+            ran: true,
+            build_ok: None,
+            tests_ok: None,
+            summary: String::new(),
+            framework: "cargo",
+        };
+        // Nothing definitive ran → not a hard fail.
+        assert!(!base.is_hard_fail());
+        assert!(BuildTestOutcome {
+            build_ok: Some(false),
+            ..base.clone()
+        }
+        .is_hard_fail());
+        assert!(BuildTestOutcome {
+            tests_ok: Some(false),
+            ..base.clone()
+        }
+        .is_hard_fail());
+        assert!(!BuildTestOutcome {
+            build_ok: Some(true),
+            tests_ok: Some(true),
+            ..base.clone()
+        }
+        .is_hard_fail());
+    }
+
+    #[test]
+    fn classify_tests_failed_count_is_hard_fail() {
+        let mut lines = Vec::new();
+        let r = cmd(false, Some(101), false);
+        let out = classify_tests(Framework::Cargo, &r, "", 3, 2, &mut lines);
+        assert_eq!(out, Some(false));
+        assert!(lines.iter().any(|l| l.contains("2 failed")));
+    }
+
+    #[test]
+    fn classify_tests_all_pass() {
+        let mut lines = Vec::new();
+        let r = cmd(true, Some(0), false);
+        let out = classify_tests(Framework::Cargo, &r, "", 5, 0, &mut lines);
+        assert_eq!(out, Some(true));
+        assert!(lines.iter().any(|l| l.contains("5 passed")));
+    }
+
+    #[test]
+    fn classify_tests_timeout_is_advisory_not_a_fail() {
+        let mut lines = Vec::new();
+        let r = cmd(false, None, true);
+        let out = classify_tests(Framework::Pytest, &r, "", 0, 0, &mut lines);
+        assert_eq!(out, None);
+        assert!(lines.iter().any(|l| l.contains("timed out")));
+    }
+
+    #[test]
+    fn classify_tests_spawn_failure_is_advisory() {
+        // exit_code None + not timed out = the test tool wasn't runnable.
+        let mut lines = Vec::new();
+        let r = cmd(false, None, false);
+        let out = classify_tests(Framework::Npm, &r, "", 0, 0, &mut lines);
+        assert_eq!(out, None);
+        assert!(lines.iter().any(|l| l.contains("could not run")));
+    }
+
+    #[test]
+    fn classify_tests_pytest_no_tests_collected_is_advisory() {
+        // pytest exits 5 when it collects zero tests — not a failure.
+        let mut lines = Vec::new();
+        let r = cmd(false, Some(5), false);
+        let out = classify_tests(Framework::Pytest, &r, "", 0, 0, &mut lines);
+        assert_eq!(out, None);
+        assert!(lines.iter().any(|l| l.contains("no tests collected")));
+    }
+
+    #[test]
+    fn classify_tests_nonzero_without_failures_is_hard_fail() {
+        // A compile error in the test target: non-zero exit, no parsed
+        // failures. Must surface as a fail rather than a silent pass.
+        let mut lines = Vec::new();
+        let r = cmd(false, Some(101), false);
+        let out = classify_tests(Framework::Cargo, &r, "error[E0433]: boom", 0, 0, &mut lines);
+        assert_eq!(out, Some(false));
+    }
+
+    #[test]
+    fn summarize_test_failures_lists_pytest_names() {
+        let combined = "FAILED tests/test_x.py::test_two - AssertionError: x != y\n";
+        let s = summarize_test_failures(Framework::Pytest, combined);
+        assert!(s.contains("test_two"), "got: {s}");
+        assert!(s.contains("tests/test_x.py"), "got: {s}");
+    }
+
+    #[test]
+    fn summarize_cargo_errors_keeps_errors_drops_warnings() {
+        let errs = vec![
+            json!({"file":"src/a.rs","line":3,"code":"E0425","severity":"error","message":"cannot find x"}),
+            json!({"file":"src/b.rs","line":9,"code":"unused","severity":"warning","message":"unused import"}),
+        ];
+        let s = summarize_cargo_errors(&errs);
+        assert!(s.contains("E0425"), "got: {s}");
+        assert!(s.contains("src/a.rs:3"), "got: {s}");
+        assert!(
+            !s.contains("unused import"),
+            "warnings must be dropped: {s}"
+        );
+    }
+
+    #[test]
+    fn run_build_and_tests_noop_without_framework() {
+        let dir = std::env::temp_dir().join(format!(
+            "claudette-btgate-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let out = run_build_and_tests(&dir, 5);
+        let _ = std::fs::remove_dir_all(&dir);
+        // The temp dir has no marker files; if an ancestor happens to (unlikely
+        // for the OS temp dir), assert the invariant rather than a hard "none".
+        assert_eq!(out.ran, out.framework != "none");
+        if !out.ran {
+            assert!(!out.is_hard_fail());
+            assert!(out.summary.contains("no test framework detected"));
+        }
     }
 }

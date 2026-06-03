@@ -46,57 +46,82 @@ prompt is fed verbatim to the Planner.
 ## Phases (v0c)
 
 The pipeline lives in [`crates/claudette/src/run.rs`](../crates/claudette/src/run.rs)
-inside `run_forge_mission`. Five phases, two of which loop:
+inside `run_forge_mission`. Six phases, two of which loop:
 
-1. **Planner** — tool-less brain turn. Decomposes the request into a
-   3–5 step numbered plan. Output is prepended to the Coder's input. An
-   empty plan is allowed (Coder just runs the original prompt).
+1. **Planner** — read-only brain turn (`files` + `search` tools only).
+   Localizes the code and emits the relevant file(s) plus a 3–5 step
+   numbered plan. The brief is prepended to the Coder's input and shown to
+   the Verifier so they inherit the localization. An empty plan is allowed
+   (Coder just runs the original prompt).
 
 2. **Coder** — full forge runtime with `files`, `search`, `git`,
    `advanced`, and `github` tool groups pre-enabled and
-   `should_submit=false`. The Coder edits the working tree but
-   **must not commit** — see "Submitter contract" below.
+   `should_submit=false`. The Coder makes the change and **commits it to
+   the mission branch** with a clear message, but does **not** push or call
+   `mission_submit` — the Verifier reviews first. Each fix-loop round adds
+   commits to the same branch; the diff the Verifier grades is
+   `base..HEAD`.
 
-3. **Verifier** — tool-less brain turn that scores the captured
-   `git diff HEAD` against the original request. Returns a JSON object:
-   ```json
-   {"score": 0..=10, "pass": true|false, "feedback": "..."}
-   ```
-   Unparseable responses (broken JSON, prose-only output, etc.) fall
-   through to a permissive `pass=true, score=10, feedback=""` default so
-   a flaky local Verifier model can't deadlock a working Coder.
+3. **Verifier** — two checks, run together each round:
+   - A **build + test gate** (on by default): the project's *real* build
+     and test suite is run inside the mission tree — `cargo check` +
+     `cargo test` on Rust, `go build` + `go test` on Go, `pytest` on
+     Python, `npm test` on Node. A build break or a failing test is a
+     hard fail; the failures are fed back to the Coder. Infrastructure
+     problems (no framework, tool not installed, timeout, "no tests
+     collected") stay advisory so a docs PR isn't blocked by a flaky or
+     uninstalled suite. Opt out with `CLAUDETTE_FORGE_NO_BUILD_CHECK=1`.
+   - A **brain Verifier** turn that scores the captured `git diff` against
+     the request and returns one line of JSON:
+     ```json
+     {"score": 0..=10, "pass": true|false, "feedback": "..."}
+     ```
+     This gate is **fail-closed**: an unparseable / fenced-only /
+     missing-field response abstains as a *fail* (`pass=false, score=0`),
+     and a pass requires both `pass=true` **and** `score >= 8`. A stuck
+     Verifier therefore exhausts the bounded fix-loop and exits via the
+     cap rather than green-lighting unverified code.
 
-4. **Fix-loop** — if Verifier `pass=false` and the round count is below
-   `MAX_FIX_ROUNDS` (currently `2`, see
-   [`run.rs:286`](../crates/claudette/src/run.rs)), the pipeline re-runs
-   Coder with the Verifier's feedback prepended. The Coder edits the
-   *same* tree; commits are still deferred to Submitter. After
-   `MAX_FIX_ROUNDS` failed rounds the pipeline submits anyway with the
-   final Verifier message logged — better to ship a flawed PR the human
-   can review than burn the whole context budget chasing a stuck
-   Verifier.
+4. **Fix-loop** — if the round didn't pass and the pass count is below
+   the cap (`DEFAULT_MAX_FIX_ROUNDS = 3` total Coder passes; override with
+   `CLAUDETTE_MAX_FIX_ROUNDS`, clamped to 10), the pipeline re-runs Coder
+   with the Verifier's feedback prepended. The Coder commits each round to
+   the mission branch; the best-scoring round is restored before submit. A
+   loop that never passes does **not** open a PR — the commits stay on the
+   mission branch for inspection (override with
+   `CLAUDETTE_FORGE_SUBMIT_ON_FAIL=1`).
 
-5. **Submitter** — final Coder turn with `should_submit=true` that
+5. **Human-review gate** — before the Submitter runs, forge prints the
+   plan + the full final diff and waits for an explicit `y`. This is your
+   QA step: anything other than yes — including a non-interactive stdin —
+   leaves the commits on the branch and opens no PR. On by default;
+   skipped under `CLAUDETTE_FORGE_AUTO_APPROVE=1` (unattended) or
+   `CLAUDETTE_FORGE_NO_REVIEW=1`.
+
+6. **Submitter** — final Coder turn with `should_submit=true` that
    **only** calls `mission_submit`. Stage → commit → push →
    `gh_create_pr` happens atomically inside that one tool call.
 
-## Submitter contract
+## Coder / Submitter contract
 
-The Coder phase must **leave the working tree dirty**: modified files,
-no commit. `mission_submit` refuses with "No changes detected in the
-working tree. Mission cannot be submitted..." if the tree is clean, so
-a Coder that runs `git_add` + `git_commit` before exiting will produce
-a successful runtime trace with **no PR opened** — exactly the silent
-failure mode that surfaced on 2026-05-15 from a forge_e2e prompt asking
-Coder to commit early.
+The Coder phase **commits** its work to the mission branch but must
+**not** `git_push` or call `mission_submit` — the Verifier and the
+human-review gate run between the commit and the PR. The Verifier grades
+the `base..HEAD` diff (the base SHA is snapshotted before any phase runs,
+so the diff survives the Coder committing mid-pipeline). An empty diff —
+the Coder committed nothing — is forced to a fail so a zero-line PR can't
+slip through.
+
+`mission_submit` (the Submitter's only call) auto-branches off
+`main`/`master`, then stages → commits any remaining work → pushes →
+opens the PR via `gh_create_pr`. It accepts an already-committed, clean
+tree (the normal case here): a clean tree with commits ahead of the base
+is *submittable*, not "nothing to do".
 
 > If you're writing custom Coder prompts (e.g. a launcher script that
-> rephrases `--forge` input), include the explicit phrase:
-> *"Do NOT call git_add, git_commit, git_push, or mission_submit. The
-> Submitter phase will stage + commit + push + open the PR for you."*
-
-The Verifier also relies on this: it reads `git diff HEAD` of the dirty
-tree to score the change. A clean tree gives it nothing to verify.
+> rephrases `--forge` input), tell the Coder to commit but not push:
+> *"Make the change and `git_commit` it to the current branch. Do NOT
+> `git_push` or call `mission_submit` — the Verifier reviews first."*
 
 ## Auto-bootstrap
 
@@ -168,10 +193,22 @@ The Coder phase also gets a bundled **persona overlay**
 for a consistent code-review/code-write voice. Planner and Verifier
 do not currently carry a persona overlay.
 
-## Things you can't change yet
+## Tuning knobs
 
-- The fix-loop budget is a const (`MAX_FIX_ROUNDS = 2`). Tuning is a
-  follow-up.
+| Env var | Default | Effect |
+|---------|---------|--------|
+| `CLAUDETTE_MAX_FIX_ROUNDS` | `3` | Total Coder passes (round 0 + revisions), clamped to `[1, 10]` |
+| `CLAUDETTE_FORGE_NO_REVIEW` | off | Skip the human-review gate (hands-off submit) |
+| `CLAUDETTE_FORGE_NO_BUILD_CHECK` | off | Skip the build+test gate |
+| `CLAUDETTE_FORGE_TEST_TIMEOUT_SECS` | `180` | Per-step build/test timeout, clamped to `[10, 1800]` |
+| `CLAUDETTE_FORGE_AUTO_APPROVE` | off | Unattended: auto-approve tool calls **and** skip the review gate |
+| `CLAUDETTE_FORGE_SUBMIT_ON_FAIL` | off | Open a PR for the best revision even if the Verifier never passed |
+| `CLAUDETTE_FORGE_SECURITY_REVIEW` | off | Run the deterministic diff security scan as an extra gate |
+| `CLAUDETTE_FORGE_SECURITY_OVERRIDE` | off | Submit even if a HIGH-severity security finding survives |
+| `CLAUDETTE_FORGE_ALLOW_DIRTY` | off | Allow forge on a dirty/mid-merge tree (ephemeral missions) |
+
+What's still fixed in code:
+
 - The Verifier's grading prompt is fixed in
   [`prompt.rs`](../crates/claudette/src/prompt.rs)
   (`forge_verifier_system_prompt`).
@@ -180,20 +217,26 @@ do not currently carry a persona overlay.
 
 ## Diagnostic checklist
 
-When a forge run misbehaves, run `claudette --doctor` first — it
-verifies Ollama / brain / OAuth tokens. Then, on errors specific to
-forge:
+When a forge run misbehaves, run `claudette --doctor` first — it verifies
+the model server / brain, the **build toolchains** the Verifier needs
+(`git` / `cargo` / `python` / `node` / `go`), and OAuth tokens, with a
+copy-paste fix under anything red. Then, on errors specific to forge:
 
-- *"No changes detected in the working tree."* — the Coder committed
-  early. See "Submitter contract" above.
+- *"forge: build/test gate FAILED…"* — the change doesn't compile or
+  broke a test. The failing commands + errors are in the streamed log and
+  fed to the Coder; if it's a false alarm (flaky/networked suite) set
+  `CLAUDETTE_FORGE_NO_BUILD_CHECK=1`.
+- *"forge: PR not opened — change declined at review."* — you answered
+  anything but `y` at the review gate (or stdin wasn't interactive). The
+  commits are on the mission branch; re-run `/forge`, or set
+  `CLAUDETTE_FORGE_NO_REVIEW=1` to skip the gate.
+- *"forge: NOT opening a PR — the Verifier never passed…"* — the fix-loop
+  hit its round cap without a pass. Re-run to continue, or set
+  `CLAUDETTE_FORGE_SUBMIT_ON_FAIL=1` to open a PR for the best revision.
 - *"forge-mode requires an active brownfield mission, and could not
   auto-bootstrap one…"* — you're not in a git repo, or the repo lives
   outside `$HOME` and `CLAUDETTE_WORKSPACE`. `cd` into the repo or set
   `CLAUDETTE_WORKSPACE` to its parent.
-- *"verifier still failing after 2 round(s); submitting anyway"* —
-  Coder couldn't satisfy Verifier in two rounds. The PR was opened
-  anyway with the final feedback in the streamed log — review it
-  manually before merging.
 
 ## See also
 

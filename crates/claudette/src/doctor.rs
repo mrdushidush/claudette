@@ -55,6 +55,14 @@ fn print_section(title: &str) {
     eprintln!("{}", theme::accent(title));
 }
 
+/// Print an indented, copy-pasteable remediation line under the preceding row.
+/// Doctor's whole value is telling the user *exactly* what to run next, so the
+/// red/yellow rows are paired with a concrete `↳ fix:` command wherever one
+/// exists.
+fn print_fix(cmd: &str) {
+    eprintln!("      {} {}", theme::accent("↳ fix:"), theme::dim(cmd));
+}
+
 fn home_dir() -> PathBuf {
     let raw = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
@@ -91,6 +99,9 @@ pub fn run() -> i32 {
 
     print_section("local brain");
     bump(probe_brain());
+
+    print_section("build toolchains");
+    bump(probe_toolchains());
 
     print_section("recall / embeddings");
     bump(probe_recall());
@@ -276,6 +287,7 @@ fn probe_brain() -> Status {
                     Status::Err,
                     "server returned an empty model list — load one first",
                 );
+                print_fix(&model_load_hint(compat, &configured_model));
                 overall = Status::Err;
             } else if model_present(&names, &configured_model) {
                 print_row(
@@ -284,18 +296,12 @@ fn probe_brain() -> Status {
                     &format!("{} model(s) available", names.len()),
                 );
             } else {
-                let hint = if compat {
-                    format!(
-                        "load it in LM Studio's Local Server tab (looking for: {configured_model})"
-                    )
-                } else {
-                    format!("`ollama pull {configured_model}` to fetch it")
-                };
                 print_row(
                     &format!("brain '{configured_model}' NOT in model list"),
                     Status::Err,
-                    &hint,
+                    &format!("{} other model(s) available", names.len()),
                 );
+                print_fix(&model_load_hint(compat, &configured_model));
                 overall = Status::Err;
             }
         }
@@ -305,18 +311,38 @@ fn probe_brain() -> Status {
                 Status::Err,
                 &format!("HTTP {} at {tags_url}", r.status().as_u16()),
             );
+            print_fix(&backend_start_hint(compat));
             overall = Status::Err;
         }
         Err(e) => {
-            print_row(
-                "reachable",
-                Status::Err,
-                &format!("{e} — start the server or set OLLAMA_HOST"),
-            );
+            print_row("not reachable", Status::Err, &format!("{base} — {e}"));
+            print_fix(&backend_start_hint(compat));
             overall = Status::Err;
         }
     }
     overall
+}
+
+/// Copy-paste command to start the model server for the active backend.
+fn backend_start_hint(compat: bool) -> String {
+    if compat {
+        "open LM Studio → Developer (Local Server) tab → Start, or run `lms server start` \
+         (default http://localhost:1234)"
+            .to_string()
+    } else {
+        "run `ollama serve` in another terminal, or set OLLAMA_HOST to your endpoint".to_string()
+    }
+}
+
+/// Copy-paste command to load/pull the configured brain for the active backend.
+fn model_load_hint(compat: bool, model: &str) -> String {
+    if compat {
+        format!(
+            "load `{model}` in LM Studio (Models tab → load), or pick another with CLAUDETTE_MODEL"
+        )
+    } else {
+        format!("ollama pull {model}")
+    }
 }
 
 fn is_openai_compat() -> bool {
@@ -358,6 +384,144 @@ fn model_present(names: &[String], wanted: &str) -> bool {
         let n = n.to_ascii_lowercase();
         n == w || n == format!("{w}:latest") || w == format!("{n}:latest")
     })
+}
+
+// ─── Build toolchains ─────────────────────────────────────────────────────
+//
+// forge runs the project's real build + test suite (cargo check/test, go
+// build/test, pytest, npm test) inside the Verifier, and codet shells out to
+// language compilers for its syntax/test checks. Missing a toolchain is the #1
+// silent reason "forge says it passed but nothing actually compiled". This
+// section probes each toolchain and, when one is missing, prints a copy-paste
+// install command for the current OS.
+
+/// One build-toolchain probe. `bins` is tried in order (first hit wins) so a
+/// platform that ships `python3` but not `python` still resolves.
+struct Toolchain {
+    label: &'static str,
+    /// Stable key into [`toolchain_install_hint`].
+    key: &'static str,
+    bins: &'static [&'static str],
+    version_arg: &'static str,
+    /// What in claudette needs it — shown when it's missing.
+    why: &'static str,
+    /// `true` ⇒ a miss is an error (claudette can't function without it);
+    /// `false` ⇒ a miss is a warning (only needed for that language).
+    required: bool,
+}
+
+const TOOLCHAINS: &[Toolchain] = &[
+    Toolchain {
+        label: "git",
+        key: "git",
+        bins: &["git"],
+        version_arg: "--version",
+        why: "missions + forge: clone, commit, push, open PRs",
+        required: true,
+    },
+    Toolchain {
+        label: "cargo (Rust)",
+        key: "rust",
+        bins: &["cargo"],
+        version_arg: "--version",
+        why: "forge build/test gate on Rust repos (cargo check / cargo test)",
+        required: false,
+    },
+    Toolchain {
+        label: "python",
+        key: "python",
+        bins: &["python", "python3"],
+        version_arg: "--version",
+        why: "codet syntax/test checks + the pytest forge gate",
+        required: false,
+    },
+    Toolchain {
+        label: "node",
+        key: "node",
+        bins: &["node"],
+        version_arg: "--version",
+        why: "codet JS/TS checks + the npm forge gate",
+        required: false,
+    },
+    Toolchain {
+        label: "go",
+        key: "go",
+        bins: &["go"],
+        version_arg: "version",
+        why: "forge build/test gate on Go repos (go build / go test)",
+        required: false,
+    },
+];
+
+fn probe_toolchains() -> Status {
+    let mut worst = Status::Ok;
+    for tc in TOOLCHAINS {
+        match tc
+            .bins
+            .iter()
+            .find_map(|b| command_first_line(b, tc.version_arg))
+        {
+            Some(version) => print_row(tc.label, Status::Ok, &version),
+            None => {
+                let detail = format!("not found — needed for: {}", tc.why);
+                if tc.required {
+                    print_row(tc.label, Status::Err, &detail);
+                    worst = Status::Err;
+                } else {
+                    print_row(tc.label, Status::Warn, &detail);
+                    if worst == Status::Ok {
+                        worst = Status::Warn;
+                    }
+                }
+                print_fix(&toolchain_install_hint(tc.key));
+            }
+        }
+    }
+    worst
+}
+
+/// Run `<bin> <arg>` and return its first non-empty output line, or `None` when
+/// the binary isn't on PATH / couldn't be executed. Version banners land on
+/// stdout for most tools but stderr for a few, so both streams are considered.
+fn command_first_line(bin: &str, arg: &str) -> Option<String> {
+    let out = Command::new(bin).arg(arg).output().ok()?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let pick = if stdout.trim().is_empty() {
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    } else {
+        stdout.into_owned()
+    };
+    pick.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(str::to_string)
+}
+
+/// OS-appropriate copy-paste install command for a toolchain `key`.
+fn toolchain_install_hint(key: &str) -> String {
+    let os = std::env::consts::OS;
+    let cmd = match (os, key) {
+        ("windows", "git") => "winget install Git.Git",
+        ("windows", "rust") => "winget install Rustlang.Rustup  (then `rustup default stable`)",
+        ("windows", "python") => "winget install Python.Python.3.12",
+        ("windows", "node") => "winget install OpenJS.NodeJS.LTS",
+        ("windows", "go") => "winget install GoLang.Go",
+        ("windows", "ffmpeg") => "winget install Gyan.FFmpeg",
+        ("macos", "git") => "brew install git",
+        ("macos", "rust") => "brew install rustup && rustup-init",
+        ("macos", "python") => "brew install python",
+        ("macos", "node") => "brew install node",
+        ("macos", "go") => "brew install go",
+        ("macos", "ffmpeg") => "brew install ffmpeg",
+        (_, "git") => "sudo apt install git   (or your distro's package manager)",
+        (_, "rust") => "curl https://sh.rustup.rs -sSf | sh",
+        (_, "python") => "sudo apt install python3",
+        (_, "node") => "sudo apt install nodejs npm",
+        (_, "go") => "sudo apt install golang   (or https://go.dev/dl/)",
+        (_, "ffmpeg") => "sudo apt install ffmpeg",
+        _ => "see the tool's official install docs",
+    };
+    format!("install: {cmd}")
 }
 
 // ─── Recall / embeddings ─────────────────────────────────────────────────
@@ -461,6 +625,7 @@ fn probe_voice() -> Status {
             Status::Warn,
             "not found — voice transcription disabled",
         );
+        print_fix(&toolchain_install_hint("ffmpeg"));
     }
 
     let whisper_ok = Command::new(&whisper).arg("--help").output().is_ok();
@@ -471,6 +636,10 @@ fn probe_voice() -> Status {
             &whisper,
             Status::Warn,
             "not found — voice transcription disabled",
+        );
+        print_fix(
+            "build whisper.cpp (`whisper-cli`) from https://github.com/ggml-org/whisper.cpp, \
+             or set CLAUDETTE_WHISPER_BIN to its path",
         );
     }
     if ffmpeg_ok && whisper_ok {
@@ -606,5 +775,57 @@ mod tests {
     fn redact_short_secret_is_fully_starred() {
         assert_eq!(redact_for_display("SOME_TOKEN", "abc"), "***");
         assert_eq!(redact_for_display("SOME_TOKEN", ""), "***");
+    }
+
+    // ─── Build-toolchain probes + copy-paste fixes ────────────────────
+
+    #[test]
+    fn command_first_line_finds_present_binary() {
+        // cargo is always on PATH in the test environment.
+        let v = command_first_line("cargo", "--version");
+        assert!(v.is_some(), "cargo --version should resolve in tests");
+        assert!(v.unwrap().to_lowercase().contains("cargo"));
+    }
+
+    #[test]
+    fn command_first_line_none_for_missing_binary() {
+        assert!(command_first_line("claudette-no-such-binary-xyz", "--version").is_none());
+    }
+
+    #[test]
+    fn toolchain_install_hint_is_nonempty_for_every_key() {
+        for key in ["git", "rust", "python", "node", "go", "ffmpeg"] {
+            let h = toolchain_install_hint(key);
+            assert!(h.starts_with("install: "), "key {key} got: {h}");
+            assert!(h.len() > "install: ".len(), "key {key} has no command: {h}");
+        }
+    }
+
+    #[test]
+    fn backend_start_hint_is_backend_specific() {
+        assert!(backend_start_hint(false).to_lowercase().contains("ollama"));
+        assert!(backend_start_hint(true)
+            .to_lowercase()
+            .contains("lm studio"));
+    }
+
+    #[test]
+    fn model_load_hint_ollama_uses_pull_command() {
+        assert!(model_load_hint(false, "qwen3:8b").contains("ollama pull qwen3:8b"));
+        assert!(model_load_hint(true, "any")
+            .to_lowercase()
+            .contains("lm studio"));
+    }
+
+    #[test]
+    fn git_is_the_only_required_toolchain() {
+        // Missions/forge can't function without git; the language toolchains
+        // are only needed when you forge in that language, so they warn.
+        let required: Vec<&str> = TOOLCHAINS
+            .iter()
+            .filter(|t| t.required)
+            .map(|t| t.key)
+            .collect();
+        assert_eq!(required, vec!["git"]);
     }
 }
