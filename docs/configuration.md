@@ -10,6 +10,7 @@ Claudette intentionally does **not** auto-load `.env` from the current working d
 |----------|---------|---------|
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint. Honoured exactly like Ollama itself. |
 | `CLAUDETTE_ALLOW_REMOTE_OLLAMA` | unset | Set to `1` to silence the startup warning when `OLLAMA_HOST` is non-loopback. Default posture is local-only. |
+| `CLAUDETTE_OFFLINE` | unset | Set to `1` (or pass `--offline`) to **enforce the air-gap**: hard-block every outbound network call except the local model backend + loopback. See [Enforced offline mode](#enforced-offline-mode---offline) below. |
 | `CLAUDETTE_MODEL` | `qwen3.5:4b` (Auto preset) | Brain model override. |
 | `CLAUDETTE_NUM_CTX` | `16384` | Brain context window in tokens. |
 | `CLAUDETTE_NUM_PREDICT` | `6144` | Max output tokens per request. |
@@ -32,6 +33,18 @@ LM Studio exposes models with a `@<quant>` suffix in `/v1/models` — for exampl
 ### Backend quirks: brain and embeddings share `OLLAMA_HOST`
 
 Both the brain (`/v1/chat/completions`) and recall (`/v1/embeddings`) resolve to the same `OLLAMA_HOST`. There is no separate `CLAUDETTE_RECALL_HOST` knob. If you run a chat-only server (e.g. an MTP llama-server with no `--embeddings`) you'll see `recall: /v1/embeddings HTTP 501 Not Implemented` from `--doctor` and from `/recall`. Either (a) set `CLAUDETTE_RECALL_DISABLE=1`, or (b) load the embedding model on the same endpoint as the brain (LM Studio supports loading both simultaneously if VRAM allows).
+
+### Enforced offline mode (`--offline` / `CLAUDETTE_OFFLINE`)
+
+`--offline` (or `CLAUDETTE_OFFLINE=1`) turns claudette's local-first *posture* into an *enforced* air-gap. With it on, every outbound network call is checked against an allow-list and anything not on it is hard-blocked with a uniform error — `blocked by offline mode (--offline / CLAUDETTE_OFFLINE)…` — whether the call would have been made via reqwest or by spawning a subprocess.
+
+- **Allowed:** the resolved model backend host (`OLLAMA_HOST`, even a LAN box you opted into with `CLAUDETTE_ALLOW_REMOTE_OLLAMA=1` — matched at the host level, so any port on that box is reachable) and loopback (`localhost`, `127.0.0.0/8`, `::1`). The brain, recall embeddings, and local vision keep working.
+- **Blocked:** `web_search` / `web_fetch`, `gmail_*` / `calendar_*` / `--auth-google`, `tv_get_quote`, `wikipedia`, `weather`, the `gh_*` GitHub tools, `tg_send`, remote `git_push` / `git_clone`, the brownfield `mission_start` clone and `mission_submit` push, and text-to-speech (edge-tts).
+- **`--offline` + `--telegram`** is refused at startup — the Telegram bridge is a cloud relay (`api.telegram.org`) and can't run air-gapped.
+
+Inspect the live allow-list with `claudette --offline --doctor` — the **egress / air-gap** section prints exactly what's reachable and notes that the Google-OAuth live probe is skipped (it can't run offline).
+
+Two layers enforce it: an HTTP-layer guard in the reqwest path checks the destination host of every in-process request, and a dispatch-layer guard refuses tools that reach the network through a subprocess where the HTTP guard can't see the destination. The host-matching logic lives in [`src/egress.rs`](../crates/claudette/src/egress.rs).
 
 ## Codet (code-generation sidecar)
 

@@ -378,6 +378,40 @@ fn is_compat_value_truthy(value: Option<&str>) -> bool {
 /// arbitrary project `.env` files no longer feed into this path.
 #[must_use]
 pub fn is_local_ollama_url(url: &str) -> bool {
+    let host_lower = host_of_url(url);
+
+    // `0.0.0.0` and `::` are valid BIND addresses (Ollama listens on all
+    // interfaces) but not valid DESTINATION addresses — a TCP connect to
+    // 0.0.0.0 usually routes to the default local interface on Unix and
+    // errors on Windows. Treating them as loopback suppresses the warning
+    // even though OLLAMA_HOST=http://0.0.0.0:11434 does not mean "stay
+    // local". Drop them from the loopback list; a user who really wants
+    // that config can set CLAUDETTE_ALLOW_REMOTE_OLLAMA=1.
+    if host_lower == "localhost" || host_lower == "::1" {
+        return true;
+    }
+    // 127.0.0.0/8 — any loopback IPv4.
+    if let Some(rest) = host_lower.strip_prefix("127.") {
+        return rest.split('.').count() == 3
+            && rest
+                .split('.')
+                .all(|s| !s.is_empty() && s.parse::<u8>().is_ok());
+    }
+    false
+}
+
+/// Parse the lowercased host out of a URL (or a bare `host[:port]`). Strips
+/// the scheme, path, userinfo (`user[:pass]@`), and port, and unwraps an
+/// IPv6 bracket literal (`[::1]:11434` → `::1`). Returns the host verbatim,
+/// lowercased: `localhost`, `127.0.0.1`, `192.168.1.5`, `::1`,
+/// `api.github.com`, … An empty string is returned for input with no host.
+///
+/// Shared by [`is_local_ollama_url`] and the offline egress guard
+/// ([`crate::egress`]) so both judge the same notion of "host" — the loopback
+/// warning and the air-gapped allow-list must never disagree on what host a
+/// URL points at.
+#[must_use]
+pub fn host_of_url(url: &str) -> String {
     // Strip scheme if present, case-insensitively. We only need the host.
     // `str::get(..n)` returns `None` when `n` is out of range *or* not a char
     // boundary, so this never panics on a URL whose first bytes are multibyte
@@ -413,26 +447,7 @@ pub fn is_local_ollama_url(url: &str) -> bool {
     } else {
         host_and_port.split(':').next().unwrap_or(host_and_port)
     };
-    let host_lower = host.to_ascii_lowercase();
-
-    // `0.0.0.0` and `::` are valid BIND addresses (Ollama listens on all
-    // interfaces) but not valid DESTINATION addresses — a TCP connect to
-    // 0.0.0.0 usually routes to the default local interface on Unix and
-    // errors on Windows. Treating them as loopback suppresses the warning
-    // even though OLLAMA_HOST=http://0.0.0.0:11434 does not mean "stay
-    // local". Drop them from the loopback list; a user who really wants
-    // that config can set CLAUDETTE_ALLOW_REMOTE_OLLAMA=1.
-    if host_lower == "localhost" || host_lower == "::1" {
-        return true;
-    }
-    // 127.0.0.0/8 — any loopback IPv4.
-    if let Some(rest) = host_lower.strip_prefix("127.") {
-        return rest.split('.').count() == 3
-            && rest
-                .split('.')
-                .all(|s| !s.is_empty() && s.parse::<u8>().is_ok());
-    }
-    false
+    host.to_ascii_lowercase()
 }
 
 /// Short-timeout GET on the resolved Ollama base URL to verify the daemon

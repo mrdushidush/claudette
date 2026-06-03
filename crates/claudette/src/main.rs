@@ -131,6 +131,12 @@ ONE-SHOT SETUP COMMANDS (each exits after doing its one job):
                          'daily', or a single weekday name ('monday', etc).
 
 MISC:
+    --offline            Enforce the air-gap: hard-block every outbound network
+                         call except the local model backend + loopback. Same
+                         as CLAUDETTE_OFFLINE=1. Blocks web_search/web_fetch,
+                         Gmail/Calendar, markets/weather/wikipedia, GitHub, and
+                         the Telegram bridge; the local brain + recall still
+                         work. See `--offline` in --doctor for the allow-list.
     --help, -h           Show this help and exit.
     --version, -V        Show the claudette version and exit.
 
@@ -140,6 +146,7 @@ ENVIRONMENT:
       CLAUDETTE_MODEL          Override the brain model.
       CLAUDETTE_CODER_MODEL    Override the Codet coder model.
       CLAUDETTE_SESSION        Override the session-file path.
+      CLAUDETTE_OFFLINE        Set to 1 to enforce the air-gap (see --offline).
       TELEGRAM_BOT_TOKEN       Required for --telegram.
 
 EXAMPLES:
@@ -226,6 +233,21 @@ fn main() -> ExitCode {
         doctor,
         cto,
     } = args;
+
+    // ── Offline-mode banner ───────────────────────────────────────────
+    // Loud, one-line confirmation that the air-gap is enforced this run.
+    // `--doctor` prints its own dedicated offline section, so skip it here
+    // to avoid saying it twice.
+    if claudette::egress::is_offline() && !doctor {
+        eprintln!(
+            "{} {}",
+            theme::accent("🔒 offline mode"),
+            theme::dim(&format!(
+                "only the local backend ({}) + loopback are reachable; all other egress is blocked",
+                claudette::api::resolve_ollama_url()
+            ))
+        );
+    }
 
     // ── --doctor: full diagnostic probe ──────────────────────────────
     // Runs before every other branch because it's the command the user
@@ -402,6 +424,22 @@ fn main() -> ExitCode {
 
     // ── Telegram bot mode ──────────────────────────────────────────────
     if telegram {
+        // The Telegram bridge is a cloud service (api.telegram.org); it is
+        // fundamentally incompatible with an enforced air-gap. Refuse up front
+        // with the same vocabulary the egress guard uses, rather than letting
+        // the bot start and then fail every poll.
+        if claudette::egress::is_offline() {
+            eprintln!(
+                "{} {}",
+                theme::error(theme::ERR_GLYPH),
+                theme::error(
+                    "offline mode (--offline) blocks the Telegram bridge — it relays through \
+                     api.telegram.org (cloud). Drop --offline to run the bot, or drop --telegram \
+                     to stay air-gapped."
+                )
+            );
+            return ExitCode::FAILURE;
+        }
         // Merge persisted chat IDs (from previous runs) with CLI flags.
         for id in secrets::load_chat_ids() {
             if !chat_ids.contains(&id) {
@@ -568,6 +606,12 @@ fn parse_args(args: &[String]) -> CliArgs {
                 // builder picks it up — same surface as
                 // `CLAUDETTE_FACELESS=1`.
                 std::env::set_var("CLAUDETTE_FACELESS", "1");
+            }
+            "--offline" => {
+                // Enforced air-gap. Set the env var so the egress guard (and
+                // any subprocess we spawn) sees it — same surface as
+                // `CLAUDETTE_OFFLINE=1`. See `egress.rs`.
+                std::env::set_var(claudette::egress::OFFLINE_ENV, "1");
             }
             _ => out.prompt_words.push(arg.clone()),
         }
@@ -777,6 +821,27 @@ mod tests {
         let a = parse_args(&["--telegram".into()]);
         assert!(a.telegram);
         assert!(a.prompt_words.is_empty());
+    }
+
+    #[test]
+    fn parse_args_offline_sets_env_and_is_not_a_prompt_word() {
+        let _g = lock_env();
+        let prev = std::env::var(claudette::egress::OFFLINE_ENV).ok();
+        std::env::remove_var(claudette::egress::OFFLINE_ENV);
+
+        // The flag is consumed (not echoed into the prompt) and flips the env
+        // var the egress guard reads — same mechanism as --faceless.
+        let a = parse_args(&["--offline".into(), "fix".into(), "bug".into()]);
+        assert!(
+            claudette::egress::is_offline(),
+            "--offline enables offline mode"
+        );
+        assert_eq!(a.prompt_words, vec!["fix".to_string(), "bug".to_string()]);
+
+        match prev {
+            Some(v) => std::env::set_var(claudette::egress::OFFLINE_ENV, v),
+            None => std::env::remove_var(claudette::egress::OFFLINE_ENV),
+        }
     }
 
     #[test]

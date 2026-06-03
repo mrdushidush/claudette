@@ -211,21 +211,27 @@ pub(super) fn schemas() -> Vec<Value> {
 }
 
 pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>> {
-    let result = match name {
-        "gh_inbox" => run_gh_inbox(input),
-        "gh_get_issue" => run_gh_get_issue(input),
-        "gh_create_issue" => run_gh_create_issue(input),
-        "gh_comment_issue" => run_gh_comment_issue(input),
-        "gh_search_code" => run_gh_search_code(input),
-        "gh_list_repo_issues" => run_gh_list_repo_issues(input),
-        "gh_pr_status" => run_gh_pr_status(input),
-        "gh_pr_view" => run_gh_pr_view(input),
-        "gh_workflow_logs" => run_gh_workflow_logs(input),
-        "gh_fork" => run_gh_fork(input),
-        "gh_create_pr" => run_gh_create_pr(input),
+    // Resolve the handler first (so ownership of `name` is decided) but DON'T
+    // run it yet — every gh_* tool reaches api.github.com, so the offline
+    // egress guard gets to refuse before any request leaves the process.
+    let handler: fn(&str) -> Result<String, String> = match name {
+        "gh_inbox" => run_gh_inbox,
+        "gh_get_issue" => run_gh_get_issue,
+        "gh_create_issue" => run_gh_create_issue,
+        "gh_comment_issue" => run_gh_comment_issue,
+        "gh_search_code" => run_gh_search_code,
+        "gh_list_repo_issues" => run_gh_list_repo_issues,
+        "gh_pr_status" => run_gh_pr_status,
+        "gh_pr_view" => run_gh_pr_view,
+        "gh_workflow_logs" => run_gh_workflow_logs,
+        "gh_fork" => run_gh_fork,
+        "gh_create_pr" => run_gh_create_pr,
         _ => return None,
     };
-    Some(result)
+    if let Err(e) = crate::egress::guard("https://api.github.com") {
+        return Some(Err(e));
+    }
+    Some(handler(input))
 }
 
 /// `gh_inbox(scope, owner?, repo?)` — polymorphic GitHub inbox. Routes to

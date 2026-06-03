@@ -97,14 +97,19 @@ pub(super) fn schemas() -> Vec<Value> {
 }
 
 pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>> {
-    let result = match name {
-        "calendar_list_events" => run_list_events(input),
-        "calendar_create_event" => run_create_event(input),
-        "calendar_update_event" => run_update_event(input),
-        "calendar_delete_event" => run_delete_event(input),
+    // Resolve the handler before running it so the offline egress guard can
+    // refuse before any request hits the Google Calendar API.
+    let handler: fn(&str) -> Result<String, String> = match name {
+        "calendar_list_events" => run_list_events,
+        "calendar_create_event" => run_create_event,
+        "calendar_update_event" => run_update_event,
+        "calendar_delete_event" => run_delete_event,
         _ => return None,
     };
-    Some(result)
+    if let Err(e) = crate::egress::guard("https://www.googleapis.com") {
+        return Some(Err(e));
+    }
+    Some(handler(input))
 }
 
 /// Percent-encode a path segment (calendar ID can contain `@` and `.`).

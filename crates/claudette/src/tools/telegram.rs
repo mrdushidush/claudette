@@ -41,11 +41,15 @@ pub(super) fn schemas() -> Vec<Value> {
 }
 
 pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>> {
-    let result = match name {
-        "tg_send" => run_tg_send(input),
-        _ => return None,
-    };
-    Some(result)
+    if name != "tg_send" {
+        return None;
+    }
+    // tg_send relays through api.telegram.org (cloud); block under offline
+    // mode before any request leaves the process.
+    if let Err(e) = crate::egress::guard("https://api.telegram.org") {
+        return Some(Err(e));
+    }
+    Some(run_tg_send(input))
 }
 
 /// Resolve the Telegram Bot API token via the unified secret store.

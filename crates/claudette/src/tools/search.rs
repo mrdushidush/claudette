@@ -362,6 +362,9 @@ fn run_web_fetch(input: &str) -> Result<String, String> {
         ));
     }
     validate_fetch_target(url)?;
+    // Offline mode: the SSRF guard above already rejects loopback/private
+    // targets, so any URL that reaches here is public — block it.
+    crate::egress::guard(url)?;
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(WEB_FETCH_TIMEOUT_SECS))

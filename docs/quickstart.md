@@ -47,7 +47,14 @@ claudette --tui                      # fullscreen TUI
 claudette "your prompt here"         # one-shot, prints reply and exits
 claudette --telegram --chat any      # Telegram bot
 claudette --resume                   # resume last session
+claudette --offline "..."            # enforced air-gap: block all cloud egress
 ```
+
+Add `--offline` (or set `CLAUDETTE_OFFLINE=1`) to any of these to **enforce**
+the air-gap — every outbound call except the local model backend + loopback is
+hard-blocked, so the brain and recall keep working but web search, mail, GitHub,
+Telegram, and remote git all refuse. `claudette --offline --doctor` prints the
+exact allow-list. See [Air-gapped by design](../README.md#-air-gapped-by-design).
 
 ## The TUI in 60 seconds
 

@@ -111,6 +111,11 @@ pub fn run_telegram_bot(
     let token = read_secret("telegram").map_err(|e| anyhow::anyhow!(e))?;
     let base_url = format!("https://api.telegram.org/bot{token}");
 
+    // Defense-in-depth: `main.rs` already refuses `--offline --telegram` at
+    // startup, but guard the transport too so no code path can poll the cloud
+    // Bot API while air-gapped.
+    crate::egress::guard(&base_url).map_err(|e| anyhow::anyhow!(e))?;
+
     // Verify the token works.
     let http = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(30))

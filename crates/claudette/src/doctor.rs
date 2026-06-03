@@ -97,6 +97,9 @@ pub fn run() -> i32 {
     print_section("environment");
     bump(probe_env());
 
+    print_section("egress / air-gap");
+    bump(probe_egress());
+
     print_section("local brain");
     bump(probe_brain());
 
@@ -154,6 +157,7 @@ const TRACKED_VARS: &[&str] = &[
     // Backends
     "OLLAMA_HOST",
     "CLAUDETTE_OPENAI_COMPAT",
+    "CLAUDETTE_OFFLINE",
     "CLAUDETTE_ALLOW_REMOTE_OLLAMA",
     "CLAUDETTE_SKIP_OLLAMA_PROBE",
     "CLAUDETTE_SKIP_LM_STUDIO_PROBE",
@@ -556,7 +560,47 @@ fn probe_recall() -> Status {
 
 // ─── Google OAuth ────────────────────────────────────────────────────────
 
+/// Surface the offline-mode posture and, when enforced, the exact egress
+/// allow-list. Purely informational — it never fails the overall run (an
+/// air-gapped box is a healthy box, and "offline off" is the opt-in default,
+/// not a misconfiguration).
+fn probe_egress() -> Status {
+    if crate::egress::is_offline() {
+        print_row(
+            "offline mode",
+            Status::Ok,
+            "ENFORCED — only the hosts below are reachable",
+        );
+        for host in crate::egress::allow_list() {
+            print_row("  allow", Status::Ok, &host);
+        }
+        print_row(
+            "  deny",
+            Status::Ok,
+            "everything else (web_search/web_fetch, gmail/calendar, markets/weather/wikipedia, github, telegram)",
+        );
+    } else {
+        print_row(
+            "offline mode",
+            Status::Ok,
+            "off — run with --offline (or CLAUDETTE_OFFLINE=1) to enforce the air-gap",
+        );
+    }
+    Status::Ok
+}
+
 fn probe_google_oauth() -> Status {
+    // Offline mode blocks every Google API call by design — attempting the
+    // live verify here would just paint the report red. Show it as skipped so
+    // the report stays green-meaningful.
+    if crate::egress::is_offline() {
+        print_row(
+            "google oauth",
+            Status::Ok,
+            "skipped — offline mode blocks Google API access",
+        );
+        return Status::Ok;
+    }
     let mut worst = Status::Ok;
     for ctx in [
         crate::google_auth::AuthContext::Calendar,

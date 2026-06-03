@@ -15,6 +15,30 @@ If anything here doesn't match what you observe in the wild, that's a bug — pl
 
 ---
 
+## Enforced offline mode (`--offline`)
+
+Everything below this section describes the **default** posture: cloud egress is off until you opt into a specific feature. Offline mode turns that posture into an **enforced guarantee** — the difference between "Claudette is configured not to phone home" and "Claudette *cannot* phone home, by construction."
+
+Run with `--offline` (or set `CLAUDETTE_OFFLINE=1`):
+
+```bash
+claudette --offline "refactor this module"
+claudette --offline --doctor          # prints the egress allow-list
+```
+
+When enabled, **every** outbound network call is checked against a tiny allow-list and anything else is hard-blocked with a single, uniform error (`blocked by offline mode (--offline / CLAUDETTE_OFFLINE)…`):
+
+- **Allowed:** the configured local model backend (the resolved Ollama / LM Studio host) and loopback (`localhost`, `127.0.0.0/8`, `::1`). The brain, recall embeddings, and local vision keep working.
+- **Blocked:** `web_search` / `web_fetch`, Gmail / Calendar / Google OAuth, markets / weather / Wikipedia, GitHub, the Telegram bridge (and its voice in/out), `git_push` / `git_clone` to a remote, the brownfield `mission_start` clone and `mission_submit` push, and the edge-tts TTS subprocess — each refuses with the same message rather than a confusing connection error.
+
+Enforcement is two-layered so nothing slips through: an HTTP-layer guard in the reqwest path (it checks the destination host of every in-process request), plus a dispatch-layer guard for tools that reach the network by spawning a subprocess (`git`, `python -m edge_tts`) where the HTTP guard can't see the destination.
+
+**LAN backends are still your hardware.** If your model runs on another box on your network (`OLLAMA_HOST=http://192.168.1.50:11434`, opted into with `CLAUDETTE_ALLOW_REMOTE_OLLAMA=1`), that host stays on the allow-list. Offline mode blocks the *cloud*, not the model you own.
+
+`--offline` and `--telegram` are mutually exclusive — the Telegram bridge relays through `api.telegram.org`, so Claudette refuses to start the bot under offline mode rather than failing every poll.
+
+---
+
 ## Where your data lives
 
 Everything Claudette stores lives under `~/.claudette/` (or `%USERPROFILE%\.claudette\` on Windows):
@@ -39,7 +63,7 @@ Nothing outside `~/.claudette/` is written without explicit user action (e.g. `w
 
 ## When data leaves your machine
 
-Each outbound connection below is **off by default** until you opt in, and is **gated by a specific feature, env var, or tool group**. Localhost connections (Ollama on `:11434`, LM Studio on `:1234`) are not counted as leaving.
+Each outbound connection below is **off by default** until you opt in, and is **gated by a specific feature, env var, or tool group**. Localhost connections (Ollama on `:11434`, LM Studio on `:1234`) are not counted as leaving. Every host in the tables below is hard-blocked under [`--offline`](#enforced-offline-mode---offline), regardless of how it would otherwise be triggered.
 
 ### Always-off until you opt in
 
@@ -86,10 +110,10 @@ Claudette logs to stdout/stderr. By default, nothing is written to a system log 
 
 These are explicit design intents, not promises:
 
-- **`--offline` hard kill switch.** A single flag that refuses any outbound network call (including the optional ones above) and surfaces an explicit error if a tool needs one. Useful for air-gapped sessions.
 - **Outbound-host audit log.** A `~/.claudette/outbound.log` recording every hostname Claudette touched, with timestamp and triggering tool, for after-the-fact review.
 - **At-rest encryption for `recall.sqlite`.** Pass-phrase-derived key, SQLCipher or equivalent.
-- **`CLAUDETTE_DISALLOW_NETWORK` env var** to forbid network calls for specific environments (CI sandboxes, work laptops).
+
+The `--offline` hard kill switch (formerly listed here) is **shipped** — see [Enforced offline mode](#enforced-offline-mode---offline) above. `CLAUDETTE_OFFLINE=1` is the env-var equivalent.
 
 Track or contribute these at <https://github.com/mrdushidush/claudette/issues>.
 

@@ -62,6 +62,7 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
 ///   - `search`: `query` is search terms, returns top 5 title matches
 ///     with HTML-stripped snippets via the MediaWiki search API.
 fn run_wikipedia(input: &str) -> Result<String, String> {
+    crate::egress::guard("https://en.wikipedia.org")?;
     let v = parse_json_input(input, "wikipedia")?;
     let query = extract_str(&v, "query", "wikipedia")?.to_string();
     let mode = v
@@ -318,6 +319,8 @@ fn wmo_label(code: i64) -> &'static str {
 /// current conditions; `days=1..7` is a daily forecast. Values outside
 /// the range clamp; non-numeric `days` is treated as 0.
 fn run_weather(input: &str) -> Result<String, String> {
+    // Geocoding + forecast both hit *.open-meteo.com (cloud).
+    crate::egress::guard("https://api.open-meteo.com")?;
     let v = parse_json_input(input, "weather")?;
     let location = extract_str(&v, "location", "weather")?.to_string();
     let days = v.get("days").and_then(Value::as_i64).unwrap_or(0);
