@@ -10,6 +10,8 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.8.8] - 2026-06-03
+
 ### Added
 
 - **Forge human-review gate.** Before the Submitter opens a PR, forge now prints
