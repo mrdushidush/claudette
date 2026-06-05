@@ -33,6 +33,8 @@ When enabled, **every** outbound network call is checked against a tiny allow-li
 
 Enforcement is two-layered so nothing slips through: an HTTP-layer guard in the reqwest path (it checks the destination host of every in-process request), plus a dispatch-layer guard for tools that reach the network by spawning a subprocess (`git`, `python -m edge_tts`) where the HTTP guard can't see the destination.
 
+This is **CI-proven, not just asserted in prose.** An integration test (`tests/offline_egress.rs`) drives every network-reaching tool through the real dispatch path under `CLAUDETTE_OFFLINE=1` and fails the build if any one of them connects out instead of refusing. Separately — even with offline mode *off* — `web_fetch` re-validates the target of **every HTTP redirect**, so a public page that answers `301 → http://169.254.169.254/` (the cloud-metadata address) or `→ http://192.168.0.1/` can't smuggle the fetch onto your LAN or a metadata service (SSRF).
+
 **LAN backends are still your hardware.** If your model runs on another box on your network (`OLLAMA_HOST=http://192.168.1.50:11434`, opted into with `CLAUDETTE_ALLOW_REMOTE_OLLAMA=1`), that host stays on the allow-list. Offline mode blocks the *cloud*, not the model you own.
 
 `--offline` and `--telegram` are mutually exclusive — the Telegram bridge relays through `api.telegram.org`, so Claudette refuses to start the bot under offline mode rather than failing every poll.

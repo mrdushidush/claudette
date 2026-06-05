@@ -10,6 +10,27 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Security
+
+- **`web_fetch` now re-validates every HTTP redirect target.** Previously the
+  SSRF guard checked only the *initial* URL, then reqwest silently followed up
+  to 10 redirects — so a public page returning `301 → http://169.254.169.254/`
+  (cloud metadata) or `→ http://192.168.0.1/` could pivot the fetch onto a
+  loopback/private/link-local host. The client now carries a custom redirect
+  policy that re-runs the loopback/private/metadata check on each hop and
+  refuses any disallowed target.
+
+### Added
+
+- **CI-proven air-gap.** A new integration test (`tests/offline_egress.rs`)
+  drives every network-reaching tool through the real `dispatch_tool` path
+  under `CLAUDETTE_OFFLINE=1` and asserts each one refuses (with the uniform
+  offline-block message) before any request leaves the process — turning the
+  enforced offline guarantee into a build-gating test rather than a documented
+  promise. Backed by a canonical `egress::NET_TOOLS` registry with a regression
+  guard that catches a new always-network tool (`gh_*`/`gmail_*`/`calendar_*`/
+  `tg_*`) added without its egress guard.
+
 ## [0.8.9] - 2026-06-04
 
 ### Added
