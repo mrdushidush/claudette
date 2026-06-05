@@ -45,6 +45,60 @@ pub const OFFLINE_ENV: &str = "CLAUDETTE_OFFLINE";
 /// sentence.
 pub const BLOCK_PREFIX: &str = "blocked by offline mode (--offline / CLAUDETTE_OFFLINE)";
 
+/// Canonical registry of every tool whose normal operation reaches the network
+/// and is therefore gated by [`guard`] / [`guard_subprocess`] under offline
+/// mode. This is the single source of truth the no-egress integration test
+/// (`tests/offline_egress.rs`) iterates: it drives each tool through
+/// `dispatch_tool` with `CLAUDETTE_OFFLINE=1` and asserts every one refuses
+/// with a [`BLOCK_PREFIX`] message — turning the air-gap from a documented
+/// posture into a CI-proven guarantee.
+///
+/// MAINTENANCE CONTRACT: when you add a tool that performs network egress, add
+/// its name here *and* wire its `egress::guard*` call. The integration test
+/// fails if a tool listed here is not actually guarded; the registry test
+/// (`net_tools_registry_covers_network_named_tools`) fails if a tool in an
+/// always-network family (`gh_`, `gmail_`, `calendar_`, `tg_`) is missing from
+/// this list — so a forgotten guard on those families is caught automatically.
+/// Tools in mixed families (`git_*`, `mission_*` have local siblings) must be
+/// added here by hand.
+pub const NET_TOOLS: &[&str] = &[
+    // Search / fetch
+    "web_search",
+    "web_fetch",
+    // GitHub (REST via reqwest → api.github.com)
+    "gh_inbox",
+    "gh_get_issue",
+    "gh_create_issue",
+    "gh_comment_issue",
+    "gh_search_code",
+    "gh_list_repo_issues",
+    "gh_pr_status",
+    "gh_pr_view",
+    "gh_workflow_logs",
+    "gh_fork",
+    "gh_create_pr",
+    // Google (Gmail + Calendar)
+    "gmail_list",
+    "gmail_search",
+    "gmail_read",
+    "gmail_list_labels",
+    "calendar_list_events",
+    "calendar_create_event",
+    "calendar_update_event",
+    "calendar_delete_event",
+    // Keyless facts / markets
+    "tv_get_quote",
+    "wikipedia",
+    "weather",
+    // Telegram bridge
+    "tg_send",
+    // Network-reaching git + brownfield-mission subprocesses
+    "git_push",
+    "git_clone",
+    "mission_start",
+    "mission_submit",
+];
+
 /// Returns true when offline mode is enabled. Truthy = set, non-empty, and not
 /// literally `"0"` — matching the convention used by `CLAUDETTE_FACELESS`,
 /// `CLAUDETTE_ALLOW_REMOTE_OLLAMA`, and the skip-probe flags.

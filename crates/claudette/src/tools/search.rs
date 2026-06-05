@@ -366,10 +366,7 @@ fn run_web_fetch(input: &str) -> Result<String, String> {
     // targets, so any URL that reaches here is public — block it.
     crate::egress::guard(url)?;
 
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(WEB_FETCH_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| format!("web_fetch: build http client: {e}"))?;
+    let client = web_fetch_client()?;
 
     let resp = client
         .get(url)
@@ -408,6 +405,33 @@ fn run_web_fetch(input: &str) -> Result<String, String> {
         "text": wrapped,
     })
     .to_string())
+}
+
+/// Build the blocking HTTP client `web_fetch` uses, carrying a **custom
+/// redirect policy** that re-runs [`validate_fetch_target`] on every redirect
+/// hop. Without this, `validate_fetch_target(url)?` only checks the *initial*
+/// URL while reqwest then silently follows up to 10 redirects — so a public
+/// page returning `301 → http://169.254.169.254/` (cloud metadata) or
+/// `→ http://192.168.0.1/` would bypass the SSRF guard. The policy refuses any
+/// redirect target the guard rejects, and caps the chain at 10 hops (matching
+/// reqwest's default) so a redirect loop can't spin forever.
+fn web_fetch_client() -> Result<reqwest::blocking::Client, String> {
+    let policy = reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() >= 10 {
+            return attempt.error(std::io::Error::other("web_fetch: too many redirects"));
+        }
+        match validate_fetch_target(attempt.url().as_str()) {
+            Ok(()) => attempt.follow(),
+            // The SSRF guard rejected this redirect target — turn it into a
+            // hard error so the chain stops here instead of being followed.
+            Err(msg) => attempt.error(std::io::Error::other(msg)),
+        }
+    });
+    reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(WEB_FETCH_TIMEOUT_SECS))
+        .redirect(policy)
+        .build()
+        .map_err(|e| format!("web_fetch: build http client: {e}"))
 }
 
 /// SSRF guard for `web_fetch`. Refuses URLs whose host is loopback, private
@@ -535,6 +559,44 @@ mod tests {
         }
         // A normal public IP literal is allowed.
         assert!(validate_fetch_target("https://1.1.1.1/").is_ok());
+    }
+
+    #[test]
+    fn web_fetch_client_refuses_redirect_to_internal_host() {
+        // Proves the redirect policy is actually wired into the web_fetch
+        // client (not just that validate_fetch_target works in isolation). A
+        // loopback server answers 301 → http://169.254.169.254/ (cloud
+        // metadata). The client must refuse to follow it: send() returns Err.
+        //
+        // We drive the client directly with a loopback *initial* URL — the
+        // policy only runs on the redirect hop, so the initial loopback
+        // address is reached, and the 169.254 redirect target is what the
+        // policy rejects. (run_web_fetch additionally blocks loopback initial
+        // URLs up front; that path is covered by the SSRF test above.)
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let addr = listener.local_addr().expect("local addr");
+        let server = std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf); // drain the request line
+                let resp = "HTTP/1.1 301 Moved Permanently\r\n\
+                            Location: http://169.254.169.254/\r\n\
+                            Content-Length: 0\r\n\r\n";
+                let _ = stream.write_all(resp.as_bytes());
+            }
+        });
+
+        let client = web_fetch_client().expect("build client");
+        let result = client.get(format!("http://{addr}/")).send();
+        let _ = server.join();
+
+        assert!(
+            result.is_err(),
+            "redirect to the 169.254.169.254 metadata host must be refused"
+        );
     }
 
     #[test]
