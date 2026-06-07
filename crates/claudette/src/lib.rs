@@ -67,6 +67,7 @@ pub mod test_runner;
 pub mod theme;
 pub mod tool_groups;
 pub mod tools;
+pub mod transcript;
 pub mod tts;
 pub mod tui;
 pub mod tui_events;
@@ -96,6 +97,38 @@ pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
     LOCK.get_or_init(|| std::sync::Mutex::new(()))
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Run `f` with `HOME`/`USERPROFILE` swapped to a fresh temp dir, then
+/// restore. Shared by every test that touches `~/.claudette` (transcript,
+/// notes, todos, file_ops, executor). Holds [`test_env_lock`] for the whole
+/// closure so parallel tests can't race the env mutation.
+#[cfg(test)]
+pub(crate) fn with_temp_home<F, T>(f: F) -> T
+where
+    F: FnOnce(&std::path::Path) -> T,
+{
+    let _guard = test_env_lock();
+    #[cfg(windows)]
+    let key = "USERPROFILE";
+    #[cfg(not(windows))]
+    let key = "HOME";
+    let prev = std::env::var(key).ok();
+    let tmp = std::env::temp_dir().join(format!(
+        "claudette-temphome-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::env::set_var(key, &tmp);
+    let out = f(&tmp);
+    match prev {
+        Some(v) => std::env::set_var(key, v),
+        None => std::env::remove_var(key),
+    }
+    let _ = std::fs::remove_dir_all(&tmp);
+    out
 }
 
 // Bridge re-exports: claudette code imports these from `crate::`.

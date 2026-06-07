@@ -679,6 +679,7 @@ mod tests {
 
     #[test]
     fn grep_search_uses_regex_and_skips_build_dirs() {
+        let _eg = crate::test_env_lock(); // home-resolving: serialize vs temp-home swaps
         let base = user_home()
             .join(".claudette")
             .join("files")

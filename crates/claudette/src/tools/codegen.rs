@@ -521,6 +521,7 @@ mod tests {
     #[test]
     fn collect_reference_files_reads_tilde_path() {
         let _g = lock_stash();
+        let _eg = crate::test_env_lock(); // home-resolving
         set_current_turn_paths(vec![]); // start clean
                                         // Write a fixture under the user's home so validate_read_path accepts it.
         let dir = user_home().join(".claudette").join("files");
@@ -562,6 +563,7 @@ mod tests {
     #[test]
     fn collect_reference_files_caps_file_size() {
         let _g = lock_stash();
+        let _eg = crate::test_env_lock(); // home-resolving: serialize vs temp-home swaps
         set_current_turn_paths(vec![]);
         let dir = user_home().join(".claudette").join("files");
         fs::create_dir_all(&dir).unwrap();
@@ -592,6 +594,7 @@ mod tests {
     #[test]
     fn collect_reference_files_uses_explicit_param() {
         let _g = lock_stash();
+        let _eg = crate::test_env_lock(); // home-resolving: serialize vs temp-home swaps
         set_current_turn_paths(vec![]);
         let dir = user_home().join(".claudette").join("files");
         fs::create_dir_all(&dir).unwrap();
@@ -617,6 +620,7 @@ mod tests {
     #[test]
     fn collect_reference_files_dedups_explicit_and_scanner() {
         let _g = lock_stash();
+        let _eg = crate::test_env_lock(); // home-resolving: serialize vs temp-home swaps
         set_current_turn_paths(vec![]);
         let dir = user_home().join(".claudette").join("files");
         fs::create_dir_all(&dir).unwrap();
@@ -647,6 +651,7 @@ mod tests {
 
     #[test]
     fn extract_user_prompt_paths_keeps_existing_files_only() {
+        let _eg = crate::test_env_lock(); // home-resolving
         let dir = user_home().join(".claudette").join("files");
         fs::create_dir_all(&dir).unwrap();
         let fixture = dir.join("refsprint_stash_real.py");
@@ -670,6 +675,7 @@ mod tests {
     #[test]
     fn collect_reference_files_honours_turn_stash() {
         let _g = lock_stash();
+        let _eg = crate::test_env_lock(); // home-resolving
         let dir = user_home().join(".claudette").join("files");
         fs::create_dir_all(&dir).unwrap();
         let fixture = dir.join("refsprint_stash_fixture.py");
@@ -708,6 +714,7 @@ mod tests {
     #[test]
     fn collect_reference_files_explicit_respects_max_files() {
         let _g = lock_stash();
+        let _eg = crate::test_env_lock(); // home-resolving: serialize vs temp-home swaps
         set_current_turn_paths(vec![]);
         let dir = user_home().join(".claudette").join("files");
         fs::create_dir_all(&dir).unwrap();

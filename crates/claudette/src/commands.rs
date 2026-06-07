@@ -99,6 +99,10 @@ pub enum SlashCommand {
     /// mission is active. Mirrors the `--forge "<prompt>"` CLI flag from
     /// inside the REPL.
     Forge(String),
+    /// One-step undo of the last destructive action: restores the trashed
+    /// file / pre-image recorded in the action transcript
+    /// (`~/.claudette/transcript/actions.jsonl`). Works in REPL and TUI.
+    Undo,
     /// Recognised as starting with `/` but unusable: unknown name, missing
     /// required argument, etc. Carries a human-readable error.
     Invalid(String),
@@ -203,6 +207,7 @@ pub fn parse_slash_command(line: &str) -> Option<SlashCommand> {
             None => SlashCommand::Invalid("/coder requires a model name".to_string()),
         },
         "models" => SlashCommand::Models,
+        "undo" => SlashCommand::Undo,
         "recall" => match arg.filter(|s| !s.is_empty()) {
             Some(arg) if arg.eq_ignore_ascii_case("reprobe") => SlashCommand::RecallReprobe,
             Some(query) => SlashCommand::Recall(query),
@@ -389,6 +394,17 @@ where
             handle_models(out);
             SlashOutcome::Continue
         }
+        SlashCommand::Undo => {
+            match crate::transcript::undo_last() {
+                Ok(msg) => {
+                    let _ = writeln!(out, "{} {}", theme::OK_GLYPH, theme::ok(&msg));
+                }
+                Err(e) => {
+                    let _ = writeln!(out, "{} {}", theme::WARN_GLYPH, theme::warn(&e));
+                }
+            }
+            SlashOutcome::Continue
+        }
         SlashCommand::Recall(query) => {
             handle_recall(out, &query);
             SlashOutcome::Continue
@@ -472,6 +488,10 @@ fn print_help(out: &mut impl Write) {
                 (
                     "/recall reprobe",
                     "Retry the embed probe + re-enable indexing",
+                ),
+                (
+                    "/undo",
+                    "Restore the last destructive action from ~/.claudette/trash/",
                 ),
             ],
         ),

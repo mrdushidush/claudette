@@ -43,6 +43,7 @@ Run `claudette --help` for the authoritative reference.
 /clear               Reset to a fresh session.
 /capabilities        Full configuration dump.
 /recall <query>      Search past conversations across sessions (semantic).
+/undo                Restore the last destructive action (delete/overwrite) from ~/.claudette/trash/.
 /brownfield <target> Clone a repo and make it the active mission (one-shot).
 /forge <prompt>      Run the forge pipeline against the active mission.
 /exit                Leave the REPL.

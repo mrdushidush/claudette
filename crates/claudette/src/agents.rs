@@ -262,7 +262,16 @@ impl ToolExecutor for FilteredToolExecutor {
                 "tool `{tool_name}` is not available for this agent"
             )));
         }
-        crate::tools::dispatch_tool(tool_name, input).map_err(ToolError::new)
+        let result = crate::tools::dispatch_tool(tool_name, input).map_err(ToolError::new);
+        // Discard any pending undo ref so it can't leak onto a later
+        // SecretaryToolExecutor transcript line on this thread. No agent's
+        // allowlist contains a trashing tool TODAY (researcher/code_reviewer
+        // are read-only; gitops has git_*/gh_*/bash/mission_*), so this is
+        // a guard for the day one gains note_delete/write_file/todo_delete —
+        // agent-internal actions are deliberately NOT transcript-recorded
+        // (the spawning `spawn_agent` call is the user-visible action).
+        let _ = crate::transcript::take_pending_undo();
+        result
     }
 }
 

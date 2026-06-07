@@ -2337,9 +2337,16 @@ mod tests {
     fn notes_and_todos_round_trip() {
         // End-to-end smoke test: create a note, read it back, delete it;
         // add a todo, complete, uncomplete, delete.
-        // Uses unique titles/texts so it's safe alongside real data.
         // Notes handlers live in src/tools/notes.rs — go through the public
         // dispatcher to exercise them from this cross-group test.
+        //
+        // Hermetic since PR6: deletes now move pre-images into the trash, so
+        // running against the real home would stamp junk into the dev's
+        // actual ~/.claudette/trash on every test run.
+        crate::with_temp_home(|_| notes_and_todos_round_trip_body());
+    }
+
+    fn notes_and_todos_round_trip_body() {
         let stamp = chrono::Local::now().timestamp_nanos_opt().unwrap_or(0);
         let title = format!("__test_note_{stamp}");
         let body = format!("body-{stamp}");

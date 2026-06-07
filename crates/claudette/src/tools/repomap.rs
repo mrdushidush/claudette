@@ -370,6 +370,7 @@ mod tests {
 
     #[test]
     fn repo_map_ranks_the_matching_file_first_with_value_in_sig() {
+        let _eg = crate::test_env_lock(); // home-resolving: serialize vs temp-home swaps
         let base = super::super::user_home()
             .join(".claudette")
             .join("files")

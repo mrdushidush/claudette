@@ -481,6 +481,7 @@ mod tests {
 
     #[test]
     fn apply_patch_dry_run_does_not_touch_disk() {
+        let _eg = crate::test_env_lock(); // home-resolving: serialize vs temp-home swaps
         let path = home_join("dryrun");
         fs::write(&path, "alpha\nbeta\n").unwrap();
 
@@ -499,6 +500,7 @@ mod tests {
 
     #[test]
     fn apply_patch_writes_when_not_dry_run() {
+        let _eg = crate::test_env_lock(); // home-resolving
         let path = home_join("write");
         fs::write(&path, "alpha\nbeta\n").unwrap();
 
@@ -513,6 +515,7 @@ mod tests {
 
     #[test]
     fn apply_patch_is_atomic_across_files() {
+        let _eg = crate::test_env_lock(); // home-resolving
         let path_good = home_join("atomic-good");
         let path_bad = home_join("atomic-bad");
         fs::write(&path_good, "alpha\n").unwrap();
