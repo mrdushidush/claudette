@@ -10,6 +10,20 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Changed
+
+- **The OpenAI-compat (LM Studio / vLLM / llama.cpp) path now streams.** It
+  previously sent `stream: false` and surfaced the whole reply in one shot — on
+  the recommended `qwen3.6-35b-a3b` flagship (~24 tok/s) a 400-token answer was
+  ~17 seconds of dead air before a single character appeared. Brain requests now
+  send `stream: true` and parse the `data:` SSE chunks token-by-token, so text
+  appears as it is generated (matching the Ollama path). Streamed tool calls are
+  reassembled by `index` (name + concatenated `arguments` fragments). The
+  request also sets `stream_options.include_usage` so servers that support it
+  return real prompt/completion token counts on a trailing chunk; servers that
+  ignore it just report zeros. If a server ignores `stream: true` and returns a
+  non-SSE body, the client transparently falls back to the non-streaming parser.
+
 ### Security
 
 - **`web_fetch` now re-validates every HTTP redirect target.** Previously the

@@ -30,6 +30,20 @@ Claudette intentionally does **not** auto-load `.env` from the current working d
 
 LM Studio exposes models with a `@<quant>` suffix in `/v1/models` — for example `qwen3.6-35b-a3b@q4_k_xl` rather than the bare `qwen3.6-35b-a3b`. If you set `CLAUDETTE_MODEL=qwen3.6-35b-a3b` (bare id) against LM Studio, the server treats it as an unknown id, attempts a JIT-load for a different variant, and (when VRAM is tight) returns HTTP 400 `{"error":"Model is unloaded."}`. **Use the exact id from `lms ps` or `/v1/models`** when targeting LM Studio — e.g. `CLAUDETTE_MODEL=qwen3.6-35b-a3b@q4_k_xl`. llama.cpp's `llama-server` (and the MTP fork) ignores the `model` field entirely since it only has one loaded, so the bare id works there.
 
+### Backend quirks: streaming on the OpenAI-compat path
+
+Under `CLAUDETTE_OPENAI_COMPAT=1` the brain request sends `stream: true`, so the
+server replies with Server-Sent Events (`text/event-stream`) and claudette
+renders tokens as they arrive instead of waiting for the whole reply — the same
+behaviour as the native Ollama path. It also sets `stream_options.include_usage`,
+which asks the server to append a final chunk carrying the real
+`prompt_tokens`/`completion_tokens`; LM Studio honours this, and servers that
+don't recognise the option simply ignore it (token counts then show as `0`).
+If a server ignores `stream: true` and returns a single JSON object (no SSE
+framing), claudette detects the non-SSE `Content-Type` and transparently parses
+it as a non-streaming response — so an older or minimal backend still works,
+just without token-by-token output.
+
 ### Backend quirks: brain and embeddings share `OLLAMA_HOST`
 
 Both the brain (`/v1/chat/completions`) and recall (`/v1/embeddings`) resolve to the same `OLLAMA_HOST`. There is no separate `CLAUDETTE_RECALL_HOST` knob. If you run a chat-only server (e.g. an MTP llama-server with no `--embeddings`) you'll see `recall: /v1/embeddings HTTP 501 Not Implemented` from `--doctor` and from `/recall`. Either (a) set `CLAUDETTE_RECALL_DISABLE=1`, or (b) load the embedding model on the same endpoint as the brain (LM Studio supports loading both simultaneously if VRAM allows).

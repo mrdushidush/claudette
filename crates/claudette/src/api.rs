@@ -573,13 +573,25 @@ impl ApiClient for OllamaApiClient {
         let resp = self.post_with_model_reload_retry(&url, &body)?;
 
         if self.openai_compat {
-            // Non-streaming for now — single JSON response, no SSE parsing.
-            // Trade-off: the text callback fires once with the full content,
-            // not token-by-token. Adding SSE support is a follow-up.
-            let body: Value = resp.json().map_err(|e| {
-                RuntimeError::new(format!("OpenAI-compat response parse failed: {e}"))
-            })?;
-            self.parse_openai_response(&body)
+            // We request `stream: true`, so a well-behaved OpenAI-compat
+            // server (LM Studio included) replies with `text/event-stream`
+            // and we parse the `data:` chunks token-by-token. If the server
+            // ignored the flag and sent a single JSON object instead, the
+            // Content-Type won't be SSE — fall back to the non-streaming
+            // parser so we still get a correct (just un-streamed) answer.
+            let is_sse = resp
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|ct| ct.contains("text/event-stream"));
+            if is_sse {
+                self.consume_sse_lines(BufReader::new(resp))
+            } else {
+                let body: Value = resp.json().map_err(|e| {
+                    RuntimeError::new(format!("OpenAI-compat response parse failed: {e}"))
+                })?;
+                self.parse_openai_response(&body)
+            }
         } else {
             // Reqwest's blocking Response implements Read, so we can wrap it
             // in a BufReader and consume the NDJSON stream line by line. The
@@ -714,7 +726,16 @@ impl OllamaApiClient {
                 "model": self.model,
                 "messages": messages,
                 "tools": tools,
-                "stream": false,
+                // `stream: true` switches the server into SSE mode — one
+                // `data: {…}` line per delta, terminated by `data: [DONE]`.
+                // The flagship `qwen3.6-35b-a3b` runs here, so streaming kills
+                // the ~17s of dead air a non-streaming reply would show. See
+                // `consume_sse_lines` for the parser. `stream_options.include_usage`
+                // asks the server (LM Studio supports it) to append a final
+                // chunk carrying real `usage` token counts; servers that don't
+                // recognise the option ignore it and we fall back to zeros.
+                "stream": true,
+                "stream_options": { "include_usage": true },
                 "temperature": 0.0,
                 "max_tokens": self.num_predict,
             });
@@ -924,6 +945,185 @@ impl OllamaApiClient {
                 .get("id")
                 .and_then(Value::as_str)
                 .map_or_else(|| format!("call_{idx}"), String::from);
+            events.push(AssistantEvent::ToolUse { id, name, input });
+        }
+        events.push(AssistantEvent::Usage(TokenUsage {
+            input_tokens,
+            output_tokens,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+        }));
+        events.push(AssistantEvent::MessageStop);
+
+        Ok(events)
+    }
+
+    /// Consume an OpenAI-compat Server-Sent Events stream (LM Studio and other
+    /// `/v1/chat/completions` servers when `stream: true`) and assemble the
+    /// same `Vec<AssistantEvent>` the runtime expects. This is the streaming
+    /// counterpart to [`Self::parse_openai_response`]; structurally it mirrors
+    /// [`Self::consume_stream_lines`] (the Ollama NDJSON reader).
+    ///
+    /// SSE framing: each event is a line `data: {json}`; the stream ends with
+    /// `data: [DONE]`. Lines that aren't `data:` (comments, blank separators)
+    /// are skipped.
+    ///
+    /// Three things differ from the Ollama path:
+    /// - **Text** arrives under `choices[0].delta.content` (`delta`, not
+    ///   `message`).
+    /// - **Tool calls** arrive as *deltas* under `choices[0].delta.tool_calls`:
+    ///   each carries an `index`, an optional `id`/`function.name`, and a
+    ///   **partial** `function.arguments` string fragment. Fragments for the
+    ///   same `index` must be concatenated in arrival order — this is the #1
+    ///   place SSE parsers go wrong.
+    /// - **Usage** (when `stream_options.include_usage` is honoured) arrives on
+    ///   a trailing chunk whose `choices` array is empty.
+    ///
+    /// Harmony / Qwen-3.6 separator handling: the final `TextDelta` is built by
+    /// stripping the *fully accumulated* raw text, so separators that straddle
+    /// two `data:` chunks are still removed. The live callback strips each
+    /// delta in isolation for responsiveness; a separator split across chunk
+    /// boundaries can therefore flash on screen for one frame, but never
+    /// reaches the runtime's `TextDelta`. (Accepted tradeoff — see the PR2
+    /// spec.)
+    ///
+    /// Generic over `BufRead` so the unit tests can pass a `Cursor` directly.
+    fn consume_sse_lines<R: BufRead>(
+        &self,
+        reader: R,
+    ) -> Result<Vec<AssistantEvent>, RuntimeError> {
+        /// Per-`index` accumulator for a streamed tool call.
+        #[derive(Default)]
+        struct ToolCallAccum {
+            id: Option<String>,
+            name: Option<String>,
+            args: String,
+        }
+
+        let mut accumulated_text = String::new();
+        // BTreeMap keeps the tool calls ordered by their wire `index`, so we
+        // emit `ToolUse` events in the order the model intended.
+        let mut tool_calls: std::collections::BTreeMap<u64, ToolCallAccum> =
+            std::collections::BTreeMap::new();
+        let mut input_tokens: u32 = 0;
+        let mut output_tokens: u32 = 0;
+
+        for line in reader.lines() {
+            let line =
+                line.map_err(|e| RuntimeError::new(format!("SSE stream read failed: {e}")))?;
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            // Only `data:` lines carry payloads; skip SSE comments (`:`),
+            // `event:`/`id:` fields, and anything else.
+            let Some(payload) = line.strip_prefix("data:") else {
+                continue;
+            };
+            let payload = payload.trim();
+            if payload == "[DONE]" {
+                break;
+            }
+
+            let chunk: Value = serde_json::from_str(payload)
+                .map_err(|e| RuntimeError::new(format!("SSE stream parse failed: {e}")))?;
+
+            // Errors can arrive mid-stream as a `data:` chunk; surface them the
+            // same way `parse_openai_response` does.
+            if let Some(err) = chunk.pointer("/error/message").and_then(Value::as_str) {
+                return Err(RuntimeError::new(format!("OpenAI-compat error: {err}")));
+            }
+
+            // Text delta: `choices[0].delta.content`.
+            if let Some(content) = chunk
+                .pointer("/choices/0/delta/content")
+                .and_then(Value::as_str)
+            {
+                if !content.is_empty() {
+                    accumulated_text.push_str(content);
+                    if let Some(cb) = &self.text_callback {
+                        // Strip per-delta for responsiveness; the authoritative
+                        // strip happens over the full text below.
+                        let visible = harmony::strip_harmony_separators(content);
+                        if !visible.is_empty() {
+                            cb(&visible);
+                        }
+                    }
+                }
+            }
+
+            // Tool-call deltas: concatenate `function.arguments` fragments by
+            // `index`, capturing `id`/`name` whenever a fragment includes them.
+            if let Some(tcs) = chunk
+                .pointer("/choices/0/delta/tool_calls")
+                .and_then(Value::as_array)
+            {
+                for tc in tcs {
+                    let index = tc.get("index").and_then(Value::as_u64).unwrap_or(0);
+                    let entry = tool_calls.entry(index).or_default();
+                    if let Some(id) = tc.get("id").and_then(Value::as_str) {
+                        if !id.is_empty() {
+                            entry.id = Some(id.to_string());
+                        }
+                    }
+                    if let Some(name) = tc.pointer("/function/name").and_then(Value::as_str) {
+                        if !name.is_empty() {
+                            entry.name = Some(name.to_string());
+                        }
+                    }
+                    if let Some(args) = tc.pointer("/function/arguments").and_then(Value::as_str) {
+                        entry.args.push_str(args);
+                    }
+                }
+            }
+
+            // Usage may appear on a trailing chunk (choices empty) when
+            // `stream_options.include_usage` is honoured. `pointer` on a
+            // `null`/absent `usage` simply yields None, so this is safe to run
+            // on every chunk; last writer wins.
+            if let Some(pt) = chunk
+                .pointer("/usage/prompt_tokens")
+                .and_then(Value::as_u64)
+            {
+                input_tokens = pt as u32;
+            }
+            if let Some(ct) = chunk
+                .pointer("/usage/completion_tokens")
+                .and_then(Value::as_u64)
+            {
+                output_tokens = ct as u32;
+            }
+        }
+
+        // Authoritative harmony strip over the whole reply — catches separators
+        // that straddled chunk boundaries and would have slipped past the
+        // per-delta strip above.
+        let stripped_text = harmony::strip_harmony_separators(&accumulated_text);
+
+        // Terminate the visible stream with a newline so the next REPL line
+        // lands cleanly — same contract as the Ollama path. Only when the
+        // callback is installed AND there was real (post-strip) text.
+        if !stripped_text.is_empty() {
+            if let Some(cb) = &self.text_callback {
+                cb("\n");
+            }
+        }
+
+        let mut events = Vec::new();
+        if !stripped_text.is_empty() {
+            events.push(AssistantEvent::TextDelta(stripped_text));
+        }
+        for (index, acc) in tool_calls {
+            let id = acc.id.unwrap_or_else(|| format!("call_{index}"));
+            let name = acc.name.unwrap_or_else(|| "unknown".to_string());
+            // OpenAI tool-call arguments are a JSON-encoded string; pass it
+            // straight through (the dispatcher parses it). Empty → "{}" to
+            // match `parse_openai_response`.
+            let input = if acc.args.is_empty() {
+                "{}".to_string()
+            } else {
+                acc.args
+            };
             events.push(AssistantEvent::ToolUse { id, name, input });
         }
         events.push(AssistantEvent::Usage(TokenUsage {
@@ -2131,6 +2331,261 @@ mod tests {
         assert!(matches!(&events[0], AssistantEvent::TextDelta(t) if t == "hi"));
     }
 
+    // === SSE streaming tests (OpenAI-compat / LM Studio path) ===============
+    //
+    // `consume_sse_lines` is generic over `BufRead`, so we hand it a
+    // `Cursor<Vec<u8>>` containing a hand-written `text/event-stream`
+    // transcript. Each element of the slice is one physical line; real
+    // servers separate events with blank lines, which the parser skips.
+
+    fn fake_sse(lines: &[&str]) -> Cursor<Vec<u8>> {
+        Cursor::new(lines.join("\n").into_bytes())
+    }
+
+    #[test]
+    fn sse_text_accumulates_across_chunks() {
+        let client = OllamaApiClient::new("test", json!([]));
+        let stream = fake_sse(&[
+            r#"data: {"choices":[{"delta":{"content":"Hel"}}]}"#,
+            r#"data: {"choices":[{"delta":{"content":"lo, "}}]}"#,
+            r#"data: {"choices":[{"delta":{"content":"world"}}]}"#,
+            r"data: [DONE]",
+        ]);
+        let events = client.consume_sse_lines(stream).unwrap();
+        match &events[0] {
+            AssistantEvent::TextDelta(t) => assert_eq!(t, "Hello, world"),
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sse_callback_fires_per_chunk_and_trailing_newline() {
+        use std::sync::{Arc, Mutex};
+        let log: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let log_clone = log.clone();
+        let cb: TextCallback = Box::new(move |s: &str| {
+            log_clone.lock().unwrap().push(s.to_string());
+        });
+        let client = OllamaApiClient::new("test", json!([])).with_text_callback(cb);
+        let stream = fake_sse(&[
+            r#"data: {"choices":[{"delta":{"content":"foo"}}]}"#,
+            r#"data: {"choices":[{"delta":{"content":"bar"}}]}"#,
+            r"data: [DONE]",
+        ]);
+        let _ = client.consume_sse_lines(stream).unwrap();
+        let entries = log.lock().unwrap();
+        assert_eq!(
+            *entries,
+            vec!["foo".to_string(), "bar".to_string(), "\n".to_string()],
+            "callback should fire foo, bar, then trailing \\n"
+        );
+    }
+
+    #[test]
+    fn sse_tool_call_split_across_chunks() {
+        let client = OllamaApiClient::new("test", json!([]));
+        // name + empty args in the first delta; arguments arrive as fragments.
+        let stream = fake_sse(&[
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc","function":{"name":"get_time","arguments":""}}]}}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"tz\":"}}]}}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"utc\"}"}}]}}]}"#,
+            r"data: [DONE]",
+        ]);
+        let events = client.consume_sse_lines(stream).unwrap();
+        let tool_uses: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, AssistantEvent::ToolUse { .. }))
+            .collect();
+        assert_eq!(tool_uses.len(), 1, "expected exactly one ToolUse");
+        match tool_uses[0] {
+            AssistantEvent::ToolUse { id, name, input } => {
+                assert_eq!(id, "call_abc");
+                assert_eq!(name, "get_time");
+                assert_eq!(input, r#"{"tz":"utc"}"#);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn sse_two_tool_calls_in_index_order() {
+        let client = OllamaApiClient::new("test", json!([]));
+        let stream = fake_sse(&[
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"first","arguments":"{}"}}]}}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"b","function":{"name":"second","arguments":"{}"}}]}}]}"#,
+            r"data: [DONE]",
+        ]);
+        let events = client.consume_sse_lines(stream).unwrap();
+        let names: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                AssistantEvent::ToolUse { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, vec!["first", "second"]);
+    }
+
+    #[test]
+    fn sse_tool_calls_emit_in_index_order_regardless_of_arrival() {
+        // BTreeMap keying guarantees output order even if a server sent the
+        // higher index first. (OpenAI sends in order, but don't rely on it.)
+        let client = OllamaApiClient::new("test", json!([]));
+        let stream = fake_sse(&[
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"id":"b","function":{"name":"one","arguments":"{}"}}]}}]}"#,
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"zero","arguments":"{}"}}]}}]}"#,
+            r"data: [DONE]",
+        ]);
+        let events = client.consume_sse_lines(stream).unwrap();
+        let names: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                AssistantEvent::ToolUse { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, vec!["zero", "one"]);
+    }
+
+    #[test]
+    fn sse_tool_call_missing_id_and_name_get_defaults() {
+        let client = OllamaApiClient::new("test", json!([]));
+        let stream = fake_sse(&[
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]}}]}"#,
+            r"data: [DONE]",
+        ]);
+        let events = client.consume_sse_lines(stream).unwrap();
+        match events
+            .iter()
+            .find(|e| matches!(e, AssistantEvent::ToolUse { .. }))
+            .unwrap()
+        {
+            AssistantEvent::ToolUse { id, name, input } => {
+                assert_eq!(id, "call_0", "missing id should synthesise call_<index>");
+                assert_eq!(name, "unknown", "missing name should default to unknown");
+                assert_eq!(input, "{}");
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn sse_done_terminates_stream() {
+        let client = OllamaApiClient::new("test", json!([]));
+        let stream = fake_sse(&[
+            r#"data: {"choices":[{"delta":{"content":"kept"}}]}"#,
+            r"data: [DONE]",
+            r#"data: {"choices":[{"delta":{"content":"ignored"}}]}"#,
+        ]);
+        let events = client.consume_sse_lines(stream).unwrap();
+        match &events[0] {
+            AssistantEvent::TextDelta(t) => {
+                assert_eq!(t, "kept", "text after [DONE] must be ignored");
+            }
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sse_error_payload_returns_error() {
+        let client = OllamaApiClient::new("test", json!([]));
+        let stream = fake_sse(&[r#"data: {"error":{"message":"model exploded"}}"#]);
+        let result = client.consume_sse_lines(stream);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("model exploded"), "got: {err}");
+    }
+
+    #[test]
+    fn sse_harmony_separators_stripped_from_final_text() {
+        let client = OllamaApiClient::new("test", json!([]));
+        // The separator `<|end|>` is split across two chunks. The per-delta
+        // callback can't catch a boundary-straddling separator, but the final
+        // TextDelta (stripped over the full accumulated text) must be clean.
+        let stream = fake_sse(&[
+            r#"data: {"choices":[{"delta":{"content":"Hello <|en"}}]}"#,
+            r#"data: {"choices":[{"delta":{"content":"d|> world"}}]}"#,
+            r"data: [DONE]",
+        ]);
+        let events = client.consume_sse_lines(stream).unwrap();
+        match &events[0] {
+            AssistantEvent::TextDelta(t) => {
+                assert!(
+                    !t.contains("<|"),
+                    "harmony separator leaked into TextDelta: {t:?}"
+                );
+                assert_eq!(t, "Hello  world");
+            }
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sse_usage_parsed_from_trailing_chunk() {
+        let client = OllamaApiClient::new("test", json!([]));
+        // include_usage emits a final chunk with empty `choices` and `usage`.
+        let stream = fake_sse(&[
+            r#"data: {"choices":[{"delta":{"content":"hi"}}]}"#,
+            r#"data: {"choices":[],"usage":{"prompt_tokens":42,"completion_tokens":7}}"#,
+            r"data: [DONE]",
+        ]);
+        let events = client.consume_sse_lines(stream).unwrap();
+        let usage = events
+            .iter()
+            .find_map(|e| match e {
+                AssistantEvent::Usage(u) => Some(u),
+                _ => None,
+            })
+            .expect("usage event");
+        assert_eq!(usage.input_tokens, 42);
+        assert_eq!(usage.output_tokens, 7);
+    }
+
+    #[test]
+    fn sse_ignores_comments_and_blank_lines() {
+        let client = OllamaApiClient::new("test", json!([]));
+        let stream = fake_sse(&[
+            ": this is an SSE comment / keep-alive",
+            "",
+            r#"data: {"choices":[{"delta":{"content":"hi"}}]}"#,
+            "event: message",
+            "",
+            r"data: [DONE]",
+        ]);
+        let events = client.consume_sse_lines(stream).unwrap();
+        assert!(matches!(&events[0], AssistantEvent::TextDelta(t) if t == "hi"));
+    }
+
+    #[test]
+    fn sse_empty_returns_only_usage_and_stop() {
+        let client = OllamaApiClient::new("test", json!([]));
+        let stream = fake_sse(&[r"data: [DONE]"]);
+        let events = client.consume_sse_lines(stream).unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], AssistantEvent::Usage(_)));
+        assert!(matches!(events[1], AssistantEvent::MessageStop));
+    }
+
+    #[test]
+    fn sse_no_trailing_newline_when_only_tool_call() {
+        use std::sync::{Arc, Mutex};
+        let log: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let log_clone = log.clone();
+        let cb: TextCallback = Box::new(move |s: &str| {
+            log_clone.lock().unwrap().push(s.to_string());
+        });
+        let client = OllamaApiClient::new("test", json!([])).with_text_callback(cb);
+        let stream = fake_sse(&[
+            r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","function":{"name":"a","arguments":"{}"}}]}}]}"#,
+            r"data: [DONE]",
+        ]);
+        let _ = client.consume_sse_lines(stream).unwrap();
+        assert!(
+            log.lock().unwrap().is_empty(),
+            "no text callbacks expected when the reply is only a tool call"
+        );
+    }
+
     #[test]
     fn history_budget_subtracts_tools_schema() {
         // Regression: the `tools` field is sent to Ollama on every request
@@ -2218,7 +2673,11 @@ mod tests {
             system_prompt: vec!["sys".to_string()],
         };
         let body = client.build_chat_body(&req);
-        assert_eq!(body["stream"], json!(false));
+        // Compat path now streams (SSE) so the flagship model shows tokens as
+        // they arrive instead of ~17s of dead air. include_usage asks for a
+        // trailing usage chunk.
+        assert_eq!(body["stream"], json!(true));
+        assert_eq!(body["stream_options"]["include_usage"], json!(true));
         assert_eq!(body["temperature"], json!(0.0));
         assert!(body.get("max_tokens").is_some(), "max_tokens missing");
         assert!(
