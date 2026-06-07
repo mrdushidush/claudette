@@ -347,22 +347,34 @@ fn run_repo_refs(root: &Path, needle: &str) -> Result<String, String> {
             // Enumeration answer: every full identifier on this line that
             // contains the needle. Computed for ALL hits (before the cap).
             for m in ident_re.find_iter(line) {
-                if m.as_str().contains(needle) && distinct.len() < MAX_DISTINCT_NAMES {
-                    distinct.insert(m.as_str().to_string());
+                if m.as_str().contains(needle) {
+                    if distinct.len() < MAX_DISTINCT_NAMES {
+                        distinct.insert(m.as_str().to_string());
+                    } else {
+                        // Enumeration answer is now partial — say so, don't
+                        // let the brain treat it as exhaustive.
+                        truncated = true;
+                    }
                 }
             }
             total_hits += 1;
-            if source_hits.len() + doc_hits.len() < MAX_REF_HITS {
-                let hit = RefHit {
+            // PER-PARTITION caps, NOT a joint budget: the `ignore` walker
+            // visits dirs alphabetically (docs/ before src/), so a joint cap
+            // would let 120+ doc lines exhaust the budget before the first
+            // source file is read — starving source_hits and inverting the
+            // whole source-first (I3) guarantee. Each partition gets its own
+            // MAX_REF_HITS so the authoritative source value always survives.
+            let hits = if source {
+                &mut source_hits
+            } else {
+                &mut doc_hits
+            };
+            if hits.len() < MAX_REF_HITS {
+                hits.push(RefHit {
                     file: p.display().to_string(),
                     line: lineno + 1,
                     sig: line.trim().chars().take(MAX_SIG_CHARS).collect(),
-                };
-                if source {
-                    source_hits.push(hit);
-                } else {
-                    doc_hits.push(hit);
-                }
+                });
             } else {
                 truncated = true;
             }
@@ -746,6 +758,51 @@ mod tests {
                 assert_eq!(
                     v["distinct_count"], 1,
                     "fell back to query as needle: {out}"
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn repo_refs_source_hits_survive_a_flood_of_earlier_doc_hits() {
+        // I3 guarantee under load: the walker visits docs/ before src/
+        // alphabetically. With a JOINT hit cap, 130 doc matches would
+        // exhaust the budget and the lone authoritative source hit would be
+        // dropped — silently inverting source-first. Per-partition caps must
+        // keep the source hit. (MAX_REF_HITS=120; 130 doc lines > that.)
+        let many_doc_lines = "MARKER_NEEDLE mentioned in the docs\n".repeat(130);
+        with_refs_fixture(
+            "flood",
+            &[
+                ("docs/big.md", &many_doc_lines),
+                ("src/run.rs", "const MARKER_NEEDLE: u32 = 3;\n"),
+            ],
+            |path| {
+                let input = json!({
+                    "query": "x", "mode": "refs", "name": "MARKER_NEEDLE", "path": path
+                })
+                .to_string();
+                let out = run_repo_map(&input).unwrap();
+                let v: Value = serde_json::from_str(&out).unwrap();
+                let src = v["source_hits"].as_array().unwrap();
+                assert!(
+                    !src.is_empty(),
+                    "source hit must NOT be starved by 130 earlier doc hits: {}",
+                    // truncated should be flagged; doc_hits capped at 120.
+                    serde_json::to_string(&json!({
+                        "source_len": src.len(),
+                        "doc_len": v["doc_hits"].as_array().unwrap().len(),
+                        "truncated": v["truncated"].clone(),
+                    }))
+                    .unwrap()
+                );
+                assert!(
+                    src[0]["sig"].as_str().unwrap().contains("= 3"),
+                    "the surviving source hit must be the real value"
+                );
+                assert_eq!(
+                    v["truncated"], true,
+                    "doc flood past the cap must flag truncated"
                 );
             },
         );
