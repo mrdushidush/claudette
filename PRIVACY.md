@@ -53,6 +53,8 @@ Everything Claudette stores lives under `~/.claudette/` (or `%USERPROFILE%\.clau
 | `recall.sqlite` | Embedding index over past conversations for `/recall`. |
 | `secrets/*.token` | API tokens you've configured (file mode 600 on Unix). |
 | `missions/` | Brownfield clones — git repos Claudette is editing. |
+| `trash/` | Pre-images of deleted/overwritten notes, todos, and files — restorable with `/undo`. Local-only; empty it manually whenever you like. |
+| `transcript/actions.jsonl` | Append-only log of **mutating** tool calls (never read-only ones) with their undo refs. Powers `/undo`. Local-only, never uploaded. |
 | `models/` | Whisper model file (only if you've enabled voice). |
 | `.env` | Persistent env-var overrides. |
 | `CLAUDETTE.MD` | Optional user memory you author (800-char cap). |

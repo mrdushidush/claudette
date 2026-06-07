@@ -12,6 +12,16 @@ bumps are non-breaking bugfixes only.
 
 ### Added
 
+- **Destructive operations are now recoverable: action transcript, trash, and
+  `/undo`.** `note_delete` and `todo_delete` were permanent and `write_file`
+  silently truncated existing files — a misrouted "clean up my notes" from a
+  weak local model destroyed real data (a roast flagged exactly this).
+  Deletes now move to `~/.claudette/trash/`, overwrites snapshot a pre-image
+  there first (fail-closed: no snapshot, no overwrite), and every **mutating**
+  tool call is logged to `~/.claudette/transcript/actions.jsonl` (read-only
+  tools are never logged). New `/undo` slash (REPL + TUI) restores the most
+  recent destructive action; the trash copy is kept even after undo. All
+  local-only under `~/.claudette/`, consistent with `PRIVACY.md`.
 - **First-run remediation: a failed startup probe now offers to fix itself.**
   When the brain probe fails in an interactive terminal, claudette classifies
   the cause (backend down / no model loaded / configured brain not pulled) and

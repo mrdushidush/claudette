@@ -106,7 +106,7 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "note_delete",
-                "description": "Delete a note by its id (filename from note_list). This is irreversible.",
+                "description": "Delete a note by its id (filename from note_list). The note is moved to ~/.claudette/trash/ and recoverable via /undo.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -522,8 +522,12 @@ fn run_note_delete(input: &str) -> Result<String, String> {
     if !path.exists() {
         return Err(format!("note_delete: no note with id '{id}'"));
     }
-    fs::remove_file(&path).map_err(|e| format!("note_delete: remove failed: {e}"))?;
-    Ok(json!({ "ok": true, "id": id, "deleted": true }).to_string())
+    // Move to trash instead of destroying — `/undo` (or a manual copy out
+    // of ~/.claudette/trash/) can restore it. Fail-closed: if the trash
+    // move fails, the note stays.
+    crate::transcript::move_to_trash(&path)
+        .map_err(|e| format!("note_delete: move to trash failed, note kept: {e}"))?;
+    Ok(json!({ "ok": true, "id": id, "deleted": true, "recoverable": true }).to_string())
 }
 
 #[cfg(test)]
@@ -536,6 +540,30 @@ mod tests {
         assert_eq!(slugify("  --weird///title!!!  "), "weird-title");
         assert_eq!(slugify(""), "untitled");
         assert_eq!(slugify("!!!"), "untitled");
+    }
+
+    #[test]
+    fn note_delete_moves_note_to_trash_recoverably() {
+        crate::with_temp_home(|home| {
+            let dir = notes_dir();
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("victim.md");
+            std::fs::write(&path, "precious").unwrap();
+
+            run_note_delete(r#"{"id":"victim.md"}"#).unwrap();
+
+            assert!(!path.exists(), "note must be gone from notes/");
+            let trash_entries: Vec<_> = std::fs::read_dir(home.join(".claudette").join("trash"))
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .collect();
+            assert_eq!(trash_entries.len(), 1, "exactly one trash pre-image");
+            assert_eq!(
+                std::fs::read_to_string(&trash_entries[0]).unwrap(),
+                "precious",
+                "trash copy must hold the deleted content"
+            );
+        });
     }
 
     #[test]
@@ -593,30 +621,36 @@ mod tests {
         // Regression: qwen3:8b sometimes sends `{"tag": ""}` or `{"tag": "   "}`
         // for a plain "list my notes". An empty filter must not exclude every
         // note — it must behave the same as no filter at all.
-        let stamp = chrono::Local::now().timestamp_nanos_opt().unwrap_or(0);
-        let title = format!("__tag_empty_test_{stamp}");
-        let create_out = run_note_create(
-            &json!({ "title": title, "body": "x", "tags": "anything" }).to_string(),
-        )
-        .expect("note_create");
-        let created: Value = serde_json::from_str(&create_out).unwrap();
-        let note_id = created["id"].as_str().unwrap().to_string();
+        //
+        // Hermetic (temp home): disk-writing note tests must not touch the
+        // real ~/.claudette AND must hold the env lock — unlocked home reads
+        // race the with_temp_home swaps in other tests (transcript/executor).
+        crate::with_temp_home(|_| {
+            let stamp = chrono::Local::now().timestamp_nanos_opt().unwrap_or(0);
+            let title = format!("__tag_empty_test_{stamp}");
+            let create_out = run_note_create(
+                &json!({ "title": title, "body": "x", "tags": "anything" }).to_string(),
+            )
+            .expect("note_create");
+            let created: Value = serde_json::from_str(&create_out).unwrap();
+            let note_id = created["id"].as_str().unwrap().to_string();
 
-        for empty in ["", "   ", "\t"] {
-            let out = run_note_list(&json!({ "tag": empty }).to_string()).expect("note_list");
-            let v: Value = serde_json::from_str(&out).unwrap();
-            assert!(
-                v["count"].as_u64().unwrap() >= 1,
-                "empty tag {empty:?} should not filter everything: {v}"
-            );
-            assert!(
-                v.get("filtered_by_tag").is_none(),
-                "empty tag should not report filtered_by_tag: {v}"
-            );
-        }
+            for empty in ["", "   ", "\t"] {
+                let out = run_note_list(&json!({ "tag": empty }).to_string()).expect("note_list");
+                let v: Value = serde_json::from_str(&out).unwrap();
+                assert!(
+                    v["count"].as_u64().unwrap() >= 1,
+                    "empty tag {empty:?} should not filter everything: {v}"
+                );
+                assert!(
+                    v.get("filtered_by_tag").is_none(),
+                    "empty tag should not report filtered_by_tag: {v}"
+                );
+            }
 
-        // Cleanup.
-        let _ = run_note_delete(&json!({ "id": note_id }).to_string());
+            // Cleanup.
+            let _ = run_note_delete(&json!({ "id": note_id }).to_string());
+        });
     }
 
     #[test]
@@ -646,19 +680,19 @@ mod tests {
         // Create a fresh note, then update it by passing `id` back into
         // note_create. The on-disk content must reflect the new body and
         // the filename (id) must be unchanged.
-        let id = create_note_for_update_test("upsert_test", "first body", "");
-        let upsert_out = run_note_create(
-            &json!({ "id": &id, "body": "second body via note_create" }).to_string(),
-        )
-        .expect("note_create upsert");
-        let v: Value = serde_json::from_str(&upsert_out).unwrap();
-        assert_eq!(v["id"].as_str().unwrap(), id);
+        crate::with_temp_home(|_| {
+            let id = create_note_for_update_test("upsert_test", "first body", "");
+            let upsert_out = run_note_create(
+                &json!({ "id": &id, "body": "second body via note_create" }).to_string(),
+            )
+            .expect("note_create upsert");
+            let v: Value = serde_json::from_str(&upsert_out).unwrap();
+            assert_eq!(v["id"].as_str().unwrap(), id);
 
-        let read = run_note_read(&json!({ "id": &id }).to_string()).expect("note_read");
-        let r: Value = serde_json::from_str(&read).unwrap();
-        assert_eq!(r["body"].as_str().unwrap(), "second body via note_create");
-
-        let _ = run_note_delete(&json!({ "id": &id }).to_string());
+            let read = run_note_read(&json!({ "id": &id }).to_string()).expect("note_read");
+            let r: Value = serde_json::from_str(&read).unwrap();
+            assert_eq!(r["body"].as_str().unwrap(), "second body via note_create");
+        });
     }
 
     // ── note_update (upsert path behind note_create) ─────────────────────
@@ -698,115 +732,116 @@ mod tests {
     #[test]
     fn note_update_rejects_no_fields_to_update() {
         // Existing note still required so this gate fires *before* the
-        // "nothing to update" gate would matter. Using a guaranteed-bogus id
-        // to make the test order-independent.
-        let id = create_note_for_update_test("nothing_to_update", "body", "");
-        let err = run_note_update(&json!({ "id": id }).to_string()).unwrap_err();
-        assert!(
-            err.contains("nothing to update"),
-            "expected nothing-to-update error, got: {err}"
-        );
-        let _ = run_note_delete(&json!({ "id": id }).to_string());
+        // "nothing to update" gate would matter.
+        crate::with_temp_home(|_| {
+            let id = create_note_for_update_test("nothing_to_update", "body", "");
+            let err = run_note_update(&json!({ "id": id }).to_string()).unwrap_err();
+            assert!(
+                err.contains("nothing to update"),
+                "expected nothing-to-update error, got: {err}"
+            );
+        });
     }
 
     #[test]
     fn note_update_replaces_body_only() {
-        let id = create_note_for_update_test("body_only", "first body", "tag-a");
-        let out = run_note_update(&json!({ "id": id, "body": "second body" }).to_string())
-            .expect("note_update");
-        let v: Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["ok"], true);
+        crate::with_temp_home(|_| {
+            let id = create_note_for_update_test("body_only", "first body", "tag-a");
+            let out = run_note_update(&json!({ "id": id, "body": "second body" }).to_string())
+                .expect("note_update");
+            let v: Value = serde_json::from_str(&out).unwrap();
+            assert_eq!(v["ok"], true);
 
-        // Read back and confirm body replaced, tags unchanged, title unchanged.
-        let read = run_note_read(&json!({ "id": id }).to_string()).expect("note_read");
-        let r: Value = serde_json::from_str(&read).unwrap();
-        assert_eq!(r["body"].as_str().unwrap(), "second body");
-        assert!(r["tags"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|t| t.as_str() == Some("tag-a")));
-
-        let _ = run_note_delete(&json!({ "id": id }).to_string());
+            // Read back and confirm body replaced, tags unchanged, title unchanged.
+            let read = run_note_read(&json!({ "id": id }).to_string()).expect("note_read");
+            let r: Value = serde_json::from_str(&read).unwrap();
+            assert_eq!(r["body"].as_str().unwrap(), "second body");
+            assert!(r["tags"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|t| t.as_str() == Some("tag-a")));
+        });
     }
 
     #[test]
     fn note_update_title_change_keeps_filename_updates_heading() {
-        let id = create_note_for_update_test("title_change", "body", "");
-        let out = run_note_update(&json!({ "id": id, "title": "Renamed Title" }).to_string())
-            .expect("note_update");
-        let v: Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["title"].as_str().unwrap(), "Renamed Title");
+        crate::with_temp_home(|_| {
+            let id = create_note_for_update_test("title_change", "body", "");
+            let out = run_note_update(&json!({ "id": id, "title": "Renamed Title" }).to_string())
+                .expect("note_update");
+            let v: Value = serde_json::from_str(&out).unwrap();
+            assert_eq!(v["title"].as_str().unwrap(), "Renamed Title");
 
-        // The id (filename) must be unchanged — that's the brain's stable
-        // handle. The `# heading` line inside the file is what got rewritten.
-        let read = run_note_read(&json!({ "id": id }).to_string()).expect("note_read");
-        let r: Value = serde_json::from_str(&read).unwrap();
-        assert_eq!(r["id"].as_str().unwrap(), id);
-        assert_eq!(r["title"].as_str().unwrap(), "Renamed Title");
-
-        let _ = run_note_delete(&json!({ "id": id }).to_string());
+            // The id (filename) must be unchanged — that's the brain's stable
+            // handle. The `# heading` line inside the file is what got rewritten.
+            let read = run_note_read(&json!({ "id": id }).to_string()).expect("note_read");
+            let r: Value = serde_json::from_str(&read).unwrap();
+            assert_eq!(r["id"].as_str().unwrap(), id);
+            assert_eq!(r["title"].as_str().unwrap(), "Renamed Title");
+        });
     }
 
     #[test]
     fn note_update_tags_replace_not_merge() {
-        let id = create_note_for_update_test("tags_replace", "body", "old-a,old-b");
-        let _ = run_note_update(&json!({ "id": id, "tags": "new-only" }).to_string())
-            .expect("note_update");
-        let read = run_note_read(&json!({ "id": id }).to_string()).expect("note_read");
-        let r: Value = serde_json::from_str(&read).unwrap();
-        let tags: Vec<&str> = r["tags"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|t| t.as_str())
-            .collect();
-        assert_eq!(tags, vec!["new-only"], "tags must replace, not merge");
-
-        let _ = run_note_delete(&json!({ "id": id }).to_string());
+        crate::with_temp_home(|_| {
+            let id = create_note_for_update_test("tags_replace", "body", "old-a,old-b");
+            let _ = run_note_update(&json!({ "id": id, "tags": "new-only" }).to_string())
+                .expect("note_update");
+            let read = run_note_read(&json!({ "id": id }).to_string()).expect("note_read");
+            let r: Value = serde_json::from_str(&read).unwrap();
+            let tags: Vec<&str> = r["tags"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|t| t.as_str())
+                .collect();
+            assert_eq!(tags, vec!["new-only"], "tags must replace, not merge");
+        });
     }
 
     #[test]
     fn note_update_empty_tags_string_clears_tags() {
-        let id = create_note_for_update_test("tags_clear", "body", "to-clear");
-        let _ = run_note_update(&json!({ "id": id, "tags": "" }).to_string()).expect("note_update");
-        let read = run_note_read(&json!({ "id": id }).to_string()).expect("note_read");
-        let r: Value = serde_json::from_str(&read).unwrap();
-        // Empty tags should cause the `tags` field to be absent in the
-        // response (matching note_read's existing convention) — the on-disk
-        // `Tags:` line is also dropped.
-        assert!(
-            r.get("tags").is_none(),
-            "empty tags string should clear all tags, got: {r}"
-        );
-
-        let _ = run_note_delete(&json!({ "id": id }).to_string());
+        crate::with_temp_home(|_| {
+            let id = create_note_for_update_test("tags_clear", "body", "to-clear");
+            let _ =
+                run_note_update(&json!({ "id": id, "tags": "" }).to_string()).expect("note_update");
+            let read = run_note_read(&json!({ "id": id }).to_string()).expect("note_read");
+            let r: Value = serde_json::from_str(&read).unwrap();
+            // Empty tags should cause the `tags` field to be absent in the
+            // response (matching note_read's existing convention) — the on-disk
+            // `Tags:` line is also dropped.
+            assert!(
+                r.get("tags").is_none(),
+                "empty tags string should clear all tags, got: {r}"
+            );
+        });
     }
 
     #[test]
     fn note_update_preserves_created_adds_updated_line() {
-        let id = create_note_for_update_test("updated_line", "body", "");
-        let path = notes_dir().join(&id);
-        let before = fs::read_to_string(&path).expect("read original");
-        let created_line = before
-            .lines()
-            .find(|l| l.starts_with("Created:"))
-            .expect("note_create writes a Created: line")
-            .to_string();
+        crate::with_temp_home(|_| {
+            let id = create_note_for_update_test("updated_line", "body", "");
+            let path = notes_dir().join(&id);
+            let before = fs::read_to_string(&path).expect("read original");
+            let created_line = before
+                .lines()
+                .find(|l| l.starts_with("Created:"))
+                .expect("note_create writes a Created: line")
+                .to_string();
 
-        let _ = run_note_update(&json!({ "id": id, "body": "after" }).to_string())
-            .expect("note_update");
-        let after = fs::read_to_string(&path).expect("read updated");
+            let _ = run_note_update(&json!({ "id": id, "body": "after" }).to_string())
+                .expect("note_update");
+            let after = fs::read_to_string(&path).expect("read updated");
 
-        assert!(
-            after.contains(&created_line),
-            "Created: line must be preserved verbatim across updates"
-        );
-        assert!(
-            after.lines().any(|l| l.starts_with("Updated:")),
-            "Updated: line must be added on update: {after}"
-        );
-
-        let _ = run_note_delete(&json!({ "id": id }).to_string());
+            assert!(
+                after.contains(&created_line),
+                "Created: line must be preserved verbatim across updates"
+            );
+            assert!(
+                after.lines().any(|l| l.starts_with("Updated:")),
+                "Updated: line must be added on update: {after}"
+            );
+        });
     }
 }

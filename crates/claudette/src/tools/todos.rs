@@ -100,7 +100,7 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "todo_delete",
-                "description": "Delete a todo by its ID. This is irreversible.",
+                "description": "Delete a todo by its ID. The prior list is snapshotted to ~/.claudette/trash/ and recoverable via /undo.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -245,6 +245,14 @@ fn run_todo_delete(input: &str) -> Result<String, String> {
     if todos.len() == before {
         return Err(format!("todo_delete: no todo with id '{id}'"));
     }
+    // Todos live in one JSON file (no per-item file) — pre-image the whole
+    // todos.json to the trash before rewriting so `/undo` restores the
+    // prior state. Fail-closed: no snapshot, no delete.
+    let path = todos_path();
+    if path.exists() {
+        crate::transcript::snapshot_to_trash(&path)
+            .map_err(|e| format!("todo_delete: pre-image snapshot failed, todo kept: {e}"))?;
+    }
     save_todos(&todos)?;
 
     Ok(json!({
@@ -259,6 +267,32 @@ fn run_todo_delete(input: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn todo_delete_snapshots_the_prior_list_to_trash() {
+        crate::with_temp_home(|home| {
+            run_todo_add(r#"{"text":"buy milk"}"#).unwrap();
+            let todos = load_todos().unwrap();
+            assert_eq!(todos.len(), 1);
+            let id = todos[0].id.clone();
+
+            run_todo_delete(&format!(r#"{{"id":"{id}"}}"#)).unwrap();
+
+            assert!(load_todos().unwrap().is_empty(), "todo must be gone");
+            // The PRE-delete list (still containing the todo) is in trash.
+            let trash_entries: Vec<_> = std::fs::read_dir(home.join(".claudette").join("trash"))
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .collect();
+            assert_eq!(trash_entries.len(), 1, "exactly one snapshot");
+            assert!(
+                std::fs::read_to_string(&trash_entries[0])
+                    .unwrap()
+                    .contains("buy milk"),
+                "snapshot must hold the prior state"
+            );
+        });
+    }
 
     #[test]
     fn todo_add_rejects_empty_text() {

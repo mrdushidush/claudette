@@ -648,6 +648,9 @@ mod tests {
     fn bash_background_status_tail_round_trip() {
         // Spawn a tiny background command, wait for it to finish, then
         // check status + tail. Use platform-portable commands.
+        // Jobs land under ~/.claudette/jobs — home-resolving, so hold the
+        // env lock against parallel temp-home swaps.
+        let _eg = crate::test_env_lock();
         #[cfg(target_os = "windows")]
         let cmd = r"Write-Output hello-bg; Write-Error world-err";
         #[cfg(not(target_os = "windows"))]

@@ -315,6 +315,19 @@ fn run_write_file(input: &str) -> Result<String, String> {
     if let Some(parent) = path.parent() {
         ensure_dir(parent)?;
     }
+    // Pre-image: an existing target is about to be truncated — snapshot it
+    // to ~/.claudette/trash/ first so `/undo` can restore it. New files
+    // have nothing to preserve. Fail-closed: no snapshot, no overwrite
+    // (recoverability is the feature; a silent truncate was the data-loss
+    // path the roast flagged).
+    if path.exists() {
+        crate::transcript::snapshot_to_trash(&path).map_err(|e| {
+            format!(
+                "write_file: pre-image snapshot failed, refusing to overwrite {}: {e}",
+                path.display()
+            )
+        })?;
+    }
     fs::write(&path, content)
         .map_err(|e| format!("write_file: write {} failed: {e}", path.display()))?;
 
@@ -449,6 +462,42 @@ mod tests {
     }
 
     #[test]
+    fn write_file_snapshots_only_existing_targets() {
+        // NOTE: env mutation happens inside with_temp_home (which already
+        // holds the global env lock) — do NOT nest with_workspace_env here,
+        // the lock is not reentrant.
+        crate::with_temp_home(|home| {
+            let prev_ws = std::env::var("CLAUDETTE_WORKSPACE").ok();
+            std::env::remove_var("CLAUDETTE_WORKSPACE");
+
+            let trash = home.join(".claudette").join("trash");
+            // Fresh file (lands in ~/.claudette/files under the temp home):
+            // nothing to preserve → no trash entry.
+            run_write_file(r#"{"path":"fresh.txt","content":"v1"}"#).unwrap();
+            let trash_count = || -> usize { std::fs::read_dir(&trash).map_or(0, Iterator::count) };
+            assert_eq!(trash_count(), 0, "new file must not create a pre-image");
+
+            // Overwrite → exactly one pre-image holding the OLD content.
+            run_write_file(r#"{"path":"fresh.txt","content":"v2"}"#).unwrap();
+            let entries: Vec<_> = std::fs::read_dir(&trash)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .collect();
+            assert_eq!(entries.len(), 1, "overwrite must snapshot the pre-image");
+            assert_eq!(
+                std::fs::read_to_string(&entries[0]).unwrap(),
+                "v1",
+                "pre-image must hold the truncated content"
+            );
+
+            match prev_ws {
+                Some(v) => std::env::set_var("CLAUDETTE_WORKSPACE", v),
+                None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+            }
+        });
+    }
+
+    #[test]
     fn code_is_trivial_thresholds() {
         assert!(code_is_trivial("def f():\n    return 1\n"));
         // Over the line cap.
@@ -465,14 +514,19 @@ mod tests {
         // Daily-driver fast path: with a workspace set, a SHORT code file is
         // written directly instead of being refused (routed to generate_code).
         // Use a `.sh` file so validate_code_file is a no-op (no subprocess).
-        let target = files_dir().join("claudette-fastpath-test.sh");
-        let _ = fs::remove_file(&target);
+        //
+        // ALL home-dependent path resolution happens inside the locked
+        // closure — outside it, a parallel with_temp_home test could swap
+        // HOME mid-resolution.
         let input =
             json!({ "path": "claudette-fastpath-test.sh", "content": "echo hi\n" }).to_string();
         let out = with_workspace_env(Some("/tmp/claudette-ws-fastpath"), || {
-            run_write_file(&input)
+            let target = files_dir().join("claudette-fastpath-test.sh");
+            let _ = fs::remove_file(&target);
+            let out = run_write_file(&input);
+            let _ = fs::remove_file(&target);
+            out
         });
-        let _ = fs::remove_file(&target);
         let out = out.expect("short code file should be accepted in workspace mode");
         assert!(out.contains("\"ok\":true"), "got: {out}");
     }
@@ -519,6 +573,7 @@ mod tests {
     fn read_file_caps_default_window_and_flags_truncation() {
         // A file bigger than the default window must come back truncated, with
         // the paging notice — this is the fix for the large-file read spiral.
+        let _guard = crate::test_env_lock(); // home-resolving: serialize vs temp-home swaps
         let target = files_dir().join("claudette-readcap-test.txt");
         let _ = fs::remove_file(&target);
         let body = (1..=1000)
@@ -550,6 +605,7 @@ mod tests {
 
     #[test]
     fn read_file_honors_offset_and_limit() {
+        let _guard = crate::test_env_lock(); // home-resolving
         let target = files_dir().join("claudette-readwin-test.txt");
         let _ = fs::remove_file(&target);
         let body = (1..=100)
@@ -575,6 +631,7 @@ mod tests {
 
     #[test]
     fn read_file_small_file_returns_whole_without_notice() {
+        let _guard = crate::test_env_lock(); // home-resolving
         let target = files_dir().join("claudette-readsmall-test.txt");
         let _ = fs::remove_file(&target);
         fs::write(&target, "alpha\nbeta\ngamma\n").unwrap();
@@ -598,6 +655,7 @@ mod tests {
         // the workspace root) and the sandbox check rejected it. Now bare
         // relative paths are rooted at files_dir() so the model's intuition
         // works without it having to know the sandbox path.
+        let _guard = crate::test_env_lock(); // home-resolving
         let target = files_dir().join("claudette-relative-test.txt");
         let _ = fs::remove_file(&target);
 
@@ -620,6 +678,7 @@ mod tests {
         // Bare-relative resolution under the sandbox MUST NOT loosen the
         // sandbox check itself: an absolute path under the user's home but
         // outside ~/.claudette/files/ should still be rejected.
+        let _guard = crate::test_env_lock(); // home-resolving
         let outside = super::super::user_home()
             .join("Documents")
             .join("definitely-not-allowed.txt");
@@ -664,6 +723,7 @@ mod tests {
 
     #[test]
     fn write_file_allows_text_extension() {
+        let _guard = crate::test_env_lock(); // home-resolving
         let target = files_dir().join("write_refuse_allows_txt.txt");
         let _ = fs::remove_file(&target);
         let input = json!({
@@ -679,6 +739,7 @@ mod tests {
     #[test]
     fn write_file_allows_data_and_config_extensions() {
         // JSON, MD, YAML, TOML — config/data formats stay on write_file.
+        let _guard = crate::test_env_lock(); // home-resolving
         for (path, content) in [
             ("write_refuse_data.json", r#"{"k":"v"}"#),
             ("write_refuse_data.md", "# heading"),
@@ -699,6 +760,7 @@ mod tests {
     fn read_file_round_trip_through_handlers() {
         // Write a file via run_write_file then read it back via run_read_file.
         // Cleans up after itself.
+        let _guard = crate::test_env_lock(); // home-resolving
         let path = files_dir().join("claudette-test-roundtrip.txt");
         let _ = fs::remove_file(&path);
 

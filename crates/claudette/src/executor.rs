@@ -63,12 +63,41 @@ impl Default for SecretaryToolExecutor {
 impl ToolExecutor for SecretaryToolExecutor {
     fn execute(&mut self, tool_name: &str, input: &str) -> Result<String, ToolError> {
         if tool_name == "enable_tools" {
+            // ReadOnly meta-tool — never recorded in the action transcript.
             return run_enable_tools(self.registry.as_ref(), input).map_err(ToolError::new);
         }
-        dispatch_tool(tool_name, input)
+        let result = dispatch_tool(tool_name, input)
             .map(|result| format!("[tool:{tool_name}] {result}"))
-            .map_err(ToolError::new)
+            .map_err(ToolError::new);
+
+        // Action transcript — mutating tools only (ReadOnly reads would be
+        // noise and a privacy footgun), best-effort, AFTER dispatch so the
+        // log reflects what actually happened. `take_pending_undo` collects
+        // the trash/pre-image ref a tool left on this thread (same
+        // thread-local pattern as `set_current_turn_paths`) — and is taken
+        // unconditionally so a failed call can never leak its ref onto the
+        // next call's line. A failed call IS still recorded when it left an
+        // undo ref (e.g. snapshot succeeded, write failed — the pre-image
+        // is exactly what the user needs to know about then).
+        let pending_undo = crate::transcript::take_pending_undo();
+        if should_record(tool_name) && (result.is_ok() || pending_undo.is_some()) {
+            crate::transcript::record(tool_name, input, pending_undo);
+        }
+        result
     }
+}
+
+/// Whether a tool call belongs in `~/.claudette/transcript/actions.jsonl`:
+/// anything the permission policy does NOT classify `ReadOnly`. Unknown
+/// tools default to `DangerFullAccess` in `required_mode_for`, so they are
+/// recorded — fail-safe for an audit log.
+fn should_record(tool_name: &str) -> bool {
+    use std::sync::OnceLock;
+    static POLICY: OnceLock<crate::PermissionPolicy> = OnceLock::new();
+    POLICY
+        .get_or_init(crate::run::build_permission_policy)
+        .required_mode_for(tool_name)
+        != crate::PermissionMode::ReadOnly
 }
 
 /// Handle a call to the synthetic `enable_tools` meta-tool. Parses the
@@ -165,6 +194,32 @@ fn lock_registry(registry: &Arc<Mutex<ToolRegistry>>) -> std::sync::MutexGuard<'
 mod tests {
     use super::*;
     use crate::ToolExecutor;
+
+    #[test]
+    fn transcript_records_mutating_calls_but_never_readonly() {
+        crate::with_temp_home(|home| {
+            let mut ex = SecretaryToolExecutor::stateless();
+            let tpath = home
+                .join(".claudette")
+                .join("transcript")
+                .join("actions.jsonl");
+
+            // ReadOnly tool → success, but NO transcript line (privacy:
+            // reads are never logged).
+            ex.execute("get_current_time", "{}").unwrap();
+            assert!(!tpath.exists(), "ReadOnly call must not be recorded");
+
+            // WorkspaceWrite tool → recorded.
+            ex.execute("todo_add", r#"{"text":"transcript test"}"#)
+                .unwrap();
+            let raw = std::fs::read_to_string(&tpath).expect("transcript must exist now");
+            assert!(raw.contains("todo_add"), "mutating call must be recorded");
+            assert!(
+                !raw.contains("get_current_time"),
+                "the earlier ReadOnly call must not appear"
+            );
+        });
+    }
 
     #[test]
     fn stateless_executor_rejects_enable_tools() {
