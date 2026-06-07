@@ -12,6 +12,20 @@ bumps are non-breaking bugfixes only.
 
 ### Added
 
+- **First-run remediation: a failed startup probe now offers to fix itself.**
+  When the brain probe fails in an interactive terminal, claudette classifies
+  the cause (backend down / no model loaded / configured brain not pulled) and
+  — for a missing Ollama brain — offers `[Y/n]` to run `ollama pull` on the
+  spot with live progress, then re-probes and continues. Piped / CI /
+  `--offline` runs keep the exact previous behaviour (print the error, exit
+  non-zero); the prompt never blocks a script.
+- **`--doctor` now picks a brain for your GPU.** A new "pick a brain" section
+  detects VRAM via `nvidia-smi` (fallback: `CLAUDETTE_VRAM_GB`, then 8 GiB)
+  and recommends the Claudette-Certified model for that tier — backend-honest
+  (the 92% `qwen3.6-35b-a3b` flagship is LM Studio-only, so Ollama users get
+  the best *pullable* brain plus the switch recipe) — with a copy-paste load
+  command. Advisory only: nothing is switched for you. The TUI HW tab now
+  prefers detected VRAM over the env var too.
 - **The TUI now prompts for `DangerFullAccess` tools instead of silently
   denying them.** Previously the fullscreen TUI had no permission prompter, so
   `bash`, `edit_file`, `git add/commit/push`, and every other dangerous tool
