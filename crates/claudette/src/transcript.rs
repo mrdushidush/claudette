@@ -223,6 +223,25 @@ pub fn undo_last() -> Result<String, String> {
     if let Some(parent) = original_p.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("cannot undo: {e}"))?;
     }
+    // Undo must never destroy data either. If the original path now holds
+    // content (e.g. the file was overwritten and then edited again, or a new
+    // file was created where a deleted one stood), restoring the trash copy
+    // would clobber that NEWER content with no pre-image. Snapshot the
+    // current content to trash FIRST — fail-closed: if we can't back it up,
+    // refuse the undo rather than lose it. NOTE: a raw trash copy here, NOT
+    // snapshot_to_trash(), because that sets the PENDING_UNDO thread-local —
+    // /undo runs outside the executor's take_pending_undo(), so it would
+    // leak onto the next tool call's transcript line.
+    let mut backed_up: Option<String> = None;
+    if original_p.exists() {
+        let backup = trash_target_for(original_p).map_err(|e| {
+            format!("cannot undo {tool}: failed to back up the current {original} first ({e})")
+        })?;
+        fs::copy(original_p, &backup).map_err(|e| {
+            format!("cannot undo {tool}: failed to back up the current {original} first ({e})")
+        })?;
+        backed_up = Some(backup.display().to_string());
+    }
     // Copy (not move): the trash copy stays as belt-and-braces until the
     // user empties the trash themselves.
     fs::copy(trash_p, original_p)
@@ -252,9 +271,15 @@ pub fn undo_last() -> Result<String, String> {
         );
     }
 
-    Ok(format!(
-        "restored {original} from trash (undid {tool}; the trash copy at {trash} is kept)"
-    ))
+    Ok(match backed_up {
+        Some(b) => format!(
+            "restored {original} from trash (undid {tool}; the trash copy at {trash} is kept). \
+             The content that was there is backed up at {b}."
+        ),
+        None => format!(
+            "restored {original} from trash (undid {tool}; the trash copy at {trash} is kept)"
+        ),
+    })
 }
 
 #[cfg(test)]
@@ -341,6 +366,41 @@ mod tests {
 
             let err = undo_last().unwrap_err();
             assert!(err.contains("nothing to undo"), "got: {err}");
+        });
+    }
+
+    #[test]
+    fn undo_never_destroys_newer_content_at_the_original_path() {
+        // CRITICAL (final roast): overwrite a file (old → trash), then the
+        // user edits it again (newer content), then /undo. Undo must restore
+        // the trashed version WITHOUT losing the newer edit — the newer
+        // content must itself be backed up to trash first.
+        with_temp_home(|home| {
+            let f = write_tmp(home, "doc.txt", "ORIGINAL");
+            // Simulate an overwrite: snapshot the original, then write v2.
+            let _ = snapshot_to_trash(&f).unwrap();
+            record("write_file", "doc.txt v2", take_pending_undo());
+            fs::write(&f, "VERSION_TWO").unwrap();
+            // User then hand-edits to a THIRD, newer version.
+            fs::write(&f, "VERSION_THREE_NEWEST").unwrap();
+
+            let msg = undo_last().expect("undo should succeed");
+            // Restored to the snapshotted ORIGINAL...
+            assert_eq!(fs::read_to_string(&f).unwrap(), "ORIGINAL");
+            // ...and the newest content is NOT gone — it's backed up in trash.
+            assert!(
+                msg.contains("backed up"),
+                "undo must report the pre-restore backup: {msg}"
+            );
+            let trash = home.join(".claudette").join("trash");
+            let recovered = std::fs::read_dir(&trash)
+                .unwrap()
+                .map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap_or_default())
+                .any(|c| c == "VERSION_THREE_NEWEST");
+            assert!(
+                recovered,
+                "the clobbered newer content must survive in trash"
+            );
         });
     }
 
