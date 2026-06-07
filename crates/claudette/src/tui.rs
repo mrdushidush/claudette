@@ -14,7 +14,7 @@
 //! Sprint G adds the `TuiPrompter` for `DangerFullAccess` confirmation modals.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{Receiver, Sender, SyncSender, TryRecvError};
 use std::time::{Duration, Instant};
 
 use crate::Session;
@@ -184,6 +184,22 @@ impl Default for NotesState {
     }
 }
 
+/// A pending `DangerFullAccess` permission prompt (Sprint G / PR5). The
+/// worker thread is parked inside `PermissionPrompter::decide()` until the
+/// user answers over `resp_tx` — or until this struct drops (any render-loop
+/// exit path), which the worker reads as a deny.
+struct PermissionPrompt {
+    tool_name: String,
+    /// Full tool input — display-side wrap + scroll, never truncated.
+    input: String,
+    /// e.g. "danger-full-access".
+    required_mode: String,
+    /// Vertical scroll offset for long inputs (↑/↓).
+    scroll: u16,
+    /// Rendezvous answer channel: `true` → allow, `false` → deny.
+    resp_tx: SyncSender<bool>,
+}
+
 /// All mutable TUI state — owned entirely by the render loop thread.
 struct App {
     // ── Conversation ──────────────────────────────────────────────────────
@@ -207,6 +223,11 @@ struct App {
     /// Space Invaders modal. `Some` while the game is being played; `None`
     /// otherwise. Toggled via Ctrl+G.
     space_game: Option<space::SpaceGame>,
+
+    // ── Permissions ───────────────────────────────────────────────────────
+    /// Pending DangerFullAccess confirmation modal. Outranks every other
+    /// input mode while `Some` — the worker thread is blocked on the answer.
+    permission_prompt: Option<PermissionPrompt>,
 
     // ── Tool log ──────────────────────────────────────────────────────────
     all_tool_records: Vec<ToolRecord>,
@@ -244,6 +265,7 @@ impl Default for App {
             paste_file: paste::PasteFile::new(),
             working: false,
             space_game: None,
+            permission_prompt: None,
             all_tool_records: Vec::new(),
             notes: NotesState::default(),
             todos: TodosState::default(),
@@ -263,6 +285,27 @@ impl App {
     fn handle_tui_event(&mut self, event: TuiEvent) {
         match event {
             TuiEvent::Token(delta) => self.streaming_text.push_str(&delta),
+
+            TuiEvent::PermissionRequest {
+                tool_name,
+                input,
+                required_mode,
+                resp_tx,
+            } => {
+                // A permission question outranks the easter egg and any
+                // pane edit mode — force-close them so their input branches
+                // can't starve the modal (the worker is blocked until the
+                // user answers).
+                self.space_game = None;
+                self.notes.filter_editing = false;
+                self.permission_prompt = Some(PermissionPrompt {
+                    tool_name,
+                    input,
+                    required_mode,
+                    scroll: 0,
+                    resp_tx,
+                });
+            }
 
             TuiEvent::TurnComplete { text, .. } => {
                 self.history.push(Message {
@@ -736,6 +779,68 @@ fn run_loop(
                     app.hw.last_error = Some(e);
                 }
             }
+        }
+
+        // Permission modal — highest-priority input mode; owns its own
+        // draw + poll, then loops. Must come BEFORE the Space Invaders
+        // branch (whose `continue` would otherwise starve it) — and the
+        // event handler force-closes the game/filter modes on arrival.
+        // The worker thread is parked in `decide()` until we answer via
+        // `resp_tx`; every exit path that drops the prompt instead (quit,
+        // `?` error) reads as a deny on the worker side.
+        if app.permission_prompt.is_some() {
+            terminal.draw(|f| render::render(f, &app))?;
+            if event::poll(Duration::from_millis(50))? {
+                if let Event::Key(k) = event::read()? {
+                    // Windows fires Press + Release — Press only.
+                    if k.kind == KeyEventKind::Press {
+                        match (k.code, k.modifiers) {
+                            // Quit: deny first so the worker unblocks
+                            // promptly, then shut down as usual.
+                            (KeyCode::Char('c' | 'd'), KeyModifiers::CONTROL) => {
+                                if let Some(p) = app.permission_prompt.take() {
+                                    let _ = p.resp_tx.send(false);
+                                }
+                                let _ = user_tx.send(UserInput::Quit);
+                                return Ok(());
+                            }
+                            (
+                                KeyCode::Char('y' | 'Y'),
+                                KeyModifiers::NONE | KeyModifiers::SHIFT,
+                            ) => {
+                                if let Some(p) = app.permission_prompt.take() {
+                                    let _ = p.resp_tx.send(true);
+                                }
+                            }
+                            // Default-deny, matching CliPrompter's
+                            // anything-but-y semantics on Enter.
+                            (
+                                KeyCode::Char('n' | 'N'),
+                                KeyModifiers::NONE | KeyModifiers::SHIFT,
+                            )
+                            | (KeyCode::Esc | KeyCode::Enter, _) => {
+                                if let Some(p) = app.permission_prompt.take() {
+                                    let _ = p.resp_tx.send(false);
+                                }
+                            }
+                            // Long inputs scroll; everything else is
+                            // swallowed while the modal is up.
+                            (KeyCode::Up, _) => {
+                                if let Some(p) = app.permission_prompt.as_mut() {
+                                    p.scroll = p.scroll.saturating_sub(1);
+                                }
+                            }
+                            (KeyCode::Down, _) => {
+                                if let Some(p) = app.permission_prompt.as_mut() {
+                                    p.scroll = p.scroll.saturating_add(1);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            continue;
         }
 
         // Space Invaders modal — own its own input + tick loop, then loop.

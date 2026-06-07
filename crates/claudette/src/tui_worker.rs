@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::{
     compact_session, estimate_session_tokens, CompactionConfig, ContentBlock, ConversationRuntime,
-    Session,
+    PermissionPromptDecision, PermissionPrompter, PermissionRequest, Session,
 };
 
 use crate::api::{tui_text_callback, OllamaApiClient};
@@ -41,8 +41,8 @@ type TuiRuntime = ConversationRuntime<OllamaApiClient, TuiToolExecutor>;
 /// pushed the per-turn payload to ~2,500 tokens. Now ~200.
 ///
 /// Uses the same per-tool permission policy as the REPL so `ReadOnly` +
-/// `WorkspaceWrite` tools pass through. `DangerFullAccess` tools are denied
-/// (no prompter yet). Sprint G will add `TuiPrompter` for confirmation modals.
+/// `WorkspaceWrite` tools pass through. `DangerFullAccess` tools prompt the
+/// user via [`TuiPrompter`] (a confirmation modal in the render loop).
 fn build_tui_runtime(session: Session, tui_tx: SyncSender<TuiEvent>) -> TuiRuntime {
     let reg = ToolRegistry::new();
     let registry = Arc::new(Mutex::new(reg));
@@ -75,6 +75,64 @@ fn build_tui_runtime(session: Session, tui_tx: SyncSender<TuiEvent>) -> TuiRunti
             reg.group_tool_names(group)
         })
     })
+}
+
+/// TUI analogue of [`crate::run::CliPrompter`] — the permission prompter
+/// for `DangerFullAccess` tools (bash, edit_file, git mutations, …).
+///
+/// Runs on the worker thread, which is parked inside `run_turn` while a
+/// decision is pending, so the answer cannot arrive over the regular
+/// `UserInput` channel (the worker owns that receiver but is not reading
+/// it mid-turn). Instead, each `decide()` creates a fresh rendezvous
+/// channel and ships its sender to the render loop inside
+/// [`TuiEvent::PermissionRequest`]:
+///
+/// - per-request channel ⇒ a stale/buffered answer from an earlier prompt
+///   can never satisfy a later one, by construction;
+/// - every render-loop exit path (quit, error `?`, panic) drops the sender
+///   ⇒ `recv()` returns `Disconnected` ⇒ the tool is denied, never hung.
+pub struct TuiPrompter {
+    tui_tx: SyncSender<TuiEvent>,
+}
+
+impl TuiPrompter {
+    pub fn new(tui_tx: SyncSender<TuiEvent>) -> Self {
+        Self { tui_tx }
+    }
+}
+
+impl PermissionPrompter for TuiPrompter {
+    fn decide(&mut self, request: &PermissionRequest) -> PermissionPromptDecision {
+        // Rendezvous (capacity 0): the render loop's send completes only
+        // when this thread is at `recv()` — which it is, nanoseconds after
+        // the event send below. FIFO ordering on `tui_tx` guarantees the
+        // render loop sees the request before any answer is expected.
+        let (resp_tx, resp_rx) = std::sync::mpsc::sync_channel::<bool>(0);
+
+        let sent = self.tui_tx.send(TuiEvent::PermissionRequest {
+            tool_name: request.tool_name.clone(),
+            input: request.input.clone(),
+            required_mode: request.required_mode.as_str().to_string(),
+            resp_tx,
+        });
+        if sent.is_err() {
+            // Render loop is gone — fail closed, same reason CliPrompter
+            // uses when it cannot read an answer.
+            return PermissionPromptDecision::Deny {
+                reason: "could not read user input".to_string(),
+            };
+        }
+
+        match resp_rx.recv() {
+            Ok(true) => PermissionPromptDecision::Allow,
+            Ok(false) => PermissionPromptDecision::Deny {
+                reason: "user denied permission".to_string(),
+            },
+            Err(_) => PermissionPromptDecision::Deny {
+                reason: "could not read user input".to_string(),
+            },
+        }
+    }
 }
 
 /// Run a slash command typed in the TUI through the shared dispatcher.
@@ -216,6 +274,7 @@ pub fn spawn_worker(
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let mut runtime = build_tui_runtime(session, tui_tx.clone());
+        let mut prompter = TuiPrompter::new(tui_tx.clone());
 
         // Pre-flight the recall embedder so a missing embed model surfaces
         // a clear warn line before the first turn instead of as per-turn
@@ -253,9 +312,9 @@ pub fn spawn_worker(
                         .map(|att| (att.media_type, att.data_b64))
                         .collect();
                     let turn_result = if image_pairs.is_empty() {
-                        runtime.run_turn(&text, None)
+                        runtime.run_turn(&text, Some(&mut prompter))
                     } else {
-                        runtime.run_turn_with_images(&text, image_pairs, None)
+                        runtime.run_turn_with_images(&text, image_pairs, Some(&mut prompter))
                     };
                     match turn_result {
                         Ok(summary) => {
@@ -327,7 +386,138 @@ pub fn spawn_worker(
 
 #[cfg(test)]
 mod tests {
-    use super::strip_ansi_escapes;
+    use super::{strip_ansi_escapes, TuiPrompter};
+    use crate::tui_events::TuiEvent;
+    use crate::{
+        PermissionMode, PermissionOutcome, PermissionPolicy, PermissionPromptDecision,
+        PermissionPrompter, PermissionRequest,
+    };
+    use std::sync::mpsc;
+
+    fn danger_request(input: &str) -> PermissionRequest {
+        PermissionRequest {
+            tool_name: "bash".to_string(),
+            input: input.to_string(),
+            current_mode: PermissionMode::WorkspaceWrite,
+            required_mode: PermissionMode::DangerFullAccess,
+        }
+    }
+
+    /// Pretend to be the render loop: receive one PermissionRequest event
+    /// and answer it (or drop the channel when `answer` is None).
+    fn spawn_render_stub(
+        tui_rx: mpsc::Receiver<TuiEvent>,
+        answer: Option<bool>,
+    ) -> std::thread::JoinHandle<(String, String, String)> {
+        std::thread::spawn(move || match tui_rx.recv().expect("no event") {
+            TuiEvent::PermissionRequest {
+                tool_name,
+                input,
+                required_mode,
+                resp_tx,
+            } => {
+                if let Some(ans) = answer {
+                    resp_tx.send(ans).expect("worker hung up");
+                }
+                // None → resp_tx drops here, simulating a render-loop exit.
+                (tool_name, input, required_mode)
+            }
+            other => panic!("unexpected event: {other:?}"),
+        })
+    }
+
+    #[test]
+    fn tui_prompter_allows_on_true_and_ships_full_input() {
+        let (tui_tx, tui_rx) = mpsc::sync_channel(8);
+        let stub = spawn_render_stub(tui_rx, Some(true));
+        let mut p = TuiPrompter::new(tui_tx);
+
+        let decision = p.decide(&danger_request("rm -rf ./target && echo done"));
+        assert_eq!(decision, PermissionPromptDecision::Allow);
+
+        let (tool, input, mode) = stub.join().unwrap();
+        assert_eq!(tool, "bash");
+        // Full input — no truncation anywhere on the prompt path.
+        assert_eq!(input, "rm -rf ./target && echo done");
+        assert_eq!(mode, "danger-full-access");
+    }
+
+    #[test]
+    fn tui_prompter_denies_on_false_with_cli_parity_reason() {
+        let (tui_tx, tui_rx) = mpsc::sync_channel(8);
+        let stub = spawn_render_stub(tui_rx, Some(false));
+        let mut p = TuiPrompter::new(tui_tx);
+
+        let decision = p.decide(&danger_request("git push --force"));
+        assert_eq!(
+            decision,
+            PermissionPromptDecision::Deny {
+                reason: "user denied permission".to_string(),
+            }
+        );
+        stub.join().unwrap();
+    }
+
+    #[test]
+    fn tui_prompter_denies_when_render_loop_drops_the_answer() {
+        let (tui_tx, tui_rx) = mpsc::sync_channel(8);
+        // Render stub receives the request but exits without answering —
+        // the per-request sender drops, which must read as a deny.
+        let stub = spawn_render_stub(tui_rx, None);
+        let mut p = TuiPrompter::new(tui_tx);
+
+        let decision = p.decide(&danger_request("bash payload"));
+        assert_eq!(
+            decision,
+            PermissionPromptDecision::Deny {
+                reason: "could not read user input".to_string(),
+            }
+        );
+        stub.join().unwrap();
+    }
+
+    #[test]
+    fn tui_prompter_denies_when_render_loop_is_gone_entirely() {
+        let (tui_tx, tui_rx) = mpsc::sync_channel(8);
+        drop(tui_rx); // no render loop at all
+        let mut p = TuiPrompter::new(tui_tx);
+
+        let decision = p.decide(&danger_request("anything"));
+        assert_eq!(
+            decision,
+            PermissionPromptDecision::Deny {
+                reason: "could not read user input".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn authorize_consults_tui_prompter_for_danger_tools() {
+        // End-to-end through the real policy: a DangerFullAccess tool under
+        // a WorkspaceWrite active mode is no longer hard-denied — it asks
+        // the prompter, and the user's modal answer decides.
+        let policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("bash", PermissionMode::DangerFullAccess);
+
+        let (tui_tx, tui_rx) = mpsc::sync_channel(8);
+        let stub = spawn_render_stub(tui_rx, Some(true));
+        let mut p = TuiPrompter::new(tui_tx);
+        let outcome = policy.authorize("bash", "cargo test", Some(&mut p));
+        assert_eq!(outcome, PermissionOutcome::Allow);
+        stub.join().unwrap();
+
+        let (tui_tx, tui_rx) = mpsc::sync_channel(8);
+        let stub = spawn_render_stub(tui_rx, Some(false));
+        let mut p = TuiPrompter::new(tui_tx);
+        let outcome = policy.authorize("bash", "cargo test", Some(&mut p));
+        assert_eq!(
+            outcome,
+            PermissionOutcome::Deny {
+                reason: "user denied permission".to_string(),
+            }
+        );
+        stub.join().unwrap();
+    }
 
     #[test]
     fn strip_ansi_passthrough_when_no_escapes() {

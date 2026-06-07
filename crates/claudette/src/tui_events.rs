@@ -37,6 +37,28 @@ pub enum TuiEvent {
     /// Informational text from a slash command (e.g. /help, /status, /tools).
     /// Rendered as a non-error system message in the chat history.
     Info(String),
+    /// The worker thread is blocked inside a permission prompt for a
+    /// `DangerFullAccess` tool. The render loop must show the confirmation
+    /// modal and answer over `resp_tx` — NOT over `UserInput`, because the
+    /// worker owns that receiver and cannot read it while parked inside
+    /// `run_turn`.
+    ///
+    /// Each request carries its own rendezvous channel, so a buffered or
+    /// stale answer from an earlier prompt can never satisfy a later one,
+    /// and any render-loop exit path that drops the prompt automatically
+    /// denies it (the worker's `recv()` sees `Disconnected`).
+    PermissionRequest {
+        tool_name: String,
+        /// The tool's full input — never truncated here. The render side
+        /// owns presentation (wrap + scroll), so no payload can hide past
+        /// a preview edge (same rationale as `CliPrompter`).
+        input: String,
+        /// Display string of the tier the tool requires
+        /// (e.g. "danger-full-access").
+        required_mode: String,
+        /// Answer channel: `true` → allow, `false` → deny.
+        resp_tx: std::sync::mpsc::SyncSender<bool>,
+    },
 }
 
 /// One image attached to a user turn — base64-encoded payload paired with

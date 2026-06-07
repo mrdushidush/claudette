@@ -68,7 +68,7 @@ Three additional commands are **Telegram-only** (they have no effect in the REPL
 | **WorkspaceWrite** | Auto-allowed | note_create, note_update, todo_add, web_search, generate_code, github comment |
 | **DangerFullAccess** | Prompts `[y/N]` every time | bash, edit_file, git add/commit/push/checkout, cross-org PRs |
 
-The REPL prompter is interactive. The TUI renders the permission dialog in its tool pane. Telegram bot denies DangerFullAccess by default (no TTY to confirm with).
+The REPL prompter is interactive. The TUI shows a confirmation modal over the chat — `y` allows; `n`, `Esc`, or `Enter` denies (deny is the default); long inputs scroll with `↑`/`↓` and are never truncated. Telegram bot denies DangerFullAccess by default (no TTY to confirm with).
 
 ## Sessions and auto-compaction
 

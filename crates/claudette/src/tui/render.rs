@@ -15,7 +15,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 
@@ -58,6 +58,96 @@ pub(super) fn render(f: &mut Frame, app: &App) {
     if let Some(game) = app.space_game.as_ref() {
         game.draw(f, area);
     }
+
+    // Permission confirmation modal — drawn last so it sits above
+    // everything, including the easter-egg overlay. The worker thread is
+    // blocked until the user answers.
+    if let Some(prompt) = app.permission_prompt.as_ref() {
+        render_permission_modal(f, prompt, area);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Permission modal (Sprint G / PR5)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Centred confirmation overlay for a pending `DangerFullAccess` tool call.
+///
+/// Shows the **full** input — long bodies wrap and scroll (↑/↓) rather than
+/// truncate, so an adversarial payload can't hide past a preview edge (same
+/// rationale as `CliPrompter`). The char count in the title makes a body
+/// that scrolls below the fold detectable at a glance.
+fn render_permission_modal(f: &mut Frame, prompt: &super::PermissionPrompt, area: Rect) {
+    // ~70% × ~60%, centred — same overlay shape as the Space Invaders modal.
+    let ow = (area.width.saturating_mul(7) / 10).clamp(24.min(area.width), area.width);
+    let oh = (area.height.saturating_mul(6) / 10).clamp(6.min(area.height), area.height);
+    let ox = area.x + area.width.saturating_sub(ow) / 2;
+    let oy = area.y + area.height.saturating_sub(oh) / 2;
+    let overlay = Rect::new(ox, oy, ow, oh);
+
+    f.render_widget(Clear, overlay);
+
+    let chars = prompt.input.chars().count();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(
+            " ⚠ {} wants to run ({chars} chars, {}) ",
+            prompt.tool_name, prompt.required_mode
+        ))
+        .style(Style::default().fg(Color::Yellow));
+    let inner = block.inner(overlay);
+    f.render_widget(block, overlay);
+
+    // Body (scrollable) above a fixed one-line footer that never scrolls
+    // out of view.
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(inner);
+
+    let body_lines: Vec<Line> = if prompt.input.is_empty() {
+        vec![Line::from(Span::styled(
+            "(empty input)",
+            Style::default().fg(Color::DarkGray),
+        ))]
+    } else {
+        prompt
+            .input
+            .lines()
+            .map(|l| Line::from(l.to_string()))
+            .collect()
+    };
+    // Clamp the scroll offset to the wrapped row count. ratatui's Wrap
+    // render path draws an EMPTY paragraph when `scroll.y` exceeds the
+    // content (the line composer exhausts and returns early) — without
+    // this clamp, holding ↓ would scroll the payload fully off-screen and
+    // let the user approve a blank modal, defeating the modal's anti-hide
+    // purpose. Same render-time clamp the chat pane uses.
+    let total = wrapped_row_count(&body_lines, rows[0].width);
+    let max_scroll = total.saturating_sub(rows[0].height);
+    let scroll = prompt.scroll.min(max_scroll);
+
+    let body = Paragraph::new(body_lines)
+        .style(Style::default().fg(Color::White))
+        .wrap(Wrap { trim: false })
+        .scroll((scroll, 0));
+    f.render_widget(body, rows[0]);
+
+    // "(end)" only when there IS hidden content to scroll through and the
+    // user has reached its bottom — tells them nothing more is below.
+    let footer_text = if max_scroll > 0 && scroll == max_scroll {
+        " Allow? [y/N] · Esc denies · ↑↓ scroll · (end) "
+    } else {
+        " Allow? [y/N] · Esc denies · ↑↓ scroll "
+    };
+    let footer = Paragraph::new(Line::from(Span::styled(
+        footer_text,
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    )));
+    f.render_widget(footer, rows[1]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
