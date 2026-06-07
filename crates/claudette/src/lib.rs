@@ -50,6 +50,10 @@ pub mod egress;
 pub mod executor;
 pub mod firstrun;
 pub mod forge;
+// External-cloud integrations — gated behind the default-on `integrations`
+// feature so a `--no-default-features` build is coding-only (no Google/Telegram
+// code compiled in). See Cargo.toml `[features]`.
+#[cfg(feature = "integrations")]
 pub mod google_auth;
 pub mod hw;
 pub mod image_attach;
@@ -62,6 +66,7 @@ pub mod run;
 pub mod scheduler;
 pub mod secrets;
 pub mod security_review;
+#[cfg(feature = "integrations")]
 pub mod telegram_mode;
 pub mod test_runner;
 pub mod theme;

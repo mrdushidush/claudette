@@ -1,6 +1,6 @@
 [package]
 name = "claudette"
-version = "0.8.9"
+version = "0.9.0"
 edition = "2021"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
@@ -25,7 +25,23 @@ path = "src/main.rs"
 name = "claudette"
 path = "src/lib.rs"
 
+# The OAuth smoke example exercises the Google integration, so it only builds
+# when that surface is compiled in. Without this, a coding-only
+# `--no-default-features` build would fail to compile the example.
+[[example]]
+name = "oauth_smoke"
+required-features = ["integrations"]
+
 [features]
+default = ["integrations"]
+# `integrations` bundles the external personal-assistant surface that reaches
+# out to third-party clouds: Google OAuth + Gmail + Calendar, and the Telegram
+# bot. It is ON by default. Build a lean, coding-focused binary with NONE of it
+# compiled in via `--no-default-features` (a "coding-only" build — there is no
+# Google/Telegram code in the binary at all, so it cannot reach those services
+# even by misconfiguration). The coding core (files, search, git, shell,
+# quality, vision, recall, notes, todos, scheduler, …) is unaffected.
+integrations = []
 # Off-by-default scaffolds awaiting wiring: the SWE-bench / A-B benchmark
 # runner (`bench`) and the TUI typewriter renderer (`tui::typewriter`). Kept
 # in-tree for planned integration but excluded from the default build so they

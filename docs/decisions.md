@@ -1,5 +1,16 @@
 # Architecture Decisions
 
+> [!WARNING]
+> **HISTORICAL — planning-era design doc, NOT the shipped architecture.**
+> These ADs were written in April 2026 for the `claudettes-forge` predecessor and describe a design that was largely *not* built. They are kept for provenance only. For how claudette actually works today, read **[`architecture.md`](architecture.md)** — it is the source of truth.
+>
+> Specifically, the following claims below are **fiction relative to the shipped product**:
+> - **AD-1 / AD-2** — claudette is a **single-crate** workspace (`crates/claudette`), not six crates. There is no `claudette-verify` binary or `claudettes-forge-verifier` crate. Forge is invoked as `claudette --forge "<prompt>"`, not `claudettes-forge forge <mission>`.
+> - **AD-3** — **claudette has no cloud provider.** It is local-only / air-gapped and drives one local model (LM Studio or Ollama). The "Anthropic Claude as the only cloud option" never shipped; see [`../PRIVACY.md`](../PRIVACY.md) and `src/egress.rs`.
+> - **AD-4 / AD-7** — the real forge loop is a Coder → Verifier (with an optional CTO decomposition) cycle, **not** the 7-stage `Router → Planner → Coder → TestCoder → Verifier → SurgicalCoder → Gate` pipeline. There is no `--gate-threshold`, `--pro`, or `pipeline.gate_threshold` config.
+> - **AD-5** — permissions are **three-tier** (see `architecture.md`), not the 5-tier `ReadOnly/WorkspaceWrite/DangerFullAccess/Prompt/Allow` model, and there is **no platform sandboxing** (`sandbox-exec`/`bwrap`) — that module was removed in the 2026-06 dead-code cleanup.
+> - **AD-6** — MSRV is **1.88** and clippy/pedantic apply to the single crate; the "seven-crate workspace" framing is moot.
+
 Convention: AD-N sequential. Each captures *problem → options → decision → consequences*. Nice-to-have documentation for load-bearing choices; readers can go straight from "why does it work this way" to the rationale without asking.
 
 ---

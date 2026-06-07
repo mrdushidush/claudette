@@ -112,8 +112,13 @@ pub fn run() -> i32 {
     print_section("recall / embeddings");
     bump(probe_recall());
 
-    print_section("google oauth");
-    bump(probe_google_oauth());
+    // Google OAuth only exists in a default-features build; a coding-only
+    // build (--no-default-features) has no Google code to probe.
+    #[cfg(feature = "integrations")]
+    {
+        print_section("google oauth");
+        bump(probe_google_oauth());
+    }
 
     print_section("voice (optional)");
     bump(probe_voice());
@@ -658,6 +663,7 @@ fn probe_egress() -> Status {
     Status::Ok
 }
 
+#[cfg(feature = "integrations")]
 fn probe_google_oauth() -> Status {
     // Offline mode blocks every Google API call by design — attempting the
     // live verify here would just paint the report red. Show it as skipped so
@@ -715,6 +721,7 @@ fn probe_google_oauth() -> Status {
 /// for "does this token actually work against the API". Keeps the doctor
 /// and the OAuth flow in lockstep so a passing `--doctor` row implies
 /// the same thing as the "OK: ... verified" line the auth flow prints.
+#[cfg(feature = "integrations")]
 fn verify_scope(ctx: crate::google_auth::AuthContext, token: &str) -> Result<String, String> {
     crate::google_auth::verify_scope_live(ctx, token)
 }

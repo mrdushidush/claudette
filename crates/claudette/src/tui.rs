@@ -685,6 +685,28 @@ fn read_clipboard_paste() -> ClipboardPaste {
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub fn run_tui(session: Session) -> Result<()> {
+    // Restore the terminal even if a panic blows past the `scopeguard::defer!`
+    // below. The release profile builds with `panic = "abort"` (see the root
+    // Cargo.toml), and `defer!` only fires on normal return or unwind — under
+    // `abort` it is SKIPPED. Without this hook a panic mid-session would leave
+    // the user's shell in raw mode + alt-screen (a garbled, unusable terminal),
+    // which is the most plausible "it broke my shell" failure. A panic hook, by
+    // contrast, runs on the panicking thread *before* the process aborts, so the
+    // terminal is reset on every exit path. We chain to the previous hook so the
+    // panic message still prints. The restore calls are idempotent no-ops once
+    // the terminal is back to cooked mode, so leaving the hook installed after a
+    // clean exit is harmless.
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = disable_raw_mode();
+        let _ = execute!(
+            std::io::stdout(),
+            DisableBracketedPaste,
+            LeaveAlternateScreen
+        );
+        previous_hook(info);
+    }));
+
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;

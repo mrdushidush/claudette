@@ -278,20 +278,26 @@ mod tests {
 
     #[test]
     fn image_describe_rejects_non_image_extension() {
-        // Have to pass a path that survives validate_read_path. Use a
-        // unique non-image filename under $HOME — it doesn't need to
-        // exist; the extension check fires first.
-        let home = std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .unwrap_or_else(|_| ".".into());
-        let path = format!("{home}/claudette-not-an-image-xyz.txt");
-        let _ = std::fs::write(&path, "hi");
-        let err = run_image_describe(&json!({ "path": &path }).to_string()).unwrap_err();
-        let _ = std::fs::remove_file(&path);
-        assert!(
-            err.contains("not a supported image type") || err.contains("missing"),
-            "got: {err}"
-        );
+        // Use the shared temp-HOME helper rather than reading the ambient
+        // HOME/USERPROFILE directly. `validate_read_path` (called inside
+        // `run_image_describe`) re-resolves the home dir, so reading the
+        // global env here would race any concurrent test that swaps HOME —
+        // the path we built would fall outside the home seen at dispatch and
+        // fail the read-guard *before* the extension check we're asserting on.
+        // `with_temp_home` pins HOME to a private temp dir AND holds the
+        // process-wide env lock for the whole closure, killing the race. The
+        // file lives under that home so it survives the read-guard; the
+        // unsupported-extension check then fires as intended.
+        crate::with_temp_home(|home| {
+            let path = home.join("claudette-not-an-image-xyz.txt");
+            let _ = std::fs::write(&path, "hi");
+            let err = run_image_describe(&json!({ "path": path.to_string_lossy() }).to_string())
+                .unwrap_err();
+            assert!(
+                err.contains("not a supported image type") || err.contains("missing"),
+                "got: {err}"
+            );
+        });
     }
 
     #[test]
