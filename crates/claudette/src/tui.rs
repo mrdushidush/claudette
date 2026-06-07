@@ -119,10 +119,9 @@ struct HwState {
 
 impl Default for HwState {
     fn default() -> Self {
-        let total_vram_gb = std::env::var("CLAUDETTE_VRAM_GB")
-            .ok()
-            .and_then(|s| s.parse::<f64>().ok())
-            .unwrap_or(8.0);
+        // Detected (nvidia-smi) → CLAUDETTE_VRAM_GB → 8.0; one shell-out
+        // at TUI startup, not per-frame.
+        let (total_vram_gb, _) = crate::hw::resolve_vram_gb();
         Self {
             models: Vec::new(),
             ollama_online: false,

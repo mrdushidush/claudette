@@ -103,6 +103,9 @@ pub fn run() -> i32 {
     print_section("local brain");
     bump(probe_brain());
 
+    print_section("pick a brain (VRAM → certified model)");
+    bump(probe_pick_brain());
+
     print_section("build toolchains");
     bump(probe_toolchains());
 
@@ -327,8 +330,71 @@ fn probe_brain() -> Status {
     overall
 }
 
+/// VRAM-aware brain recommendation — answers "which model should I run?"
+/// with the Claudette-Certified battery data instead of vibes. Advisory
+/// only: never touches `CLAUDETTE_MODEL`, never evicts anything (runtime
+/// selection stays with `brain_selector`). Always returns `Ok`/`Warn` —
+/// a recommendation can't be a hard failure.
+fn probe_pick_brain() -> Status {
+    let compat = is_openai_compat();
+    let configured = crate::run::current_model();
+    let (vram_gb, source) = crate::hw::resolve_vram_gb();
+
+    let status = match source {
+        crate::hw::VramSource::Detected => {
+            print_row(
+                "gpu vram (nvidia-smi)",
+                Status::Ok,
+                &format!("{vram_gb:.1} GiB"),
+            );
+            Status::Ok
+        }
+        crate::hw::VramSource::EnvVar => {
+            print_row(
+                "gpu vram (CLAUDETTE_VRAM_GB)",
+                Status::Ok,
+                &format!("{vram_gb:.1} GiB — nvidia-smi unavailable, using your override"),
+            );
+            Status::Ok
+        }
+        crate::hw::VramSource::Default => {
+            print_row(
+                "gpu vram unknown",
+                Status::Warn,
+                "no nvidia-smi (AMD/Apple/CPU?) and no CLAUDETTE_VRAM_GB — assuming 8 GiB; \
+                 set CLAUDETTE_VRAM_GB to your real figure for a better pick",
+            );
+            Status::Warn
+        }
+    };
+
+    let rec = crate::hw::recommend_brain(vram_gb, compat);
+    let rec_model = rec.model;
+    print_row(
+        &format!("recommended brain: {rec_model}"),
+        Status::Ok,
+        rec.why,
+    );
+    if !rec.alternatives.is_empty() {
+        print_row("alternatives", Status::Ok, rec.alternatives);
+    }
+    if model_present(std::slice::from_ref(&configured), rec_model) {
+        print_row("configured brain already matches", Status::Ok, &configured);
+    } else {
+        print_fix(&model_load_hint(compat, rec_model));
+        print_row(
+            "currently configured",
+            Status::Ok,
+            &format!("{configured} — switch with CLAUDETTE_MODEL={rec_model} (advisory; nothing is changed for you)"),
+        );
+    }
+    status
+}
+
 /// Copy-paste command to start the model server for the active backend.
-fn backend_start_hint(compat: bool) -> String {
+/// `pub(crate)`: shared with the first-run remediation path (`firstrun.rs`)
+/// so startup and `--doctor` give the same advice.
+pub(crate) fn backend_start_hint(compat: bool) -> String {
     if compat {
         "open LM Studio → Developer (Local Server) tab → Start, or run `lms server start` \
          (default http://localhost:1234)"
@@ -339,7 +405,8 @@ fn backend_start_hint(compat: bool) -> String {
 }
 
 /// Copy-paste command to load/pull the configured brain for the active backend.
-fn model_load_hint(compat: bool, model: &str) -> String {
+/// `pub(crate)`: shared with the first-run remediation path (`firstrun.rs`).
+pub(crate) fn model_load_hint(compat: bool, model: &str) -> String {
     if compat {
         format!(
             "load `{model}` in LM Studio (Models tab → load), or pick another with CLAUDETTE_MODEL"
@@ -357,8 +424,9 @@ fn is_openai_compat() -> bool {
 }
 
 /// Pull model ids out of an Ollama `/api/tags` or OpenAI-compat `/v1/models`
-/// response body.
-fn extract_model_names(body: &Value, openai_compat: bool) -> Vec<String> {
+/// response body. `pub(crate)`: shared with `firstrun.rs` so the startup
+/// classifier and `--doctor` parse the same shapes the same way.
+pub(crate) fn extract_model_names(body: &Value, openai_compat: bool) -> Vec<String> {
     let arr = if openai_compat {
         body.get("data").and_then(Value::as_array)
     } else {
@@ -382,7 +450,8 @@ fn extract_model_names(body: &Value, openai_compat: bool) -> Vec<String> {
 /// lowercased; the configured name matches if it's equal to OR a prefix of
 /// the listed name when delimited by `:` (so the listed `qwen3:8b-q4_0`
 /// satisfies a configured `qwen3:8b` only if the user spelled it that way).
-fn model_present(names: &[String], wanted: &str) -> bool {
+/// `pub(crate)`: shared with `firstrun.rs`.
+pub(crate) fn model_present(names: &[String], wanted: &str) -> bool {
     let w = wanted.to_ascii_lowercase();
     names.iter().any(|n| {
         let n = n.to_ascii_lowercase();

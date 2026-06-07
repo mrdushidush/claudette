@@ -112,7 +112,7 @@ ReadOnly and WorkspaceWrite tools auto-allow; DangerFullAccess (`bash`, `edit_fi
 
 ## 🏅 Claudette Certified — the local-model benchmark
 
-A local agent is only as good as the model behind it, and "which model should I run?" is the question every new user asks. So we answer it with data, not vibes.
+A local agent is only as good as the model behind it, and "which model should I run?" is the question every new user asks. So we answer it with data, not vibes — and `claudette --doctor` answers it **for your specific GPU**: it detects VRAM (`nvidia-smi`, falling back to `CLAUDETTE_VRAM_GB`) and recommends the certified model for that tier with the exact load command.
 
 **Every candidate brain runs the same objective 50-task battery** — 11 languages/surfaces (Rust, Python, JS, TS, Go, shell, HTML, CSS, SQL, a large real repo, git) × 12 task types (bugfix, add-feature, multi-file, refactor, create-file, explain, locate, enumerate, run-tests, debug-error, git-workflow, answer-from-codebase) — through Claudette's *real* tool loop, then an automated verifier checks the result (build/test passes, the file is correct, or ground-truth tokens appear in the transcript). **No model grades itself.** All runs below: **24k context, `--parallel 1`, RTX 5060 Ti 16 GB** (2026-05-30). The harness is reusable and lives at [`runs/eval-2026-05-29/battery/`](runs/eval-2026-05-29/battery/) — bring your own model.
 

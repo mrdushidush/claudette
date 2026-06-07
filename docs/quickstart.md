@@ -32,6 +32,15 @@ running, brain not pulled, a missing build toolchain (`git` / `cargo` /
 `python` / `node` / `go`), or absent voice deps. Green "local brain" and "build
 toolchains" rows mean you're ready. Run it any time something misbehaves.
 
+It also **recommends a Claudette-Certified model for your GPU**: the "pick a
+brain" section detects VRAM via `nvidia-smi` (falling back to
+`CLAUDETTE_VRAM_GB`) and maps it to the best measured brain for that tier,
+with the exact load command. Advisory only — nothing is switched for you.
+
+And if the first interactive run finds the brain missing, claudette **offers
+to pull it on the spot** (`[Y/n]` → `ollama pull …` with live progress) instead
+of dead-ending. Piped/CI/`--offline` runs keep the old print-and-exit behaviour.
+
 ## 3. First conversation (30 sec)
 
 ```bash

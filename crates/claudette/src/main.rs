@@ -309,9 +309,16 @@ fn main() -> ExitCode {
     // Fail fast with a readable message if Ollama isn't running, instead of
     // surfacing a raw reqwest connection error inside the first chat turn.
     // Bypass with CLAUDETTE_SKIP_OLLAMA_PROBE=1 for offline / CI scenarios.
+    //
+    // In an interactive terminal (and never under --offline), offer to fix
+    // the failure on the spot — classify the cause and prompt `[Y/n]` to
+    // `ollama pull` a missing brain. Non-interactive / piped / CI runs take
+    // the exact pre-existing path: print the error, exit non-zero.
     if let Err(msg) = probe_ollama() {
         eprintln!("{} {}", theme::error(theme::ERR_GLYPH), theme::error(&msg));
-        return ExitCode::FAILURE;
+        if !claudette::firstrun::offer_fix_interactive() {
+            return ExitCode::FAILURE;
+        }
     }
 
     // ── CTO decomposition (one-shot) ──────────────────────────────────
