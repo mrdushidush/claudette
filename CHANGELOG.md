@@ -10,6 +10,17 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **The TUI now prompts for `DangerFullAccess` tools instead of silently
+  denying them.** Previously the fullscreen TUI had no permission prompter, so
+  `bash`, `edit_file`, `git add/commit/push`, and every other dangerous tool
+  was auto-denied — the headline coding surface couldn't edit a file or run a
+  command. A confirmation modal now shows the tool name and its **full** input
+  (wrapped + scrollable, never truncated); `y` allows, `n`/`Esc`/`Enter`
+  denies. Any way the TUI exits while a prompt is pending — quit, crash, error
+  — resolves the pending tool as denied, never hung.
+
 ### Changed
 
 - **The OpenAI-compat (LM Studio / vLLM / llama.cpp) path now streams.** It
