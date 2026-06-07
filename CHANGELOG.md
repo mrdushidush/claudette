@@ -10,8 +10,21 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-08
+
 ### Added
 
+- **Coding-only build (`--no-default-features`).** A new default-on
+  `integrations` Cargo feature gates the external-cloud personal-assistant
+  surface — Google OAuth, Gmail, Calendar, and the Telegram bot. Build with
+  `cargo install claudette --no-default-features` (or `cargo build
+  --no-default-features`) to compile **none** of that code into the binary: a
+  leaner, coding-focused build that physically cannot reach Google or Telegram
+  even by misconfiguration. In such a build `--auth-google` / `--telegram`
+  print a clear "compiled without integrations" message and `--doctor` skips
+  the Google OAuth probe. The default build — and everything a coding session
+  uses (files, search, git, shell, quality, vision, recall, notes, todos,
+  scheduler) — is unchanged.
 - **Destructive operations are now recoverable: action transcript, trash, and
   `/undo`.** `note_delete` and `todo_delete` were permanent and `write_file`
   silently truncated existing files — a misrouted "clean up my notes" from a
@@ -79,6 +92,31 @@ bumps are non-breaking bugfixes only.
   promise. Backed by a canonical `egress::NET_TOOLS` registry with a regression
   guard that catches a new always-network tool (`gh_*`/`gmail_*`/`calendar_*`/
   `tg_*`) added without its egress guard.
+
+### Fixed
+
+- **The TUI no longer leaves your terminal garbled if it panics.** The release
+  profile builds with `panic = "abort"`, which skips the `scopeguard::defer!`
+  that restores the terminal — so an unhandled panic during a `--tui` session
+  could exit with the shell stuck in raw mode + alternate screen. `run_tui` now
+  installs a `panic` hook that disables raw mode and leaves the alternate screen
+  *before* the process aborts (the hook runs on the panicking thread first),
+  then chains to the previous hook so the panic message still prints.
+- **Flaky vision test under parallel `cargo test`.**
+  `image_describe_rejects_non_image_extension` read the global `HOME` /
+  `USERPROFILE` directly and could lose a race with a concurrent test that
+  swapped it, failing the path read-guard before the assertion it meant to
+  exercise. It now uses the shared `with_temp_home` helper, which pins the home
+  dir and holds the process-wide env lock for the test body.
+
+### Docs
+
+- **`docs/decisions.md` marked HISTORICAL.** Its AD-1…AD-7 describe the
+  `claudettes-forge` planning-era design — a six-crate workspace, a cloud
+  "Claude" provider, a 7-stage forge pipeline, 5-tier permissions with platform
+  sandboxing — none of which matches the shipped single-crate, local-only,
+  air-gapped product. A banner at the top now flags exactly what never shipped
+  and points readers to `docs/architecture.md` (the accurate source of truth).
 
 ## [0.8.9] - 2026-06-04
 

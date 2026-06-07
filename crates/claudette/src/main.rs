@@ -20,11 +20,15 @@
 use std::process::ExitCode;
 
 use claudette::{
-    briefing, clock, google_auth, probe_ollama, run_forge_mission, run_secretary,
-    run_secretary_repl, scheduler, secrets, telegram_mode, theme, try_load_session,
-    workspace_startup_diagnostics, SessionOptions,
+    briefing, clock, probe_ollama, run_forge_mission, run_secretary, run_secretary_repl, scheduler,
+    theme, try_load_session, workspace_startup_diagnostics, SessionOptions,
 };
 use claudette::{ContentBlock, Session};
+// External-cloud integrations: only compiled into a default-features build.
+// See Cargo.toml `[features]` and the `dispatch_google_auth` / `dispatch_telegram`
+// helpers below, which carry the coding-only fallback.
+#[cfg(feature = "integrations")]
+use claudette::{google_auth, secrets, telegram_mode};
 
 /// Parsed CLI invocation. Any flag below that doesn't make sense with the
 /// selected mode is quietly ignored (the old tuple contract) — the parser
@@ -217,7 +221,7 @@ fn main() -> ExitCode {
     let CliArgs {
         resume,
         telegram,
-        mut chat_ids,
+        chat_ids,
         prompt_words: prompt_args,
         tui: tui_mode,
         auth_google,
@@ -267,34 +271,7 @@ fn main() -> ExitCode {
     // Runs before the Ollama probe because it's a one-shot setup command —
     // the user doesn't need the brain running to grant OAuth consent.
     if auth_google {
-        let ctx = match auth_google_scope.as_deref() {
-            None => google_auth::AuthContext::Calendar, // backwards compat
-            Some(s) => match google_auth::AuthContext::parse(s) {
-                Some(c) => c,
-                None => {
-                    eprintln!(
-                        "{} {}",
-                        theme::error(theme::ERR_GLYPH),
-                        theme::error(&format!(
-                            "unknown --auth-google scope '{s}'. Try 'calendar' or 'gmail'."
-                        ))
-                    );
-                    return ExitCode::FAILURE;
-                }
-            },
-        };
-        let result = if auth_google_revoke {
-            google_auth::revoke(ctx)
-        } else {
-            google_auth::run_auth_flow(ctx)
-        };
-        return match result {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("{} {}", theme::error(theme::ERR_GLYPH), theme::error(&e));
-                ExitCode::FAILURE
-            }
-        };
+        return dispatch_google_auth(auth_google_scope.as_deref(), auth_google_revoke);
     }
 
     // ── Scheduled-briefing setup ──────────────────────────────────────
@@ -431,39 +408,7 @@ fn main() -> ExitCode {
 
     // ── Telegram bot mode ──────────────────────────────────────────────
     if telegram {
-        // The Telegram bridge is a cloud service (api.telegram.org); it is
-        // fundamentally incompatible with an enforced air-gap. Refuse up front
-        // with the same vocabulary the egress guard uses, rather than letting
-        // the bot start and then fail every poll.
-        if claudette::egress::is_offline() {
-            eprintln!(
-                "{} {}",
-                theme::error(theme::ERR_GLYPH),
-                theme::error(
-                    "offline mode (--offline) blocks the Telegram bridge — it relays through \
-                     api.telegram.org (cloud). Drop --offline to run the bot, or drop --telegram \
-                     to stay air-gapped."
-                )
-            );
-            return ExitCode::FAILURE;
-        }
-        // Merge persisted chat IDs (from previous runs) with CLI flags.
-        for id in secrets::load_chat_ids() {
-            if !chat_ids.contains(&id) {
-                chat_ids.push(id);
-            }
-        }
-        match telegram_mode::run_telegram_bot(chat_ids, allow_any_chat, resume) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!(
-                    "{} {}",
-                    theme::error(theme::ERR_GLYPH),
-                    theme::error(&format!("{e:#}"))
-                );
-                ExitCode::FAILURE
-            }
-        }
+        dispatch_telegram(chat_ids, allow_any_chat, resume)
     } else if prompt_args.is_empty() {
         // No prompt → interactive REPL. REPL always autosaves.
         let opts = SessionOptions {
@@ -580,7 +525,10 @@ fn parse_args(args: &[String]) -> CliArgs {
                 // capture it as the scope. Otherwise treat it as a
                 // regular prompt word so `--auth-google somebody typed
                 // more words` still parses the way the user expected.
+                // (Coding-only builds have no scope keywords — the token
+                // always falls through as a normal arg.)
                 expect = ExpectNext::Nothing;
+                #[cfg(feature = "integrations")]
                 if claudette::google_auth::AuthContext::parse(arg).is_some() {
                     out.auth_google_scope = Some(arg.clone());
                     continue;
@@ -635,6 +583,110 @@ enum ExpectNext {
     /// next token isn't a recognised scope we fall back to normal arg
     /// matching rather than consuming it.
     AuthGoogleScope,
+}
+
+/// Run the Google OAuth loopback flow (or revoke). The real implementation is
+/// only compiled into a default-features build; the coding-only build (built
+/// `--no-default-features`) carries no Google code at all, so this stub just
+/// explains that and exits non-zero.
+#[cfg(feature = "integrations")]
+fn dispatch_google_auth(scope: Option<&str>, revoke: bool) -> ExitCode {
+    let ctx = match scope {
+        None => google_auth::AuthContext::Calendar, // backwards compat
+        Some(s) => match google_auth::AuthContext::parse(s) {
+            Some(c) => c,
+            None => {
+                eprintln!(
+                    "{} {}",
+                    theme::error(theme::ERR_GLYPH),
+                    theme::error(&format!(
+                        "unknown --auth-google scope '{s}'. Try 'calendar' or 'gmail'."
+                    ))
+                );
+                return ExitCode::FAILURE;
+            }
+        },
+    };
+    let result = if revoke {
+        google_auth::revoke(ctx)
+    } else {
+        google_auth::run_auth_flow(ctx)
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("{} {}", theme::error(theme::ERR_GLYPH), theme::error(&e));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(not(feature = "integrations"))]
+fn dispatch_google_auth(_scope: Option<&str>, _revoke: bool) -> ExitCode {
+    eprintln!(
+        "{} {}",
+        theme::error(theme::ERR_GLYPH),
+        theme::error(
+            "--auth-google needs the `integrations` feature — this is a coding-only build \
+             (compiled --no-default-features), so there is no Google code in it. Reinstall \
+             with default features to use Gmail/Calendar."
+        )
+    );
+    ExitCode::FAILURE
+}
+
+/// Run the Telegram bot. Real implementation only in a default-features build;
+/// the coding-only build carries no Telegram bridge, so the stub exits non-zero
+/// with an explanation.
+#[cfg(feature = "integrations")]
+fn dispatch_telegram(mut chat_ids: Vec<i64>, allow_any_chat: bool, resume: bool) -> ExitCode {
+    // The Telegram bridge is a cloud service (api.telegram.org); it is
+    // fundamentally incompatible with an enforced air-gap. Refuse up front
+    // with the same vocabulary the egress guard uses, rather than letting
+    // the bot start and then fail every poll.
+    if claudette::egress::is_offline() {
+        eprintln!(
+            "{} {}",
+            theme::error(theme::ERR_GLYPH),
+            theme::error(
+                "offline mode (--offline) blocks the Telegram bridge — it relays through \
+                 api.telegram.org (cloud). Drop --offline to run the bot, or drop --telegram \
+                 to stay air-gapped."
+            )
+        );
+        return ExitCode::FAILURE;
+    }
+    // Merge persisted chat IDs (from previous runs) with CLI flags.
+    for id in secrets::load_chat_ids() {
+        if !chat_ids.contains(&id) {
+            chat_ids.push(id);
+        }
+    }
+    match telegram_mode::run_telegram_bot(chat_ids, allow_any_chat, resume) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!(
+                "{} {}",
+                theme::error(theme::ERR_GLYPH),
+                theme::error(&format!("{e:#}"))
+            );
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(not(feature = "integrations"))]
+fn dispatch_telegram(_chat_ids: Vec<i64>, _allow_any_chat: bool, _resume: bool) -> ExitCode {
+    eprintln!(
+        "{} {}",
+        theme::error(theme::ERR_GLYPH),
+        theme::error(
+            "--telegram needs the `integrations` feature — this is a coding-only build \
+             (compiled --no-default-features), so the Telegram bridge isn't in it. Reinstall \
+             with default features to run the bot."
+        )
+    );
+    ExitCode::FAILURE
 }
 
 /// Create (or replace) the scheduled morning-briefing entry. Used by the

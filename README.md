@@ -175,6 +175,7 @@ ollama pull qwen3-coder:30b      # Codet coder — only if you'll use generate_c
 curl -fsSL https://raw.githubusercontent.com/mrdushidush/claudette/main/install.sh | sh   # Linux/macOS
 iwr -useb https://raw.githubusercontent.com/mrdushidush/claudette/main/install.ps1 | iex  # Windows
 cargo install claudette                                                                    # Rust users
+cargo install claudette --no-default-features                                              # coding-only: no Google/Telegram code compiled in
 
 # 3. (Optional) Tokens for opt-in tools that reach the network.
 export BRAVE_API_KEY=...         # web_search

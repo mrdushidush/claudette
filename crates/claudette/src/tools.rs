@@ -23,7 +23,23 @@ use serde_json::{json, Value};
 
 // Per-group sub-modules. Each exports `schemas()` and `dispatch()`; see the
 // group-module contract at the top of `registry.rs`.
+//
+// `calendar`, `gmail`, and `telegram` talk to third-party clouds, so they are
+// gated behind the default-on `integrations` feature. In a `--no-default-
+// features` (coding-only) build they compile to an empty stub that advertises
+// no tools and dispatches nothing — the `GROUPS` table below stays unchanged,
+// the group simply contributes zero tools.
+#[cfg(feature = "integrations")]
 mod calendar;
+#[cfg(not(feature = "integrations"))]
+mod calendar {
+    pub fn schemas() -> Vec<serde_json::Value> {
+        Vec::new()
+    }
+    pub fn dispatch(_tool: &str, _args: &str) -> Option<Result<String, String>> {
+        None
+    }
+}
 mod clipboard;
 mod codegen;
 mod dialog;
@@ -33,7 +49,17 @@ mod forge_tail;
 mod fuzzy_apply;
 mod git;
 mod github;
+#[cfg(feature = "integrations")]
 mod gmail;
+#[cfg(not(feature = "integrations"))]
+mod gmail {
+    pub fn schemas() -> Vec<serde_json::Value> {
+        Vec::new()
+    }
+    pub fn dispatch(_tool: &str, _args: &str) -> Option<Result<String, String>> {
+        None
+    }
+}
 mod ide;
 mod markets;
 mod mission;
@@ -47,7 +73,17 @@ mod schedule;
 mod search;
 mod semantic;
 mod shell;
+#[cfg(feature = "integrations")]
 mod telegram;
+#[cfg(not(feature = "integrations"))]
+mod telegram {
+    pub fn schemas() -> Vec<serde_json::Value> {
+        Vec::new()
+    }
+    pub fn dispatch(_tool: &str, _args: &str) -> Option<Result<String, String>> {
+        None
+    }
+}
 mod todos;
 mod vision;
 mod web_search;
