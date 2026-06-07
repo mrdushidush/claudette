@@ -544,6 +544,20 @@ pub fn probe_ollama() -> Result<String, String> {
     }
 }
 
+/// Whether a `Content-Type` header value denotes a Server-Sent Events
+/// stream. RFC 7231 media types are case-insensitive and may carry
+/// parameters (`text/event-stream; charset=utf-8`), so we lowercase and
+/// substring-match — matching the `eq_ignore_ascii_case`/`to_ascii_lowercase`
+/// convention the rest of this file already uses for HTTP header matching.
+/// A wrong-case or parameterised header would otherwise route a real SSE
+/// body to the non-streaming `resp.json()` fallback, which errors loudly on
+/// `data:` framing (never silent corruption) — but every real OpenAI-compat
+/// server emits lowercase, so this is consistency + cheap hardening.
+#[must_use]
+fn is_sse_content_type(ct: &str) -> bool {
+    ct.to_ascii_lowercase().contains("text/event-stream")
+}
+
 /// Returns true when the LM Studio `/v1/models` response body parses as JSON
 /// with a top-level `data` array that is empty. Pure helper so the empty-
 /// data branch of `probe_ollama` is unit-testable without a real server.
@@ -583,7 +597,7 @@ impl ApiClient for OllamaApiClient {
                 .headers()
                 .get(reqwest::header::CONTENT_TYPE)
                 .and_then(|v| v.to_str().ok())
-                .is_some_and(|ct| ct.contains("text/event-stream"));
+                .is_some_and(is_sse_content_type);
             if is_sse {
                 self.consume_sse_lines(BufReader::new(resp))
             } else {
@@ -2663,6 +2677,21 @@ mod tests {
         assert!(is_compat_value_truthy(Some("true")));
         assert!(is_compat_value_truthy(Some("yes")));
         assert!(is_compat_value_truthy(Some("on")));
+    }
+
+    #[test]
+    fn is_sse_content_type_is_case_and_param_insensitive() {
+        // Real servers emit lowercase, bare. But RFC 7231 media types are
+        // case-insensitive and may carry parameters — all of these must
+        // route to the SSE reader, not the non-streaming fallback.
+        assert!(is_sse_content_type("text/event-stream"));
+        assert!(is_sse_content_type("text/event-stream; charset=utf-8"));
+        assert!(is_sse_content_type("Text/Event-Stream"));
+        assert!(is_sse_content_type("TEXT/EVENT-STREAM;charset=UTF-8"));
+        // Non-SSE bodies must NOT match (they take the resp.json() path).
+        assert!(!is_sse_content_type("application/json"));
+        assert!(!is_sse_content_type("application/json; charset=utf-8"));
+        assert!(!is_sse_content_type(""));
     }
 
     #[test]
