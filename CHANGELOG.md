@@ -10,6 +10,37 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-06-12
+
+All three changes come straight from dogfooding claudette on her own
+repository with a local 35B brain — each one removes a failure mode an
+actual session hit.
+
+### Added
+
+- **`grep_search` optional `glob` filter.** Restrict a content search to
+  matching files, ripgrep `-g` style: a bare pattern (`*.rs`) matches file
+  names at any depth; a pattern containing `/` (`src/**/*.ts`) matches the
+  path relative to the search root, with `*` never crossing directory
+  boundaries. Windows-style `\` separators in the pattern are normalized.
+  An invalid glob is a clear error, never a silent full-repo search, and
+  filtered-out files no longer consume the file-scan cap. (#55)
+- **Graceful iteration-cap landing (REPL/TUI).** A turn approaching the
+  per-turn iteration cap now gets a budget warning for its last 5
+  tool-call rounds, and on hitting the cap makes one final text-only
+  request for a state-of-work summary — shown with a ⚠ banner — instead
+  of failing with "conversation loop exceeded the maximum number of
+  iterations" and discarding the turn. Tool calls in that final reply are
+  refused, never executed. Sub-agents and forge roles keep the hard
+  failure their callers rely on. (#56)
+- **Near-miss diagnostics for `apply_diff`/`edit_file`.** When a
+  `before`/`old_text` block isn't found, the error now diagnoses why
+  instead of just saying "copy the block exactly": if de-doubling `\\` to
+  `\` makes the block match (the classic JSON-escaping confusion on
+  raw-string regexes), it says so and quotes the offending line; otherwise
+  it reports the closest matching line window and the first differing
+  line, file-side vs block-side. (#57)
+
 ## [0.9.0] - 2026-06-08
 
 ### Added
