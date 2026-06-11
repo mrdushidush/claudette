@@ -28,6 +28,41 @@ const VISION_DISCIPLINE_HINT: &str = "User attached an image this turn. \
     chart indicators, text in screenshots) before referencing tool data \
     from prior turns.";
 
+/// How many tool-call rounds before the iteration cap the budget warning
+/// starts appearing in the system prompt. Only active when the graceful
+/// cap is enabled (top-level daily-driver turns, cap 40); sub-agents with
+/// caps of 5-10 would see the warning almost immediately, which suppresses
+/// tool-calling on small brains.
+const ITERATION_NUDGE_WINDOW: usize = 5;
+
+/// System-prompt line for the last [`ITERATION_NUDGE_WINDOW`] rounds before
+/// the cap. Two dogfood sessions (2026-06-11) were hard-killed within sight
+/// of the finish line — one at `git checkout -b` after the full test gate
+/// had passed — with no warning that the budget was running out.
+fn iteration_budget_nudge(remaining: usize) -> String {
+    format!(
+        "Iteration budget alert: at most {remaining} tool-call round(s) remain \
+         this turn. Prioritize finishing the task now. If you cannot finish, \
+         stop calling tools and reply with a summary of what is done, the \
+         current state, and the exact next steps."
+    )
+}
+
+/// System-prompt line for the one extra text-only request made when the cap
+/// is hit (graceful landing). Tool calls in the reply are refused, never
+/// executed.
+const ITERATION_CAP_LANDING_PROMPT: &str = "The tool-call iteration limit for \
+    this turn is exhausted. Tools are no longer available; any tool call will \
+    be rejected, not executed. Reply with TEXT ONLY: state what was \
+    accomplished, the current state of files/branches/commands, what remains \
+    unfinished, and the exact next step for whoever continues.";
+
+/// Tool-result body for tool calls the model emits anyway during the
+/// landing request. Keeps the tool_use/tool_result protocol consistent for
+/// the next turn without executing anything.
+const ITERATION_CAP_TOOL_REFUSAL: &str =
+    "iteration limit reached — this tool call was NOT executed";
+
 /// Append the vision-discipline hint to `base` when this turn has an image
 /// attached, otherwise return `base` unchanged. Pure function — separates
 /// the policy from the conversation loop so it can be unit-tested.
@@ -127,6 +162,12 @@ pub struct TurnSummary {
     pub iterations: usize,
     pub usage: TokenUsage,
     pub auto_compaction: Option<AutoCompactionEvent>,
+    /// True when the turn hit the iteration cap and ended with the forced
+    /// text-only landing (see `with_graceful_iteration_cap`) instead of a
+    /// hard error. The last assistant message is then a state-of-work
+    /// summary, and the turn's work may be unfinished — callers should
+    /// surface that to the user.
+    pub hit_iteration_cap: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,6 +186,7 @@ pub struct ConversationRuntime<C, T> {
     permission_policy: PermissionPolicy,
     system_prompt: Vec<String>,
     max_iterations: usize,
+    graceful_iteration_cap: bool,
     usage_tracker: UsageTracker,
     hook_runner: HookRunner,
     auto_compaction_input_tokens_threshold: u32,
@@ -195,6 +237,7 @@ where
             permission_policy,
             system_prompt,
             max_iterations: usize::MAX,
+            graceful_iteration_cap: false,
             usage_tracker,
             hook_runner: HookRunner::from_feature_config(&feature_config),
             auto_compaction_input_tokens_threshold: auto_compaction_threshold_from_env(),
@@ -205,6 +248,26 @@ where
     #[must_use]
     pub fn with_max_iterations(mut self, max_iterations: usize) -> Self {
         self.max_iterations = max_iterations;
+        self
+    }
+
+    /// Land iteration-cap turns gracefully instead of hard-failing.
+    ///
+    /// With this enabled, the last [`ITERATION_NUDGE_WINDOW`] rounds before
+    /// the cap carry a budget warning in the system prompt, and hitting the
+    /// cap makes ONE extra text-only request asking the model to summarize
+    /// the state of its work — returned as a normal `Ok` summary with
+    /// [`TurnSummary::hit_iteration_cap`] set — rather than returning the
+    /// hard "exceeded the maximum number of iterations" error and throwing
+    /// the turn away. Tool calls in that final reply are refused, never
+    /// executed.
+    ///
+    /// Intended for top-level interactive turns (REPL/TUI, cap ~40). Leave
+    /// it off for sub-agents and forge roles: their callers consume results
+    /// programmatically and rely on the hard error to fail a round.
+    #[must_use]
+    pub fn with_graceful_iteration_cap(mut self) -> Self {
+        self.graceful_iteration_cap = true;
         self
     }
 
@@ -270,13 +333,30 @@ where
         // an answer; past SEARCH_NUDGE_AT we append a "stop and answer" hint to
         // its search results (see the Allow arm below).
         let mut consecutive_nav = 0usize;
+        let mut hit_iteration_cap = false;
 
         loop {
             iterations += 1;
             if iterations > self.max_iterations {
-                return Err(RuntimeError::new(
-                    "conversation loop exceeded the maximum number of iterations",
-                ));
+                if !self.graceful_iteration_cap {
+                    return Err(RuntimeError::new(
+                        "conversation loop exceeded the maximum number of iterations",
+                    ));
+                }
+                // Graceful landing (dogfood F2, 2026-06-11): two sessions in
+                // a row lost their endgame to the hard kill — one at
+                // `git checkout -b` after the full test gate had passed. One
+                // extra text-only call turns the dead turn into a
+                // state-of-work handoff the user can act on.
+                let (landing, refusals) = self.iteration_cap_landing(has_images)?;
+                self.session.messages.push(landing.clone());
+                assistant_messages.push(landing);
+                for refusal in refusals {
+                    self.session.messages.push(refusal.clone());
+                    tool_results.push(refusal);
+                }
+                hit_iteration_cap = true;
+                break;
             }
 
             // P2 (2026-05-04): when an image is attached this turn, append a
@@ -284,7 +364,13 @@ where
             // sessions on 35B brains showed the model echoing prior-turn
             // tool data (Technical Rating 0.4/1.0, RSI 56.37, …) and
             // pretending those came from the chart.
-            let system_prompt = build_turn_system_prompt(&self.system_prompt, has_images);
+            let mut system_prompt = build_turn_system_prompt(&self.system_prompt, has_images);
+            if self.graceful_iteration_cap {
+                let remaining = self.max_iterations.saturating_sub(iterations) + 1;
+                if remaining <= ITERATION_NUDGE_WINDOW {
+                    system_prompt.push(iteration_budget_nudge(remaining));
+                }
+            }
             let request = ApiRequest {
                 system_prompt,
                 messages: Cow::Borrowed(&self.session.messages),
@@ -425,7 +511,55 @@ where
             iterations,
             usage: self.usage_tracker.cumulative_usage(),
             auto_compaction,
+            hit_iteration_cap,
         })
+    }
+
+    /// One final text-only request after the iteration cap (graceful
+    /// landing): the system prompt tells the model tools are gone and asks
+    /// for a state-of-work summary. Tool calls in the reply are converted to
+    /// error tool_results — never executed — so the tool_use/tool_result
+    /// protocol stays consistent for the next turn. If the landing request
+    /// itself fails, the classic hard-cap error is returned so callers see
+    /// the same failure they did before graceful landing existed.
+    fn iteration_cap_landing(
+        &mut self,
+        has_images: bool,
+    ) -> Result<(ConversationMessage, Vec<ConversationMessage>), RuntimeError> {
+        let hard_cap_error =
+            || RuntimeError::new("conversation loop exceeded the maximum number of iterations");
+
+        let mut system_prompt = build_turn_system_prompt(&self.system_prompt, has_images);
+        system_prompt.push(ITERATION_CAP_LANDING_PROMPT.to_string());
+        let request = ApiRequest {
+            system_prompt,
+            messages: Cow::Borrowed(&self.session.messages),
+        };
+        let events = self
+            .api_client
+            .stream(&request)
+            .map_err(|_| hard_cap_error())?;
+        let (assistant_message, usage) =
+            build_assistant_message(events).map_err(|_| hard_cap_error())?;
+        if let Some(usage) = usage {
+            self.usage_tracker.record(usage);
+        }
+
+        let refusals = assistant_message
+            .blocks
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::ToolUse { id, name, .. } => Some(ConversationMessage::tool_result(
+                    id.clone(),
+                    name.clone(),
+                    ITERATION_CAP_TOOL_REFUSAL.to_string(),
+                    true,
+                )),
+                _ => None,
+            })
+            .collect();
+
+        Ok((assistant_message, refusals))
     }
 
     #[must_use]
@@ -799,6 +933,187 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// Api client that calls the `step` tool forever — until it sees the
+    /// graceful-landing system prompt, at which point it returns the
+    /// scripted landing events. Drives every iteration-cap test below.
+    struct CapSpiralApi {
+        calls: usize,
+        /// Events to return for the landing request.
+        landing: Vec<AssistantEvent>,
+        /// Iteration numbers (1-based) whose request carried the budget nudge.
+        nudged_calls: Vec<usize>,
+    }
+
+    impl CapSpiralApi {
+        fn new(landing: Vec<AssistantEvent>) -> Self {
+            Self {
+                calls: 0,
+                landing,
+                nudged_calls: Vec::new(),
+            }
+        }
+    }
+
+    impl ApiClient for CapSpiralApi {
+        fn stream(
+            &mut self,
+            request: &ApiRequest<'_>,
+        ) -> Result<Vec<AssistantEvent>, RuntimeError> {
+            if request
+                .system_prompt
+                .iter()
+                .any(|s| s.contains("iteration limit for"))
+            {
+                return Ok(self.landing.clone());
+            }
+            self.calls += 1;
+            if request
+                .system_prompt
+                .iter()
+                .any(|s| s.contains("Iteration budget alert"))
+            {
+                self.nudged_calls.push(self.calls);
+            }
+            Ok(vec![
+                AssistantEvent::ToolUse {
+                    id: format!("t{}", self.calls),
+                    name: "step".to_string(),
+                    input: format!("{{\"n\":{}}}", self.calls),
+                },
+                AssistantEvent::MessageStop,
+            ])
+        }
+    }
+
+    fn cap_test_runtime(
+        api: CapSpiralApi,
+        max_iterations: usize,
+    ) -> (
+        ConversationRuntime<CapSpiralApi, StaticToolExecutor>,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    ) {
+        let executed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = executed.clone();
+        let tool_executor = StaticToolExecutor::new().register("step", move |_| {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok("ok".to_string())
+        });
+        let permission_policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("step", PermissionMode::ReadOnly);
+        let runtime = ConversationRuntime::new(
+            Session::new(),
+            api,
+            tool_executor,
+            permission_policy,
+            vec!["test system prompt".to_string()],
+        )
+        .with_max_iterations(max_iterations);
+        (runtime, executed)
+    }
+
+    #[test]
+    fn iteration_cap_without_graceful_flag_hard_fails() {
+        let api = CapSpiralApi::new(vec![AssistantEvent::MessageStop]);
+        let (mut runtime, _executed) = cap_test_runtime(api, 2);
+        let err = runtime
+            .run_turn("spiral", None)
+            .expect_err("cap must hard-fail without the graceful flag");
+        assert!(
+            err.to_string().contains("maximum number of iterations"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn graceful_cap_lands_with_text_summary() {
+        let api = CapSpiralApi::new(vec![
+            AssistantEvent::TextDelta("state-of-work: branch ready, push remains".to_string()),
+            AssistantEvent::MessageStop,
+        ]);
+        let (mut runtime, executed) = cap_test_runtime(api, 2);
+        runtime = runtime.with_graceful_iteration_cap();
+
+        let summary = runtime
+            .run_turn("spiral", None)
+            .expect("graceful cap must return Ok");
+
+        assert!(summary.hit_iteration_cap);
+        // Two normal rounds executed the tool; the landing did not.
+        assert_eq!(executed.load(std::sync::atomic::Ordering::SeqCst), 2);
+        let last_text = summary
+            .assistant_messages
+            .last()
+            .and_then(|m| {
+                m.blocks.iter().find_map(|b| match b {
+                    ContentBlock::Text { text } => Some(text.clone()),
+                    _ => None,
+                })
+            })
+            .expect("landing message must carry text");
+        assert!(last_text.contains("state-of-work"));
+    }
+
+    #[test]
+    fn graceful_cap_refuses_landing_tool_calls() {
+        // The model ignores the text-only instruction and calls a tool in
+        // the landing reply — it must be refused, never executed.
+        let api = CapSpiralApi::new(vec![
+            AssistantEvent::ToolUse {
+                id: "landing-tool".to_string(),
+                name: "step".to_string(),
+                input: "{}".to_string(),
+            },
+            AssistantEvent::MessageStop,
+        ]);
+        let (mut runtime, executed) = cap_test_runtime(api, 2);
+        runtime = runtime.with_graceful_iteration_cap();
+
+        let summary = runtime
+            .run_turn("spiral", None)
+            .expect("graceful cap must return Ok");
+
+        assert!(summary.hit_iteration_cap);
+        assert_eq!(
+            executed.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "the landing tool call must NOT execute"
+        );
+        let refusal = summary
+            .tool_results
+            .last()
+            .expect("landing tool call must get a tool_result");
+        assert!(matches!(
+            &refusal.blocks[0],
+            ContentBlock::ToolResult { is_error: true, output, .. }
+                if output.contains("NOT executed")
+        ));
+    }
+
+    #[test]
+    fn budget_nudge_fires_only_in_final_window() {
+        // max=8, window=5 → remaining = 8-i+1: iterations 1-3 are clean,
+        // 4-8 carry the nudge. The turn ends at the cap (graceful landing),
+        // so all 8 normal calls happen.
+        let api = CapSpiralApi::new(vec![
+            AssistantEvent::TextDelta("summary".to_string()),
+            AssistantEvent::MessageStop,
+        ]);
+        let (mut runtime, _executed) = cap_test_runtime(api, 8);
+        runtime = runtime.with_graceful_iteration_cap();
+
+        let summary = runtime.run_turn("spiral", None).expect("turn should land");
+        assert!(summary.hit_iteration_cap);
+        assert_eq!(runtime.api_client.nudged_calls, vec![4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn budget_nudge_absent_without_graceful_flag() {
+        let api = CapSpiralApi::new(vec![AssistantEvent::MessageStop]);
+        let (mut runtime, _executed) = cap_test_runtime(api, 8);
+        let _ = runtime.run_turn("spiral", None);
+        assert!(runtime.api_client.nudged_calls.is_empty());
     }
 
     #[test]

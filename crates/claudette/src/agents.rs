@@ -662,6 +662,7 @@ mod tests {
             iterations: 0,
             usage: crate::TokenUsage::default(),
             auto_compaction: None,
+            hit_iteration_cap: false,
         };
         let text = extract_final_text(&summary);
         assert_eq!(text, "(agent produced no text output)");

@@ -65,6 +65,10 @@ fn build_tui_runtime(session: Session, tui_tx: SyncSender<TuiEvent>) -> TuiRunti
         secretary_system_prompt_with_memory(memory.as_deref(), false),
     )
     .with_max_iterations(crate::run::max_iterations())
+    // Same graceful iteration-cap landing as the REPL chokepoint in
+    // `run::build_runtime` — cap hits end in a state-of-work summary, not
+    // a discarded turn.
+    .with_graceful_iteration_cap()
     .with_auto_compaction_input_tokens_threshold(u32::MAX)
     .with_unknown_tool_hinter(move |name: &str| {
         ToolGroup::parse(name).map_or_else(Vec::new, |group| {
@@ -339,6 +343,15 @@ pub fn spawn_worker(
                                 in_tok: summary.usage.input_tokens,
                                 out_tok: summary.usage.output_tokens,
                             });
+
+                            if summary.hit_iteration_cap {
+                                let _ = tui_tx.send(TuiEvent::Info(
+                                    "⚠ turn hit the iteration cap — the reply \
+                                     above is a state-of-work summary; the \
+                                     task may be unfinished"
+                                        .to_string(),
+                                ));
+                            }
 
                             // Cross-session recall indexing — non-blocking
                             // hand-off to the process-wide async indexer
