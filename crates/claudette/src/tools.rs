@@ -63,6 +63,7 @@ mod gmail {
 mod ide;
 mod markets;
 mod mission;
+mod near_miss;
 mod notes;
 mod patch;
 pub(crate) mod quality;

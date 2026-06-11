@@ -238,8 +238,13 @@ fn run_edit_file(input: &str) -> Result<String, String> {
     let match_count = content.matches(old_text).count();
     match match_count {
         0 => {
+            // Near-miss diagnostics (dogfood T2): point at over-escaped
+            // backslashes or the closest drifted window instead of leaving
+            // the model to theorize about CRLF/whitespace.
+            let hint = super::near_miss::near_miss_hint(&content, old_text)
+                .unwrap_or_else(|| "The text to replace must match exactly.".to_string());
             return Err(format!(
-                "edit_file: old_text not found in {}. The text to replace must match exactly.",
+                "edit_file: old_text not found in {}. {hint}",
                 path.display()
             ));
         }
@@ -596,6 +601,29 @@ mod tests {
         let err = result.expect_err("expected not-found error");
         assert!(err.contains("not found"), "got: {err}");
         assert_eq!(after.as_deref(), Some(original));
+    }
+
+    #[test]
+    fn edit_file_zero_match_reports_over_escaped_backslashes() {
+        // Dogfood T2: old_text doubled the backslashes of a raw-string regex
+        // (JSON-escaping confusion). The error must name the real cause, not
+        // just say "not found".
+        let path = home_join("nearmiss");
+        let original = "fn pat() {\n    let re = r\"^\\s*fn\";\n}\n";
+        fs::write(&path, original).unwrap();
+
+        let input = json!({
+            "path": &path,
+            "old_text": "    let re = r\"^\\\\s*fn\";\n",
+            "new_text": "    let re = r\"^\\\\s*struct\";\n"
+        })
+        .to_string();
+        let result = run_edit_file(&input);
+        let _ = fs::remove_file(&path);
+
+        let err = result.expect_err("expected not-found error");
+        assert!(err.contains("not found"), "got: {err}");
+        assert!(err.contains("over-escapes backslashes"), "got: {err}");
     }
 
     #[test]

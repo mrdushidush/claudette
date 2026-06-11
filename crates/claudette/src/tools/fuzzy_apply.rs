@@ -113,10 +113,21 @@ fn run_apply_diff(input: &str) -> Result<String, String> {
         }
         Err(e) => {
             let msg = match e {
-                FuzzyError::NotFound => format!(
-                    "apply_diff: 'before' block not found in {raw_path} (tried exact + line-trim \
-                     match). Re-read the file and copy the block exactly, or widen the context."
-                ),
+                FuzzyError::NotFound => {
+                    // Near-miss diagnostics (dogfood T2): a bare "not found"
+                    // sends small brains down CRLF/whitespace rabbit holes
+                    // when the real cause is usually over-escaped backslashes
+                    // or one drifted line. Name the difference when we can.
+                    let hint =
+                        super::near_miss::near_miss_hint(&original, before).unwrap_or_else(|| {
+                            "Re-read the file and copy the block exactly, or widen the context."
+                                .to_string()
+                        });
+                    format!(
+                        "apply_diff: 'before' block not found in {raw_path} (tried exact + \
+                         line-trim match). {hint}"
+                    )
+                }
                 FuzzyError::Ambiguous => format!(
                     "apply_diff: 'before' block matched in multiple places in {raw_path} — \
                      ambiguous. Add more surrounding lines so the block is unique."
@@ -519,5 +530,33 @@ mod tests {
     fn run_apply_diff_rejects_missing_before() {
         let err = run_apply_diff(r#"{"path":"x","after":"y"}"#).unwrap_err();
         assert!(err.contains("missing 'before'"), "got: {err}");
+    }
+
+    #[test]
+    fn not_found_error_carries_near_miss_hint() {
+        // Dogfood T2: a `before` with doubled backslashes must produce the
+        // over-escaping diagnosis end-to-end, not the generic "copy exactly".
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".into());
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let path = format!("{home}/claudette-diff-nearmiss-{nanos}.txt");
+        let original = "fn pat() {\n    let re = r\"^\\s*fn\";\n}\n";
+        fs::write(&path, original).unwrap();
+
+        let input = json!({
+            "path": &path,
+            "before": "    let re = r\"^\\\\s*fn\";\n",
+            "after": "    let re = r\"^\\\\s*struct\";\n"
+        })
+        .to_string();
+        let result = run_apply_diff(&input);
+        let _ = fs::remove_file(&path);
+
+        let err = result.expect_err("expected not-found error");
+        assert!(err.contains("'before' block not found"), "got: {err}");
+        assert!(err.contains("over-escapes backslashes"), "got: {err}");
     }
 }
