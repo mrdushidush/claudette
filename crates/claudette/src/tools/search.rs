@@ -70,7 +70,8 @@ pub(super) fn schemas() -> Vec<Value> {
                     "type": "object",
                     "properties": {
                         "pattern": { "type": "string", "description": "Regex to search for (e.g. 'TODO|FIXME', 'fn\\s+\\w+'). Invalid regex falls back to literal substring." },
-                        "path":    { "type": "string", "description": "Directory to search (default: the workspace/project root)" }
+                        "path":    { "type": "string", "description": "Directory to search (default: the workspace/project root)" },
+                        "glob":    { "type": "string", "description": "Optional filename glob to restrict the search (e.g. '*.rs', 'src/**/*.ts'). A bare name matches files at any depth; a pattern with '/' matches the path relative to the search root. When omitted, all files are searched." }
                     },
                     "required": ["pattern"]
                 }
@@ -244,6 +245,19 @@ fn run_grep_search(input: &str) -> Result<String, String> {
         ));
     }
 
+    // Optional glob filter — restricts which files are searched (ripgrep -g
+    // style). Backslashes are normalized to `/` so a Windows-style pattern
+    // like `src\*.rs` still works; the glob crate treats `\` as a literal
+    // character, never an escape, so nothing is lost.
+    let glob_pattern: Option<glob::Pattern> = v
+        .get("glob")
+        .and_then(Value::as_str)
+        .map(|g| {
+            glob::Pattern::new(&g.replace('\\', "/"))
+                .map_err(|e| format!("grep_search: invalid glob pattern '{g}': {e}"))
+        })
+        .transpose()?;
+
     // Compile the pattern as a case-insensitive regex (ripgrep semantics —
     // what coding models reach for: alternation, `.?`, char classes). If it
     // isn't valid regex (a small brain occasionally passes a raw string with
@@ -302,8 +316,39 @@ fn run_grep_search(input: &str) -> Result<String, String> {
             truncated = true;
             break 'walk;
         }
-        files_scanned += 1;
         let p = entry.path();
+
+        // Apply the optional glob filter (ripgrep `-g` semantics) before the
+        // file counts as scanned, so filtered-out files don't consume the
+        // MAX_GREP_FILES cap. A pattern without `/` matches the file name at
+        // any depth (`*.rs` finds nested sources); a pattern with `/` matches
+        // the root-relative path with literal separators, so `src/*.rs` does
+        // NOT match `src/sub/mod.rs`. The latter needs
+        // `require_literal_separator` — the glob crate's DEFAULT MatchOptions
+        // lets `*` cross `/` on every platform.
+        if let Some(ref pat) = glob_pattern {
+            let matched = if pat.as_str().contains('/') {
+                let rel_path = p.strip_prefix(&root).unwrap_or(p);
+                // Join components with `/` — on Windows strip_prefix yields
+                // backslash-separated paths, which would never match.
+                let norm: String = rel_path
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                let opts = glob::MatchOptions {
+                    require_literal_separator: true,
+                    ..Default::default()
+                };
+                pat.matches_with(&norm, opts)
+            } else {
+                pat.matches(&entry.file_name().to_string_lossy())
+            };
+            if !matched {
+                continue;
+            }
+        }
+        files_scanned += 1;
 
         // Skip oversized files — same 100 KB cap as read_file.
         let Ok(meta) = entry.metadata() else { continue };
@@ -758,5 +803,212 @@ mod tests {
             .filter_map(|v| v.pointer("/function/name").and_then(Value::as_str))
             .collect();
         assert_eq!(names, ["web_fetch", "glob_search", "grep_search"]);
+    }
+
+    #[test]
+    fn grep_search_glob_filter_restricts_files() {
+        // The `glob` parameter restricts which files are searched. Only files
+        // whose workspace-relative path matches the glob pattern should be
+        // scanned; others must be silently skipped.
+        let _eg = crate::test_env_lock();
+        let base = user_home()
+            .join(".claudette")
+            .join("files")
+            .join("claudette-grep-glob-test");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(base.join("src")).unwrap();
+        fs::write(
+            base.join("src").join("main.rs"),
+            "fn main() { println!(\"hello\"); }\n",
+        )
+        .unwrap();
+        fs::write(base.join("src").join("lib.rs"), "pub fn helper() {}\n").unwrap();
+        fs::write(base.join("README.md"), "# Project\n").unwrap();
+
+        // Without glob → both source files + README are scanned (3 matches).
+        let input = json!({
+            "pattern": "\\w+",
+            "path": base.to_str().unwrap()
+        })
+        .to_string();
+        let out = run_grep_search(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            v["match_count"].as_u64().unwrap(),
+            3,
+            "without glob should find all files"
+        );
+
+        // With glob "*.rs" → only .rs files are scanned (2 matches).
+        let input_glob = json!({
+            "pattern": "\\w+",
+            "path": base.to_str().unwrap(),
+            "glob": "*.rs"
+        })
+        .to_string();
+        let out_glob = run_grep_search(&input_glob).unwrap();
+        let v2: Value = serde_json::from_str(&out_glob).unwrap();
+        assert_eq!(
+            v2["match_count"].as_u64().unwrap(),
+            2,
+            "glob *.rs should only match .rs files"
+        );
+
+        // With glob "*.md" → only README is scanned (1 match).
+        let input_md = json!({
+            "pattern": "#",
+            "path": base.to_str().unwrap(),
+            "glob": "*.md"
+        })
+        .to_string();
+        let out_md = run_grep_search(&input_md).unwrap();
+        let v3: Value = serde_json::from_str(&out_md).unwrap();
+        assert_eq!(
+            v3["match_count"].as_u64().unwrap(),
+            1,
+            "glob *.md should only match .md files"
+        );
+
+        // With glob "**/lib.rs" → only lib.rs matches.
+        let input_lib = json!({
+            "pattern": "helper",
+            "path": base.to_str().unwrap(),
+            "glob": "**/lib.rs"
+        })
+        .to_string();
+        let out_lib = run_grep_search(&input_lib).unwrap();
+        let v4: Value = serde_json::from_str(&out_lib).unwrap();
+        assert_eq!(
+            v4["match_count"].as_u64().unwrap(),
+            1,
+            "glob **/lib.rs should only match lib.rs"
+        );
+
+        // With glob that matches nothing → zero results.
+        let input_none = json!({
+            "pattern": "\\w+",
+            "path": base.to_str().unwrap(),
+            "glob": "*.xyz"
+        })
+        .to_string();
+        let out_none = run_grep_search(&input_none).unwrap();
+        let v5: Value = serde_json::from_str(&out_none).unwrap();
+        assert_eq!(
+            v5["match_count"].as_u64().unwrap(),
+            0,
+            "glob *.xyz should match nothing"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn grep_search_glob_rejects_invalid_pattern() {
+        // An invalid glob pattern must produce a user-facing error.
+        let base = user_home()
+            .join(".claudette")
+            .join("files")
+            .join("claudette-grep-glob-invalid");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        fs::write(base.join("test.txt"), "hello\n").unwrap();
+
+        // Unmatched `[` is an invalid glob pattern.
+        let input = json!({
+            "pattern": "hello",
+            "path": base.to_str().unwrap(),
+            "glob": "[invalid"
+        })
+        .to_string();
+        let err = run_grep_search(&input).unwrap_err();
+        assert!(
+            err.contains("invalid glob"),
+            "expected invalid glob error, got: {err}"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn grep_search_glob_matches_relative_path() {
+        // The glob filter must match against the workspace-relative path, not
+        // just the filename. A pattern like `src/*.rs` should NOT match
+        // `src/sub/mod.rs`, but `**/mod.rs` should.
+        let _eg = crate::test_env_lock();
+        let base = user_home()
+            .join(".claudette")
+            .join("files")
+            .join("claudette-grep-glob-rel");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(base.join("src").join("sub")).unwrap();
+        fs::write(base.join("src").join("main.rs"), "fn main() {}\n").unwrap();
+        fs::write(
+            base.join("src").join("sub").join("mod.rs"),
+            "pub fn sub() {}\n",
+        )
+        .unwrap();
+
+        // `src/*.rs` matches only src/main.rs (not the nested one).
+        let input = json!({
+            "pattern": "\\w+",
+            "path": base.to_str().unwrap(),
+            "glob": "src/*.rs"
+        })
+        .to_string();
+        let out = run_grep_search(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            v["match_count"].as_u64().unwrap(),
+            1,
+            "src/*.rs should only match src/main.rs"
+        );
+
+        // `**/mod.rs` matches the nested file.
+        let input2 = json!({
+            "pattern": "sub",
+            "path": base.to_str().unwrap(),
+            "glob": "**/mod.rs"
+        })
+        .to_string();
+        let out2 = run_grep_search(&input2).unwrap();
+        let v2: Value = serde_json::from_str(&out2).unwrap();
+        assert_eq!(
+            v2["match_count"].as_u64().unwrap(),
+            1,
+            "**/mod.rs should match src/sub/mod.rs"
+        );
+
+        // `src/**/*.rs` matches both files under src/.
+        let input3 = json!({
+            "pattern": "\\w+",
+            "path": base.to_str().unwrap(),
+            "glob": "src/**/*.rs"
+        })
+        .to_string();
+        let out3 = run_grep_search(&input3).unwrap();
+        let v3: Value = serde_json::from_str(&out3).unwrap();
+        assert_eq!(
+            v3["match_count"].as_u64().unwrap(),
+            2,
+            "src/**/*.rs should match both files"
+        );
+
+        // Windows-style separators in the pattern are normalized:
+        // `src\*.rs` behaves like `src/*.rs`.
+        let input4 = json!({
+            "pattern": "\\w+",
+            "path": base.to_str().unwrap(),
+            "glob": "src\\*.rs"
+        })
+        .to_string();
+        let out4 = run_grep_search(&input4).unwrap();
+        let v4: Value = serde_json::from_str(&out4).unwrap();
+        assert_eq!(
+            v4["match_count"].as_u64().unwrap(),
+            1,
+            "src\\*.rs should normalize to src/*.rs"
+        );
+
+        let _ = fs::remove_dir_all(&base);
     }
 }
