@@ -219,7 +219,36 @@ pub fn undo_last() -> Result<String, String> {
             "cannot undo {tool}: the trash copy is gone ({trash})"
         ));
     }
-    let original_p = Path::new(original);
+    // Both paths come verbatim from actions.jsonl — a plain, user-writable
+    // JSON file. Re-validate them before copying (defense-in-depth, roast
+    // 2026-06-07): without this a tampered line turns /undo into an
+    // arbitrary file copy — any readable `trash` source to any writable
+    // `original` destination (e.g. trash=~/.ssh/id_ed25519 →
+    // original=<workspace>/leak.txt). Legitimate refs always have a
+    // trash-dir source, and an original that some tool already validated
+    // at action time — notes/todos/scratch/missions all live under HOME,
+    // write_file targets live under HOME or CLAUDETTE_WORKSPACE — so the
+    // READ envelope (`validate_read_path`: HOME + workspace + secret
+    // denylist + symlink defence) admits every honest entry. The narrower
+    // `validate_write_path` would be wrong here: it excludes
+    // ~/.claudette/notes/, breaking legit note_delete undo.
+    let trash_root = fs::canonicalize(trash_dir())
+        .map_err(|e| format!("cannot undo {tool}: trash dir unavailable ({e})"))?;
+    let trash_canon = fs::canonicalize(trash_p)
+        .map_err(|e| format!("cannot undo {tool}: cannot resolve trash copy {trash} ({e})"))?;
+    if !trash_canon.starts_with(&trash_root) {
+        return Err(format!(
+            "cannot undo {tool}: undo ref points outside the trash dir ({trash}) — \
+             refusing (tampered transcript?)"
+        ));
+    }
+    let original_owned = crate::tools::validate_read_path(original).map_err(|e| {
+        format!(
+            "cannot undo {tool}: restore target {original} fails path validation — \
+             refusing (tampered transcript?): {e}"
+        )
+    })?;
+    let original_p: &Path = &original_owned;
     if let Some(parent) = original_p.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("cannot undo: {e}"))?;
     }
@@ -401,6 +430,105 @@ mod tests {
                 recovered,
                 "the clobbered newer content must survive in trash"
             );
+        });
+    }
+
+    /// Append a hand-forged transcript line — simulates a tampered
+    /// actions.jsonl (the file is plain user-writable JSON).
+    fn forge_entry(trash: &Path, original: &Path) {
+        let line = json!({
+            "ts": 1u64,
+            "tool": "write_file",
+            "input": "forged",
+            "undo": {
+                "trash": trash.display().to_string(),
+                "original": original.display().to_string(),
+            },
+        });
+        let path = transcript_path();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writeln!(f, "{line}").unwrap();
+    }
+
+    #[test]
+    fn undo_refuses_restore_target_outside_allowed_roots() {
+        with_temp_home(|home| {
+            // CLAUDETTE_WORKSPACE may be inherited from the dev environment —
+            // pin it away so the forged target is outside every allowed root.
+            let prev_ws = std::env::var("CLAUDETTE_WORKSPACE").ok();
+            std::env::remove_var("CLAUDETTE_WORKSPACE");
+
+            // A real trash copy (legitimate source) ...
+            let victim = write_tmp(home, "victim.txt", "X");
+            let trash = snapshot_to_trash(&victim).unwrap();
+            let _ = take_pending_undo();
+            // ... but a forged restore target OUTSIDE home/workspace.
+            let outside = home
+                .parent()
+                .unwrap()
+                .join("claudette-forged-restore-target.txt");
+            forge_entry(&trash, &outside);
+
+            let err = undo_last().unwrap_err();
+            assert!(err.contains("path validation"), "got: {err}");
+            assert!(!outside.exists(), "forged target must not be written");
+
+            match prev_ws {
+                Some(v) => std::env::set_var("CLAUDETTE_WORKSPACE", v),
+                None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+            }
+        });
+    }
+
+    #[test]
+    fn undo_refuses_trash_source_outside_trash_dir() {
+        with_temp_home(|home| {
+            // Forged ref: the source is a real, readable file OUTSIDE the
+            // trash (a credential stand-in) — /undo must not become an
+            // arbitrary file-copy primitive.
+            fs::create_dir_all(trash_dir()).unwrap();
+            let secret = write_tmp(home, "secret-standin.txt", "PRIVATE");
+            let dest = home.join("leak.txt");
+            forge_entry(&secret, &dest);
+
+            let err = undo_last().unwrap_err();
+            assert!(err.contains("outside the trash dir"), "got: {err}");
+            assert!(!dest.exists(), "forged copy must not happen");
+        });
+    }
+
+    #[test]
+    fn undo_restores_workspace_files_outside_home() {
+        // The validation must NOT be a naive home-only check: a legit undo of
+        // a CLAUDETTE_WORKSPACE file overwrite targets a path outside $HOME.
+        with_temp_home(|home| {
+            let prev_ws = std::env::var("CLAUDETTE_WORKSPACE").ok();
+            let ws = home
+                .parent()
+                .unwrap()
+                .join(format!("claudette-undo-ws-{}", std::process::id()));
+            fs::create_dir_all(&ws).unwrap();
+            std::env::set_var("CLAUDETTE_WORKSPACE", &ws);
+
+            let f = ws.join("project.txt");
+            fs::write(&f, "OLD").unwrap();
+            let _ = snapshot_to_trash(&f).unwrap();
+            record("write_file", "project.txt", take_pending_undo());
+            fs::write(&f, "NEW").unwrap();
+
+            let msg = undo_last().expect("workspace undo must stay allowed");
+            assert_eq!(fs::read_to_string(&f).unwrap(), "OLD", "{msg}");
+
+            match prev_ws {
+                Some(v) => std::env::set_var("CLAUDETTE_WORKSPACE", v),
+                None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+            }
+            let _ = fs::remove_dir_all(&ws);
         });
     }
 
