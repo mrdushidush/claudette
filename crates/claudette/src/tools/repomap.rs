@@ -61,7 +61,7 @@ pub(super) fn schemas() -> Vec<Value> {
         "type": "function",
         "function": {
             "name": "repo_map",
-            "description": "Localize code by concept. Returns a ranked outline of the workspace: the files whose top-level definitions (functions, types, constants) best match `query`, each with line numbers + signature snippets. Use this FIRST to find where something lives instead of guessing grep patterns — the snippet often shows the value/signature directly. Then read_file the cited line if you need more. (Languages: Rust, Python, JS/TS, Go.) For an exhaustive list of everywhere a name is used (or to pin the real source value past stale docs), call with mode='refs' and name='<exact text>'.",
+            "description": "Localize code by concept. Returns a ranked outline of the workspace: the files whose top-level definitions (functions, types, constants) best match `query`, each with line numbers + signature snippets. Use this FIRST to find where something lives instead of guessing grep patterns — the snippet often shows the value/signature directly. Then read_file the cited line if you need more. (Languages: Rust, Python, JS/TS, Go, Ruby.) For an exhaustive list of everywhere a name is used (or to pin the real source value past stale docs), call with mode='refs' and name='<exact text>'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -514,6 +514,11 @@ fn patterns_for(path: &Path) -> Option<Vec<(&'static str, Regex)>> {
             ("type", r"^\s*type\s+([A-Za-z_]\w*)"),
             ("const", r"^\s*(?:const|var)\s+([A-Za-z_]\w*)"),
         ],
+        "rb" => vec![
+            ("def", r"^\s*def\s+(?:self\.)?([A-Za-z_]\w*[!?=]?)"),
+            ("class", r"^\s*class\s+([A-Za-z_][\w:]*)"),
+            ("module", r"^\s*module\s+([A-Za-z_][\w:]*)"),
+        ],
         _ => return None,
     };
     Some(
@@ -558,6 +563,114 @@ mod tests {
             hit_const,
             Some(("const", "DEFAULT_MAX_FIX_ROUNDS".to_string()))
         );
+    }
+
+    #[test]
+    fn ruby_patterns_capture_def_class_and_module() {
+        let pats = patterns_for(Path::new("x.rb")).unwrap();
+        // plain def
+        let line_def = "  def method_name";
+        let hit_def = pats
+            .iter()
+            .find_map(|(k, re)| re.captures(line_def).map(|c| (*k, c[1].to_string())));
+        assert_eq!(hit_def, Some(("def", "method_name".to_string())));
+
+        // def self.class_method - must extract class_method, not self
+        let line_self = "  def self.class_method";
+        let hit_self = pats
+            .iter()
+            .find_map(|(k, re)| re.captures(line_self).map(|c| (*k, c[1].to_string())));
+        assert_eq!(hit_self, Some(("def", "class_method".to_string())));
+
+        // def with ? - must keep the ?
+        let line_q = "  def valid?";
+        let hit_q = pats
+            .iter()
+            .find_map(|(k, re)| re.captures(line_q).map(|c| (*k, c[1].to_string())));
+        assert_eq!(hit_q, Some(("def", "valid?".to_string())));
+
+        // class with namespace
+        let line_class = "  class Foo::Bar";
+        let hit_class = pats
+            .iter()
+            .find_map(|(k, re)| re.captures(line_class).map(|c| (*k, c[1].to_string())));
+        assert_eq!(hit_class, Some(("class", "Foo::Bar".to_string())));
+
+        // module
+        let line_mod = "  module Something";
+        let hit_mod = pats
+            .iter()
+            .find_map(|(k, re)| re.captures(line_mod).map(|c| (*k, c[1].to_string())));
+        assert_eq!(hit_mod, Some(("module", "Something".to_string())));
+    }
+
+    #[test]
+    fn repo_map_ruby_definitions_extracted_in_map_mode() {
+        let _eg = crate::test_env_lock();
+        let base = super::super::user_home()
+            .join(".claudette")
+            .join("files")
+            .join("claudette-repomap-test-ruby");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("lib")).unwrap();
+        let ruby_content = "module Something\n  class Greeting\n    def initialize(name)\n      @name = name\n    end\n\n    def self.class_method\n      \"class\"\n    end\n\n    def valid?\n      !@name.nil?\n    end\n\n    def say_hello\n      \"Hello, #{@name}\"\n    end\n  end\nend\n";
+        std::fs::write(base.join("lib").join("greeting.rb"), ruby_content.trim()).unwrap();
+
+        let input = json!({
+            "query": "greeting module class method",
+            "path": base.to_str().unwrap()
+        })
+        .to_string();
+        let out = run_repo_map(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+
+        assert!(v["files"].is_array(), "map mode must return files array");
+        let first_file = &v["files"][0];
+        assert!(
+            first_file["file"]
+                .as_str()
+                .unwrap()
+                .replace('\\', "/")
+                .contains("/lib/greeting.rb"),
+            "greeting.rb should be found: {out}"
+        );
+
+        let symbols = first_file["symbols"].as_array().unwrap();
+        let names: Vec<&str> = symbols
+            .iter()
+            .map(|s| s["name"].as_str().unwrap())
+            .collect();
+        assert!(
+            names.contains(&"Something"),
+            "module Something must be extracted"
+        );
+        assert!(
+            names.contains(&"Greeting"),
+            "class Greeting must be extracted"
+        );
+        assert!(
+            names.contains(&"initialize"),
+            "def initialize must be extracted"
+        );
+        assert!(
+            names.contains(&"class_method"),
+            "def self.class_method -> class_method"
+        );
+        assert!(names.contains(&"valid?"), "def valid? must include the ?");
+        assert!(
+            names.contains(&"say_hello"),
+            "def say_hello must be extracted"
+        );
+
+        let kinds: Vec<&str> = symbols
+            .iter()
+            .map(|s| s["kind"].as_str().unwrap())
+            .collect();
+        assert!(kinds.contains(&"module"));
+        assert!(kinds.contains(&"class"));
+        assert!(kinds.contains(&"def"));
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
