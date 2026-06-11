@@ -162,8 +162,18 @@ fn run_note_create(input: &str) -> Result<String, String> {
     let now = chrono::Local::now();
     let ts = now.format("%Y-%m-%dT%H-%M-%S").to_string();
     let slug = slugify(&title);
-    let filename = format!("{ts}-{slug}.md");
-    let path = notes_dir().join(&filename);
+    // The timestamp has second resolution, so two same-title creates inside
+    // one second would land on the same filename and `fs::write` would
+    // silently overwrite the first (roast 2026-06-07). Suffix to a free name
+    // instead — same scheme as the trash collision handling.
+    let mut filename = format!("{ts}-{slug}.md");
+    let mut path = notes_dir().join(&filename);
+    let mut n = 0u32;
+    while path.exists() {
+        n += 1;
+        filename = format!("{ts}-{slug}-{n}.md");
+        path = notes_dir().join(&filename);
+    }
 
     use std::fmt::Write;
     let mut content = format!("# {title}\n\nCreated: {}\n", now.to_rfc3339());
@@ -563,6 +573,25 @@ mod tests {
                 "precious",
                 "trash copy must hold the deleted content"
             );
+        });
+    }
+
+    #[test]
+    fn note_create_same_title_same_second_keeps_both_notes() {
+        // Filenames are second-resolution timestamps + slug, so two creates
+        // with the same title inside one second used to silently overwrite
+        // the first. The collision suffix must keep both.
+        crate::with_temp_home(|_home| {
+            run_note_create(r#"{"title":"Same","body":"FIRST"}"#).unwrap();
+            run_note_create(r#"{"title":"Same","body":"SECOND"}"#).unwrap();
+
+            let contents: Vec<String> = std::fs::read_dir(notes_dir())
+                .unwrap()
+                .map(|e| std::fs::read_to_string(e.unwrap().path()).unwrap())
+                .collect();
+            assert_eq!(contents.len(), 2, "both notes must exist as files");
+            assert!(contents.iter().any(|c| c.contains("FIRST")));
+            assert!(contents.iter().any(|c| c.contains("SECOND")));
         });
     }
 
