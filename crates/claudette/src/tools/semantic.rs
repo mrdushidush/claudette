@@ -221,10 +221,24 @@ fn chunk_file(path: &Path, text: &str, chunks: &mut Vec<Chunk>) {
 }
 
 fn tokenize(s: &str) -> HashSet<String> {
-    s.split(|c: char| !c.is_alphanumeric())
-        .filter(|t| !t.is_empty() && t.len() > 1)
-        .map(str::to_lowercase)
-        .collect()
+    let mut out = Vec::new();
+    for raw in s.split(|c: char| !c.is_alphanumeric()) {
+        if raw.is_empty() {
+            continue;
+        }
+        let mut cur = String::new();
+        let mut prev_lower_or_digit = false;
+        for ch in raw.chars() {
+            if ch.is_uppercase() && prev_lower_or_digit && !cur.is_empty() {
+                out.push(cur.to_lowercase());
+                cur.clear();
+            }
+            cur.push(ch);
+            prev_lower_or_digit = ch.is_lowercase() || ch.is_ascii_digit();
+        }
+        out.push(cur.to_lowercase());
+    }
+    out.into_iter().collect()
 }
 
 fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f32 {
@@ -287,9 +301,21 @@ mod tests {
         assert!(t.contains("payment"));
         assert!(t.contains("retry"));
         assert!(t.contains("logic"));
-        assert!(t.contains("myclass"));
+        // "MyClass" splits into two tokens: my + class.
+        assert!(t.contains("my"));
+        assert!(t.contains("class"));
         // Single-char tokens dropped — the slash isn't kept either.
         assert!(!t.contains(""));
+    }
+
+    #[test]
+    fn tokenize_splits_camelcase() {
+        let t = tokenize("loopBreaker maxFixRounds");
+        assert!(t.contains("loop"));
+        assert!(t.contains("breaker"));
+        assert!(t.contains("max"));
+        assert!(t.contains("fix"));
+        assert!(t.contains("rounds"));
     }
 
     #[test]
