@@ -1309,6 +1309,7 @@ mod tests {
             iterations: 0,
             usage: crate::TokenUsage::default(),
             auto_compaction: None,
+            hit_iteration_cap: false,
         };
         let text = extract_response_text(&summary);
         assert!(text.contains("no text"));

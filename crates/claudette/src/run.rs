@@ -133,8 +133,11 @@ pub(crate) struct CompactionOutcome {
 }
 
 /// Default REPL/TUI max iterations per turn — how many (model → tool → result)
-/// cycles a single user prompt is allowed to drive before the runtime aborts
-/// with "conversation loop exceeded the maximum number of iterations".
+/// cycles a single user prompt is allowed to drive. On the interactive
+/// surfaces (REPL/TUI, which enable `with_graceful_iteration_cap`) hitting
+/// the cap ends the turn with a budget-warned, text-only state-of-work
+/// summary; sub-agents and forge roles abort with "conversation loop
+/// exceeded the maximum number of iterations".
 ///
 /// `40` is generous: it accommodates legitimate long tool chains (multi-step
 /// research, build + test + grep + fix) while still capping pathological
@@ -1414,6 +1417,7 @@ fn empty_turn_summary() -> TurnSummary {
         iterations: 0,
         usage: crate::TokenUsage::default(),
         auto_compaction: None,
+        hit_iteration_cap: false,
     }
 }
 
@@ -1860,6 +1864,16 @@ pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
                         summary.iterations, summary.usage.input_tokens, summary.usage.output_tokens,
                     ))
                 );
+                if summary.hit_iteration_cap {
+                    eprintln!(
+                        "{} {}",
+                        theme::WARN_GLYPH,
+                        theme::warn(
+                            "turn hit the iteration cap — the reply above is a \
+                             state-of-work summary; the task may be unfinished"
+                        )
+                    );
+                }
 
                 // Cross-session recall: enqueue the user input + the
                 // assistant text from this turn for the async indexer
@@ -2072,6 +2086,11 @@ fn build_runtime_with_brain_inner(
         // single-shot search/grep/git chains. The shared default (currently 40)
         // and the `CLAUDETTE_MAX_ITERATIONS` env-var knob live in `max_iterations`.
         .with_max_iterations(max_iterations())
+        // Top-level interactive turns land iteration-cap hits gracefully
+        // (budget nudge + final state-of-work summary) instead of throwing
+        // the whole turn away. Sub-agents and forge roles keep the hard
+        // error — their callers rely on it to fail a round.
+        .with_graceful_iteration_cap()
         .with_auto_compaction_input_tokens_threshold(u32::MAX)
         .with_unknown_tool_hinter(move |name: &str| {
             ToolGroup::parse(name).map_or_else(Vec::new, |group| {

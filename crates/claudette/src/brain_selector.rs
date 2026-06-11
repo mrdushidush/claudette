@@ -173,6 +173,13 @@ pub fn diagnose(result: &Result<TurnSummary, String>) -> Option<StuckReason> {
 }
 
 fn diagnose_summary(summary: &TurnSummary) -> Option<StuckReason> {
+    // A graceful iteration-cap landing already carries a state-of-work
+    // summary. Before it existed, the same turn was an `Err` that never
+    // escalated — keep that: don't burn the fallback brain re-running a
+    // 40-iteration turn whose tool-error streak is incidental to the cap.
+    if summary.hit_iteration_cap {
+        return None;
+    }
     let text_blocks = count_text_blocks(&summary.assistant_messages);
     if text_blocks == 0 && summary.iterations >= MAX_ITER_STUCK_THRESHOLD {
         return Some(StuckReason::NoTextAtMaxIter);
@@ -453,6 +460,7 @@ mod tests {
             iterations,
             usage: TokenUsage::default(),
             auto_compaction: None,
+            hit_iteration_cap: false,
         }
     }
 
@@ -511,6 +519,20 @@ mod tests {
             12,
         );
         assert_eq!(diagnose(&Ok(summary)), Some(StuckReason::NoTextAtMaxIter));
+    }
+
+    #[test]
+    fn diagnose_skips_graceful_iteration_cap_landings() {
+        // Pre-landing, a cap-hit turn was an Err that never escalated; the
+        // graceful Ok (even with stuck-looking signals) must not start
+        // burning the fallback brain on 40-iteration turns.
+        let mut summary = make_summary(
+            vec![],
+            vec![tool_err(true), tool_err(true), tool_err(true)],
+            13,
+        );
+        summary.hit_iteration_cap = true;
+        assert_eq!(diagnose(&Ok(summary)), None);
     }
 
     #[test]
