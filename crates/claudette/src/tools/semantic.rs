@@ -230,13 +230,19 @@ fn tokenize(s: &str) -> HashSet<String> {
         let mut prev_lower_or_digit = false;
         for ch in raw.chars() {
             if ch.is_uppercase() && prev_lower_or_digit && !cur.is_empty() {
-                out.push(cur.to_lowercase());
+                let lower = cur.to_lowercase();
+                if lower.chars().count() > 1 {
+                    out.push(lower);
+                }
                 cur.clear();
             }
             cur.push(ch);
             prev_lower_or_digit = ch.is_lowercase() || ch.is_ascii_digit();
         }
-        out.push(cur.to_lowercase());
+        let lower = cur.to_lowercase();
+        if lower.chars().count() > 1 {
+            out.push(lower);
+        }
     }
     out.into_iter().collect()
 }
@@ -316,6 +322,17 @@ mod tests {
         assert!(t.contains("max"));
         assert!(t.contains("fix"));
         assert!(t.contains("rounds"));
+    }
+
+    #[test]
+    fn tokenize_drops_single_char_tokens() {
+        let t = tokenize("a bb cCc x9");
+        assert!(!t.contains("a"), "single-char token must be dropped");
+        assert!(
+            !t.contains("x"),
+            "single-char split fragment must be dropped"
+        );
+        assert!(t.contains("bb"));
     }
 
     #[test]
