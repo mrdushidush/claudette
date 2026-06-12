@@ -28,6 +28,11 @@ bumps are non-breaking bugfixes only.
   Enter; any other key denies. TTY-only: piped / scripted / agent runs keep
   the line-buffered reader unchanged.
 
+- **`repo_map` maps C# definitions.** `mode=map` now extracts C# `class`,
+  `interface`, `enum`, `struct`, and method definitions — previously `.cs`
+  files were scanned only in `mode=refs`. The schema's language list now
+  includes C#.
+
 ### Changed
 
 - **`repo_map` map output is a compact outline, and the tool steers to
