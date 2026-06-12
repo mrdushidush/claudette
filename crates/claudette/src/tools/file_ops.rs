@@ -723,37 +723,49 @@ mod tests {
 
     #[test]
     fn write_file_allows_text_extension() {
-        let _guard = crate::test_env_lock(); // home-resolving
-        let target = files_dir().join("write_refuse_allows_txt.txt");
-        let _ = fs::remove_file(&target);
-        let input = json!({
-            "path": "write_refuse_allows_txt.txt",
-            "content": "plain notes",
-        })
-        .to_string();
-        let out = run_write_file(&input).expect(".txt should be allowed");
-        assert!(out.contains("\"ok\":true"), "got: {out}");
-        let _ = fs::remove_file(&target);
+        with_workspace_env(None, || {
+            let target = files_dir().join("write_refuse_allows_txt.txt");
+            let _ = fs::remove_file(&target);
+            let input = json!({
+                "path": "write_refuse_allows_txt.txt",
+                "content": "plain notes",
+            })
+            .to_string();
+            let out = run_write_file(&input).expect(".txt should be allowed");
+            assert!(out.contains("\"ok\":true"), "got: {out}");
+            assert!(
+                target.exists(),
+                "file must land in files_dir, got nothing at {}",
+                target.display()
+            );
+            let _ = fs::remove_file(&target);
+        });
     }
 
     #[test]
     fn write_file_allows_data_and_config_extensions() {
         // JSON, MD, YAML, TOML — config/data formats stay on write_file.
-        let _guard = crate::test_env_lock(); // home-resolving
-        for (path, content) in [
-            ("write_refuse_data.json", r#"{"k":"v"}"#),
-            ("write_refuse_data.md", "# heading"),
-            ("write_refuse_data.yaml", "k: v"),
-            ("write_refuse_data.toml", "k = 'v'"),
-        ] {
-            let target = files_dir().join(path);
-            let _ = fs::remove_file(&target);
-            let input = json!({ "path": path, "content": content }).to_string();
-            let out = run_write_file(&input)
-                .unwrap_or_else(|e| panic!("{path} should be allowed, got: {e}"));
-            assert!(out.contains("\"ok\":true"), "{path}: got {out}");
-            let _ = fs::remove_file(&target);
-        }
+        with_workspace_env(None, || {
+            for (path, content) in [
+                ("write_refuse_data.json", r#"{"k":"v"}"#),
+                ("write_refuse_data.md", "# heading"),
+                ("write_refuse_data.yaml", "k: v"),
+                ("write_refuse_data.toml", "k = 'v'"),
+            ] {
+                let target = files_dir().join(path);
+                let _ = fs::remove_file(&target);
+                let input = json!({ "path": path, "content": content }).to_string();
+                let out = run_write_file(&input)
+                    .unwrap_or_else(|e| panic!("{path} should be allowed, got: {e}"));
+                assert!(out.contains("\"ok\":true"), "{path}: got {out}");
+                assert!(
+                    target.exists(),
+                    "file must land in files_dir, got nothing at {}",
+                    target.display()
+                );
+                let _ = fs::remove_file(&target);
+            }
+        });
     }
 
     #[test]
