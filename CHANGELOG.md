@@ -23,6 +23,21 @@ bumps are non-breaking bugfixes only.
   scripted / CI runs stay clean; opt out with `CLAUDETTE_NO_SPINNER`. The
   TUI, forge, sub-agents, one-shot mode, and tests are unaffected.
 
+### Changed
+
+- **`repo_map` map output is a compact outline, and the tool steers to
+  grep/glob.** The `mode=map` result used to be verbose nested JSON — per
+  symbol it repeated `line`/`kind`/`name`/`sig` keys, with `kind`/`name`
+  duplicating what the signature line already shows — a multi-thousand-token
+  blob the local backend reprocesses on every loop iteration. It is now a
+  compact text outline (a `<file> (score)` header, then `  <line>  <signature>`
+  rows), roughly a 4–6× size cut and far easier for a small brain to parse.
+  Per-file symbol and result-file caps were tightened (40→20, 15→12). The tool
+  description now frames `repo_map` as *initial orientation only* and routes
+  known-symbol/known-string lookups to `grep_search` and file-by-name lookups
+  to `glob_search`, so it is no longer over-called in place of a targeted
+  search. `mode=refs` output is unchanged.
+
 ## [0.10.0] - 2026-06-12
 
 All three changes come straight from dogfooding claudette on her own
