@@ -2729,7 +2729,9 @@ mod tests {
 
     #[test]
     fn build_chat_body_default_stays_ollama_shape() {
-        let client = OllamaApiClient::new("qwen3.5:4b", json!([]));
+        // Pin compat off — ambient CLAUDETTE_OPENAI_COMPAT must not flip the
+        // ollama body shape this test asserts.
+        let client = OllamaApiClient::new("qwen3.5:4b", json!([])).with_openai_compat(false);
         let req = ApiRequest {
             messages: vec![user_text("hi")].into(),
             system_prompt: vec!["sys".to_string()],
