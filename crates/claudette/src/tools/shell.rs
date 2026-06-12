@@ -189,6 +189,7 @@ fn run_bash(input: &str) -> Result<String, String> {
     // shell-driven workflows (build, test, scripted edits) stay
     // self-consistent with git_*. Falls back to process cwd otherwise.
     let cwd = crate::missions::active_cwd();
+    destructive_git_guard(command, &cwd)?;
     let result = run_command_with_timeout(program, &args, 30, Some(&cwd));
 
     let stdout: String = result.stdout.chars().take(BASH_OUTPUT_MAX_CHARS).collect();
@@ -204,6 +205,150 @@ fn run_bash(input: &str) -> Result<String, String> {
         "truncated": truncated,
     })
     .to_string())
+}
+
+// ────── destructive-git guard ───────────────────────────────────────────
+//
+// Dogfood hardening: `git reset --hard` (and force checkout/switch) run while
+// the working tree is dirty have silently wiped in-progress edits twice in the
+// co-dev loop — the brain edits files, then runs a "refresh main" reset that
+// discards them, and the re-apply lands incomplete. When the model's `bash`
+// command is one of these ops AND the target tree has uncommitted *tracked*
+// changes, refuse it and point at the non-destructive branch recipe. A clean
+// tree, a non-repo, or CLAUDETTE_ALLOW_DESTRUCTIVE_GIT=1 all pass through.
+
+/// Refuse a destructive git command that would discard uncommitted tracked work.
+fn destructive_git_guard(command: &str, cwd: &Path) -> Result<(), String> {
+    if std::env::var_os("CLAUDETTE_ALLOW_DESTRUCTIVE_GIT").is_some() {
+        return Ok(());
+    }
+    let Some((op, work_dir)) = scan_destructive_git(command) else {
+        return Ok(());
+    };
+    // The op acts on `git -C <dir>` if given, else the shell cwd.
+    let dir: PathBuf = match work_dir {
+        Some(d) => {
+            let p = PathBuf::from(&d);
+            if p.is_absolute() {
+                p
+            } else {
+                cwd.join(p)
+            }
+        }
+        None => cwd.to_path_buf(),
+    };
+    let dirty = git_tracked_dirty(&dir);
+    if dirty.is_empty() {
+        // Clean tree, not a git repo, or git unavailable — nothing to lose.
+        return Ok(());
+    }
+    let shown: Vec<&str> = dirty.iter().take(8).map(String::as_str).collect();
+    let more = dirty.len().saturating_sub(shown.len());
+    let more_note = if more > 0 {
+        format!(", +{more} more")
+    } else {
+        String::new()
+    };
+    Err(format!(
+        "Refusing `{op}`: {} file(s) have uncommitted changes it would permanently discard \
+         ({}{}). Commit them first (`git add -A && git commit -m ...`) or stash \
+         (`git stash`). To start a fresh branch off the latest main WITHOUT losing these \
+         edits, run `git fetch origin && git checkout -b <branch> origin/main` — that \
+         carries your changes onto the new branch. (Override only if you truly mean to \
+         discard them: set CLAUDETTE_ALLOW_DESTRUCTIVE_GIT=1.)",
+        dirty.len(),
+        shown.join(", "),
+        more_note,
+    ))
+}
+
+/// Scan a (possibly chained) command line for a destructive git op, returning
+/// the op label and any `-C <dir>` target. Splits on shell separators so
+/// `git fetch && git reset --hard` is caught, and resolves the real git
+/// *subcommand* so `git commit -m "reset --hard"` is NOT a match.
+fn scan_destructive_git(command: &str) -> Option<(&'static str, Option<String>)> {
+    let normalized = command
+        .replace("&&", "\n")
+        .replace("||", "\n")
+        .replace(['|', '&', ';'], "\n");
+    normalized.lines().find_map(segment_destructive_git)
+}
+
+fn segment_destructive_git(segment: &str) -> Option<(&'static str, Option<String>)> {
+    let mut words = segment.split_whitespace();
+    // The command word must actually be `git` (after any leading VAR=val env
+    // prefixes), so `echo git reset --hard` / `sudo git ...` don't trigger.
+    let mut cmd_word = words.next()?;
+    while is_env_assignment(cmd_word) {
+        cmd_word = words.next()?;
+    }
+    if cmd_word != "git" {
+        return None;
+    }
+    // Skip git global options (some take a value); capture `-C <dir>`.
+    let args: Vec<&str> = words.collect();
+    let mut i = 0;
+    let mut work_dir = None;
+    while i < args.len() {
+        match args[i] {
+            "-C" => {
+                work_dir = args.get(i + 1).map(|s| (*s).to_string());
+                i += 2;
+            }
+            "--git-dir" | "--work-tree" | "--namespace" | "-c" => i += 2,
+            w if w.starts_with("--") && w.contains('=') => i += 1,
+            w if w.starts_with('-') => i += 1,
+            _ => break, // first bare token is the subcommand
+        }
+    }
+    let sub = *args.get(i)?;
+    let flags = &args[i + 1..];
+    let has = |f: &str| flags.contains(&f);
+    let op = match sub {
+        "reset" if has("--hard") => "git reset --hard",
+        "checkout" if has("-f") || has("--force") => "git checkout --force",
+        "switch" if has("-f") || has("--force") || has("--discard-changes") => "git switch --force",
+        _ => return None,
+    };
+    Some((op, work_dir))
+}
+
+/// `VAR=value` shell env-assignment prefix (uppercase/digit/underscore key).
+fn is_env_assignment(word: &str) -> bool {
+    if word.starts_with('-') {
+        return false;
+    }
+    match word.split_once('=') {
+        Some((k, _)) => {
+            !k.is_empty()
+                && k.chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        }
+        None => false,
+    }
+}
+
+/// Tracked, uncommitted changes in `dir` (the modifications/deletions that
+/// `reset --hard` / force-checkout would destroy). Untracked files are
+/// excluded — reset --hard leaves those. Empty if `dir` isn't a git repo or
+/// git is unavailable, so the guard never blocks outside a dirty repo.
+fn git_tracked_dirty(dir: &Path) -> Vec<String> {
+    let Ok(out) = std::process::Command::new("git")
+        .args(["status", "--porcelain", "--untracked-files=no"])
+        .current_dir(dir)
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !out.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        // Porcelain v1: two status chars + space + path.
+        .map(|l| l.get(3..).unwrap_or(l).trim().to_string())
+        .collect()
 }
 
 fn run_edit_file(input: &str) -> Result<String, String> {
@@ -326,6 +471,7 @@ fn run_bash_background(input: &str) -> Result<String, String> {
         .get("cwd")
         .and_then(Value::as_str)
         .map_or_else(crate::missions::active_cwd, PathBuf::from);
+    destructive_git_guard(command, &cwd)?;
 
     ensure_dir(&jobs_dir())?;
     let job_id = new_job_id();
@@ -518,6 +664,123 @@ mod tests {
     fn bash_rejects_whitespace_only_command() {
         let err = run_bash(r#"{"command":"   "}"#).unwrap_err();
         assert!(err.contains("empty"), "got: {err}");
+    }
+
+    #[test]
+    fn scan_flags_reset_hard_plain_and_chained() {
+        assert_eq!(
+            scan_destructive_git("git reset --hard origin/main"),
+            Some(("git reset --hard", None))
+        );
+        // chained after a refresh — the real dogfood failure shape
+        assert_eq!(
+            scan_destructive_git(
+                "git checkout main && git fetch origin && git reset --hard origin/main"
+            ),
+            Some(("git reset --hard", None))
+        );
+        assert_eq!(
+            scan_destructive_git("git fetch origin ; git reset --hard"),
+            Some(("git reset --hard", None))
+        );
+    }
+
+    #[test]
+    fn scan_flags_force_checkout_and_switch() {
+        assert_eq!(
+            scan_destructive_git("git checkout -f"),
+            Some(("git checkout --force", None))
+        );
+        assert_eq!(
+            scan_destructive_git("git checkout --force main"),
+            Some(("git checkout --force", None))
+        );
+        assert_eq!(
+            scan_destructive_git("git switch --discard-changes main"),
+            Some(("git switch --force", None))
+        );
+    }
+
+    #[test]
+    fn scan_captures_dash_c_workdir() {
+        assert_eq!(
+            scan_destructive_git("git -C /repo reset --hard"),
+            Some(("git reset --hard", Some("/repo".to_string())))
+        );
+    }
+
+    #[test]
+    fn scan_ignores_safe_and_quoted_commands() {
+        // non-destructive variants
+        assert_eq!(scan_destructive_git("git reset --soft HEAD~1"), None);
+        assert_eq!(scan_destructive_git("git reset HEAD~1"), None);
+        assert_eq!(
+            scan_destructive_git("git checkout -b feat/x origin/main"),
+            None
+        );
+        assert_eq!(scan_destructive_git("git status"), None);
+        // subcommand is `commit`; --hard only appears inside the message
+        assert_eq!(
+            scan_destructive_git(r#"git commit -m "reset --hard fixed the bug""#),
+            None
+        );
+        // git is not the command word
+        assert_eq!(scan_destructive_git("echo git reset --hard"), None);
+    }
+
+    #[test]
+    fn guard_refuses_reset_hard_on_dirty_tree_but_allows_clean() {
+        // Skip if git is unavailable or the override is set in the env.
+        if std::env::var_os("CLAUDETTE_ALLOW_DESTRUCTIVE_GIT").is_some() {
+            return;
+        }
+        let git_ok = std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if !git_ok {
+            return;
+        }
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let dir = std::env::temp_dir().join(format!("claudette-gitguard-{nanos}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap()
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@example.com"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "init"]);
+
+        // Clean tree → guard allows the reset.
+        assert!(git_tracked_dirty(&dir).is_empty());
+        assert!(destructive_git_guard("git reset --hard", &dir).is_ok());
+
+        // Dirty tree → guard refuses and names the file.
+        std::fs::write(dir.join("a.txt"), "two\n").unwrap();
+        assert!(git_tracked_dirty(&dir).iter().any(|f| f == "a.txt"));
+        let err = destructive_git_guard("git reset --hard origin/main", &dir).unwrap_err();
+        assert!(err.contains("Refusing"), "got: {err}");
+        assert!(err.contains("a.txt"), "should name the file: {err}");
+        assert!(
+            err.contains("checkout -b"),
+            "should suggest the safe recipe: {err}"
+        );
+
+        // A non-destructive command on the same dirty tree still passes.
+        assert!(destructive_git_guard("git status", &dir).is_ok());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
