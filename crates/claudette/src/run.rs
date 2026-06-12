@@ -2766,6 +2766,17 @@ impl PermissionPrompter for CliPrompter {
         let _ = write!(err, "  Allow? [y/N] ");
         let _ = err.flush();
 
+        // Interactive terminal: accept a single keypress so `y` allows
+        // without Enter. Falls through to the line reader below when stdin
+        // isn't a TTY (piped / scripted / spawned agent) or raw mode is
+        // unavailable, keeping that path byte-identical to before.
+        use std::io::IsTerminal as _;
+        if io::stdin().is_terminal() {
+            if let Some(decision) = read_single_key(&mut err) {
+                return decision;
+            }
+        }
+
         let stdin = io::stdin();
         let mut buf = String::new();
         match stdin.read_line(&mut buf) {
@@ -2784,6 +2795,48 @@ impl PermissionPrompter for CliPrompter {
             },
         }
     }
+}
+
+/// Single-keypress confirmation for the `[y/N]` danger gate on an
+/// interactive terminal: `y`/`Y` allows immediately (no Enter needed); any
+/// other key — including Ctrl-C/Ctrl-D, `n`, Esc, Enter — denies. Returns
+/// `None` if raw mode can't be enabled, so the caller falls back to the
+/// line reader. Mirrors the TUI prompt's key handling in `tui.rs`.
+fn read_single_key(err: &mut impl io::Write) -> Option<PermissionPromptDecision> {
+    use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+    use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+
+    enable_raw_mode().ok()?;
+    let mut allow = false;
+    loop {
+        match event::read() {
+            // Windows fires Press + Release — act on Press only.
+            Ok(Event::Key(k)) if k.kind == KeyEventKind::Press => {
+                allow = matches!(
+                    (k.code, k.modifiers),
+                    (
+                        KeyCode::Char('y' | 'Y'),
+                        KeyModifiers::NONE | KeyModifiers::SHIFT
+                    )
+                );
+                break; // first key press decides — anything but `y` denies
+            }
+            Ok(_) => {}      // resize / mouse / key-release — keep waiting
+            Err(_) => break, // read error denies
+        }
+    }
+    // ALWAYS restore cooked mode before returning, on every path above.
+    let _ = disable_raw_mode();
+    // Raw mode suppressed the echo — print the resolved choice + newline so
+    // the transcript reads cleanly.
+    let _ = writeln!(err, "{}", if allow { "y" } else { "n" });
+    Some(if allow {
+        PermissionPromptDecision::Allow
+    } else {
+        PermissionPromptDecision::Deny {
+            reason: "user denied permission".to_string(),
+        }
+    })
 }
 
 /// The nudge message appended when the model returns an empty response.
