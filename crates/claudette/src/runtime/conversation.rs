@@ -461,11 +461,15 @@ where
                                 true,
                             )
                         } else {
-                            let (mut output, mut is_error) =
-                                match self.tool_executor.execute(&tool_name, &input) {
-                                    Ok(output) => (output, false),
-                                    Err(error) => (error.to_string(), true),
-                                };
+                            // Surface live tool activity to the REPL spinner
+                            // (no-op unless the interactive REPL enabled it).
+                            crate::status::global().on_tool_start(&tool_name);
+                            let exec_result = self.tool_executor.execute(&tool_name, &input);
+                            crate::status::global().on_tool_end();
+                            let (mut output, mut is_error) = match exec_result {
+                                Ok(output) => (output, false),
+                                Err(error) => (error.to_string(), true),
+                            };
                             output = merge_hook_feedback(pre_hook_result.messages(), output, false);
 
                             let post_hook_result = self

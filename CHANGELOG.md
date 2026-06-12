@@ -10,6 +10,19 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **Live REPL activity indicator.** During the dead air a local backend
+  creates (prompt-processing / JIT model reload, often 5–30s), the
+  interactive REPL now shows a single-line spinner of what the turn is
+  doing — `thinking…` while the model generates, `running <tool>…` while a
+  tool executes, each with elapsed seconds. It clears itself the instant
+  streamed text, an approval prompt, or the end-of-turn status line needs
+  the screen, so a silent tool-only turn no longer looks like a hang (and
+  the stray blank line it used to print is gone). TTY-only, so piped /
+  scripted / CI runs stay clean; opt out with `CLAUDETTE_NO_SPINNER`. The
+  TUI, forge, sub-agents, one-shot mode, and tests are unaffected.
+
 ## [0.10.0] - 2026-06-12
 
 All three changes come straight from dogfooding claudette on her own

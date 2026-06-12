@@ -36,10 +36,18 @@ pub type TextCallback = Box<dyn Fn(&str) + Send + Sync>;
 pub fn stdout_text_callback() -> TextCallback {
     Box::new(|delta: &str| {
         use std::io::Write;
+        // Clear any REPL activity spinner before writing (so they don't collide
+        // on the same line) and strip a leading newline from the run's first
+        // visible text. No-op / passthrough unless the REPL enabled the
+        // indicator, so other surfaces are unchanged.
+        let out = crate::status::global().on_text(delta);
+        if out.is_empty() {
+            return;
+        }
         let stdout = std::io::stdout();
-        let mut out = stdout.lock();
-        let _ = out.write_all(delta.as_bytes());
-        let _ = out.flush();
+        let mut o = stdout.lock();
+        let _ = o.write_all(out.as_bytes());
+        let _ = o.flush();
     })
 }
 
