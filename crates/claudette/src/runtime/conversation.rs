@@ -8,7 +8,7 @@ use crate::compact::{
 use crate::config::RuntimeFeatureConfig;
 use crate::hooks::{HookRunResult, HookRunner};
 use crate::permissions::{PermissionOutcome, PermissionPolicy, PermissionPrompter};
-use crate::session::{ContentBlock, ConversationMessage, Session};
+use crate::session::{ContentBlock, ConversationMessage, MessageRole, Session};
 use crate::usage::{TokenUsage, UsageTracker};
 
 const DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD: u32 = 200_000;
@@ -75,6 +75,111 @@ fn build_turn_system_prompt(base: &[String], has_images: bool) -> Vec<String> {
     } else {
         base.to_vec()
     }
+}
+
+/// Tool whose results are large navigation blobs worth eliding once stale.
+const REPO_MAP_TOOL: &str = "repo_map";
+
+/// Env escape hatch: set `CLAUDETTE_NO_REPO_MAP_ELIDE` to send the full,
+/// un-elided transcript on the wire. Off by default — elision is the desired
+/// behavior; the knob only exists to rule it out when debugging.
+fn repo_map_elision_disabled() -> bool {
+    std::env::var_os("CLAUDETTE_NO_REPO_MAP_ELIDE").is_some()
+}
+
+/// The messages actually sent to the brain this turn: identical to the
+/// persisted [`Session::messages`] except that stale `repo_map` tool results
+/// have their bulky `output` swapped for a short pointer (see
+/// [`elide_stale_repo_map_results`]). Borrows the session messages with no
+/// allocation on the overwhelmingly common turn that has no elidable map.
+fn wire_messages(messages: &[ConversationMessage]) -> Cow<'_, [ConversationMessage]> {
+    if repo_map_elision_disabled() {
+        return Cow::Borrowed(messages);
+    }
+    match elide_stale_repo_map_results(messages) {
+        Some(trimmed) => Cow::Owned(trimmed),
+        None => Cow::Borrowed(messages),
+    }
+}
+
+/// Replace the `output` of stale `repo_map` tool results with a short pointer
+/// before they go on the wire, leaving the persisted transcript untouched.
+///
+/// Why: the agentic loop re-sends the ENTIRE transcript on every iteration and
+/// every later user turn, and the local backend re-processes the whole prompt
+/// from scratch each call. A single `repo_map` result (up to a few-thousand
+/// tokens) therefore taxes prompt-processing on every subsequent call until it
+/// is evicted — but compaction only fires near 1M tokens, far above a local
+/// model's context window, so it never evicts the map in practice. Observed
+/// live: one `repo_map` call pushed turn-2 input from ~49k to ~89k tokens, and
+/// that cost recurred on every later turn. Same class as the image-bloat fix
+/// ([`crate::compact`]'s `evict_older_image_bytes`), but on the per-turn wire
+/// path rather than at compaction (which never triggers at this scale).
+///
+/// A `repo_map` result is kept VERBATIM only when it is the most-recent
+/// `repo_map` result AND newer than the last user message — i.e. the map the
+/// model is actively reasoning over in the current turn. Every other map is
+/// elided: older within-turn re-calls, and any map from a prior turn. The
+/// common single-call case (one map that lingers) is kept during its own turn
+/// and elided on the very next user turn.
+///
+/// Returns `None` when nothing would change, so the caller borrows the session
+/// messages without allocating. Only `repo_map` results are touched; all other
+/// tool results, and the `tool_use_id`/`is_error` of the elided block, are left
+/// intact so the tool_use/tool_result pairing stays valid.
+fn elide_stale_repo_map_results(
+    messages: &[ConversationMessage],
+) -> Option<Vec<ConversationMessage>> {
+    let is_repo_map = |m: &ConversationMessage| {
+        m.blocks.iter().any(|b| {
+            matches!(b, ContentBlock::ToolResult { tool_name, .. } if tool_name == REPO_MAP_TOOL)
+        })
+    };
+
+    // Fast path: no repo_map result anywhere → borrow as-is.
+    let last_map_idx = messages.iter().rposition(is_repo_map)?;
+    let last_user_idx = messages.iter().rposition(|m| m.role == MessageRole::User);
+
+    // The one map to keep verbatim: the freshest one, but only if it belongs to
+    // the current turn (after the last user message). If the freshest map
+    // predates the last user message, every map is stale and none is kept.
+    let keep_idx = match last_user_idx {
+        Some(u) if last_map_idx <= u => None,
+        _ => Some(last_map_idx),
+    };
+
+    // Nothing changes when the only map present is the one we keep.
+    let any_elidable = messages
+        .iter()
+        .enumerate()
+        .any(|(i, m)| Some(i) != keep_idx && is_repo_map(m));
+    if !any_elidable {
+        return None;
+    }
+
+    let mut out = messages.to_vec();
+    for (i, msg) in out.iter_mut().enumerate() {
+        if Some(i) == keep_idx {
+            continue;
+        }
+        for block in &mut msg.blocks {
+            let ContentBlock::ToolResult {
+                tool_name, output, ..
+            } = block
+            else {
+                continue;
+            };
+            if tool_name != REPO_MAP_TOOL {
+                continue;
+            }
+            let kb = output.len() / 1024;
+            *output = format!(
+                "[repo_map output elided to save context (~{kb}KB): this navigation map was \
+                 consumed earlier — call repo_map again if you still need it]"
+            );
+        }
+    }
+    Some(out)
 }
 
 /// One API request to the brain. Carries the system prompt and the
@@ -373,7 +478,7 @@ where
             }
             let request = ApiRequest {
                 system_prompt,
-                messages: Cow::Borrowed(&self.session.messages),
+                messages: wire_messages(&self.session.messages),
             };
             let events = self.api_client.stream(&request)?;
             let (assistant_message, usage) = build_assistant_message(events)?;
@@ -537,7 +642,7 @@ where
         system_prompt.push(ITERATION_CAP_LANDING_PROMPT.to_string());
         let request = ApiRequest {
             system_prompt,
-            messages: Cow::Borrowed(&self.session.messages),
+            messages: wire_messages(&self.session.messages),
         };
         let events = self
             .api_client
@@ -808,8 +913,9 @@ impl ToolExecutor for StaticToolExecutor {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_turn_system_prompt, parse_auto_compaction_threshold, ApiClient, ApiRequest,
-        AssistantEvent, AutoCompactionEvent, ConversationRuntime, RuntimeError, StaticToolExecutor,
+        build_turn_system_prompt, elide_stale_repo_map_results, parse_auto_compaction_threshold,
+        wire_messages, ApiClient, ApiRequest, AssistantEvent, AutoCompactionEvent,
+        ConversationRuntime, RuntimeError, StaticToolExecutor,
         DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD, VISION_DISCIPLINE_HINT,
     };
     use crate::compact::CompactionConfig;
@@ -819,8 +925,9 @@ mod tests {
         PermissionRequest,
     };
     use crate::prompt_runtime::{ProjectContext, SystemPromptBuilder};
-    use crate::session::{ContentBlock, MessageRole, Session};
+    use crate::session::{ContentBlock, ConversationMessage, MessageRole, Session};
     use crate::usage::TokenUsage;
+    use std::borrow::Cow;
     use std::path::PathBuf;
 
     struct ScriptedApiClient {
@@ -1826,5 +1933,126 @@ mod tests {
         // Cheap sanity check that the constant didn't drift to an unrelated
         // string during refactors.
         assert!(VISION_DISCIPLINE_HINT.to_lowercase().contains("image"));
+    }
+
+    // ---- repo_map output elision (per-turn wire trimming) ----
+
+    fn user_msg(text: &str) -> ConversationMessage {
+        ConversationMessage {
+            role: MessageRole::User,
+            blocks: vec![ContentBlock::Text {
+                text: text.to_string(),
+            }],
+            usage: None,
+        }
+    }
+
+    fn repo_map_msg(id: &str, output: &str) -> ConversationMessage {
+        ConversationMessage::tool_result(id, "repo_map", output, false)
+    }
+
+    fn repo_map_output(m: &ConversationMessage) -> &str {
+        m.blocks
+            .iter()
+            .find_map(|b| match b {
+                ContentBlock::ToolResult {
+                    tool_name, output, ..
+                } if tool_name == "repo_map" => Some(output.as_str()),
+                _ => None,
+            })
+            .expect("expected a repo_map tool_result")
+    }
+
+    fn repo_map_id(m: &ConversationMessage) -> &str {
+        m.blocks
+            .iter()
+            .find_map(|b| match b {
+                ContentBlock::ToolResult {
+                    tool_name,
+                    tool_use_id,
+                    ..
+                } if tool_name == "repo_map" => Some(tool_use_id.as_str()),
+                _ => None,
+            })
+            .expect("expected a repo_map tool_result")
+    }
+
+    #[test]
+    fn elide_none_when_no_repo_map() {
+        let msgs = vec![
+            user_msg("hi"),
+            ConversationMessage::tool_result("g1", "grep_search", "hit\n".repeat(500), false),
+        ];
+        assert!(elide_stale_repo_map_results(&msgs).is_none());
+    }
+
+    #[test]
+    fn elide_keeps_single_fresh_map_verbatim() {
+        // One map, freshly produced this turn (after the last user message):
+        // it's what the model is reasoning over now → keep it, change nothing.
+        let big = "x".repeat(5000);
+        let msgs = vec![user_msg("map the repo"), repo_map_msg("m1", &big)];
+        assert!(elide_stale_repo_map_results(&msgs).is_none());
+    }
+
+    #[test]
+    fn elide_stale_map_from_prior_turn() {
+        let big = "x".repeat(5000);
+        let msgs = vec![
+            user_msg("turn 1"),
+            repo_map_msg("m1", &big),
+            user_msg("turn 2"), // a new user turn makes the earlier map stale
+        ];
+        let out = elide_stale_repo_map_results(&msgs).expect("prior-turn map should elide");
+        let elided = repo_map_output(&out[1]);
+        assert!(
+            elided.contains("elided to save context"),
+            "placeholder missing: {elided}"
+        );
+        assert!(
+            !elided.contains(&big),
+            "full blob still present on the wire"
+        );
+        assert!(elided.len() < big.len(), "elided output should be smaller");
+        // tool_use/tool_result pairing must survive: same id, still a ToolResult.
+        assert_eq!(repo_map_id(&out[1]), "m1");
+        // Unrelated messages are passed through untouched.
+        assert_eq!(out.len(), msgs.len());
+        assert_eq!(out[0], msgs[0]);
+        assert_eq!(out[2], msgs[2]);
+    }
+
+    #[test]
+    fn elide_keeps_latest_map_within_turn() {
+        // Two maps in the same turn (no intervening user message): the older
+        // re-call is dead weight; the latest is what's being reasoned over.
+        let old = "a".repeat(5000);
+        let latest = "b".repeat(5000);
+        let msgs = vec![
+            user_msg("explore"),
+            repo_map_msg("m1", &old),
+            repo_map_msg("m2", &latest),
+        ];
+        let out = elide_stale_repo_map_results(&msgs).expect("older map should elide");
+        assert!(repo_map_output(&out[1]).contains("elided"));
+        assert_eq!(repo_map_output(&out[2]), latest, "latest map kept verbatim");
+    }
+
+    #[test]
+    fn wire_messages_borrows_when_nothing_to_elide() {
+        let msgs = vec![user_msg("hi")];
+        assert!(matches!(wire_messages(&msgs), Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn wire_messages_owns_when_eliding() {
+        let big = "x".repeat(5000);
+        let msgs = vec![user_msg("t1"), repo_map_msg("m1", &big), user_msg("t2")];
+        match wire_messages(&msgs) {
+            Cow::Owned(trimmed) => {
+                assert!(repo_map_output(&trimmed[1]).contains("elided"));
+            }
+            Cow::Borrowed(_) => panic!("expected an owned, elided wire payload"),
+        }
     }
 }

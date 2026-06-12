@@ -23,6 +23,20 @@ bumps are non-breaking bugfixes only.
   scripted / CI runs stay clean; opt out with `CLAUDETTE_NO_SPINNER`. The
   TUI, forge, sub-agents, one-shot mode, and tests are unaffected.
 
+### Changed
+
+- **`repo_map` results no longer slow every later turn.** A `repo_map` call
+  produces a large navigation blob; because the whole transcript is re-sent on
+  every loop iteration and every later turn, and the local backend reprocesses
+  the full prompt from scratch each time, that blob used to tax prompt-
+  processing for the rest of the session (compaction only evicts near 1M
+  tokens — effectively never at a local model's context size). Stale `repo_map`
+  outputs are now replaced on the wire with a short pointer the moment they are
+  no longer the map being actively reasoned over (the most recent map in the
+  current turn is kept verbatim). The persisted transcript is untouched, and
+  the model is told to re-run `repo_map` if it needs the map again. Opt out
+  with `CLAUDETTE_NO_REPO_MAP_ELIDE`.
+
 ## [0.10.0] - 2026-06-12
 
 All three changes come straight from dogfooding claudette on her own
