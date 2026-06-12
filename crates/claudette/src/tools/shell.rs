@@ -71,7 +71,7 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "bash",
-                "description": "Run a shell command (asks for confirmation). PowerShell on Windows (use ; not &&, $env:VAR, backslash paths); sh elsewhere.",
+                "description": "Run a shell command (asks for confirmation). PowerShell on Windows (use ; not &&, $env:VAR, backslash paths); sh elsewhere. Prefer `git -C <dir>` / `cargo --manifest-path` over cd-chaining. For anything beyond one command, write_file a script and run that — inline -c/-Command quoting gets mangled.",
                 "parameters": {
                     "type": "object",
                     "properties": {
