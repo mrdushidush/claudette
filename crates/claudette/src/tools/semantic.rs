@@ -222,6 +222,10 @@ fn chunk_file(path: &Path, text: &str, chunks: &mut Vec<Chunk>) {
 
 fn tokenize(s: &str) -> HashSet<String> {
     let mut out = Vec::new();
+    const STOP: &[&str] = &[
+        "the", "is", "are", "of", "in", "to", "where", "what", "how", "does", "do", "it", "this",
+        "that", "for", "and", "or", "a", "an", "be", "on", "at",
+    ];
     for raw in s.split(|c: char| !c.is_alphanumeric()) {
         if raw.is_empty() {
             continue;
@@ -231,7 +235,7 @@ fn tokenize(s: &str) -> HashSet<String> {
         for ch in raw.chars() {
             if ch.is_uppercase() && prev_lower_or_digit && !cur.is_empty() {
                 let lower = cur.to_lowercase();
-                if lower.chars().count() > 1 {
+                if lower.chars().count() > 1 && !STOP.contains(&lower.as_str()) {
                     out.push(lower);
                 }
                 cur.clear();
@@ -240,7 +244,7 @@ fn tokenize(s: &str) -> HashSet<String> {
             prev_lower_or_digit = ch.is_lowercase() || ch.is_ascii_digit();
         }
         let lower = cur.to_lowercase();
-        if lower.chars().count() > 1 {
+        if lower.chars().count() > 1 && !STOP.contains(&lower.as_str()) {
             out.push(lower);
         }
     }
@@ -333,6 +337,16 @@ mod tests {
             "single-char split fragment must be dropped"
         );
         assert!(t.contains("bb"));
+    }
+
+    #[test]
+    fn tokenize_drops_stop_words() {
+        let t = tokenize("where is the parser");
+        assert!(t.contains("parser"));
+        assert!(!t.contains("where"));
+        assert!(!t.contains("is"));
+        assert!(!t.contains("the"));
+        assert_eq!(t.len(), 1, "only 'parser' should survive");
     }
 
     #[test]
