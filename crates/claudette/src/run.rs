@@ -1727,6 +1727,18 @@ pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
     let mut state = ReplState::default();
     let mut prompter = CliPrompter;
 
+    // Activity indicator: a live `thinking…` / `running <tool>…` spinner during
+    // the dead air a local backend creates (prompt-processing / JIT reload), so
+    // the user can tell a working turn from a hang without watching the LM
+    // Studio log. TTY-only (piped / scripted / CI runs stay clean); opt out via
+    // CLAUDETTE_NO_SPINNER. No-op everywhere it isn't enabled.
+    {
+        use std::io::IsTerminal as _;
+        if std::io::stderr().is_terminal() && std::env::var_os("CLAUDETTE_NO_SPINNER").is_none() {
+            crate::status::global().enable();
+        }
+    }
+
     eprintln!(
         "{} {} {}",
         theme::ROBOT,
@@ -1824,6 +1836,7 @@ pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
             }
         }
 
+        crate::status::global().on_turn_start();
         let turn_result: Result<TurnSummary, String> = if extracted.attached.is_empty() {
             // Sprint 14: route through brain_selector so Auto-preset turns get
             // the 4b → 9b escalation when stuck signals fire. On Fast/Smart
@@ -1847,6 +1860,7 @@ pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
                 .run_turn_with_images(trimmed, images, Some(&mut prompter))
                 .map_err(|e| e.to_string())
         };
+        crate::status::global().on_turn_end();
 
         match turn_result {
             Ok(summary) => {
@@ -2723,6 +2737,9 @@ pub struct CliPrompter;
 
 impl PermissionPrompter for CliPrompter {
     fn decide(&mut self, request: &PermissionRequest) -> PermissionPromptDecision {
+        // Clear the activity spinner before the approval prompt takes the
+        // screen (no-op unless the REPL enabled it).
+        crate::status::global().on_prompt();
         let stderr = io::stderr();
         let mut err = stderr.lock();
         let _ = writeln!(err);
