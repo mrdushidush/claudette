@@ -33,6 +33,15 @@ bumps are non-breaking bugfixes only.
   files were scanned only in `mode=refs`. The schema's language list now
   includes C#.
 
+- **`bash` refuses a destructive `git` command that would discard uncommitted
+  work.** `git reset --hard` (and force `checkout`/`switch`) run while the
+  working tree has uncommitted *tracked* changes now returns an error naming
+  the at-risk files and pointing at the non-destructive
+  `git fetch origin && git checkout -b <branch> origin/main` recipe, instead of
+  silently wiping the edits. A clean tree, a non-repo directory, and
+  non-destructive git commands are unaffected; override with
+  `CLAUDETTE_ALLOW_DESTRUCTIVE_GIT=1`.
+
 ### Changed
 
 - **`repo_map` map output is a compact outline, and the tool steers to
