@@ -23,6 +23,11 @@ bumps are non-breaking bugfixes only.
   scripted / CI runs stay clean; opt out with `CLAUDETTE_NO_SPINNER`. The
   TUI, forge, sub-agents, one-shot mode, and tests are unaffected.
 
+- **Single-keypress approval.** The interactive `Allow? [y/N]` danger-gate
+  prompt now accepts a single keypress — `y` approves immediately without
+  Enter; any other key denies. TTY-only: piped / scripted / agent runs keep
+  the line-buffered reader unchanged.
+
 ### Changed
 
 - **`repo_map` map output is a compact outline, and the tool steers to
