@@ -655,22 +655,23 @@ mod tests {
         // the workspace root) and the sandbox check rejected it. Now bare
         // relative paths are rooted at files_dir() so the model's intuition
         // works without it having to know the sandbox path.
-        let _guard = crate::test_env_lock(); // home-resolving
-        let target = files_dir().join("claudette-relative-test.txt");
-        let _ = fs::remove_file(&target);
+        with_workspace_env(None, || {
+            let target = files_dir().join("claudette-relative-test.txt");
+            let _ = fs::remove_file(&target);
 
-        let input = json!({
-            "path": "claudette-relative-test.txt",
-            "content": "wrote via bare relative path",
-        })
-        .to_string();
-        let out = run_write_file(&input).expect("relative write should succeed under sandbox");
-        assert!(out.contains("\"ok\":true"), "got: {out}");
-        assert!(target.exists(), "expected {} to exist", target.display());
-        let content = fs::read_to_string(&target).unwrap();
-        assert_eq!(content, "wrote via bare relative path");
+            let input = json!({
+                "path": "claudette-relative-test.txt",
+                "content": "wrote via bare relative path",
+            })
+            .to_string();
+            let out = run_write_file(&input).expect("relative write should succeed under sandbox");
+            assert!(out.contains("\"ok\":true"), "got: {out}");
+            assert!(target.exists(), "expected {} to exist", target.display());
+            let content = fs::read_to_string(&target).unwrap();
+            assert_eq!(content, "wrote via bare relative path");
 
-        let _ = fs::remove_file(&target);
+            let _ = fs::remove_file(&target);
+        });
     }
 
     #[test]
