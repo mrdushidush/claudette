@@ -21,6 +21,7 @@
 //! lists — for "list everywhere X is used" and "what's the real value past
 //! the stale docs". See [`run_repo_refs`].
 
+use std::fmt::Write;
 use std::path::Path;
 
 use regex::Regex;
@@ -29,8 +30,8 @@ use serde_json::{json, Value};
 use super::{validate_read_path, MAX_FILE_BYTES};
 
 const MAX_FILES_SCANNED: usize = 5000;
-const MAX_RESULT_FILES: usize = 15;
-const MAX_SYMBOLS_PER_FILE: usize = 40;
+const MAX_RESULT_FILES: usize = 12;
+const MAX_SYMBOLS_PER_FILE: usize = 20;
 const MAX_SIG_CHARS: usize = 160;
 /// `mode="refs"`: cap on individual hit lines returned (source + doc
 /// combined). Higher than grep's 100 because the per-hit payload is just
@@ -61,7 +62,7 @@ pub(super) fn schemas() -> Vec<Value> {
         "type": "function",
         "function": {
             "name": "repo_map",
-            "description": "Localize code by concept. Returns a ranked outline of the workspace: the files whose top-level definitions (functions, types, constants) best match `query`, each with line numbers + signature snippets. Use this FIRST to find where something lives instead of guessing grep patterns — the snippet often shows the value/signature directly. Then read_file the cited line if you need more. (Languages: Rust, Python, JS/TS, Go, Ruby.) For an exhaustive list of everywhere a name is used (or to pin the real source value past stale docs), call with mode='refs' and name='<exact text>'.",
+            "description": "Find where code lives by concept — for INITIAL orientation when you don't already know the location. Returns a compact outline of the workspace files whose top-level definitions best match `query`, each line as `<line>  <signature>`. Orientation only: if you already know the exact symbol or string, use grep_search; to find a file by name, use glob_search; to re-read a known file, use read_file. One pass is enough — do NOT call repo_map repeatedly. (Languages: Rust, Python, JS/TS, Go, Ruby.) To list every place a name appears (or pin the real source value past stale docs), call with mode='refs' and name='<exact text>'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -85,8 +86,6 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
 
 struct Symbol {
     line: usize,
-    kind: &'static str,
-    name: String,
     sig: String,
 }
 
@@ -187,7 +186,7 @@ fn run_repo_map(input: &str) -> Result<String, String> {
         let mut file_score = 0usize;
 
         for (lineno, line) in content.lines().enumerate() {
-            for (kind, re) in &patterns {
+            for (_, re) in &patterns {
                 if let Some(caps) = re.captures(line) {
                     if let Some(name) = caps.get(1).map(|m| m.as_str()) {
                         let name_tokens = tokenize(name);
@@ -200,12 +199,10 @@ fn run_repo_map(input: &str) -> Result<String, String> {
                             sym_score,
                             Symbol {
                                 line: lineno + 1,
-                                kind,
-                                name: name.to_string(),
                                 sig: line.trim().chars().take(MAX_SIG_CHARS).collect(),
                             },
                         ));
-                        break; // one kind per line
+                        break; // one match per line
                     }
                 }
             }
@@ -233,32 +230,40 @@ fn run_repo_map(input: &str) -> Result<String, String> {
 
     scored.sort_by_key(|f| std::cmp::Reverse(f.1));
     let result_files = scored.len().min(MAX_RESULT_FILES);
-    let files_json: Vec<Value> = scored
-        .into_iter()
-        .take(MAX_RESULT_FILES)
-        .map(|(file, score, syms)| {
-            json!({
-                "file": file,
-                "score": score,
-                "symbols": syms.iter().map(|s| json!({
-                    "line": s.line,
-                    "kind": s.kind,
-                    "name": s.name,
-                    "sig": s.sig,
-                })).collect::<Vec<_>>(),
-            })
-        })
-        .collect();
 
-    Ok(json!({
-        "query": query,
-        "root": root.display().to_string(),
-        "files_scanned": files_scanned,
-        "result_files": result_files,
-        "truncated": truncated,
-        "files": files_json,
-    })
-    .to_string())
+    // Compact, digestible outline instead of nested JSON. The per-symbol JSON
+    // keys (`line`/`kind`/`name`/`sig`) — with kind/name duplicating what the
+    // sig line already shows — were the bulk of a multi-thousand-token blob the
+    // local backend reprocesses on every loop iteration. The outline keeps the
+    // same information (file, score, and each matching definition's line +
+    // source signature) at a fraction of the size and is easier to parse.
+    let mut out = format!(
+        "repo_map  \"{query}\"  -  {result_files} of {files_scanned} files matched{}\n",
+        if truncated {
+            "  (scan hit the file cap; narrow `path` or use grep_search)"
+        } else {
+            ""
+        }
+    );
+    if result_files == 0 {
+        out.push_str(
+            "\nNothing matched. Use grep_search for an exact symbol or string, \
+             glob_search for a filename, or rephrase the query.\n",
+        );
+        return Ok(out);
+    }
+    for (file, score, syms) in scored.into_iter().take(MAX_RESULT_FILES) {
+        let _ = writeln!(out, "\n{file}  ({score})");
+        for s in &syms {
+            let _ = writeln!(out, "  {:>5}  {}", s.line, s.sig);
+        }
+    }
+    out.push_str(
+        "\nnext: read_file a cited line for context; grep_search for a known \
+         symbol or string; glob_search for a file by name. One orientation pass \
+         is enough -- no need to re-run repo_map.\n",
+    );
+    Ok(out)
 }
 
 struct RefHit {
@@ -621,54 +626,25 @@ mod tests {
             "path": base.to_str().unwrap()
         })
         .to_string();
-        let out = run_repo_map(&input).unwrap();
-        let v: Value = serde_json::from_str(&out).unwrap();
+        let out = run_repo_map(&input).unwrap().replace('\\', "/");
 
-        assert!(v["files"].is_array(), "map mode must return files array");
-        let first_file = &v["files"][0];
         assert!(
-            first_file["file"]
-                .as_str()
-                .unwrap()
-                .replace('\\', "/")
-                .contains("/lib/greeting.rb"),
-            "greeting.rb should be found: {out}"
+            out.contains("lib/greeting.rb"),
+            "greeting.rb should be found:\n{out}"
         );
-
-        let symbols = first_file["symbols"].as_array().unwrap();
-        let names: Vec<&str> = symbols
-            .iter()
-            .map(|s| s["name"].as_str().unwrap())
-            .collect();
-        assert!(
-            names.contains(&"Something"),
-            "module Something must be extracted"
-        );
-        assert!(
-            names.contains(&"Greeting"),
-            "class Greeting must be extracted"
-        );
-        assert!(
-            names.contains(&"initialize"),
-            "def initialize must be extracted"
-        );
-        assert!(
-            names.contains(&"class_method"),
-            "def self.class_method -> class_method"
-        );
-        assert!(names.contains(&"valid?"), "def valid? must include the ?");
-        assert!(
-            names.contains(&"say_hello"),
-            "def say_hello must be extracted"
-        );
-
-        let kinds: Vec<&str> = symbols
-            .iter()
-            .map(|s| s["kind"].as_str().unwrap())
-            .collect();
-        assert!(kinds.contains(&"module"));
-        assert!(kinds.contains(&"class"));
-        assert!(kinds.contains(&"def"));
+        // The outline shows each definition's source line (signature), which
+        // already carries the kind keyword and the name — so the extraction is
+        // proven by the sig appearing, with no separate name/kind fields.
+        for sig in [
+            "module Something",
+            "class Greeting",
+            "def initialize",
+            "def self.class_method",
+            "def valid?",
+            "def say_hello",
+        ] {
+            assert!(out.contains(sig), "expected `{sig}` in the outline:\n{out}");
+        }
 
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -698,33 +674,21 @@ mod tests {
             "path": base.to_str().unwrap()
         })
         .to_string();
-        let out = run_repo_map(&input).unwrap();
-        let v: Value = serde_json::from_str(&out).unwrap();
+        let out = run_repo_map(&input).unwrap().replace('\\', "/");
 
-        let first = &v["files"][0];
+        // run.rs is the matching file; the const's sig carries the value (= 3).
         assert!(
-            first["file"]
-                .as_str()
-                .unwrap()
-                .replace('\\', "/")
-                .contains("/src/run.rs"),
-            "run.rs should rank first: {out}"
+            out.contains("src/run.rs"),
+            "run.rs should be listed:\n{out}"
         );
-        // The const's sig snippet carries the answer (= 3) directly.
-        let sigs: String = first["symbols"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|s| s["sig"].as_str().unwrap())
-            .collect::<Vec<_>>()
-            .join(" | ");
-        assert!(sigs.contains("= 3"), "expected the value in a sig: {sigs}");
-        // map mode response shape: has `files`, no refs-only keys.
-        assert!(v.get("files").is_some(), "map mode must keep `files`");
+        assert!(out.contains("= 3"), "expected the value in a sig:\n{out}");
+        // notes.rs shares no query token → excluded from the outline.
         assert!(
-            v.get("distinct_names").is_none(),
-            "map mode must NOT carry refs-only keys"
+            !out.contains("notes.rs"),
+            "non-matching file must be excluded:\n{out}"
         );
+        // Map output, not refs: no refs-only section markers.
+        assert!(!out.contains("source_hits"), "map mode is not refs:\n{out}");
 
         let _ = std::fs::remove_dir_all(&base);
     }
