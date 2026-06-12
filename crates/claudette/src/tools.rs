@@ -457,7 +457,13 @@ fn run_get_capabilities() -> String {
 // doc comment and `path_is_allowed`.
 // ────────────────────────────────────────────────────────────────────────────
 
-pub(super) const MAX_FILE_BYTES: usize = 100 * 1024; // 100 KB
+// 1 MB: raised from 100 KB after a dogfood session went blind to the repo's
+// own `api.rs` (135 KB) — read_file refused it and grep_search/repo_map
+// silently skipped it, so a search for a symbol that was actually present
+// returned nothing and the model concluded the code had been deleted. Normal
+// source files routinely exceed 100 KB; 1 MB still excludes pathological
+// minified/generated/data blobs while covering hand-written code.
+pub(super) const MAX_FILE_BYTES: usize = 1024 * 1024; // 1 MB
 
 /// Expand a leading `~` to the user's home directory. Other tildes are left
 /// alone (matching shell behaviour). `pub(crate)` so the `/validate` slash

@@ -279,6 +279,7 @@ fn run_grep_search(input: &str) -> Result<String, String> {
     let mut matches: Vec<Value> = Vec::new();
     let mut files_scanned: usize = 0;
     let mut truncated = false;
+    let mut skipped_oversize: usize = 0;
 
     // Walk with ripgrep's `ignore` crate: respects .gitignore / .ignore,
     // skips hidden files, and never descends into VCS metadata. `filter_entry`
@@ -350,9 +351,13 @@ fn run_grep_search(input: &str) -> Result<String, String> {
         }
         files_scanned += 1;
 
-        // Skip oversized files — same 100 KB cap as read_file.
+        // Skip oversized files — same cap as read_file. Counted, not silently
+        // dropped, so the result can flag that a too-big file went unsearched
+        // instead of looking like a clean "no match" (a silent skip once made a
+        // model conclude present code had been deleted).
         let Ok(meta) = entry.metadata() else { continue };
         if meta.len() > MAX_FILE_BYTES as u64 {
+            skipped_oversize += 1;
             continue;
         }
         // Read as text; binary files fail UTF-8 and get skipped.
@@ -375,7 +380,7 @@ fn run_grep_search(input: &str) -> Result<String, String> {
         }
     }
 
-    Ok(json!({
+    let mut result = json!({
         "pattern": pattern,
         "mode": mode,
         "root": root.display().to_string(),
@@ -383,8 +388,16 @@ fn run_grep_search(input: &str) -> Result<String, String> {
         "match_count": matches.len(),
         "truncated": truncated,
         "matches": matches,
-    })
-    .to_string())
+    });
+    if skipped_oversize > 0 {
+        result["skipped_oversize"] = json!(skipped_oversize);
+        result["note"] = json!(format!(
+            "{skipped_oversize} file(s) exceeded the {MAX_FILE_BYTES}-byte size cap and were NOT \
+             searched — a low match_count may be incomplete. Open such a file directly with \
+             read_file (it pages) instead of assuming the pattern is absent."
+        ));
+    }
+    Ok(result.to_string())
 }
 
 // ────── web_fetch ────────────────────────────────────────────────────────
@@ -778,6 +791,62 @@ mod tests {
         let out2 = run_grep_search(&input2).unwrap();
         let v2: Value = serde_json::from_str(&out2).unwrap();
         assert_eq!(v2["mode"], json!("literal"), "got: {out2}");
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn grep_search_searches_large_files_and_flags_oversized() {
+        let _eg = crate::test_env_lock();
+        let base = user_home()
+            .join(".claudette")
+            .join("files")
+            .join("claudette-greptest-bigfiles");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+
+        // ~200 KB: over the OLD 100 KB cap, under the new 1 MB cap → must be
+        // searched now (this is exactly the api.rs-went-invisible regression).
+        let mut medium = "x".repeat(200 * 1024);
+        medium.push_str("\nFINDME_NEEDLE\n");
+        fs::write(base.join("medium.rs"), &medium).unwrap();
+
+        // ~1.1 MB: over the new cap → skipped, but FLAGGED, not silent.
+        let mut huge = "y".repeat(1_100 * 1024);
+        huge.push_str("\nFINDME_NEEDLE\n");
+        fs::write(base.join("huge.rs"), &huge).unwrap();
+
+        let input =
+            json!({ "pattern": "FINDME_NEEDLE", "path": base.to_str().unwrap() }).to_string();
+        let out = run_grep_search(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+
+        let files: Vec<String> = v["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["file"].as_str().unwrap().replace('\\', "/"))
+            .collect();
+        // The 200 KB file is now searched (would have been skipped at 100 KB).
+        assert!(
+            files.iter().any(|f| f.contains("/medium.rs")),
+            "200 KB file must be searched now: {out}"
+        );
+        // The 1.1 MB file is skipped…
+        assert!(
+            !files.iter().any(|f| f.contains("/huge.rs")),
+            "1.1 MB file must be skipped: {out}"
+        );
+        // …but flagged, not silent.
+        assert_eq!(
+            v["skipped_oversize"].as_u64().unwrap(),
+            1,
+            "the oversized file must be counted: {out}"
+        );
+        assert!(
+            v["note"].as_str().unwrap().contains("read_file"),
+            "the note must point to read_file: {out}"
+        );
 
         let _ = fs::remove_dir_all(&base);
     }

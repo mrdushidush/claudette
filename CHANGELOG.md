@@ -38,6 +38,18 @@ bumps are non-breaking bugfixes only.
   to `glob_search`, so it is no longer over-called in place of a targeted
   search. `mode=refs` output is unchanged.
 
+### Fixed
+
+- **Large source files are no longer invisible to search/read.** The shared
+  file-size cap was 100 KB, so a source file over it — including Claudette's
+  own 135 KB `api.rs` — was hard-refused by `read_file` and *silently* skipped
+  by `grep_search`/`repo_map`. A search for a symbol that was actually present
+  returned nothing, which on a small brain read as "the code was deleted." The
+  cap is raised to 1 MB (covers hand-written source; still excludes
+  pathological minified/generated blobs), and `grep_search` now reports a
+  `skipped_oversize` count plus a note pointing to `read_file` when a file is
+  too large to scan, instead of dropping it silently.
+
 ## [0.10.0] - 2026-06-12
 
 All three changes come straight from dogfooding claudette on her own
