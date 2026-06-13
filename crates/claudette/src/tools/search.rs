@@ -70,10 +70,11 @@ pub(super) fn schemas() -> Vec<Value> {
                     "type": "object",
                     "properties": {
                         "pattern": { "type": "string", "description": "Regex to search for (e.g. 'TODO|FIXME', 'fn\\s+\\w+'). Invalid regex falls back to literal substring." },
-                        "path":    { "type": "string", "description": "Directory to search (default: the workspace/project root)" },
-                        "glob":    { "type": "string", "description": "Optional filename glob to restrict the search (e.g. '*.rs', 'src/**/*.ts'). A bare name matches files at any depth; a pattern with '/' matches the path relative to the search root. When omitted, all files are searched." }
-                    },
-                    "required": ["pattern"]
+                            "path":    { "type": "string", "description": "Directory to search (default: the workspace/project root)" },
+                            "glob":    { "type": "string", "description": "Optional filename glob to restrict the search (e.g. '*.rs', 'src/**/*.ts'). A bare name matches files at any depth; a pattern with '/' matches the path relative to the search root. When omitted, all files are searched." },
+                            "count_only": { "type": "boolean", "description": "When true, return only the total match count and a per-file breakdown — no line bodies, and not capped at 100. Use to gauge how widespread a pattern is. Default false." }
+                        },
+                        "required": ["pattern"]
                 }
             }
         }),
@@ -258,6 +259,14 @@ fn run_grep_search(input: &str) -> Result<String, String> {
         })
         .transpose()?;
 
+    // Count-only mode: tally matches and a per-file breakdown, skip the line
+    // bodies, and (below) do NOT stop at the 100-match cap so the total is the
+    // true count across the same filtered set normal mode would return.
+    let count_only = v
+        .get("count_only")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
     // Compile the pattern as a case-insensitive regex (ripgrep semantics —
     // what coding models reach for: alternation, `.?`, char classes). If it
     // isn't valid regex (a small brain occasionally passes a raw string with
@@ -280,6 +289,8 @@ fn run_grep_search(input: &str) -> Result<String, String> {
     let mut files_scanned: usize = 0;
     let mut truncated = false;
     let mut skipped_oversize: usize = 0;
+    let mut total_matches: usize = 0; // count_only: true total (no 100-match cap)
+    let mut file_counts: Vec<Value> = Vec::new(); // count_only: per-file breakdown
 
     // Walk with ripgrep's `ignore` crate: respects .gitignore / .ignore,
     // skips hidden files, and never descends into VCS metadata. `filter_entry`
@@ -364,31 +375,59 @@ fn run_grep_search(input: &str) -> Result<String, String> {
         let Ok(content) = fs::read_to_string(p) else {
             continue;
         };
+        let mut file_match_count: usize = 0;
         for (lineno, line) in content.lines().enumerate() {
             if line_matches(line) {
-                let snippet: String = line.chars().take(MAX_GREP_LINE_CHARS).collect();
-                matches.push(json!({
-                    "file": p.display().to_string(),
-                    "line": lineno + 1,
-                    "text": snippet,
-                }));
-                if matches.len() >= MAX_GREP_MATCHES {
-                    truncated = true;
-                    break 'walk;
+                if count_only {
+                    // Tally only — keep no line body, and do NOT break at
+                    // MAX_GREP_MATCHES: the whole point is the true total. The
+                    // walk is still bounded by the MAX_GREP_FILES file cap.
+                    file_match_count += 1;
+                    total_matches += 1;
+                } else {
+                    let snippet: String = line.chars().take(MAX_GREP_LINE_CHARS).collect();
+                    matches.push(json!({
+                        "file": p.display().to_string(),
+                        "line": lineno + 1,
+                        "text": snippet,
+                    }));
+                    if matches.len() >= MAX_GREP_MATCHES {
+                        truncated = true;
+                        break 'walk;
+                    }
                 }
             }
         }
+        if count_only && file_match_count > 0 {
+            file_counts.push(json!({
+                "file": p.display().to_string(),
+                "count": file_match_count,
+            }));
+        }
     }
 
-    let mut result = json!({
-        "pattern": pattern,
-        "mode": mode,
-        "root": root.display().to_string(),
-        "files_scanned": files_scanned,
-        "match_count": matches.len(),
-        "truncated": truncated,
-        "matches": matches,
-    });
+    let mut result = if count_only {
+        json!({
+            "pattern": pattern,
+            "mode": mode,
+            "root": root.display().to_string(),
+            "files_scanned": files_scanned,
+            "count_only": true,
+            "match_count": total_matches,
+            "file_counts": file_counts,
+            "truncated": truncated,
+        })
+    } else {
+        json!({
+            "pattern": pattern,
+            "mode": mode,
+            "root": root.display().to_string(),
+            "files_scanned": files_scanned,
+            "match_count": matches.len(),
+            "truncated": truncated,
+            "matches": matches,
+        })
+    };
     if skipped_oversize > 0 {
         result["skipped_oversize"] = json!(skipped_oversize);
         result["note"] = json!(format!(
@@ -1076,6 +1115,105 @@ mod tests {
             v4["match_count"].as_u64().unwrap(),
             1,
             "src\\*.rs should normalize to src/*.rs"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn grep_search_count_only_returns_totals_without_line_bodies() {
+        let _eg = crate::test_env_lock();
+        let base = user_home()
+            .join(".claudette")
+            .join("files")
+            .join("claudette-grep-count-only-test");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(base.join("src")).unwrap();
+        // a.rs: 150 matching lines — deliberately OVER the 100-match cap, so the
+        // test proves count_only reports the TRUE total (not capped) and does
+        // not flag truncation, whereas default mode caps at 100 and truncates.
+        let a: String = (0..150).map(|_| "let NEEDLE = 1;\n").collect();
+        fs::write(base.join("src").join("a.rs"), a).unwrap();
+        // b.rs: 3 matching lines + 1 non-match.
+        fs::write(
+            base.join("src").join("b.rs"),
+            "NEEDLE\nNEEDLE\nNEEDLE\nnot here\n",
+        )
+        .unwrap();
+
+        // count_only=true → true total 153, per-file breakdown, NO line bodies.
+        let input = json!({
+            "pattern": "NEEDLE",
+            "path": base.to_str().unwrap(),
+            "count_only": true
+        })
+        .to_string();
+        let out = run_grep_search(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["count_only"], json!(true), "got: {out}");
+        assert_eq!(
+            v["match_count"].as_u64().unwrap(),
+            153,
+            "count_only must report the true total across the filtered set: {out}"
+        );
+        assert_eq!(
+            v["truncated"],
+            json!(false),
+            "count_only is not capped at 100 matches: {out}"
+        );
+        // No line bodies at all — the whole point of count_only.
+        assert!(
+            v.get("matches").is_none(),
+            "count_only must omit the `matches` array: {out}"
+        );
+        assert!(
+            !out.contains("\"text\""),
+            "count_only must omit line bodies: {out}"
+        );
+        // Per-file breakdown present and correct.
+        let count_for = |suffix: &str| {
+            v["file_counts"].as_array().unwrap().iter().find_map(|e| {
+                let f = e["file"].as_str().unwrap().replace('\\', "/");
+                if f.ends_with(suffix) {
+                    Some(e["count"].as_u64().unwrap())
+                } else {
+                    None
+                }
+            })
+        };
+        assert_eq!(count_for("src/a.rs"), Some(150), "a.rs count: {out}");
+        assert_eq!(count_for("src/b.rs"), Some(3), "b.rs count: {out}");
+
+        // Omitting the flag is unchanged: line bodies present, capped at 100 +
+        // truncated, and no count_only / file_counts keys.
+        let input_default = json!({
+            "pattern": "NEEDLE",
+            "path": base.to_str().unwrap()
+        })
+        .to_string();
+        let out_d = run_grep_search(&input_default).unwrap();
+        let vd: Value = serde_json::from_str(&out_d).unwrap();
+        assert!(
+            vd.get("count_only").is_none(),
+            "default mode omits count_only: {out_d}"
+        );
+        assert!(
+            vd.get("file_counts").is_none(),
+            "default mode omits file_counts: {out_d}"
+        );
+        assert_eq!(
+            vd["match_count"].as_u64().unwrap(),
+            100,
+            "default mode caps matches at 100: {out_d}"
+        );
+        assert_eq!(
+            vd["truncated"],
+            json!(true),
+            "default mode truncates at the cap: {out_d}"
+        );
+        assert!(
+            vd["matches"].as_array().unwrap()[0]["text"].is_string(),
+            "default mode returns line bodies: {out_d}"
         );
 
         let _ = fs::remove_dir_all(&base);
