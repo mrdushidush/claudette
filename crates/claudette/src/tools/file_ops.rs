@@ -111,10 +111,10 @@ pub(super) fn schemas() -> Vec<Value> {
                     "properties": {
                         "path":   { "type": "string", "description": "File path (absolute, ~/, or relative to the workspace)" },
                         "offset": { "type": "integer", "description": "1-based line number to start at (default: start of file)" },
-                            "limit":  { "type": "integer", "description": "Max lines to return (default: 400)" },
-                            "tail":   { "type": "integer", "description": "Return only the LAST N lines (e.g. the end of a log). Mutually exclusive with offset." }
-                        },
-                        "required": ["path"]
+                        "limit":  { "type": "integer", "description": "Max lines to return (default: 400)" },
+                        "tail":   { "type": "integer", "description": "Return only the LAST N lines (e.g. the end of a log). Mutually exclusive with offset." }
+                    },
+                    "required": ["path"]
                 }
             }
         }),
