@@ -54,6 +54,10 @@ bumps are non-breaking bugfixes only.
       top. It is mutually exclusive with `offset` — passing both returns a clear
       error. Omitting it leaves the default top-of-file windowing unchanged.
 
+- **`repo_map` maps Java definitions.** `mode=map` now extracts Java `class`,
+  `interface`, `enum`, and method definitions — previously `.java` files were
+  scanned only in `mode=refs`. The schema's language list now includes Java.
+
     ### Changed
 
 - **`repo_map` map output is a compact outline, and the tool steers to

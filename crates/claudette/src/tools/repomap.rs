@@ -62,7 +62,7 @@ pub(super) fn schemas() -> Vec<Value> {
         "type": "function",
         "function": {
             "name": "repo_map",
-            "description": "Find where code lives by concept — for INITIAL orientation when you don't already know the location. Returns a compact outline of the workspace files whose top-level definitions best match `query`, each line as `<line>  <signature>`. Orientation only: if you already know the exact symbol or string, use grep_search; to find a file by name, use glob_search; to re-read a known file, use read_file. One pass is enough — do NOT call repo_map repeatedly. (Languages: Rust, Python, JS/TS, Go, Ruby, C#.) To list every place a name appears (or pin the real source value past stale docs), call with mode='refs' and name='<exact text>'.",
+            "description": "Find where code lives by concept — for INITIAL orientation when you don't already know the location. Returns a compact outline of the workspace files whose top-level definitions best match `query`, each line as `<line>  <signature>`. Orientation only: if you already know the exact symbol or string, use grep_search; to find a file by name, use glob_search; to re-read a known file, use read_file. One pass is enough — do NOT call repo_map repeatedly. (Languages: Rust, Python, JS/TS, Go, Ruby, C#, Java.) To list every place a name appears (or pin the real source value past stale docs), call with mode='refs' and name='<exact text>'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -546,6 +546,24 @@ fn patterns_for(path: &Path) -> Option<Vec<(&'static str, Regex)>> {
                 r"^\s*(?:(?:public|private|protected|internal|static|async|virtual|override|sealed|abstract|extern|new|partial|unsafe)\s+)+[\w<>\[\],.?]+\s+([A-Za-z_]\w*)\s*\(",
             ),
         ],
+        "java" => vec![
+            (
+                "class",
+                r"^\s*(?:(?:public|private|protected|static|final|abstract|sealed|strictfp)\s+)*class\s+([A-Za-z_]\w*)",
+            ),
+            (
+                "interface",
+                r"^\s*(?:(?:public|private|protected|static|abstract|sealed|strictfp)\s+)*interface\s+([A-Za-z_]\w*)",
+            ),
+            (
+                "enum",
+                r"^\s*(?:(?:public|private|protected|static)\s+)*enum\s+([A-Za-z_]\w*)",
+            ),
+            (
+                "method",
+                r"^\s*(?:(?:public|private|protected|static|final|abstract|synchronized|native|default|strictfp)\s+)+[\w<>\[\],.?]+\s+([A-Za-z_]\w*)\s*\(",
+            ),
+        ],
         _ => return None,
     };
     Some(
@@ -711,6 +729,76 @@ mod tests {
         // control flow must NOT be captured as a method (no keyword swallow)
         assert_eq!(hit("    if (ready)"), None);
         assert_eq!(hit("    return Add(1, 2);"), None);
+    }
+
+    #[test]
+    fn java_patterns_capture_class_interface_enum_and_method() {
+        let pats = patterns_for(Path::new("x.java")).unwrap();
+        let hit = |line: &str| {
+            pats.iter()
+                .find_map(|(k, re)| re.captures(line).map(|c| (*k, c[1].to_string())))
+        };
+
+        assert_eq!(hit("public class Foo"), Some(("class", "Foo".to_string())));
+        assert_eq!(
+            hit("    public final class Bar"),
+            Some(("class", "Bar".to_string()))
+        );
+        assert_eq!(
+            hit("public interface IBar"),
+            Some(("interface", "IBar".to_string()))
+        );
+        // enum allows zero modifiers
+        assert_eq!(hit("    enum Color"), Some(("enum", "Color".to_string())));
+        // method = modifier(s) + return type + name + '('
+        assert_eq!(
+            hit("    public void run()"),
+            Some(("method", "run".to_string()))
+        );
+        assert_eq!(
+            hit("    public static int add(int a, int b)"),
+            Some(("method", "add".to_string()))
+        );
+        // control flow must NOT be captured as a method (no keyword swallow)
+        assert_eq!(hit("    if (ready) {"), None);
+        assert_eq!(hit("    while (true) {"), None);
+        assert_eq!(hit("    return add(1, 2);"), None);
+    }
+
+    #[test]
+    fn repo_map_java_definitions_extracted_in_map_mode() {
+        let _eg = crate::test_env_lock();
+        let base = super::super::user_home()
+            .join(".claudette")
+            .join("files")
+            .join("claudette-repomap-test-java");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("src")).unwrap();
+        let java_content = "package app;\n\npublic interface Greeter {\n    String greet(String name);\n}\n\npublic class HelloGreeter implements Greeter {\n    private final String prefix;\n\n    public HelloGreeter(String prefix) {\n        this.prefix = prefix;\n    }\n\n    public String greet(String name) {\n        return prefix + name;\n    }\n\n    public static int add(int a, int b) {\n        return a + b;\n    }\n}\n\npublic enum Mood {\n    HAPPY,\n    SAD,\n}\n";
+        std::fs::write(base.join("src").join("HelloGreeter.java"), java_content).unwrap();
+
+        let input = json!({
+            "query": "greeter class interface method add enum",
+            "path": base.to_str().unwrap()
+        })
+        .to_string();
+        let out = run_repo_map(&input).unwrap().replace('\\', "/");
+
+        assert!(
+            out.contains("src/HelloGreeter.java"),
+            "HelloGreeter.java should be found:\n{out}"
+        );
+        for sig in [
+            "public interface Greeter",
+            "public class HelloGreeter",
+            "public String greet",
+            "public static int add",
+            "public enum Mood",
+        ] {
+            assert!(out.contains(sig), "missing `{sig}` in:\n{out}");
+        }
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
