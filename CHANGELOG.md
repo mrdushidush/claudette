@@ -40,9 +40,16 @@ bumps are non-breaking bugfixes only.
   `git fetch origin && git checkout -b <branch> origin/main` recipe, instead of
   silently wiping the edits. A clean tree, a non-repo directory, and
   non-destructive git commands are unaffected; override with
-  `CLAUDETTE_ALLOW_DESTRUCTIVE_GIT=1`.
+    `CLAUDETTE_ALLOW_DESTRUCTIVE_GIT=1`.
 
-### Changed
+  - **`grep_search` `count_only` mode.** Passing `count_only: true` returns just
+    the total match count plus a per-file breakdown, with no line bodies — handy
+    for gauging how widespread a pattern is without flooding the context. Unlike
+    the default mode (capped at 100 returned matches), the count is the true total
+    across the same filtered set: gitignore, the skip-dirs, and the optional
+    `glob` all still apply. Omitting the flag is unchanged.
+
+  ### Changed
 
 - **`repo_map` map output is a compact outline, and the tool steers to
   grep/glob.** The `mode=map` result used to be verbose nested JSON — per
