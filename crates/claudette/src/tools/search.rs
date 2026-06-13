@@ -70,11 +70,11 @@ pub(super) fn schemas() -> Vec<Value> {
                     "type": "object",
                     "properties": {
                         "pattern": { "type": "string", "description": "Regex to search for (e.g. 'TODO|FIXME', 'fn\\s+\\w+'). Invalid regex falls back to literal substring." },
-                            "path":    { "type": "string", "description": "Directory to search (default: the workspace/project root)" },
-                            "glob":    { "type": "string", "description": "Optional filename glob to restrict the search (e.g. '*.rs', 'src/**/*.ts'). A bare name matches files at any depth; a pattern with '/' matches the path relative to the search root. When omitted, all files are searched." },
-                            "count_only": { "type": "boolean", "description": "When true, return only the total match count and a per-file breakdown — no line bodies, and not capped at 100. Use to gauge how widespread a pattern is. Default false." }
-                        },
-                        "required": ["pattern"]
+                        "path":    { "type": "string", "description": "Directory to search (default: the workspace/project root)" },
+                        "glob":    { "type": "string", "description": "Optional filename glob to restrict the search (e.g. '*.rs', 'src/**/*.ts'). A bare name matches files at any depth; a pattern with '/' matches the path relative to the search root. When omitted, all files are searched." },
+                        "count_only": { "type": "boolean", "description": "When true, return only the total match count and a per-file breakdown — no line bodies, and not capped at 100. Use to gauge how widespread a pattern is. Default false." }
+                    },
+                    "required": ["pattern"]
                 }
             }
         }),
