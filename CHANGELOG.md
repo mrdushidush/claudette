@@ -47,9 +47,14 @@ bumps are non-breaking bugfixes only.
     for gauging how widespread a pattern is without flooding the context. Unlike
     the default mode (capped at 100 returned matches), the count is the true total
     across the same filtered set: gitignore, the skip-dirs, and the optional
-    `glob` all still apply. Omitting the flag is unchanged.
+      `glob` all still apply. Omitting the flag is unchanged.
 
-  ### Changed
+    - **`read_file` `tail=N`.** Pass `tail: N` to read just the last N lines of a
+      file (e.g. the end of a log or a generated file) instead of paging from the
+      top. It is mutually exclusive with `offset` — passing both returns a clear
+      error. Omitting it leaves the default top-of-file windowing unchanged.
+
+    ### Changed
 
 - **`repo_map` map output is a compact outline, and the tool steers to
   grep/glob.** The `mode=map` result used to be verbose nested JSON — per
