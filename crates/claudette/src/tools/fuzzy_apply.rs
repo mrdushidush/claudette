@@ -188,17 +188,10 @@ fn leading_ws(line: &str) -> &str {
     &line[..end]
 }
 
-/// The longest common leading substring of `a` and `b`. Both args are runs of
-/// indentation whitespace, so this is always a char boundary.
-fn common_prefix<'a>(a: &'a str, b: &str) -> &'a str {
-    let n = a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count();
-    &a[..n]
-}
-
-/// Rebase `block`'s outermost indentation onto `target_indent`, preserving the
-/// block's internal relative nesting. The block's own base indent (the common
-/// leading-whitespace prefix of its non-blank lines) is stripped from each line
-/// and replaced with `target_indent`; blank lines keep only their terminator.
+/// Rebase `block` so its FIRST non-blank line sits at `target_indent`, shifting
+/// every other line by the SAME amount so the block keeps its internal relative
+/// nesting — including lines that dedent BELOW the first line (a closing brace,
+/// a `},`).
 ///
 /// Pass 2 matches on TRIMMED lines, so the model's `after` carries whatever
 /// indentation the model guessed. Splicing it verbatim silently corrupts
@@ -206,22 +199,21 @@ fn common_prefix<'a>(a: &'a str, b: &str) -> &'a str {
 /// or a changed scope) and writes inconsistent indentation everywhere else,
 /// reported `ok:true` (roast 2026-05-31 / issue #26 §A). Rebasing to the matched
 /// window's actual indent fixes that while keeping the edit's structure.
+///
+/// The anchor is the block's FIRST non-blank line, because it aligns with the
+/// matched window's first line — which is where the caller measured
+/// `target_indent`. (An earlier version anchored on the block's *minimum* indent;
+/// when the first line was deeper than that minimum — e.g. an edit ending in a
+/// less-indented `}` — every line was shifted right by the difference, silently
+/// mis-indenting the whole block. Dogfood Tasks 9/10.)
 fn reindent_to(block: &str, target_indent: &str) -> String {
     let lines: Vec<&str> = block.split_inclusive('\n').collect();
-    // The block's base indent = the common leading-ws prefix of its non-blank
-    // lines (blank lines carry no meaningful indentation).
-    let mut base: Option<&str> = None;
-    for line in &lines {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let ws = leading_ws(line);
-        base = Some(match base {
-            None => ws,
-            Some(prev) => common_prefix(prev, ws),
-        });
-    }
-    let base = base.unwrap_or("");
+    // Anchor = the leading whitespace of the first non-blank line. Every line is
+    // re-based by the same (target − anchor) delta so relative nesting survives.
+    let anchor = lines
+        .iter()
+        .find(|l| !l.trim().is_empty())
+        .map_or("", |l| leading_ws(l));
     let mut out = String::with_capacity(block.len() + target_indent.len() * lines.len());
     for line in &lines {
         if line.trim().is_empty() {
@@ -232,8 +224,24 @@ fn reindent_to(block: &str, target_indent: &str) -> String {
             }
             continue;
         }
-        out.push_str(target_indent);
-        out.push_str(line.strip_prefix(base).unwrap_or(line));
+        let ws = leading_ws(line);
+        let body = &line[ws.len()..];
+        if let Some(extra) = ws.strip_prefix(anchor) {
+            // At the anchor depth or deeper: target indent + the extra nesting.
+            out.push_str(target_indent);
+            out.push_str(extra);
+        } else if let Some(removed) = anchor.strip_prefix(ws) {
+            // Shallower than the anchor (a dedent line such as a closing brace):
+            // trim the same trailing run off the target indent so it dedents in
+            // step. Indentation is ASCII spaces/tabs, so byte-slicing is safe.
+            let keep = target_indent.len().saturating_sub(removed.len());
+            out.push_str(&target_indent[..keep]);
+        } else {
+            // Indentation styles diverge (mixed tabs/spaces): fall back to the
+            // target indent so at least the first-line anchor is honored.
+            out.push_str(target_indent);
+        }
+        out.push_str(body);
     }
     out
 }
@@ -430,6 +438,42 @@ mod tests {
         assert_eq!(
             got, "def f():\n    if a:\n        c()\n",
             "internal nesting must be preserved across the rebase: {got:?}"
+        );
+    }
+
+    #[test]
+    fn line_trim_keeps_indent_when_block_dedents_below_first_line() {
+        // Regression (dogfood Tasks 9/10): the matched window's FIRST line is
+        // deeper than a later line in the block (a closing brace / `},`). The
+        // old rebase anchored on the block's MINIMUM indent, so it shifted the
+        // whole block right by (first-line − min) and over-indented it. Anchoring
+        // on the first line keeps the block exactly where it belongs.
+        let content = "obj = {\n        \"a\": 1,\n        \"b\": 2,\n    }\nnext\n";
+        // Trailing space on line 1 → Pass 1 (exact) misses, Pass 2 (line-trim)
+        // handles it; the block's first line (8sp) is deeper than its `}` (4sp).
+        let before = "        \"a\": 1, \n        \"b\": 2,\n    }\n";
+        let after = "        \"a\": 1,\n        \"b\": 9,\n    }\n";
+        let got = fuzzy_replace(content, before, after).unwrap();
+        assert_eq!(
+            got, "obj = {\n        \"a\": 1,\n        \"b\": 9,\n    }\nnext\n",
+            "block must keep its own indentation, not shift right: {got:?}"
+        );
+    }
+
+    #[test]
+    fn line_trim_python_if_else_keeps_dedented_else() {
+        // Whitespace-significant case: the block starts inside an `if` body (8sp)
+        // and includes the `else:` which dedents to 4sp. A whole-block right-shift
+        // (the old bug) would push `else:` to 8sp — turning it into part of the
+        // if-body, a silent scope change reported `ok:true`. Anchoring on the
+        // first line keeps `else:` at its level.
+        let content = "def f(x):\n    if x:\n        a = 1\n    else:\n        b = 2\n";
+        let before = "        a = 1 \n    else:\n        b = 2\n"; // trailing space → Pass 2
+        let after = "        a = 10\n    else:\n        b = 20\n";
+        let got = fuzzy_replace(content, before, after).unwrap();
+        assert_eq!(
+            got, "def f(x):\n    if x:\n        a = 10\n    else:\n        b = 20\n",
+            "else: must stay at 4sp, not shift into the if-body: {got:?}"
         );
     }
 
