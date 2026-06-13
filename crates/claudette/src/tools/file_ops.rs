@@ -105,15 +105,16 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "read_file",
-                "description": "Read a text file (max 100 KB). Returns up to 400 lines by default; for a larger file pass `offset`/`limit` to page through it, or use grep_search to jump straight to the line you need. Do not re-read the same range.",
+                "description": "Read a text file (max 100 KB). Returns up to 400 lines by default; for a larger file pass `offset`/`limit` to page through it (or `tail` for the last N lines), or use grep_search to jump straight to the line you need. Do not re-read the same range.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "path":   { "type": "string", "description": "File path (absolute, ~/, or relative to the workspace)" },
                         "offset": { "type": "integer", "description": "1-based line number to start at (default: start of file)" },
-                        "limit":  { "type": "integer", "description": "Max lines to return (default: 400)" }
-                    },
-                    "required": ["path"]
+                            "limit":  { "type": "integer", "description": "Max lines to return (default: 400)" },
+                            "tail":   { "type": "integer", "description": "Return only the LAST N lines (e.g. the end of a log). Mutually exclusive with offset." }
+                        },
+                        "required": ["path"]
                 }
             }
         }),
@@ -171,6 +172,16 @@ fn run_read_file(input: &str) -> Result<String, String> {
     // Explicit line cap; absent = the default windowed cap.
     let explicit_limit = v.get("limit").and_then(Value::as_u64).map(|n| n as usize);
 
+    // Optional tail window: the last N lines. Mutually exclusive with offset —
+    // they specify opposite ends, so asking for both is a contradiction.
+    let tail = v.get("tail").and_then(Value::as_u64).map(|n| n as usize);
+    if tail.is_some() && offset > 0 {
+        return Err(
+            "read_file: 'tail' and 'offset' are mutually exclusive — pass one or the other"
+                .to_string(),
+        );
+    }
+
     let path = validate_read_path(path_str)?;
 
     let metadata = fs::metadata(&path).map_err(|e| {
@@ -204,9 +215,15 @@ fn run_read_file(input: &str) -> Result<String, String> {
 
     let lines: Vec<&str> = raw.lines().collect();
     let total = lines.len();
-    let start = offset.saturating_sub(1).min(total);
-    let cap = explicit_limit.unwrap_or_else(read_default_line_cap);
-    let end = start.saturating_add(cap).min(total);
+    let (start, end) = if let Some(n) = tail {
+        // Last `n` lines (or the whole file when it has fewer than n).
+        (total.saturating_sub(n), total)
+    } else {
+        let start = offset.saturating_sub(1).min(total);
+        let cap = explicit_limit.unwrap_or_else(read_default_line_cap);
+        let end = start.saturating_add(cap).min(total);
+        (start, end)
+    };
     let mut content = lines[start..end].join("\n");
     // Keep a trailing newline for a whole-small-file read so callers see the
     // file exactly as on disk.
@@ -625,6 +642,54 @@ mod tests {
         assert!(content.contains("L10\nL11\nL12"), "exact window: {content}");
         assert!(!content.contains("L9"), "excludes before offset");
         assert!(!content.contains("L13"), "excludes after limit");
+
+        let _ = fs::remove_file(&target);
+    }
+
+    #[test]
+    fn read_file_tail_returns_last_lines_and_rejects_offset() {
+        let _guard = crate::test_env_lock(); // home-resolving
+        let target = files_dir().join("claudette-readtail-test.txt");
+        let _ = fs::remove_file(&target);
+        let body = (1..=100)
+            .map(|n| format!("L{n}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        fs::write(&target, &body).unwrap();
+
+        // tail=3 → the last three lines, 98-100, and nothing earlier.
+        let input = json!({ "path": target.to_str().unwrap(), "tail": 3 }).to_string();
+        let out = run_read_file(&input).expect("read should succeed");
+        let v: Value = serde_json::from_str(&out).unwrap();
+        let content = v["content"].as_str().unwrap();
+        assert_eq!(v["lines_shown"], json!("98-100"), "tail window: {out}");
+        assert_eq!(v["total_lines"], json!(100));
+        assert!(content.contains("L98\nL99\nL100"), "exact tail: {content}");
+        assert!(
+            !content.contains("L97"),
+            "excludes before the tail: {content}"
+        );
+        // end == total in tail mode, so no paging notice fires.
+        assert_eq!(v["truncated"], json!(false), "tail reaches EOF: {out}");
+
+        // tail larger than the file → whole file, no panic.
+        let input_big = json!({ "path": target.to_str().unwrap(), "tail": 500 }).to_string();
+        let v_big: Value = serde_json::from_str(&run_read_file(&input_big).unwrap()).unwrap();
+        assert_eq!(
+            v_big["lines_shown"],
+            json!("1-100"),
+            "tail>=len → whole file"
+        );
+
+        // tail + offset together is rejected with a clear error.
+        let input_bad =
+            json!({ "path": target.to_str().unwrap(), "tail": 3, "offset": 10 }).to_string();
+        let err = run_read_file(&input_bad).unwrap_err();
+        assert!(
+            err.contains("mutually exclusive"),
+            "tail+offset must be rejected: {err}"
+        );
 
         let _ = fs::remove_file(&target);
     }
