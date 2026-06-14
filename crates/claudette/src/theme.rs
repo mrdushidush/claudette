@@ -111,6 +111,19 @@ pub fn brand(s: &str) -> ColoredString {
     s.magenta().bold()
 }
 
+/// Green — an added line in a diff preview (the `+` side). Plain (not bold) so
+/// a multi-line hunk stays easy on the eyes.
+#[must_use]
+pub fn diff_add(s: &str) -> ColoredString {
+    s.green()
+}
+
+/// Red — a removed line in a diff preview (the `-` side). Plain (not bold).
+#[must_use]
+pub fn diff_del(s: &str) -> ColoredString {
+    s.red()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,7 +141,9 @@ mod tests {
     /// array to confirm the helpers all share the same signature.
     #[test]
     fn all_helpers_round_trip_text() {
-        let funcs: [fn(&str) -> ColoredString; 7] = [accent, info, warn, error, dim, ok, brand];
+        let funcs: [fn(&str) -> ColoredString; 9] = [
+            accent, info, warn, error, dim, ok, brand, diff_add, diff_del,
+        ];
         for f in funcs {
             let s = f("hello");
             assert!(
