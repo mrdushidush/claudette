@@ -333,6 +333,12 @@ where
         // an answer; past SEARCH_NUDGE_AT we append a "stop and answer" hint to
         // its search results (see the Allow arm below).
         let mut consecutive_nav = 0usize;
+        // Loop-breaker (block edits): exact (name, args) of block-edit calls
+        // already attempted this turn. An identical retry is always a spiral
+        // (see is_block_edit_tool), so it is suppressed with a pointer to
+        // re-read and change tactic. Kept separate from seen_nav: edits are not
+        // navigation, and a suppressed edit must not perturb the nav dedup.
+        let mut seen_edits: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut hit_iteration_cap = false;
 
         loop {
@@ -419,6 +425,24 @@ where
                     self.session.messages.push(result_message.clone());
                     tool_results.push(result_message);
                     continue;
+                }
+
+                // Loop-breaker (block edits): suppress an exact repeat of a
+                // block edit (apply_diff/edit_file/apply_patch). The first
+                // attempt runs; a byte-identical repeat this turn cannot help
+                // (it failed before, or already applied), so return a "change
+                // tactic" tool_result instead of re-executing. Before the nav
+                // block so the suppressed edit leaves seen_nav untouched.
+                if is_block_edit_tool(&tool_name) {
+                    let key = format!("{tool_name}\u{1f}{input}");
+                    if !seen_edits.insert(key) {
+                        let body = duplicate_edit_body(&tool_name);
+                        let result_message =
+                            ConversationMessage::tool_result(tool_use_id, tool_name, body, true);
+                        self.session.messages.push(result_message.clone());
+                        tool_results.push(result_message);
+                        continue;
+                    }
                 }
 
                 // Loop-breaker: suppress an exact repeat of a read-only
@@ -744,6 +768,31 @@ fn duplicate_call_body(tool_name: &str) -> String {
          above. Re-reading it changes nothing. Either answer now from what you have, or take a \
          DIFFERENT action: grep_search for the specific symbol, or read_file with an offset/limit \
          to page to a new region.\"}}"
+    )
+}
+
+/// Block-edit tools whose *exact repeat* within a turn is a spiral, never
+/// useful work. Unlike a re-read (handled by [`is_navigation_tool`]), an
+/// identical block edit re-issued in the same turn can only do one of two
+/// things: the first attempt failed, so a byte-identical retry fails the same
+/// way (the dogfood 2026-06-13 doubled-backslash no-op loop); or the first
+/// succeeded, so the target block is gone and the retry can't match. Either
+/// way it changes nothing. `write_file` is excluded — a whole-file overwrite
+/// is idempotent, not a find-and-replace, and isn't part of the spiral.
+fn is_block_edit_tool(name: &str) -> bool {
+    matches!(name, "apply_diff" | "edit_file" | "apply_patch")
+}
+
+/// Tool result for a block-edit call that exactly repeats one already
+/// attempted this turn. Pushes the brain off the retry spiral toward
+/// re-reading the file and changing tactic.
+fn duplicate_edit_body(tool_name: &str) -> String {
+    format!(
+        "{{\"error\":\"duplicate edit suppressed\",\"tool\":\"{tool_name}\",\"hint\":\"You \
+         already attempted this EXACT edit earlier in this turn. A byte-identical retry \
+         changes nothing — the first attempt either failed (it will fail the same way) or \
+         already applied (the target is gone). Re-read the file with read_file to see its \
+         CURRENT contents, then send a DIFFERENT edit that matches what is actually there.\"}}"
     )
 }
 
@@ -1222,6 +1271,107 @@ mod tests {
             })
             .expect("a suppressed duplicate tool_result should exist");
         assert!(dup.contains("duplicate call suppressed"), "got: {dup}");
+    }
+
+    #[test]
+    fn duplicate_block_edit_call_is_suppressed_not_re_executed() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // The brain re-issues the IDENTICAL apply_diff twice (the dogfood
+        // 2026-06-13 no-op spiral), then answers. The loop must execute it
+        // once, suppress the exact repeat with a "duplicate edit" tool_result,
+        // and still finish.
+        struct EditSpiralApi {
+            calls: usize,
+        }
+        impl ApiClient for EditSpiralApi {
+            fn stream(
+                &mut self,
+                _request: &ApiRequest<'_>,
+            ) -> Result<Vec<AssistantEvent>, RuntimeError> {
+                self.calls += 1;
+                match self.calls {
+                    1 | 2 => Ok(vec![
+                        AssistantEvent::ToolUse {
+                            id: format!("ad-{}", self.calls),
+                            name: "apply_diff".to_string(),
+                            input: "{\"path\":\"x.rs\",\"before\":\"a\",\"after\":\"b\"}"
+                                .to_string(),
+                        },
+                        AssistantEvent::MessageStop,
+                    ]),
+                    _ => Ok(vec![
+                        AssistantEvent::TextDelta("done".to_string()),
+                        AssistantEvent::MessageStop,
+                    ]),
+                }
+            }
+        }
+
+        let exec_count = Rc::new(Cell::new(0usize));
+        let ec = Rc::clone(&exec_count);
+        let tool_executor = StaticToolExecutor::new().register("apply_diff", move |_input| {
+            ec.set(ec.get() + 1);
+            Ok("{\"ok\":true}".to_string())
+        });
+        let permission_policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("apply_diff", PermissionMode::WorkspaceWrite);
+
+        let mut runtime = ConversationRuntime::new(
+            Session::new(),
+            EditSpiralApi { calls: 0 },
+            tool_executor,
+            permission_policy,
+            vec!["sys".to_string()],
+        );
+
+        let summary = runtime
+            .run_turn("fix the regex", None)
+            .expect("loop should finish");
+
+        assert_eq!(
+            exec_count.get(),
+            1,
+            "apply_diff must execute once; the identical repeat is suppressed"
+        );
+        assert_eq!(summary.iterations, 3);
+        let dup = runtime
+            .session()
+            .messages
+            .iter()
+            .find_map(|m| {
+                m.blocks.iter().find_map(|b| match b {
+                    ContentBlock::ToolResult {
+                        output, is_error, ..
+                    } if *is_error => Some(output.clone()),
+                    _ => None,
+                })
+            })
+            .expect("a suppressed duplicate tool_result should exist");
+        assert!(dup.contains("duplicate edit suppressed"), "got: {dup}");
+    }
+
+    #[test]
+    fn block_edit_tool_classifier_matches_edits_only() {
+        for edit in ["apply_diff", "edit_file", "apply_patch"] {
+            assert!(
+                super::is_block_edit_tool(edit),
+                "{edit} should be a block edit"
+            );
+        }
+        for other in [
+            "read_file",
+            "grep_search",
+            "bash",
+            "write_file",
+            "git_commit",
+        ] {
+            assert!(
+                !super::is_block_edit_tool(other),
+                "{other} must NOT be a block edit"
+            );
+        }
     }
 
     #[test]

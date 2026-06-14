@@ -84,6 +84,27 @@ fn run_apply_diff(input: &str) -> Result<String, String> {
 
     match fuzzy_replace(&original, before, after) {
         Ok(new_content) => {
+            // No-op guard (dogfood 2026-06-13): a before/after that produce
+            // byte-identical content changed nothing. Reporting ok:true here is
+            // a false success that spirals small brains — they "fixed" the file,
+            // see success, but nothing moved, so they re-send the same edit. The
+            // display layer collapses `\\`->`\`, so an over-escaped block looks
+            // identical to the model and it cannot see why. Fail loudly instead.
+            if new_content == original {
+                let msg = format!(
+                    "apply_diff: no change — 'before' and 'after' produce identical \
+                     content in {raw_path}, so nothing was written. Re-read the file \
+                     to see its CURRENT bytes: what you intend to change may already \
+                     be present, or your two blocks are the same. Do NOT re-send this \
+                     edit unchanged."
+                );
+                eprintln!(
+                    "  {} {}",
+                    crate::theme::dim("▸"),
+                    crate::theme::dim(&format!("apply_diff: {raw_path} no-op")),
+                );
+                return Err(msg);
+            }
             // Atomic write via sibling tmp + rename, matching apply_patch.
             let tmp = path.with_extension("claudette-diff.tmp");
             fs::write(&tmp, &new_content)
@@ -602,5 +623,36 @@ mod tests {
         let err = result.expect_err("expected not-found error");
         assert!(err.contains("'before' block not found"), "got: {err}");
         assert!(err.contains("over-escapes backslashes"), "got: {err}");
+    }
+
+    #[test]
+    fn identical_before_after_is_a_loud_no_op() {
+        // The dogfood 2026-06-13 spiral: before == after (the model could not
+        // see its own doubled backslash). The edit must FAIL with a no-op error,
+        // not report ok:true after writing nothing.
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".into());
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let path = format!("{home}/claudette-diff-noop-{nanos}.txt");
+        let original = "fn main() {\n    let x = 1;\n}\n";
+        fs::write(&path, original).unwrap();
+
+        let input = json!({
+            "path": &path,
+            "before": "    let x = 1;\n",
+            "after": "    let x = 1;\n"
+        })
+        .to_string();
+        let result = run_apply_diff(&input);
+        // The file must be untouched.
+        let after_disk = fs::read_to_string(&path).unwrap();
+        let _ = fs::remove_file(&path);
+
+        let err = result.expect_err("identical before/after must be a no-op error");
+        assert!(err.contains("no change"), "got: {err}");
+        assert_eq!(after_disk, original, "file must not be modified by a no-op");
     }
 }

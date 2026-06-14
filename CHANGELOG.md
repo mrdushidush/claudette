@@ -10,6 +10,20 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **No-op edits fail loudly instead of reporting false success.** `apply_diff`
+  and `edit_file` now return an error when the requested change would produce
+  byte-identical file content (most often `before`/`old_text` equal to
+  `after`/`new_text`) instead of writing nothing and reporting `ok:true` — a
+  false success that spiralled small models into re-sending the same edit (the
+  tool-result display collapses `\\`->`\`, hiding an over-escaped block).
+- **The loop-breaker suppresses an exact-repeat block edit.** An identical
+  `apply_diff`/`edit_file`/`apply_patch` call re-issued within a turn is no
+  longer re-executed — it returns a "you already tried this; re-read and change
+  tactic" result. Previously only read-only navigation calls were deduped, so a
+  failed or no-op edit could be retried byte-identical until the turn died.
+
 ## [0.11.0] - 2026-06-14
 
 ### Added
