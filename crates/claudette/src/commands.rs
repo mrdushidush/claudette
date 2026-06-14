@@ -1259,28 +1259,17 @@ fn handle_agents(out: &mut impl Write) {
         theme::ROBOT,
         theme::accent("available agents")
     );
-    let agents: &[(&str, &str)] = &[
-        (
-            "researcher",
-            "web search, file reading, code search (max 10 iter)",
-        ),
-        ("gitops", "git workflows, bash, file reading (max 8 iter)"),
-        (
-            "reviewer",
-            "code review: bugs, security, quality (max 5 iter, read-only)",
-        ),
-        (
-            "codet",
-            "code validation sidecar (automatic on write_file, supports py/rs/js/ts)",
-        ),
-    ];
+    let agents: &[(&str, &str)] = &[(
+        "codet",
+        "code validation sidecar (automatic on write_file, supports py/rs/js/ts)",
+    )];
     for (name, desc) in agents {
         let _ = writeln!(out, "  {}  {}", theme::accent(name), theme::dim(desc));
     }
     let _ = writeln!(
         out,
         "\n  {}",
-        theme::dim("Trigger via the spawn_agent tool or ask Claudette to delegate.")
+        theme::dim("codet runs automatically on write_file/edit_file.")
     );
 }
 

@@ -1,4 +1,4 @@
-//! Code-generation group — 2 tools (generate_code, spawn_agent) plus
+//! Code-generation group — 1 tool (generate_code) plus
 //! the reference-file extraction infrastructure that generate_code
 //! depends on.
 //!
@@ -255,45 +255,27 @@ fn resolve_reference(token: &str) -> Option<PathBuf> {
 }
 
 pub(super) fn schemas() -> Vec<Value> {
-    vec![
-        json!({
-            "type": "function",
-            "function": {
-                "name": "generate_code",
-                "description": "Write code to a file via the specialised coder model (auto-validates syntax + tests). Use for SUBSTANTIAL or complex code, or brownfield edits — pass the existing file in reference_files so the coder reads the real API. For a SHORT, simple file in your project (a small helper/module) call write_file directly instead: it's one fast pass, no model hand-off. Reply with path + one sentence — never paste the generated code.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "description":     { "type": "string", "description": "What code to write" },
-                        "filename":        { "type": "string", "description": "Filename; extension sets the language (calc.py, lib.rs, app.ts)" },
-                        "reference_files": { "type": "array", "items": { "type": "string" }, "description": "Paths the coder must read first (up to 4). Required for brownfield." }
-                    },
-                    "required": ["description", "filename"]
-                }
+    vec![json!({
+        "type": "function",
+        "function": {
+            "name": "generate_code",
+            "description": "Write code to a file via the specialised coder model (auto-validates syntax + tests). Use for SUBSTANTIAL or complex code, or brownfield edits — pass the existing file in reference_files so the coder reads the real API. For a SHORT, simple file in your project (a small helper/module) call write_file directly instead: it's one fast pass, no model hand-off. Reply with path + one sentence — never paste the generated code.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "description":     { "type": "string", "description": "What code to write" },
+                    "filename":        { "type": "string", "description": "Filename; extension sets the language (calc.py, lib.rs, app.ts)" },
+                    "reference_files": { "type": "array", "items": { "type": "string" }, "description": "Paths the coder must read first (up to 4). Required for brownfield." }
+                },
+                "required": ["description", "filename"]
             }
-        }),
-        json!({
-            "type": "function",
-            "function": {
-                "name": "spawn_agent",
-                "description": "Delegate a task to a specialized agent. 'researcher' for web/file/code research, 'gitops' for git workflows, 'reviewer' for code review.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "agent_type": { "type": "string", "enum": ["researcher", "gitops", "reviewer"], "description": "Agent type" },
-                        "task":       { "type": "string", "description": "Task description for the agent" }
-                    },
-                    "required": ["agent_type", "task"]
-                }
-            }
-        }),
-    ]
+        }
+    })]
 }
 
 pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>> {
     let result = match name {
         "generate_code" => run_generate_code(input),
-        "spawn_agent" => run_spawn_agent(input),
         _ => return None,
     };
     Some(result)
@@ -412,31 +394,6 @@ fn run_generate_code(input: &str) -> Result<String, String> {
     }
 
     Ok(result.to_string())
-}
-
-fn run_spawn_agent(input: &str) -> Result<String, String> {
-    let v: Value = serde_json::from_str(input)
-        .map_err(|e| format!("spawn_agent: invalid JSON ({e}): {input}"))?;
-    let type_str = v
-        .get("agent_type")
-        .and_then(Value::as_str)
-        .ok_or("spawn_agent: missing 'agent_type'")?;
-    let agent_type = crate::agents::AgentType::parse(type_str).ok_or_else(|| {
-        format!("spawn_agent: unknown agent type '{type_str}'. Use 'researcher' or 'gitops'.")
-    })?;
-    let task = v
-        .get("task")
-        .and_then(Value::as_str)
-        .ok_or("spawn_agent: missing 'task'")?;
-    // The model must NOT be able to flip a child agent into unattended
-    // PermissionMode::Allow (the old model-supplied `auto` flag): a confabulating
-    // / prompt-injected brain could spawn a gitops agent with unsandboxed bash +
-    // git_push and no [y/N] gate (roast 2026-05-31 / issue #24 §A). Inherit the
-    // parent session's posture instead — auto only when the USER opted in via
-    // CLAUDETTE_AUTO_APPROVE; otherwise the child prompts like any other tool.
-    let auto_mode = crate::run::secretary_auto_approve_enabled();
-
-    crate::agents::spawn_agent(agent_type, task, auto_mode)
 }
 
 #[cfg(test)]
@@ -743,13 +700,13 @@ mod tests {
     }
 
     #[test]
-    fn schemas_lists_two_tools() {
+    fn schemas_lists_one_tool() {
         let schemas = schemas();
-        assert_eq!(schemas.len(), 2);
+        assert_eq!(schemas.len(), 1);
         let names: Vec<&str> = schemas
             .iter()
             .filter_map(|v| v.pointer("/function/name").and_then(Value::as_str))
             .collect();
-        assert_eq!(names, ["generate_code", "spawn_agent"]);
+        assert_eq!(names, ["generate_code"]);
     }
 }

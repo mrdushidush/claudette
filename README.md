@@ -110,9 +110,6 @@ Whisper transcription for Telegram voice notes, edge-tts replies (English or Heb
 ### 🔎 Cross-session semantic recall
 `/recall <query>` searches every past conversation turn across sessions via a local embedding index, dropping the relevant fragments straight into the current context.
 
-### 🤝 Sub-agents
-`spawn_agent` delegates to a Researcher (web + file + code search), GitOps (rebase/squash/push), or Code Reviewer (read-only). Only the final answer comes back — sub-agent chatter never pollutes the main context.
-
 ### 🛡️ Per-tool permission gating
 ReadOnly and WorkspaceWrite tools auto-allow; DangerFullAccess (`bash`, `edit_file`, `git add/commit/push`, cross-org PRs) prompts `[y/N]` every time. Telegram default-denies DangerFullAccess (no TTY to confirm at).
 

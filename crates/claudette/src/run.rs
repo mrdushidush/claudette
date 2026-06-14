@@ -2012,21 +2012,6 @@ fn coding_workspace_active() -> bool {
     std::env::var("CLAUDETTE_WORKSPACE").is_ok_and(|s| !s.trim().is_empty())
 }
 
-/// Same as [`build_runtime_with_brain`] but the caller supplies a fully-
-/// formed `system_prompt`. Used by CTO sub-sessions
-/// ([`crate::cto::run_cto_decomposition`]) so the persona / format
-/// directives from `cto_decomposition_system_prompt` are honored instead
-/// of the secretary's default prompt.
-pub(crate) fn build_runtime_with_brain_and_prompt(
-    session: Session,
-    brain: &crate::model_config::RoleConfig,
-    streaming: bool,
-    telegram: bool,
-    system_prompt: Vec<String>,
-) -> ConversationRuntime<OllamaApiClient, SecretaryToolExecutor> {
-    build_runtime_with_brain_inner(session, brain, streaming, telegram, Some(system_prompt))
-}
-
 fn build_runtime_with_brain_inner(
     session: Session,
     brain: &crate::model_config::RoleConfig,
@@ -2372,7 +2357,6 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("reveal_in_explorer", WorkspaceWrite)
         .with_tool_requirement("open_url", WorkspaceWrite)
         .with_tool_requirement("add_numbers", WorkspaceWrite)
-        .with_tool_requirement("spawn_agent", WorkspaceWrite)
         // ── Sprint 9 Phase 0a: facts group (read-only REST calls) ───
         // v0.6.0: wikipedia_search + wikipedia_summary merged into
         // wikipedia(mode?); weather_current + weather_forecast merged

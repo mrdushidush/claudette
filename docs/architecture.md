@@ -24,7 +24,6 @@ src/
 ├── tools.rs          — Aggregates per-group schemas + routes dispatch_tool() through each sub-module
 ├── tools/            — One module per tool cluster (calendar, codegen, facts, file_ops, git, github, gmail, ide, markets, notes, registry, schedule, search, shell, telegram, todos, web_search)
 ├── tool_groups.rs    — ToolRegistry + the 18 on-demand tool-group definitions
-├── agents.rs         — AgentType, FilteredToolExecutor, spawn_agent orchestrator
 ├── codet.rs          — Code-generation sidecar (syntax check, surgical fix loop, tests)
 ├── test_runner.rs    — Python/Rust/JS/TS syntax + test runners
 ├── commands.rs       — Slash-command parsers and handlers
@@ -67,7 +66,7 @@ src/
 | `git` | 9 | status, diff, log, add, commit, branch, checkout, push, clone |
 | `ide` | 3 | Open in editor (`code`), reveal in file manager, open URL in browser |
 | `search` | 4 | `web_search` (Brave), `web_fetch`, `glob_search`, `grep_search` |
-| `advanced` | 3 | Bash shell, `edit_file` (find/replace), `spawn_agent` (delegate to a sub-agent) |
+| `advanced` | 2 | Bash shell, `apply_diff` / `edit_file` (find/replace) |
 | `facts` | 4 | Wikipedia search/summary, Open-Meteo weather (current/forecast) |
 | `registry` | 4 | crates.io info/search, npmjs info/search |
 | `github` | 16 | PRs (list, status, fork, create), issues (get, create, comment, list-repo, list-assigned), code search, **brownfield missions** (start, status, list, attach, exit, submit) |
@@ -103,16 +102,6 @@ Codet is hot-swapped into VRAM on demand — the main brain is evicted first on 
 5. **Submitter** — final Coder turn with `should_submit=true` that just calls `mission_submit`. PR opens here, never earlier.
 
 Persona overlay: `personas/codex7.md` is baked into the binary via `include_str!` and parsed at startup. Its `voice` one-liner + backstory prose are appended to the forge-mode system prompt so the brain adopts a consistent style.
-
-## Sub-agents
-
-`spawn_agent` delegates to a sub-agent with its own isolated conversation context — only the final text comes back to Claudette.
-
-| Agent | What it does | Max turns |
-|-------|--------------|-----------|
-| **Researcher** | Web search + file read + code search. For open-ended investigations. | 10 |
-| **GitOps** | Git workflows with bash. For "rebase this, squash that, push it." | 8 |
-| **Code Reviewer** | Read-only. Spots bugs, security issues, style problems. | 5 |
 
 ## Project layout rules
 
