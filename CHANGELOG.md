@@ -10,6 +10,8 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-06-14
+
 ### Added
 
 - **Colored diff preview on the `[y/N]` edit gate.** When `apply_diff`,
@@ -2087,7 +2089,8 @@ Initial public release of Claudette as a standalone repository.
 
 ---
 
-[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/mrdushidush/claudette/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/mrdushidush/claudette/compare/v0.10.0...v0.11.0
 [0.4.0]: https://github.com/mrdushidush/claudette/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/mrdushidush/claudette/compare/v0.3.0...v0.3.1
