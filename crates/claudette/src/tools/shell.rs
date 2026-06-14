@@ -404,6 +404,20 @@ fn run_edit_file(input: &str) -> Result<String, String> {
 
     let new_content = content.replacen(old_text, new_text, 1);
 
+    // No-op guard (dogfood 2026-06-13): old_text == new_text writes the file
+    // unchanged but reports ok:true — a false success that spirals small brains
+    // into re-sending the same edit (the display layer hides over-escaped
+    // backslashes, so they cannot see the blocks are identical). Fail loudly.
+    if new_content == content {
+        return Err(format!(
+            "edit_file: no change — 'old_text' and 'new_text' are identical, so \
+             nothing was written to {}. Re-read the file to see its CURRENT \
+             contents: what you intend to change may already be present. Do NOT \
+             re-send this edit unchanged.",
+            path.display()
+        ));
+    }
+
     // Atomic write: serialise to a sibling tmp file, preserve the original
     // file's permissions, then rename. A mid-write crash leaves either the
     // original file intact or the tmp behind for manual recovery — never a
@@ -864,6 +878,24 @@ mod tests {
         let err = result.expect_err("expected not-found error");
         assert!(err.contains("not found"), "got: {err}");
         assert_eq!(after.as_deref(), Some(original));
+    }
+
+    #[test]
+    fn edit_file_identical_old_new_is_a_loud_no_op() {
+        // Dogfood 2026-06-13: old_text == new_text writes nothing but reported
+        // ok:true. It must now FAIL with a no-op error and leave the file alone.
+        let path = home_join("noop");
+        let original = "alpha\nbeta\ngamma\n";
+        fs::write(&path, original).unwrap();
+
+        let input = json!({"path": &path, "old_text": "beta\n", "new_text": "beta\n"}).to_string();
+        let result = run_edit_file(&input);
+        let after_disk = fs::read_to_string(&path).unwrap();
+        let _ = fs::remove_file(&path);
+
+        let err = result.expect_err("identical old/new must be a no-op error");
+        assert!(err.contains("no change"), "got: {err}");
+        assert_eq!(after_disk, original, "file must not be modified by a no-op");
     }
 
     #[test]
