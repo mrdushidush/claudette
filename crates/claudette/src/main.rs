@@ -75,11 +75,6 @@ struct CliArgs {
     /// secrets dir). Exits before any interactive mode starts. Non-zero
     /// exit code if any probe was a hard failure (warnings tolerated).
     doctor: bool,
-    /// `--cto`: run the trailing prompt through the CTO Decomposition
-    /// turn and print the resulting subtask block. Tool-less; uses the
-    /// active brownfield mission for grounding when one is set. See
-    /// `crates/claudette/src/cto.rs`.
-    cto: bool,
 }
 
 /// Help text printed on `--help` / `-h`. One source of truth; the README
@@ -235,7 +230,6 @@ fn main() -> ExitCode {
         allow_any_chat,
         forge,
         doctor,
-        cto,
     } = args;
 
     // ── Offline-mode banner ───────────────────────────────────────────
@@ -296,42 +290,6 @@ fn main() -> ExitCode {
         if !claudette::firstrun::offer_fix_interactive() {
             return ExitCode::FAILURE;
         }
-    }
-
-    // ── CTO decomposition (one-shot) ──────────────────────────────────
-    // Runs the trailing prompt through the CTO Decomposition turn and
-    // prints the resulting subtask block. Tool-less — no file / git side
-    // effects. Persona overlay honors --faceless. See `cto.rs`.
-    if cto {
-        if prompt_args.is_empty() {
-            eprintln!(
-                "{} {}",
-                theme::error(theme::ERR_GLYPH),
-                theme::error(
-                    "--cto requires a prompt. Try: claudette --cto \"add a CSV-to-JSON tool\""
-                )
-            );
-            return ExitCode::FAILURE;
-        }
-        let opts = SessionOptions {
-            resume,
-            autosave: resume,
-        };
-        let prompt = prompt_args.join(" ");
-        return match claudette::cto::run_cto_decomposition(&prompt, opts) {
-            Ok(text) => {
-                println!("{text}");
-                ExitCode::SUCCESS
-            }
-            Err(e) => {
-                eprintln!(
-                    "{} {}",
-                    theme::error(theme::ERR_GLYPH),
-                    theme::error(&format!("{e:#}"))
-                );
-                ExitCode::FAILURE
-            }
-        };
     }
 
     // ── Forge-mode (single-stage v0a) ─────────────────────────────────
@@ -553,7 +511,6 @@ fn parse_args(args: &[String]) -> CliArgs {
             "--time" => expect = ExpectNext::Time,
             "--days" => expect = ExpectNext::Days,
             "--forge" => out.forge = true,
-            "--cto" => out.cto = true,
             "--doctor" => out.doctor = true,
             "--faceless" => {
                 // Persona overlay opt-out (Eva for assistant, CodeX-7 for

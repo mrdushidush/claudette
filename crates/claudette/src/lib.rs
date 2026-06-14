@@ -31,20 +31,12 @@ pub mod session;
 pub mod usage;
 
 // ── Claudette secretary layer ────────────────────────────────────────────
-pub mod agents;
-pub mod antipatterns;
 pub mod api;
-// Off-by-default scaffold (SWE-bench / A-B benchmark runner) awaiting wiring —
-// kept in-tree behind the `experimental` feature so it doesn't bloat the
-// shipped binary or public API. (roast 2026-06-02)
-#[cfg(feature = "experimental")]
-pub mod bench;
 pub mod brain_selector;
 pub mod briefing;
 pub mod clock;
 pub mod codet;
 pub mod commands;
-pub mod cto;
 pub mod doctor;
 pub mod egress;
 pub mod executor;

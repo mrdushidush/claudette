@@ -2,8 +2,8 @@
 //!
 //! Originally ported from `claudettes-forge/crates/core/src/personas.rs` at
 //! the `rc1-final` tag. Forge-mode Coder is wired against `codex7` since v0b;
-//! assistant-mode (Eva) and Verifier (Sentinel-9) get wired in
-//! `import_2026_05_19` Phase 2 alongside the `--faceless` flag.
+//! assistant-mode (Eva) is wired in alongside the `--faceless` flag; the
+//! forge Verifier uses a static prompt with no persona overlay.
 //!
 //! A persona bundles name, role, voice style, backstory, and example
 //! interactions into a single markdown file (TOML frontmatter + markdown
@@ -462,7 +462,7 @@ Flag anything over 50 lines.
         let dir = workspace_personas_dir();
         let map = load_personas(&dir, None)
             .unwrap_or_else(|e| panic!("load_personas({}) failed: {e}", dir.display()));
-        for key in ["codex7", "sentinel9", "cto", "eva"] {
+        for key in ["codex7", "cto", "eva"] {
             assert!(
                 map.contains_key(key),
                 "bundled persona '{key}' missing from map (keys: {:?})",
@@ -476,7 +476,6 @@ Flag anything over 50 lines.
         let dir = workspace_personas_dir();
         let map = load_personas(&dir, None).expect("load");
         assert_eq!(map["codex7"].role, Role::Coder);
-        assert_eq!(map["sentinel9"].role, Role::Verifier);
         assert_eq!(map["cto"].role, Role::Cto);
         assert_eq!(map["eva"].role, Role::Assistant);
     }

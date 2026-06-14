@@ -42,12 +42,6 @@ default = ["integrations"]
 # even by misconfiguration). The coding core (files, search, git, shell,
 # quality, vision, recall, notes, todos, scheduler, …) is unaffected.
 integrations = []
-# Off-by-default scaffolds awaiting wiring: the SWE-bench / A-B benchmark
-# runner (`bench`) and the TUI typewriter renderer (`tui::typewriter`). Kept
-# in-tree for planned integration but excluded from the default build so they
-# don't bloat the shipped binary or the public API / docs.rs surface.
-# (roast 2026-06-02)
-experimental = []
 
 [dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json", "multipart"] }

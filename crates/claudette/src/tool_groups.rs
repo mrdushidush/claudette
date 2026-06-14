@@ -43,7 +43,7 @@ pub enum ToolGroup {
     Ide,
     /// Search: web_search (Brave), web_fetch, glob_search, grep_search.
     Search,
-    /// Power tools: bash, `edit_file`, `spawn_agent` (delegation).
+    /// Power tools: bash, `edit_file`, `apply_diff`.
     Advanced,
     /// Reference lookups: Wikipedia, Open-Meteo weather.
     Facts,
@@ -130,7 +130,7 @@ impl ToolGroup {
             Self::Git => "git workflows: status, diff, log, add, commit, branch, checkout, push",
             Self::Ide => "IDE integration: open_in_editor, reveal_in_explorer, open_url",
             Self::Search => "search: repo_map (localize code by concept — use first), grep_search (regex), glob_search, web_search (Brave), web_fetch",
-            Self::Advanced => "power tools: bash (sync), bash_background + bash_status + bash_tail, apply_diff (fuzzy before/after edit), edit_file (legacy), spawn_agent, ask_user (turn-suspending clarifier)",
+            Self::Advanced => "power tools: bash (sync), bash_background + bash_status + bash_tail, apply_diff (fuzzy before/after edit), edit_file (legacy), ask_user (turn-suspending clarifier)",
             Self::Facts => "reference lookups: wikipedia (summary or search via `mode`), weather (no API key needed)",
             Self::Registry => "package registries: crates.io and npm package metadata (version, downloads, homepage)",
             Self::Github => "github + brownfield missions: gh_inbox(scope=my_prs|assigned|repo_issues), issue+PR ops, code search, clone/fork, mission_start + mission_state(action=status|list|attach|exit) + mission_submit (requires GITHUB_TOKEN)",
@@ -260,8 +260,8 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         "glob_search" | "grep_search" | "web_fetch" | "web_search" | "repo_map" => {
             Some(ToolGroup::Search)
         }
-        "bash" | "edit_file" | "apply_diff" | "spawn_agent" | "bash_background" | "bash_status"
-        | "bash_tail" | "ask_user" => Some(ToolGroup::Advanced),
+        "bash" | "edit_file" | "apply_diff" | "bash_background" | "bash_status" | "bash_tail"
+        | "ask_user" => Some(ToolGroup::Advanced),
         // wikipedia(mode?) and weather(days?) subsume the v0.6.0
         // wikipedia_search/summary and weather_current/forecast names.
         "wikipedia" | "weather" => Some(ToolGroup::Facts),
@@ -562,7 +562,6 @@ mod tests {
         assert_eq!(group_of("glob_search"), Some(ToolGroup::Search));
         assert_eq!(group_of("web_fetch"), Some(ToolGroup::Search));
         assert_eq!(group_of("bash"), Some(ToolGroup::Advanced));
-        assert_eq!(group_of("spawn_agent"), Some(ToolGroup::Advanced));
         // Sprint 9 Phase 0a additions.
         assert_eq!(group_of("wikipedia"), Some(ToolGroup::Facts));
         assert_eq!(group_of("weather"), Some(ToolGroup::Facts));
@@ -876,13 +875,12 @@ mod tests {
     }
 
     #[test]
-    fn advanced_group_contains_spawn_agent() {
+    fn advanced_group_contains_power_tools() {
         let reg = ToolRegistry::new();
         let advanced = reg.group_tool_names(ToolGroup::Advanced);
         assert!(advanced.contains(&"bash".to_string()));
         assert!(advanced.contains(&"edit_file".to_string()));
         assert!(advanced.contains(&"apply_diff".to_string()));
-        assert!(advanced.contains(&"spawn_agent".to_string()));
     }
 
     #[test]

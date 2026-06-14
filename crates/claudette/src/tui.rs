@@ -1226,7 +1226,3 @@ fn run_loop(
 mod paste;
 mod render;
 mod space;
-// Off-by-default scaffold awaiting wiring into render.rs — see the
-// `experimental` feature. (roast 2026-06-02)
-#[cfg(feature = "experimental")]
-mod typewriter;

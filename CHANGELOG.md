@@ -24,6 +24,32 @@ bumps are non-breaking bugfixes only.
   tactic" result. Previously only read-only navigation calls were deduped, so a
   failed or no-op edit could be retried byte-identical until the turn died.
 
+### Removed
+
+A legacy-audit (2026-06-13) pass removed early "context-era" machinery that no
+longer earns its keep — dead scaffolds, dormant read-paths, and sub-agents the
+local brain never invoked. All preserved in git history.
+
+- **Dropped the unwired `tui::typewriter` scaffold and the `experimental`
+  feature.** Both `typewriter` and `bench` were `experimental`-gated and never
+  wired into any live path, so the feature carried nothing once they were gone.
+- **Dropped the unwired `bench` scaffold.** The A/B + SWE-bench runner had no CLI
+  entry or caller and its SWE-bench loop was an unimplemented stub.
+- **Dropped the dormant `antipatterns` prompt overlay.** Its write-half was
+  already gone, so it read a rules file that is never created and always
+  contributed an empty string to the prompt.
+- **Dropped the standalone `--cto` decomposition flag and `cto.rs`.** It was
+  undocumented, never wired to a `/cto` slash, and unused; the forge Planner
+  already does grounded in-repo decomposition. The forge `cto` persona/role
+  remain.
+- **Dropped the `spawn_agent` sub-agents (researcher / gitops / reviewer).** They
+  were in the default schema but never invoked in real sessions, and their
+  toolsets duplicated the main loop + forge + git tools. Reclaims ~458 schema
+  bytes.
+- **Dropped the unwired Sentinel-9 verifier persona.** The forge Verifier uses a
+  static prompt with no persona overlay, so the bundled `sentinel9.md` was never
+  loaded into any turn.
+
 ## [0.11.0] - 2026-06-14
 
 ### Added

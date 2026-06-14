@@ -582,7 +582,7 @@ fn resolve_via_workspace_roots(relative: &Path) -> Option<PathBuf> {
     None
 }
 
-// Codegen group — generate_code + spawn_agent, along with reference-file
+// Codegen group — generate_code, along with reference-file
 // extraction (collect_reference_files, extract_path_candidates,
 // resolve_reference, looks_like_path, has_code_extension) and the
 // per-turn user-prompt path stash (set_current_turn_paths,
@@ -1052,7 +1052,7 @@ fn validate_edit_path_inner(input: &str, mission_active: bool) -> Result<PathBuf
 
 // Shell + edit group (bash, edit_file) lives in src/tools/shell.rs.
 
-// Codegen group (generate_code, spawn_agent) lives in src/tools/codegen.rs.
+// Codegen group (generate_code) lives in src/tools/codegen.rs.
 
 // Search group (glob_search, grep_search, web_fetch) lives in
 // src/tools/search.rs. `strip_html` and `strip_tag_block` stay here because
