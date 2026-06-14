@@ -10,6 +10,8 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-06-14
+
 ### Added
 
 - **Live REPL activity indicator.** During the dead air a local backend
@@ -72,6 +74,12 @@ bumps are non-breaking bugfixes only.
   known-symbol/known-string lookups to `grep_search` and file-by-name lookups
   to `glob_search`, so it is no longer over-called in place of a targeted
   search. `mode=refs` output is unchanged.
+
+- **README leads harder on the air-gapped / local-first positioning, and
+  documents that Claudette develops herself.** The masthead and a new "She helps
+  build herself" section surface the enforced `--offline` air-gap and the fact
+  that Claudette opens real pull requests against her own repo (she is a listed
+  contributor) up front, instead of leaving them buried.
 
 ### Fixed
 
@@ -2029,7 +2037,8 @@ Initial public release of Claudette as a standalone repository.
 
 ---
 
-[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/mrdushidush/claudette/compare/v0.10.0...v0.11.0
 [0.4.0]: https://github.com/mrdushidush/claudette/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/mrdushidush/claudette/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/mrdushidush/claudette/compare/v0.2.3...v0.3.0
