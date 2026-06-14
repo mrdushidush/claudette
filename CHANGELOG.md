@@ -10,6 +10,16 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **Colored diff preview on the `[y/N]` edit gate.** When `apply_diff`,
+  `edit_file`, or `apply_patch` ask for approval, the prompt now shows a
+  unified-diff-style preview — a file header, red removals, green additions, and
+  dim context around the change, with real newlines — instead of dumping the raw
+  escaped-JSON payload (`{"before":"…\n…","after":"…"}`) on one line. The full
+  content is still shown (nothing truncated), and color is dropped on non-TTY /
+  piped output.
+
 ### Fixed
 
 - **No-op edits fail loudly instead of reporting false success.** `apply_diff`

@@ -37,6 +37,7 @@ pub mod briefing;
 pub mod clock;
 pub mod codet;
 pub mod commands;
+pub mod diff_preview;
 pub mod doctor;
 pub mod egress;
 pub mod executor;

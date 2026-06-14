@@ -2742,6 +2742,15 @@ impl PermissionPrompter for CliPrompter {
         // less single-line case correctly — yields the one line.
         if request.input.is_empty() {
             let _ = writeln!(err, "    {}", theme::dim("(empty input)"));
+        } else if let Some(diff_lines) =
+            crate::diff_preview::render(&request.tool_name, &request.input)
+        {
+            // Edit tools (apply_diff / edit_file / apply_patch): show a colored
+            // unified-diff preview instead of the escaped-JSON wall. Full
+            // content, nothing truncated.
+            for line in diff_lines {
+                let _ = writeln!(err, "    {line}");
+            }
         } else {
             for line in request.input.lines() {
                 let _ = writeln!(err, "    {}", theme::dim(line));
