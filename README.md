@@ -1,14 +1,17 @@
 # Claudette
 
-**Your AI never leaves your laptop.** Claudette is a personal AI assistant *and* coding agent that runs entirely on local hardware — REPL, fullscreen TUI, one-shot CLI, and a Telegram bot, all driving one local model through [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai/). No cloud brain. No API key. No subscription. No [telemetry](PRIVACY.md). One Rust binary.
+**Your AI never leaves your laptop.** Claudette is a **local-first, air-gapped** personal AI assistant *and* coding agent that runs entirely on your own hardware — REPL, fullscreen TUI, one-shot CLI, and a Telegram bot, all driving one local model through [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai/). No cloud brain. No API key. No subscription. No [telemetry](PRIVACY.md). One Rust binary.
 
-> **Pull a model, unplug the network, and she still works.** The whole core — chat, notes, todos, file editing, code search, repo work, even the autonomous code-change pipeline — runs with zero internet. See [Air-gapped by design](#-air-gapped-by-design).
+> **Pull a model, unplug the network, and she still works.** The whole core — chat, notes, todos, file editing, code search, repo work, even the autonomous code-change pipeline — runs with zero internet. With `--offline` the air-gap is *enforced*, not just configured. See [Air-gapped by design](#-air-gapped-by-design).
+>
+> And she helps build herself: Claudette opens real pull requests against her own source tree — [she's a listed contributor on this repo](https://github.com/mrdushidush/claudette/graphs/contributors). See [She helps build herself](#-she-helps-build-herself).
 
 [![Crates.io](https://img.shields.io/crates/v/claudette.svg)](https://crates.io/crates/claudette)
 [![CI](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml/badge.svg)](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 [![Local-only](https://img.shields.io/badge/cloud_brain-none-success.svg)](PRIVACY.md)
+[![Air-gapped](https://img.shields.io/badge/air--gap-enforced-success.svg)](#-air-gapped-by-design)
 
 ![Claudette TUI — chat + live tool-call panel side-by-side, one turn covering notes, weather, BTC price, and calendar](docs/images/claudette-tui.png)
 
@@ -89,6 +92,11 @@ Almost every tool lives in a **group the model opts into** via `enable_tools(gro
 
 ### 🌿 Brownfield missions: clone, edit, ship a PR in one chain
 `mission_start("owner/repo")` clones into `~/.claudette/missions/<slug>/` and transparently re-routes `git_status` / `glob_search` / `grep_search` / `write_file` / `bash` into the mission tree. `mission_submit` auto-branches, commits, pushes, and opens the PR. Resumable across sessions with `mission_state(action="attach")`.
+
+### 🔁 She helps build herself
+Claudette is developed **with Claudette.** She runs her own [Forge](#-forge-mode-an-autonomous-code-change-pipeline) + brownfield pipeline against her *own* source tree to implement changes, clears the real build-and-test gate (`cargo fmt` / `clippy -D warnings` / `cargo test`) before anything is pushed, and opens genuine pull requests under her own git identity — so she shows up as a [listed contributor on this very repo](https://github.com/mrdushidush/claudette/graphs/contributors). Features authored and merged this way include `repo_map` language support (C#, Java), `read_file tail=N`, and `grep_search count_only`.
+
+This is the honest version of "self-evolving": **she does the implementation, you keep the keys.** Every change still passes the [human-review gate](#-forge-mode-an-autonomous-code-change-pipeline) and is merged by a person — never an unattended commit to `main`. The agent that edits, tests, and ships code is the same one you point at your *own* repos, so the dogfooding is the demo.
 
 ### 🧠 Tiered-brain auto-fallback
 Three presets — Fast / Auto / Smart. Auto runs `qwen3.5:4b` and escalates to `qwen3.5:9b` only on real stuck signals (empty response after retry, max-iterations with no text, ≥3 consecutive tool errors), reverting per-turn rather than sticking. On a 16 GB GPU, pin `qwen3.6-35b-a3b` instead — see [Claudette Certified](#-claudette-certified--the-local-model-benchmark).
