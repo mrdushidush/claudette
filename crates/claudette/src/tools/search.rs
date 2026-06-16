@@ -65,14 +65,15 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "grep_search",
-                "description": "Search file contents with a regular expression (ripgrep-style, case-insensitive) under a directory. Defaults to the active workspace/project; skips build & dependency dirs (target, node_modules, .git). Use a precise pattern like CLAUDETTE_MAX_FIX_ROUNDS or fn\\s+max_rounds.",
+                "description": "Search file contents with a regular expression (ripgrep-style, case-insensitive by default) under a directory. Defaults to the active workspace/project; skips build & dependency dirs (target, node_modules, .git). Use a precise pattern like CLAUDETTE_MAX_FIX_ROUNDS or fn\\s+max_rounds.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "pattern": { "type": "string", "description": "Regex to search for (e.g. 'TODO|FIXME', 'fn\\s+\\w+'). Invalid regex falls back to literal substring." },
                         "path":    { "type": "string", "description": "Directory to search (default: the workspace/project root)" },
                         "glob":    { "type": "string", "description": "Optional filename glob to restrict the search (e.g. '*.rs', 'src/**/*.ts'). A bare name matches files at any depth; a pattern with '/' matches the path relative to the search root. When omitted, all files are searched." },
-                        "count_only": { "type": "boolean", "description": "When true, return only the total match count and a per-file breakdown — no line bodies, and not capped at 100. Use to gauge how widespread a pattern is. Default false." }
+                        "count_only": { "type": "boolean", "description": "When true, return only the total match count and a per-file breakdown — no line bodies, and not capped at 100. Use to gauge how widespread a pattern is. Default false." },
+                        "case_sensitive": { "type": "boolean", "description": "When true, match the pattern with exact case. Default false (case-insensitive)." }
                     },
                     "required": ["pattern"]
                 }
@@ -267,21 +268,33 @@ fn run_grep_search(input: &str) -> Result<String, String> {
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
+    // Optional exact-case match. Default false → today's case-insensitive
+    // behavior on both the regex and the literal-fallback paths.
+    let case_sensitive = v
+        .get("case_sensitive")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
     // Compile the pattern as a case-insensitive regex (ripgrep semantics —
     // what coding models reach for: alternation, `.?`, char classes). If it
     // isn't valid regex (a small brain occasionally passes a raw string with
     // stray metacharacters), fall back to a literal case-insensitive
     // substring match so the search still does something useful.
     let regex = regex::RegexBuilder::new(pattern)
-        .case_insensitive(true)
+        .case_insensitive(!case_sensitive)
         .size_limit(1 << 20)
         .build()
         .ok();
     let mode = if regex.is_some() { "regex" } else { "literal" };
-    let needle = pattern.to_lowercase();
+    let needle = if case_sensitive {
+        pattern.to_string()
+    } else {
+        pattern.to_lowercase()
+    };
     let line_matches = |line: &str| -> bool {
         match &regex {
             Some(re) => re.is_match(line),
+            None if case_sensitive => line.contains(&needle),
             None => line.to_lowercase().contains(&needle),
         }
     };
@@ -1005,6 +1018,69 @@ mod tests {
             v5["match_count"].as_u64().unwrap(),
             0,
             "glob *.xyz should match nothing"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn grep_search_case_sensitive_honors_exact_case() {
+        let _eg = crate::test_env_lock();
+        let base = user_home()
+            .join(".claudette")
+            .join("files")
+            .join("claudette-grep-case-test");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        // Foo/foo exercise the regex path; Bar(/bar( exercise the literal
+        // fallback ("Bar(" is invalid regex — unclosed group — so the search
+        // falls back to a substring match, which must also honor the flag).
+        fs::write(base.join("s.txt"), "Foo\nfoo\nBar(x)\nbar(x)\n").unwrap();
+
+        // Default (omitted) → case-insensitive: "Foo" matches Foo AND foo.
+        let out = run_grep_search(
+            &json!({ "pattern": "Foo", "path": base.to_str().unwrap() }).to_string(),
+        )
+        .unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            v["match_count"].as_u64().unwrap(),
+            2,
+            "default is case-insensitive"
+        );
+
+        // case_sensitive=true → "Foo" matches only the exact-case line.
+        let out_cs = run_grep_search(
+            &json!({
+                "pattern": "Foo",
+                "path": base.to_str().unwrap(),
+                "case_sensitive": true
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let v_cs: Value = serde_json::from_str(&out_cs).unwrap();
+        assert_eq!(
+            v_cs["match_count"].as_u64().unwrap(),
+            1,
+            "case_sensitive matches exact case only"
+        );
+
+        // Literal fallback (invalid regex "Bar(") must honor case_sensitive too.
+        let out_lit = run_grep_search(
+            &json!({
+                "pattern": "Bar(",
+                "path": base.to_str().unwrap(),
+                "case_sensitive": true
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let v_lit: Value = serde_json::from_str(&out_lit).unwrap();
+        assert_eq!(
+            v_lit["match_count"].as_u64().unwrap(),
+            1,
+            "literal fallback honors case_sensitive"
         );
 
         let _ = fs::remove_dir_all(&base);
