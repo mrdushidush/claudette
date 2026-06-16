@@ -7,7 +7,9 @@
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Air-gap: enforced](https://img.shields.io/badge/air--gap-enforced-success.svg)](#-air-gapped-and-enforced)
 
-![Claudette TUI - chat alongside a live tool-call panel](docs/images/claudette-tui.png)
+![Claudette editing her own repo, clearing the cargo gate, and opening a real pull request - all on a local model, offline](docs/images/claudette-ships-pr.png)
+
+*Claudette in her own repo on a local 35B model - editing the code, clearing the full `cargo fmt` / `clippy` / `cargo test` gate, then opening a genuine pull request. No cloud; nothing leaves the machine.*
 
 ---
 
@@ -54,7 +56,11 @@ Prefer not to pipe curl into a shell? Grab a [prebuilt release](https://github.c
 
 ### 🔁 She helps build herself
 
-Claudette is developed *with* Claudette. She runs her own Forge pipeline against this repo, clears the real build-and-test gate (`cargo fmt` / `clippy -D warnings` / `cargo test`) before anything is pushed, and opens genuine pull requests under her own git identity - so she shows up as a [listed contributor on this repo](https://github.com/mrdushidush/claudette/graphs/contributors). A human reviews and merges every change; nothing lands on `main` unattended. Features shipped this way include `repo_map` C#/Java support, `read_file tail=N`, and `grep_search count_only`.
+Claudette is developed *with* Claudette. She runs her own Forge pipeline against this repo, clears the real build-and-test gate (`cargo fmt` / `clippy -D warnings` / `cargo test`) before anything is pushed, and opens genuine pull requests under her own git identity - so she shows up as a [listed contributor on this repo](https://github.com/mrdushidush/claudette/graphs/contributors). A human reviews and merges every change; nothing lands on `main` unattended. Features shipped this way include `repo_map` C#/Java support, `read_file tail=N`, `grep_search count_only` / `case_sensitive`, and `git_status filter`.
+
+![Claudette previewing a colored diff and running the cargo gate before pushing](docs/images/claudette-diff-gate.png)
+
+*Each edit is previewed as a colored diff at the `[y/N]` gate; she then runs `cargo fmt` / `clippy` / `cargo test` and pushes only when they pass.*
 
 ---
 
