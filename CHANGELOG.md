@@ -10,6 +10,8 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-06-16
+
 ### Added
 
 - **`grep_search` `case_sensitive` flag.** An optional boolean (default false →
@@ -22,6 +24,13 @@ bumps are non-breaking bugfixes only.
   `untracked`) that returns only that class of change while always keeping the
   `## <branch>` header. Omit it for the full status (unchanged). Lets the agent
   ask "what's staged?" without wading through the whole working tree.
+
+### Changed
+
+- **README hero screenshots.** The top of the README now shows Claudette
+  editing her own repo, clearing the full `cargo` gate, and opening a real pull
+  request on a local model - plus a second shot of the colored-diff preview and
+  gate in the "She helps build herself" section.
 
 ## [0.12.0] - 2026-06-14
 
@@ -2102,7 +2111,8 @@ Initial public release of Claudette as a standalone repository.
 
 ---
 
-[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/mrdushidush/claudette/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/mrdushidush/claudette/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/mrdushidush/claudette/compare/v0.10.0...v0.11.0
 [0.4.0]: https://github.com/mrdushidush/claudette/compare/v0.3.1...v0.4.0
