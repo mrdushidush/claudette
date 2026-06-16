@@ -10,6 +10,14 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **`grep_search` `case_sensitive` flag.** An optional boolean (default false →
+  the existing case-insensitive behavior) that, when true, matches the pattern
+  with exact case on both the regex and the invalid-regex literal-fallback paths
+  — for finding `MAX` without every `max(...)`, or a type `Foo` apart from a
+  variable `foo`.
+
 ## [0.12.0] - 2026-06-14
 
 ### Added
