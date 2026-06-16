@@ -20,8 +20,14 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "git_status",
-                "description": "Show working tree status (modified, staged, untracked files).",
-                "parameters": { "type": "object", "properties": {}, "required": [] }
+                "description": "Show working tree status (modified, staged, untracked files). Pass filter to narrow to one class.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "filter": { "type": "string", "enum": ["modified", "staged", "untracked"], "description": "Return only this class of change: 'staged' (index column), 'modified' (worktree column), or 'untracked' (??). The branch header is always kept. Omit for the full status." }
+                    },
+                    "required": []
+                }
             }
         }),
         json!({
@@ -140,7 +146,7 @@ pub(super) fn schemas() -> Vec<Value> {
 
 pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>> {
     let result = match name {
-        "git_status" => run_git_status(),
+        "git_status" => run_git_status(input),
         "git_diff" => run_git_diff(input),
         "git_log" => run_git_log(input),
         "git_add" => run_git_add(input),
@@ -280,9 +286,42 @@ fn reject_destructive(args: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
-fn run_git_status() -> Result<String, String> {
+fn run_git_status(input: &str) -> Result<String, String> {
+    let v: Value = serde_json::from_str(input).unwrap_or(json!({}));
+    let filter = v.get("filter").and_then(Value::as_str);
+
     let output = run_git(&["status", "--short", "--branch"])?;
-    Ok(json!({ "output": output }).to_string())
+
+    // No filter → today's behaviour, byte-identical.
+    match filter {
+        Some(f) => Ok(json!({ "output": filter_status(&output, f), "filter": f }).to_string()),
+        None => Ok(json!({ "output": output }).to_string()),
+    }
+}
+
+/// Filter `git status --short --branch` porcelain to a single class of entry.
+/// Columns: char 0 = index (staged), char 1 = worktree (modified); `??` =
+/// untracked. The `## <branch>` header line is always kept. An unrecognised
+/// filter is a no-op (keeps every line).
+fn filter_status(output: &str, filter: &str) -> String {
+    output
+        .lines()
+        .filter(|line| {
+            if line.starts_with("##") {
+                return true; // always keep the branch header
+            }
+            let mut cols = line.chars();
+            let x = cols.next().unwrap_or(' '); // index / staged column
+            let y = cols.next().unwrap_or(' '); // worktree / modified column
+            match filter {
+                "staged" => x != ' ' && x != '?',
+                "modified" => y != ' ' && y != '?',
+                "untracked" => x == '?' && y == '?',
+                _ => true,
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn run_git_diff(input: &str) -> Result<String, String> {
@@ -655,6 +694,35 @@ mod tests {
     #[test]
     fn extract_stat_number_missing() {
         assert_eq!(extract_stat_number("no match here", "insertion"), 0);
+    }
+
+    #[test]
+    fn filter_status_narrows_by_class() {
+        // Synthetic `git status --short --branch` porcelain. Each entry is the
+        // two status columns then a space then the path: char 0 = index
+        // (staged), char 1 = worktree (modified), "??" = untracked. NOTE the
+        // single leading space on the "modified" line is significant — it is the
+        // empty index column. (Written as ONE string literal with explicit \n;
+        // do NOT use backslash line-continuation, which would strip that space.)
+        let porcelain = "## main...origin/main\nA  staged.txt\n M modified.txt\n?? untracked.txt";
+
+        let staged = filter_status(porcelain, "staged");
+        assert!(staged.contains("## main"), "branch header always kept");
+        assert!(staged.contains("staged.txt"));
+        assert!(!staged.contains("modified.txt"));
+        assert!(!staged.contains("untracked.txt"));
+
+        let modified = filter_status(porcelain, "modified");
+        assert!(modified.contains("## main"));
+        assert!(modified.contains("modified.txt"));
+        assert!(!modified.contains("staged.txt"));
+        assert!(!modified.contains("untracked.txt"));
+
+        let untracked = filter_status(porcelain, "untracked");
+        assert!(untracked.contains("## main"));
+        assert!(untracked.contains("untracked.txt"));
+        assert!(!untracked.contains("staged.txt"));
+        assert!(!untracked.contains("modified.txt"));
     }
 
     #[test]
