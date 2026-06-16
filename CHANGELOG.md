@@ -18,6 +18,11 @@ bumps are non-breaking bugfixes only.
   — for finding `MAX` without every `max(...)`, or a type `Foo` apart from a
   variable `foo`.
 
+- **`git_status` `filter`.** An optional enum (`modified` | `staged` |
+  `untracked`) that returns only that class of change while always keeping the
+  `## <branch>` header. Omit it for the full status (unchanged). Lets the agent
+  ask "what's staged?" without wading through the whole working tree.
+
 ## [0.12.0] - 2026-06-14
 
 ### Added
