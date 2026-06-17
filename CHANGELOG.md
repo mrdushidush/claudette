@@ -10,6 +10,14 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **`repo_map` C/C++ support.** `mode=map` now extracts C and C++ definitions —
+  `class` / `struct` / `enum` (incl. `enum class`), `namespace`, `typedef`, and
+  function/method signatures — from `.c` / `.cc` / `.cpp` / `.cxx` / `.h` /
+  `.hpp` / `.hh` files, so C/C++ trees get the same one-line-per-symbol outline
+  the other languages already had.
+
 ## [0.13.1] - 2026-06-17
 
 ### Changed
