@@ -48,7 +48,7 @@ const MAX_DISTINCT_NAMES: usize = 200;
 /// sees the real `const X = 3;` ahead of a stale doc saying `2`.
 const SOURCE_EXTENSIONS: &[&str] = &[
     "rs", "py", "js", "mjs", "cjs", "jsx", "ts", "tsx", "go", "java", "c", "cc", "cpp", "cxx", "h",
-    "hpp", "rb", "php", "sh", "bash", "sql", "kt", "swift", "scala", "cs",
+    "hpp", "hh", "rb", "php", "sh", "bash", "sql", "kt", "swift", "scala", "cs",
 ];
 
 fn is_source_file(path: &Path) -> bool {
@@ -62,7 +62,7 @@ pub(super) fn schemas() -> Vec<Value> {
         "type": "function",
         "function": {
             "name": "repo_map",
-            "description": "Find where code lives by concept — for INITIAL orientation when you don't already know the location. Returns a compact outline of the workspace files whose top-level definitions best match `query`, each line as `<line>  <signature>`. Orientation only: if you already know the exact symbol or string, use grep_search; to find a file by name, use glob_search; to re-read a known file, use read_file. One pass is enough — do NOT call repo_map repeatedly. (Languages: Rust, Python, JS/TS, Go, Ruby, C#, Java.) To list every place a name appears (or pin the real source value past stale docs), call with mode='refs' and name='<exact text>'.",
+            "description": "Find where code lives by concept — for INITIAL orientation when you don't already know the location. Returns a compact outline of the workspace files whose top-level definitions best match `query`, each line as `<line>  <signature>`. Orientation only: if you already know the exact symbol or string, use grep_search; to find a file by name, use glob_search; to re-read a known file, use read_file. One pass is enough — do NOT call repo_map repeatedly. (Languages: Rust, Python, JS/TS, Go, Ruby, C#, Java, C/C++.) To list every place a name appears (or pin the real source value past stale docs), call with mode='refs' and name='<exact text>'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -564,6 +564,29 @@ fn patterns_for(path: &Path) -> Option<Vec<(&'static str, Regex)>> {
                 r"^\s*(?:(?:public|private|protected|static|final|abstract|synchronized|native|default|strictfp)\s+)+[\w<>\[\],.?]+\s+([A-Za-z_]\w*)\s*\(",
             ),
         ],
+        "c" | "cc" | "cpp" | "cxx" | "h" | "hpp" | "hh" => vec![
+            ("namespace", r"^\s*namespace\s+([A-Za-z_]\w*)"),
+            (
+                "class",
+                r"^\s*(?:template\s*<[^>]*>\s*)?class\s+([A-Za-z_]\w*)",
+            ),
+            ("struct", r"^\s*struct\s+([A-Za-z_]\w*)"),
+            // enum, enum class, enum struct
+            ("enum", r"^\s*enum\s+(?:class\s+|struct\s+)?([A-Za-z_]\w*)"),
+            // typedef <stuff> Name;  — captures the last identifier before ';'.
+            // Best-effort: function-pointer typedefs (`typedef int (*Cb)(int);`)
+            // intentionally don't match (no `Name;` tail).
+            ("typedef", r"^\s*typedef\s+.+\b([A-Za-z_]\w*)\s*;"),
+            // function/method definition or prototype: <return-type> <name>(.
+            // Requires a return type AND a name before '(', so `if (` / `while (`
+            // / `for (` / `switch (` and bare calls `foo(` are NOT matched. The
+            // `[\s\*&]+` lets the return type carry pointers/refs (`Widget* f(`,
+            // `const Foo& g(`). No-lookaround limitation: a `return name(...)`
+            // statement line is admitted (accepted — bias to recall in an
+            // outline). Constructors have no return type, so they're skipped here
+            // and counted once by the `class`/`struct` arm.
+            ("fn", r"^\s*(?:[A-Za-z_][\w:]*[\s\*&]+)+([A-Za-z_]\w*)\s*\("),
+        ],
         _ => return None,
     };
     Some(
@@ -831,6 +854,86 @@ mod tests {
             "public string Greet",
             "public static int Add",
             "public enum Mood",
+        ] {
+            assert!(out.contains(sig), "missing `{sig}` in:\n{out}");
+        }
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn cpp_patterns_capture_class_struct_namespace_enum_typedef_and_function() {
+        let pats = patterns_for(Path::new("x.cpp")).unwrap();
+        let hit = |line: &str| {
+            pats.iter()
+                .find_map(|(k, re)| re.captures(line).map(|c| (*k, c[1].to_string())))
+        };
+
+        assert_eq!(hit("namespace baz"), Some(("namespace", "baz".to_string())));
+        assert_eq!(
+            hit("class Widget : public Base"),
+            Some(("class", "Widget".to_string()))
+        );
+        assert_eq!(hit("struct Bar"), Some(("struct", "Bar".to_string())));
+        assert_eq!(hit("enum class Color"), Some(("enum", "Color".to_string())));
+        assert_eq!(hit("enum Mood"), Some(("enum", "Mood".to_string())));
+        assert_eq!(
+            hit("typedef struct Point Point_t;"),
+            Some(("typedef", "Point_t".to_string()))
+        );
+        // functions: with/without modifiers, pointer + qualified return types
+        assert_eq!(
+            hit("int add(int a, int b)"),
+            Some(("fn", "add".to_string()))
+        );
+        assert_eq!(
+            hit("    static void run()"),
+            Some(("fn", "run".to_string()))
+        );
+        assert_eq!(hit("Widget* make(int n)"), Some(("fn", "make".to_string())));
+        assert_eq!(
+            hit("std::string greet(const std::string& name)"),
+            Some(("fn", "greet".to_string()))
+        );
+        // keyword-swallow guard: control flow is NOT a function (no name before `(`)
+        assert_eq!(hit("    if (ready) {"), None);
+        assert_eq!(hit("    while (true) {"), None);
+        assert_eq!(hit("    for (int i = 0; i < n; i++) {"), None);
+        assert_eq!(hit("    switch (state) {"), None);
+        // bare call / constructor have no return type → not captured as fn
+        assert_eq!(hit("    doThing(x);"), None);
+        assert_eq!(hit("    Widget(int n)"), None);
+    }
+
+    #[test]
+    fn repo_map_cpp_definitions_extracted_in_map_mode() {
+        let _eg = crate::test_env_lock();
+        let base = super::super::user_home()
+            .join(".claudette")
+            .join("files")
+            .join("claudette-repomap-test-cpp");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("src")).unwrap();
+        let cpp_content = "namespace geo {\n\nstruct Point {\n    int x;\n    int y;\n};\n\nenum class Shape {\n    Circle,\n    Square,\n};\n\nclass Widget {\npublic:\n    Widget(int n);\n    int area() const;\n};\n\nint add(int a, int b) {\n    return add_impl(a, b);\n}\n\n}\n";
+        std::fs::write(base.join("src").join("widget.cpp"), cpp_content).unwrap();
+
+        let input = json!({
+            "query": "widget point shape namespace geo add area",
+            "path": base.to_str().unwrap()
+        })
+        .to_string();
+        let out = run_repo_map(&input).unwrap().replace('\\', "/");
+
+        assert!(
+            out.contains("src/widget.cpp"),
+            "widget.cpp should be found:\n{out}"
+        );
+        for sig in [
+            "namespace geo",
+            "struct Point",
+            "enum class Shape",
+            "class Widget",
+            "int add(int a, int b)",
         ] {
             assert!(out.contains(sig), "missing `{sig}` in:\n{out}");
         }
