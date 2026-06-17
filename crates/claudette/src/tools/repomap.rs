@@ -62,7 +62,7 @@ pub(super) fn schemas() -> Vec<Value> {
         "type": "function",
         "function": {
             "name": "repo_map",
-            "description": "Find where code lives by concept — for INITIAL orientation when you don't already know the location. Returns a compact outline of the workspace files whose top-level definitions best match `query`, each line as `<line>  <signature>`. Orientation only: if you already know the exact symbol or string, use grep_search; to find a file by name, use glob_search; to re-read a known file, use read_file. One pass is enough — do NOT call repo_map repeatedly. (Languages: Rust, Python, JS/TS, Go, Ruby, C#, Java, C/C++.) To list every place a name appears (or pin the real source value past stale docs), call with mode='refs' and name='<exact text>'.",
+            "description": "Find where code lives by concept — for INITIAL orientation when you don't already know the location. Returns a compact outline of the workspace files whose top-level definitions best match `query`, each line as `<line>  <signature>`. Orientation only: if you already know the exact symbol or string, use grep_search; to find a file by name, use glob_search; to re-read a known file, use read_file. One pass is enough — do NOT call repo_map repeatedly. (Languages: Rust, Python, JS/TS, Go, Ruby, C#, Java, C/C++, PHP.) To list every place a name appears (or pin the real source value past stale docs), call with mode='refs' and name='<exact text>'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -587,6 +587,24 @@ fn patterns_for(path: &Path) -> Option<Vec<(&'static str, Regex)>> {
             // and counted once by the `class`/`struct` arm.
             ("fn", r"^\s*(?:[A-Za-z_][\w:]*[\s\*&]+)+([A-Za-z_]\w*)\s*\("),
         ],
+        "php" => vec![
+            ("namespace", r"^\s*namespace\s+([A-Za-z_]\w*)"),
+            (
+                "class",
+                r"^\s*(?:(?:abstract|final|readonly)\s+)*class\s+([A-Za-z_]\w*)",
+            ),
+            ("interface", r"^\s*interface\s+([A-Za-z_]\w*)"),
+            ("trait", r"^\s*trait\s+([A-Za-z_]\w*)"),
+            ("enum", r"^\s*enum\s+([A-Za-z_]\w*)"),
+            // method/function: visibility/static modifiers optional, `function`
+            // keyword mandatory (so `if (`/`while (` and `$f = function() {}`
+            // anonymous closures are NOT captured — a closure has no name after
+            // `function`). `&?` allows return-by-reference (`function &ref()`).
+            (
+                "function",
+                r"^\s*(?:(?:public|private|protected|static|final|abstract)\s+)*function\s+&?\s*([A-Za-z_]\w*)",
+            ),
+        ],
         _ => return None,
     };
     Some(
@@ -934,6 +952,85 @@ mod tests {
             "enum class Shape",
             "class Widget",
             "int add(int a, int b)",
+        ] {
+            assert!(out.contains(sig), "missing `{sig}` in:\n{out}");
+        }
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn php_patterns_capture_class_interface_trait_enum_namespace_and_function() {
+        let pats = patterns_for(Path::new("x.php")).unwrap();
+        let hit = |line: &str| {
+            pats.iter()
+                .find_map(|(k, re)| re.captures(line).map(|c| (*k, c[1].to_string())))
+        };
+
+        assert_eq!(
+            hit("namespace App;"),
+            Some(("namespace", "App".to_string()))
+        );
+        assert_eq!(hit("class Greeter"), Some(("class", "Greeter".to_string())));
+        assert_eq!(
+            hit("abstract class Base"),
+            Some(("class", "Base".to_string()))
+        );
+        assert_eq!(
+            hit("interface Greeter"),
+            Some(("interface", "Greeter".to_string()))
+        );
+        assert_eq!(hit("trait Hello"), Some(("trait", "Hello".to_string())));
+        assert_eq!(hit("enum Suit"), Some(("enum", "Suit".to_string())));
+        assert_eq!(
+            hit("    public function greet($name)"),
+            Some(("function", "greet".to_string()))
+        );
+        assert_eq!(
+            hit("    public static function add($a, $b)"),
+            Some(("function", "add".to_string()))
+        );
+        assert_eq!(
+            hit("function greet()"),
+            Some(("function", "greet".to_string()))
+        );
+        // control flow and anonymous closures are NOT functions (no name after `function`)
+        assert_eq!(hit("    if ($ready) {"), None);
+        assert_eq!(hit("    while (true) {"), None);
+        assert_eq!(hit("    $f = function() {"), None);
+        assert_eq!(hit("    doThing($x);"), None);
+    }
+
+    #[test]
+    fn repo_map_php_definitions_extracted_in_map_mode() {
+        let _eg = crate::test_env_lock();
+        let base = super::super::user_home()
+            .join(".claudette")
+            .join("files")
+            .join("claudette-repomap-test-php");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("src")).unwrap();
+        let php_content = "<?php\n\nnamespace App;\n\ninterface Greeter {\n    public function greet(string $name): string;\n}\n\nclass HelloGreeter implements Greeter {\n    private string $prefix;\n\n    public function __construct(string $prefix) {\n        $this->prefix = $prefix;\n    }\n\n    public function greet(string $name): string {\n        return $this->prefix . $name;\n    }\n\n    public static function add(int $a, int $b): int {\n        return $a + $b;\n    }\n}\n\nenum Mood {\n    case Happy;\n    case Sad;\n}\n";
+        std::fs::write(base.join("src").join("Greeter.php"), php_content).unwrap();
+
+        let input = json!({
+            "query": "greeter class interface function greet add enum namespace",
+            "path": base.to_str().unwrap()
+        })
+        .to_string();
+        let out = run_repo_map(&input).unwrap().replace('\\', "/");
+
+        assert!(
+            out.contains("src/Greeter.php"),
+            "Greeter.php should be found:\n{out}"
+        );
+        for sig in [
+            "namespace App",
+            "interface Greeter",
+            "class HelloGreeter",
+            "public function greet",
+            "public static function add",
+            "enum Mood",
         ] {
             assert!(out.contains(sig), "missing `{sig}` in:\n{out}");
         }

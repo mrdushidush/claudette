@@ -18,6 +18,11 @@ bumps are non-breaking bugfixes only.
   `.hpp` / `.hh` files, so C/C++ trees get the same one-line-per-symbol outline
   the other languages already had.
 
+- **`repo_map` PHP support.** `mode=map` now extracts PHP definitions —
+  `namespace`, `class` / `interface` / `trait` / `enum`, and function/method
+  signatures — from `.php` files, so PHP projects get the same
+  one-line-per-symbol outline the other languages already had.
+
 ## [0.13.1] - 2026-06-17
 
 ### Changed
