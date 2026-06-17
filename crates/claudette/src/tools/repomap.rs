@@ -58,11 +58,17 @@ fn is_source_file(path: &Path) -> bool {
 }
 
 pub(super) fn schemas() -> Vec<Value> {
+    // The "(Languages: …)" list is generated from LANG_PATTERNS so adding a
+    // language stays a one-place edit (the table) — the schema follows.
+    let description = format!(
+        "Find where code lives by concept — for INITIAL orientation when you don't already know the location. Returns a compact outline of the workspace files whose top-level definitions best match `query`, each line as `<line>  <signature>`. Orientation only: if you already know the exact symbol or string, use grep_search; to find a file by name, use glob_search; to re-read a known file, use read_file. One pass is enough — do NOT call repo_map repeatedly. (Languages: {}.) To list every place a name appears (or pin the real source value past stale docs), call with mode='refs' and name='<exact text>'.",
+        map_language_list()
+    );
     vec![json!({
         "type": "function",
         "function": {
             "name": "repo_map",
-            "description": "Find where code lives by concept — for INITIAL orientation when you don't already know the location. Returns a compact outline of the workspace files whose top-level definitions best match `query`, each line as `<line>  <signature>`. Orientation only: if you already know the exact symbol or string, use grep_search; to find a file by name, use glob_search; to re-read a known file, use read_file. One pass is enough — do NOT call repo_map repeatedly. (Languages: Rust, Python, JS/TS, Go, Ruby, C#, Java, C/C++, PHP.) To list every place a name appears (or pin the real source value past stale docs), call with mode='refs' and name='<exact text>'.",
+            "description": description,
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -457,10 +463,25 @@ fn push_token(out: &mut Vec<String>, tok: &str, stop: &[&str]) {
 /// isn't a supported source language. Each `Regex` captures the symbol NAME in
 /// group 1. Compiled per call (cheap — a few dozen small patterns, and
 /// repo_map runs rarely).
-fn patterns_for(path: &Path) -> Option<Vec<(&'static str, Regex)>> {
-    let ext = path.extension()?.to_str()?.to_lowercase();
-    let pats: Vec<(&'static str, &str)> = match ext.as_str() {
-        "rs" => vec![
+/// One definition pattern: `(kind label, regex source)`. The regex captures the
+/// symbol NAME in group 1.
+type DefPattern = (&'static str, &'static str);
+/// One language for `mode=map`: `(display name, file extensions, patterns)`.
+type LangSpec = (&'static str, &'static [&'static str], &'static [DefPattern]);
+
+/// Per-language definition patterns for `mode=map`, as a flat data table.
+///
+/// ─────────── TO ADD A LANGUAGE: append ONE entry at the end. ───────────
+/// `patterns_for` looks it up by extension and the schema's "(Languages: …)"
+/// list is generated from the display names — so a new language is a single
+/// edit here (plus a CHANGELOG bullet and a test mirroring the others). Each
+/// regex captures the symbol name in group 1; order within a language matters
+/// (first match per line wins in the scan loop).
+const LANG_PATTERNS: &[LangSpec] = &[
+    (
+        "Rust",
+        &["rs"],
+        &[
             (
                 "fn",
                 r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?(?:const\s+)?fn\s+([A-Za-z_]\w*)",
@@ -492,11 +513,19 @@ fn patterns_for(path: &Path) -> Option<Vec<(&'static str, Regex)>> {
             ("mod", r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z_]\w*)"),
             ("macro", r"^\s*macro_rules!\s+([A-Za-z_]\w*)"),
         ],
-        "py" => vec![
+    ),
+    (
+        "Python",
+        &["py"],
+        &[
             ("def", r"^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)"),
             ("class", r"^\s*class\s+([A-Za-z_]\w*)"),
         ],
-        "js" | "mjs" | "cjs" | "jsx" | "ts" | "tsx" => vec![
+    ),
+    (
+        "JS/TS",
+        &["js", "mjs", "cjs", "jsx", "ts", "tsx"],
+        &[
             (
                 "function",
                 r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s+([A-Za-z_$][\w$]*)",
@@ -514,17 +543,29 @@ fn patterns_for(path: &Path) -> Option<Vec<(&'static str, Regex)>> {
                 r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=",
             ),
         ],
-        "go" => vec![
+    ),
+    (
+        "Go",
+        &["go"],
+        &[
             ("func", r"^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)"),
             ("type", r"^\s*type\s+([A-Za-z_]\w*)"),
             ("const", r"^\s*(?:const|var)\s+([A-Za-z_]\w*)"),
         ],
-        "rb" => vec![
+    ),
+    (
+        "Ruby",
+        &["rb"],
+        &[
             ("def", r"^\s*def\s+(?:self\.)?([A-Za-z_]\w*[!?=]?)"),
             ("class", r"^\s*class\s+([A-Za-z_][\w:]*)"),
             ("module", r"^\s*module\s+([A-Za-z_][\w:]*)"),
         ],
-        "cs" => vec![
+    ),
+    (
+        "C#",
+        &["cs"],
+        &[
             (
                 "class",
                 r"^\s*(?:(?:public|private|protected|internal|static|sealed|abstract|partial)\s+)*class\s+([A-Za-z_]\w*)",
@@ -546,7 +587,11 @@ fn patterns_for(path: &Path) -> Option<Vec<(&'static str, Regex)>> {
                 r"^\s*(?:(?:public|private|protected|internal|static|async|virtual|override|sealed|abstract|extern|new|partial|unsafe)\s+)+[\w<>\[\],.?]+\s+([A-Za-z_]\w*)\s*\(",
             ),
         ],
-        "java" => vec![
+    ),
+    (
+        "Java",
+        &["java"],
+        &[
             (
                 "class",
                 r"^\s*(?:(?:public|private|protected|static|final|abstract|sealed|strictfp)\s+)*class\s+([A-Za-z_]\w*)",
@@ -564,7 +609,11 @@ fn patterns_for(path: &Path) -> Option<Vec<(&'static str, Regex)>> {
                 r"^\s*(?:(?:public|private|protected|static|final|abstract|synchronized|native|default|strictfp)\s+)+[\w<>\[\],.?]+\s+([A-Za-z_]\w*)\s*\(",
             ),
         ],
-        "c" | "cc" | "cpp" | "cxx" | "h" | "hpp" | "hh" => vec![
+    ),
+    (
+        "C/C++",
+        &["c", "cc", "cpp", "cxx", "h", "hpp", "hh"],
+        &[
             ("namespace", r"^\s*namespace\s+([A-Za-z_]\w*)"),
             (
                 "class",
@@ -587,7 +636,11 @@ fn patterns_for(path: &Path) -> Option<Vec<(&'static str, Regex)>> {
             // and counted once by the `class`/`struct` arm.
             ("fn", r"^\s*(?:[A-Za-z_][\w:]*[\s\*&]+)+([A-Za-z_]\w*)\s*\("),
         ],
-        "php" => vec![
+    ),
+    (
+        "PHP",
+        &["php"],
+        &[
             ("namespace", r"^\s*namespace\s+([A-Za-z_]\w*)"),
             (
                 "class",
@@ -605,11 +658,26 @@ fn patterns_for(path: &Path) -> Option<Vec<(&'static str, Regex)>> {
                 r"^\s*(?:(?:public|private|protected|static|final|abstract)\s+)*function\s+&?\s*([A-Za-z_]\w*)",
             ),
         ],
-        _ => return None,
-    };
+    ),
+];
+
+/// Comma-joined display names of the map languages, for the schema description.
+fn map_language_list() -> String {
+    LANG_PATTERNS
+        .iter()
+        .map(|(name, _, _)| *name)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn patterns_for(path: &Path) -> Option<Vec<(&'static str, Regex)>> {
+    let ext = path.extension()?.to_str()?.to_lowercase();
+    let (_, _, pats) = LANG_PATTERNS
+        .iter()
+        .find(|(_, exts, _)| exts.contains(&ext.as_str()))?;
     Some(
-        pats.into_iter()
-            .filter_map(|(kind, p)| Regex::new(p).ok().map(|re| (kind, re)))
+        pats.iter()
+            .filter_map(|&(kind, p)| Regex::new(p).ok().map(|re| (kind, re)))
             .collect(),
     )
 }
@@ -1036,6 +1104,26 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn schema_language_list_is_derived_from_the_table() {
+        // The whole point of the LANG_PATTERNS refactor: adding a language to the
+        // table surfaces in the schema "(Languages: …)" list automatically.
+        let schemas = schemas();
+        let desc = schemas[0]["function"]["description"].as_str().unwrap();
+        assert!(
+            desc.contains(&format!("(Languages: {}.)", map_language_list())),
+            "schema description must embed the generated language list: {desc}"
+        );
+        // the table actually carries the languages we claim to support
+        let list = map_language_list();
+        for lang in ["Rust", "Python", "C#", "Java", "C/C++", "PHP"] {
+            assert!(
+                list.contains(lang),
+                "table missing language `{lang}`: {list}"
+            );
+        }
     }
 
     #[test]
