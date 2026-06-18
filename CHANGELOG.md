@@ -23,6 +23,17 @@ bumps are non-breaking bugfixes only.
   signatures — from `.php` files, so PHP projects get the same
   one-line-per-symbol outline the other languages already had.
 
+- **Read-loop breaker.** A new content-aware guard for the read-only churn that
+  the edit loop-breaker can't catch (a small brain re-reading the same large
+  file around an edit that never lands). When `read_file` returns bytes
+  identical to an earlier read this turn — even across an intervening *failed*
+  edit, which the existing navigation dedup clears — the second read no longer
+  re-injects the whole file; it returns a compact "unchanged, scroll up" notice
+  instead (the main context saver). A one-shot no-progress nudge also steers the
+  brain to commit an edit or stop after several reads with no file actually
+  changing. Knobs: `CLAUDETTE_READ_LOOP_LIMIT` (default 2) and
+  `CLAUDETTE_NO_READ_LOOP_BREAKER` to disable.
+
 ## [0.13.1] - 2026-06-17
 
 ### Changed

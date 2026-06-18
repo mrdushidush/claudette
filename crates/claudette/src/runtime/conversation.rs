@@ -14,6 +14,21 @@ use crate::usage::{TokenUsage, UsageTracker};
 const DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD: u32 = 200_000;
 const AUTO_COMPACTION_THRESHOLD_ENV_VAR: &str = "CLAUDE_CODE_AUTO_COMPACT_INPUT_TOKENS";
 
+/// Read-loop breaker knobs (plans/read-loop-breaker-2026-06-17.md). Setting
+/// `CLAUDETTE_NO_READ_LOOP_BREAKER` (to anything) disables both the unchanged-
+/// re-read suppression and the no-progress nudge; `CLAUDETTE_READ_LOOP_LIMIT`
+/// overrides how many identical reads are allowed before suppression.
+const READ_LOOP_DISABLE_ENV_VAR: &str = "CLAUDETTE_NO_READ_LOOP_BREAKER";
+const READ_LOOP_LIMIT_ENV_VAR: &str = "CLAUDETTE_READ_LOOP_LIMIT";
+/// Suppress from the 2nd identical re-read (1st returns the body, 2nd+ the
+/// pointer-up notice).
+const READ_LOOP_LIMIT_DEFAULT: usize = 2;
+/// Tool calls since the last SUCCESSFUL mutation before the no-progress nudge
+/// fires once. Counts a DIFFERENT spiral than [`SEARCH_NUDGE_AT`]: a
+/// read↔failed-edit churn, where each failed edit resets the consecutive-nav
+/// streak (so [`search_budget_nudge`] never trips) yet no file ever changes.
+const NO_PROGRESS_NUDGE_AT: usize = 8;
+
 /// One-sentence discipline reminder appended to the system prompt for any
 /// turn that carries an image attachment. The 35B brain on
 /// `unsloth/qwen3.6-35b-a3b` was observed citing prior-turn tool output
@@ -339,6 +354,22 @@ where
         // re-read and change tactic. Kept separate from seen_nav: edits are not
         // navigation, and a suppressed edit must not perturb the nav dedup.
         let mut seen_edits: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // Read-loop breaker (plans/read-loop-breaker-2026-06-17.md): per-path
+        // content hash + how many times a read_file returned those exact bytes
+        // this turn. Unlike `seen_nav` this is NOT cleared by a mutating tool —
+        // it is keyed on CONTENT, so a FAILED edit (file unchanged) still lets a
+        // re-read be suppressed (the Task-16 spiral that defeated `seen_nav`,
+        // because a failed edit hits the `seen_nav.clear()` branch), while a
+        // SUCCESSFUL edit changes the hash so the real content is returned.
+        let read_loop_enabled = std::env::var_os(READ_LOOP_DISABLE_ENV_VAR).is_none();
+        let read_loop_limit =
+            read_loop_limit_from(std::env::var(READ_LOOP_LIMIT_ENV_VAR).ok().as_deref());
+        let mut read_seen: std::collections::HashMap<String, (u64, usize)> =
+            std::collections::HashMap::new();
+        // No-progress breaker: tool calls since the last SUCCESSFUL mutation,
+        // plus a once-per-turn flag for the steering line.
+        let mut iters_since_mutation = 0usize;
+        let mut nudged_no_progress = false;
         let mut hit_iteration_cap = false;
 
         loop {
@@ -507,6 +538,59 @@ where
                                 output,
                                 post_hook_result.is_denied(),
                             );
+
+                            // Read-loop breaker (A): when read_file returns the
+                            // SAME bytes as an earlier read this turn, replace
+                            // the re-injected full body with a pointer-up notice
+                            // — the big context saver. Keyed on content hash, so
+                            // a genuine change (after a successful edit) is NOT
+                            // suppressed. Post-exec by design: we need the bytes
+                            // to know they are unchanged, and the cost it cuts is
+                            // CONTEXT, not the (cheap) disk read.
+                            if read_loop_enabled && tool_name == "read_file" && !is_error {
+                                let path = read_file_path(&input);
+                                let hash = content_hash(&output);
+                                let reads = {
+                                    let entry = read_seen.entry(path.clone()).or_insert((hash, 0));
+                                    if entry.0 == hash {
+                                        entry.1 += 1;
+                                    } else {
+                                        *entry = (hash, 1);
+                                    }
+                                    entry.1
+                                };
+                                if reads >= read_loop_limit {
+                                    output = unchanged_read_notice(&path, reads);
+                                    is_error = true;
+                                }
+                            }
+
+                            // No-progress counter: reset on a SUCCESSFUL
+                            // mutation, otherwise grow. Distinct from
+                            // consecutive_nav, which a failed edit resets — so
+                            // this keeps climbing through a read↔failed-edit
+                            // churn that search_budget_nudge never catches.
+                            if read_loop_enabled {
+                                if is_mutation_tool(&tool_name) && !is_error {
+                                    iters_since_mutation = 0;
+                                } else {
+                                    iters_since_mutation += 1;
+                                }
+                                // Fire once, on a clean nav result, only when a
+                                // non-nav tool (a failed edit) broke the nav
+                                // streak — i.e. consecutive_nav <
+                                // iters_since_mutation. Pure read churn is left
+                                // to search_budget_nudge so the two never double.
+                                if !nudged_no_progress
+                                    && is_nav
+                                    && !is_error
+                                    && iters_since_mutation >= NO_PROGRESS_NUDGE_AT
+                                    && consecutive_nav < iters_since_mutation
+                                {
+                                    output.push_str(&no_progress_nudge());
+                                    nudged_no_progress = true;
+                                }
+                            }
 
                             // Search-budget nudge: too many consecutive
                             // searches/reads → push the brain to answer from
@@ -794,6 +878,79 @@ fn duplicate_edit_body(tool_name: &str) -> String {
          already applied (the target is gone). Re-read the file with read_file to see its \
          CURRENT contents, then send a DIFFERENT edit that matches what is actually there.\"}}"
     )
+}
+
+/// Parse [`READ_LOOP_LIMIT_ENV_VAR`]; falls back to [`READ_LOOP_LIMIT_DEFAULT`]
+/// for an absent / unparseable / zero value. Pure so it can be unit-tested
+/// without touching the (process-global, parallel-test-shared) environment.
+fn read_loop_limit_from(value: Option<&str>) -> usize {
+    value
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|n| *n >= 1)
+        .unwrap_or(READ_LOOP_LIMIT_DEFAULT)
+}
+
+/// Mutating tools whose SUCCESS counts as progress and resets the no-progress
+/// counter. `write_file` is included here (unlike [`is_block_edit_tool`]) — a
+/// successful whole-file write is real progress, even though its idempotent
+/// *repeat* is not a spiral worth suppressing.
+fn is_mutation_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "edit_file" | "apply_diff" | "apply_patch" | "write_file"
+    )
+}
+
+/// Stable-within-a-turn hash of a `read_file` body. Only ever compared against
+/// another hash from the same turn to tell "same bytes" from "changed" — not
+/// persisted, so the default hasher is fine.
+fn content_hash(body: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    body.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Best-effort `path` pulled from a `read_file` tool input, for the unchanged-
+/// re-read notice. Falls back to the raw input when the JSON has no `path`.
+fn read_file_path(input: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(input)
+        .ok()
+        .and_then(|v| {
+            v.get("path")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| input.to_string())
+}
+
+/// Notice returned in place of a `read_file` body when the file is UNCHANGED
+/// since an earlier read this turn (identical content hash). Points UP to the
+/// copy already in context. It must NEVER invite a re-fetch — the #61
+/// re-fetch-loop trap came from a "call it again" placeholder — so it says
+/// scroll up and narrow, never "read it again".
+fn unchanged_read_notice(path: &str, reads: usize) -> String {
+    serde_json::json!({
+        "error": "unchanged re-read suppressed",
+        "path": path,
+        "reads": reads,
+        "hint": "This file is UNCHANGED since you read it earlier this turn — its full \
+                 contents are already in the conversation above; scroll up to them. Do NOT \
+                 read it again. To act on a specific part, narrow with grep_search or \
+                 read_file with an offset/limit, then send your edit.",
+    })
+    .to_string()
+}
+
+/// One-shot steering line for the read↔failed-edit churn ([`NO_PROGRESS_NUDGE_AT`]).
+/// Appended to a clean navigation result; pushes the brain to commit an edit or
+/// stop, rather than keep re-reading around an edit that never lands.
+fn no_progress_nudge() -> String {
+    "\n\n[no-progress: several reads/searches and no file has actually changed. If you are \
+     locating the change, narrow with grep_search; if an edit keeps failing, re-read ONLY the \
+     failing region (read_file offset/limit) and send a DIFFERENT edit that matches what is \
+     there. Make the edit now, or stop and summarize what you found.]"
+        .to_string()
 }
 
 fn format_hook_message(result: &HookRunResult, fallback: &str) -> String {
@@ -1372,6 +1529,300 @@ mod tests {
                 "{other} must NOT be a block edit"
             );
         }
+    }
+
+    #[test]
+    fn read_loop_limit_parses_env_or_falls_back() {
+        assert_eq!(super::read_loop_limit_from(None), 2, "absent -> default");
+        assert_eq!(super::read_loop_limit_from(Some("5")), 5);
+        assert_eq!(super::read_loop_limit_from(Some(" 3 ")), 3, "trimmed");
+        assert_eq!(super::read_loop_limit_from(Some("0")), 2, "zero -> default");
+        assert_eq!(
+            super::read_loop_limit_from(Some("x")),
+            2,
+            "garbage -> default"
+        );
+        assert_eq!(super::read_loop_limit_from(Some("")), 2, "empty -> default");
+    }
+
+    #[test]
+    fn mutation_tool_classifier_matches_writes_and_edits() {
+        for m in ["edit_file", "apply_diff", "apply_patch", "write_file"] {
+            assert!(super::is_mutation_tool(m), "{m} should be a mutation");
+        }
+        for other in ["read_file", "grep_search", "repo_map", "bash", "git_status"] {
+            assert!(
+                !super::is_mutation_tool(other),
+                "{other} must NOT be a mutation"
+            );
+        }
+    }
+
+    // A scripted client that emits a fixed batch of events per call, then
+    // falls through to a one-shot text answer. Used by the read-loop tests to
+    // drive an arbitrary read/edit sequence.
+    struct ScriptApi {
+        batches: Vec<Vec<AssistantEvent>>,
+        i: usize,
+    }
+    impl ApiClient for ScriptApi {
+        fn stream(&mut self, _r: &ApiRequest<'_>) -> Result<Vec<AssistantEvent>, RuntimeError> {
+            let batch = self.batches.get(self.i).cloned().unwrap_or_else(|| {
+                vec![
+                    AssistantEvent::TextDelta("done".to_string()),
+                    AssistantEvent::MessageStop,
+                ]
+            });
+            self.i += 1;
+            Ok(batch)
+        }
+    }
+    fn tool_use(id: &str, name: &str, input: &str) -> Vec<AssistantEvent> {
+        vec![
+            AssistantEvent::ToolUse {
+                id: id.to_string(),
+                name: name.to_string(),
+                input: input.to_string(),
+            },
+            AssistantEvent::MessageStop,
+        ]
+    }
+    fn rw_policy() -> PermissionPolicy {
+        PermissionPolicy::new(PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("read_file", PermissionMode::ReadOnly)
+            .with_tool_requirement("edit_file", PermissionMode::WorkspaceWrite)
+    }
+    fn tool_result_outputs(
+        runtime: &ConversationRuntime<ScriptApi, StaticToolExecutor>,
+    ) -> Vec<String> {
+        runtime
+            .session()
+            .messages
+            .iter()
+            .flat_map(|m| m.blocks.iter())
+            .filter_map(|b| match b {
+                ContentBlock::ToolResult { output, .. } => Some(output.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn unchanged_re_read_is_suppressed_even_after_a_failed_edit() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // The Task-16 spiral: read repomap.rs -> attempt an edit that FAILS ->
+        // re-read the SAME (unchanged) file. The failed edit hits the
+        // `seen_nav.clear()` branch, so the existing nav dedup never catches the
+        // re-read. The content-hash read-loop breaker must: let the read run
+        // (it is post-exec), but replace the re-injected body with a pointer-up
+        // notice because the bytes are unchanged.
+        let reads = Rc::new(Cell::new(0usize));
+        let rc = Rc::clone(&reads);
+        let tool_executor = StaticToolExecutor::new()
+            .register("read_file", move |_input| {
+                rc.set(rc.get() + 1);
+                Ok("FILE BODY".to_string())
+            })
+            .register("edit_file", |_input| {
+                Err(super::ToolError::new("no match for before-text"))
+            });
+
+        let batches = vec![
+            tool_use("r1", "read_file", "{\"path\":\"x.rs\"}"),
+            tool_use(
+                "e1",
+                "edit_file",
+                "{\"path\":\"x.rs\",\"before\":\"a\",\"after\":\"b\"}",
+            ),
+            tool_use("r2", "read_file", "{\"path\":\"x.rs\"}"),
+        ];
+        let mut runtime = ConversationRuntime::new(
+            Session::new(),
+            ScriptApi { batches, i: 0 },
+            tool_executor,
+            rw_policy(),
+            vec!["sys".to_string()],
+        );
+
+        runtime.run_turn("edit x.rs", None).expect("loop finishes");
+
+        assert_eq!(
+            reads.get(),
+            2,
+            "both reads execute (suppression is post-exec)"
+        );
+        let outputs = tool_result_outputs(&runtime);
+        let read_results: Vec<&String> = outputs
+            .iter()
+            .filter(|o| o.contains("FILE BODY") || o.contains("unchanged re-read"))
+            .collect();
+        assert_eq!(read_results.len(), 2, "two read results: {outputs:?}");
+        assert_eq!(read_results[0], "FILE BODY", "1st read returns the body");
+        assert!(
+            read_results[1].contains("unchanged re-read suppressed"),
+            "2nd read suppressed: {}",
+            read_results[1]
+        );
+        assert!(
+            !read_results[1].contains("FILE BODY"),
+            "the suppressed re-read must NOT re-inject the body"
+        );
+    }
+
+    #[test]
+    fn changed_file_between_reads_returns_real_content() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // read x.rs -> edit (clears seen_nav) -> read x.rs again, but the file's
+        // bytes are now DIFFERENT. The hash differs, so the second read must
+        // return the real (new) content, never a suppression notice.
+        let n = Rc::new(Cell::new(0usize));
+        let nc = Rc::clone(&n);
+        let tool_executor = StaticToolExecutor::new()
+            .register("read_file", move |_input| {
+                nc.set(nc.get() + 1);
+                Ok(format!("VERSION {}", nc.get()))
+            })
+            .register("edit_file", |_input| Ok("{\"ok\":true}".to_string()));
+
+        let batches = vec![
+            tool_use("r1", "read_file", "{\"path\":\"x.rs\"}"),
+            tool_use(
+                "e1",
+                "edit_file",
+                "{\"path\":\"x.rs\",\"before\":\"a\",\"after\":\"b\"}",
+            ),
+            tool_use("r2", "read_file", "{\"path\":\"x.rs\"}"),
+        ];
+        let mut runtime = ConversationRuntime::new(
+            Session::new(),
+            ScriptApi { batches, i: 0 },
+            tool_executor,
+            rw_policy(),
+            vec!["sys".to_string()],
+        );
+
+        runtime
+            .run_turn("edit then re-check", None)
+            .expect("finishes");
+
+        let outputs = tool_result_outputs(&runtime);
+        assert!(
+            outputs.iter().any(|o| o == "VERSION 2"),
+            "2nd read returns real changed content: {outputs:?}"
+        );
+        assert!(
+            !outputs.iter().any(|o| o.contains("unchanged re-read")),
+            "changed content must NOT be suppressed: {outputs:?}"
+        );
+    }
+
+    #[test]
+    fn distinct_files_read_once_are_not_suppressed() {
+        let tool_executor =
+            StaticToolExecutor::new().register("read_file", |input| Ok(format!("body of {input}")));
+        let batches = vec![
+            tool_use("r1", "read_file", "{\"path\":\"a.rs\"}"),
+            tool_use("r2", "read_file", "{\"path\":\"b.rs\"}"),
+        ];
+        let mut runtime = ConversationRuntime::new(
+            Session::new(),
+            ScriptApi { batches, i: 0 },
+            tool_executor,
+            rw_policy(),
+            vec!["sys".to_string()],
+        );
+
+        runtime.run_turn("read both", None).expect("finishes");
+
+        let outputs = tool_result_outputs(&runtime);
+        assert!(
+            !outputs.iter().any(|o| o.contains("unchanged re-read")),
+            "two distinct files, each read once: nothing suppressed: {outputs:?}"
+        );
+    }
+
+    // The alternating read/edit churn batches shared by the two no-progress
+    // tests: 5 distinct reads interleaved with 4 distinct edits, then an answer.
+    // With FAILED edits, iters_since_mutation climbs to 9 at the 5th read while
+    // consecutive_nav keeps resetting -> the no-progress nudge fires. With
+    // SUCCESSFUL edits, every edit zeroes the counter -> it never fires.
+    fn churn_batches() -> Vec<Vec<AssistantEvent>> {
+        let mut batches = Vec::new();
+        for k in 1..=5 {
+            batches.push(tool_use(
+                &format!("r{k}"),
+                "read_file",
+                &format!("{{\"path\":\"f{k}.rs\"}}"),
+            ));
+            if k <= 4 {
+                batches.push(tool_use(
+                    &format!("e{k}"),
+                    "edit_file",
+                    &format!("{{\"path\":\"f{k}.rs\",\"before\":\"a{k}\",\"after\":\"b{k}\"}}"),
+                ));
+            }
+        }
+        batches
+    }
+
+    #[test]
+    fn no_progress_nudge_fires_in_read_then_failed_edit_churn() {
+        let tool_executor = StaticToolExecutor::new()
+            .register("read_file", |input| Ok(format!("body of {input}")))
+            .register("edit_file", |_input| Err(super::ToolError::new("no match")));
+        let mut runtime = ConversationRuntime::new(
+            Session::new(),
+            ScriptApi {
+                batches: churn_batches(),
+                i: 0,
+            },
+            tool_executor,
+            rw_policy(),
+            vec!["sys".to_string()],
+        );
+
+        runtime
+            .run_turn("keep trying to edit", None)
+            .expect("finishes");
+
+        let outputs = tool_result_outputs(&runtime);
+        let nudges = outputs
+            .iter()
+            .filter(|o| o.contains("no-progress:"))
+            .count();
+        assert_eq!(
+            nudges, 1,
+            "exactly one no-progress nudge in a failed-edit churn: {outputs:?}"
+        );
+    }
+
+    #[test]
+    fn successful_edits_reset_counter_and_suppress_no_progress_nudge() {
+        let tool_executor = StaticToolExecutor::new()
+            .register("read_file", |input| Ok(format!("body of {input}")))
+            .register("edit_file", |_input| Ok("{\"ok\":true}".to_string()));
+        let mut runtime = ConversationRuntime::new(
+            Session::new(),
+            ScriptApi {
+                batches: churn_batches(),
+                i: 0,
+            },
+            tool_executor,
+            rw_policy(),
+            vec!["sys".to_string()],
+        );
+
+        runtime.run_turn("edit each file", None).expect("finishes");
+
+        let outputs = tool_result_outputs(&runtime);
+        assert!(
+            !outputs.iter().any(|o| o.contains("no-progress:")),
+            "a successful edit each round resets the counter; nudge must not fire: {outputs:?}"
+        );
     }
 
     #[test]
