@@ -39,6 +39,15 @@ bumps are non-breaking bugfixes only.
   intentional rename-everywhere. Omitted/false is unchanged: exactly one match is
   required and more than one is still refused as ambiguous (the safe default).
 
+### Changed
+
+- **Auto-compaction now tracks the context window.** The default compaction
+  threshold is derived from the brain's `num_ctx` (half the window) instead of
+  a fixed 1,000,000 tokens that never fired on a real local window. Long
+  sessions on a 16K–128K brain now compact before they overflow, avoiding the
+  full prompt re-prefill that made every turn slow once the window filled.
+  `CLAUDETTE_COMPACT_THRESHOLD` still overrides it exactly.
+
 ## [0.13.1] - 2026-06-17
 
 ### Changed
