@@ -48,25 +48,55 @@ use crate::tool_groups::{ToolGroup, ToolRegistry};
 /// a metric that's actually bounded by the current session size and
 /// drops back below the threshold after a successful compact.
 ///
-/// Default `1_000_000` makes auto-compact effectively a no-op for typical
-/// local-brain setups (16K–128K context). The gate stays in place so a
-/// pathologically long session still trips it, but day-to-day work won't
-/// see compaction noise. Users on tight context windows who *want* the old
-/// safety net can set `CLAUDETTE_COMPACT_THRESHOLD=12000` (or whatever
-/// fraction of their `num_ctx` they prefer).
+/// This is no longer the everyday trigger: [`compact_threshold`] now derives
+/// the default from the model's `num_ctx` (half the window) so a real local
+/// window compacts before it overflows. `1_000_000` survives as the UPPER
+/// CAP on that adaptive value (and the fallback when `num_ctx` is unknown) —
+/// a pathologically long session on a huge window still trips it. Users can
+/// still pin an exact trigger with `CLAUDETTE_COMPACT_THRESHOLD=12000`.
 pub const DEFAULT_COMPACT_THRESHOLD: usize = 1_000_000;
 
-/// Resolve the compaction threshold the REPL is currently using — honors
-/// the `CLAUDETTE_COMPACT_THRESHOLD` env var, falls back to
-/// [`DEFAULT_COMPACT_THRESHOLD`]. Public so the `get_capabilities` tool
-/// and the `/status` slash command can report the same value the REPL
-/// is actually checking against.
+/// Resolve the compaction threshold the REPL is currently using.
+///
+/// An explicit `CLAUDETTE_COMPACT_THRESHOLD` always wins. Otherwise the
+/// threshold is derived from the active brain's context window so a local
+/// brain on a real (16K–128K) window actually compacts BEFORE it overflows.
+/// (The old fixed 1M default never fired below a megatoken session, so a
+/// 32K-window brain hit the context wall and paid a full prompt re-prefill
+/// on every subsequent turn.)
+///
+/// Public so the `get_capabilities` tool and the `/status` slash command can
+/// report the same value the REPL actually checks against.
 #[must_use]
 pub fn compact_threshold() -> usize {
-    std::env::var("CLAUDETTE_COMPACT_THRESHOLD")
+    let env_override = std::env::var("CLAUDETTE_COMPACT_THRESHOLD")
         .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(DEFAULT_COMPACT_THRESHOLD)
+        .and_then(|s| s.parse::<usize>().ok());
+    let num_ctx = model_config::active().brain.num_ctx as usize;
+    resolve_compact_threshold(env_override, num_ctx)
+}
+
+/// Pure core of [`compact_threshold`]: given an explicit override (if the env
+/// var is set and parses) and the active brain's `num_ctx`, resolve the
+/// session-token count at which the REPL auto-compacts.
+///
+/// Half the window — this leaves headroom for the system prompt + tool
+/// schemas + the model's reply, none of which `estimate_session_tokens`
+/// counts. Floored at `4_000` so a tiny/misconfigured `num_ctx` can't drive
+/// the threshold absurdly low, and capped at [`DEFAULT_COMPACT_THRESHOLD`] so
+/// an enormous window still bounds total session growth.
+///
+/// Spiral-safe: the gate metric is `estimate_session_tokens` (which DROPS
+/// after a compact, unlike the cumulative-input counter behind the 2026-04-09
+/// spiral), and `maybe_compact_session` runs at most once per turn — after a
+/// hard compact (4 preserved messages) the session falls well below
+/// `num_ctx / 2`, so it does not immediately re-fire.
+#[must_use]
+fn resolve_compact_threshold(env_override: Option<usize>, num_ctx: usize) -> usize {
+    if let Some(v) = env_override {
+        return v;
+    }
+    (num_ctx / 2).clamp(4_000, DEFAULT_COMPACT_THRESHOLD)
 }
 
 /// Soft (early) compaction threshold. Returns `None` when unset — the
@@ -3033,7 +3063,10 @@ mod tests {
         let prev = std::env::var("CLAUDETTE_COMPACT_THRESHOLD").ok();
         std::env::remove_var("CLAUDETTE_COMPACT_THRESHOLD");
 
-        assert_eq!(compact_threshold(), DEFAULT_COMPACT_THRESHOLD);
+        // No env var → derives from num_ctx (half the window), capped at 1M.
+        let result = compact_threshold();
+        assert!(result <= DEFAULT_COMPACT_THRESHOLD);
+        assert!(result >= 4_000); // floor
 
         if let Some(v) = prev {
             std::env::set_var("CLAUDETTE_COMPACT_THRESHOLD", v);
@@ -3060,7 +3093,10 @@ mod tests {
         let prev = std::env::var("CLAUDETTE_COMPACT_THRESHOLD").ok();
         std::env::set_var("CLAUDETTE_COMPACT_THRESHOLD", "not-a-number");
 
-        assert_eq!(compact_threshold(), DEFAULT_COMPACT_THRESHOLD);
+        // Garbage env → falls back to adaptive (half num_ctx), not 1M.
+        let result = compact_threshold();
+        assert!(result <= DEFAULT_COMPACT_THRESHOLD);
+        assert!(result >= 4_000); // floor
 
         match prev {
             Some(v) => std::env::set_var("CLAUDETTE_COMPACT_THRESHOLD", v),
@@ -3140,6 +3176,33 @@ mod tests {
             Some(v) => std::env::set_var("CLAUDETTE_COMPACT_THRESHOLD", v),
             None => std::env::remove_var("CLAUDETTE_COMPACT_THRESHOLD"),
         }
+    }
+
+    #[test]
+    fn resolve_compact_threshold_honors_explicit_override() {
+        // An explicit env override wins regardless of the window size...
+        assert_eq!(resolve_compact_threshold(Some(12_345), 32_768), 12_345);
+        // ...even a value below the adaptive floor.
+        assert_eq!(resolve_compact_threshold(Some(50), 8_192), 50);
+    }
+
+    #[test]
+    fn resolve_compact_threshold_derives_half_the_window() {
+        // No override → half the context window, leaving headroom for the
+        // system prompt + tools + reply that estimate_session_tokens omits.
+        assert_eq!(resolve_compact_threshold(None, 32_768), 16_384);
+        assert_eq!(resolve_compact_threshold(None, 65_536), 32_768);
+    }
+
+    #[test]
+    fn resolve_compact_threshold_clamps_to_floor_and_ceiling() {
+        // A tiny window can't drive the threshold below the 4_000 floor...
+        assert_eq!(resolve_compact_threshold(None, 1_000), 4_000);
+        // ...and an enormous one can't exceed the 1M legacy ceiling.
+        assert_eq!(
+            resolve_compact_threshold(None, 8_000_000),
+            DEFAULT_COMPACT_THRESHOLD
+        );
     }
 
     #[test]
