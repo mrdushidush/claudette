@@ -119,14 +119,16 @@ pub fn soft_compact_threshold() -> Option<usize> {
         .filter(|n| *n > 0)
 }
 
-/// Recent-message preservation count for the hard (1M default) compaction
-/// path. Aggressive — keeps just enough context for the model to continue
-/// the immediate conversation.
-const HARD_COMPACT_PRESERVE: usize = 4;
+/// Recent-message preservation count for the hard compaction path. Since the
+/// threshold became adaptive (`num_ctx / 2`, PR #92) this is the EVERYDAY
+/// trigger, not a 1M last resort — so keep enough recent turns that a small
+/// brain doesn't lose track of an in-progress action ("have I pushed / opened
+/// the PR yet?") and confabulate completion from the lossy summary.
+const HARD_COMPACT_PRESERVE: usize = 12;
 
-/// Recent-message preservation count for the soft (env-var-gated) path.
-/// Three times the hard count: the user opted into early compaction, so
-/// trade summary aggressiveness for continuity.
+/// Recent-message preservation count for the soft (env-var-gated) path. Same
+/// count as the hard path now — the soft tier's job is to compact EARLIER (a
+/// lower threshold the user opts into), not to preserve more.
 const SOFT_COMPACT_PRESERVE: usize = 12;
 
 /// Which compaction tier fired in a given pass. Carried back out of
@@ -3143,10 +3145,10 @@ mod tests {
         std::env::set_var("CLAUDETTE_COMPACT_THRESHOLD", "10");
 
         // Build a session with enough messages to hit the
-        // CompactionConfig::preserve_recent_messages = 4 floor; we need
-        // strictly more than 4 messages or compact_session is a no-op.
+        // CompactionConfig::preserve_recent_messages = 12 floor; we need
+        // strictly more than 12 messages or compact_session is a no-op.
         let mut session = Session::default();
-        for i in 0..8 {
+        for i in 0..16 {
             session.messages.push(ConversationMessage {
                 role: MessageRole::User,
                 blocks: vec![ContentBlock::Text {

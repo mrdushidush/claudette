@@ -64,6 +64,8 @@ pub fn get_compact_continuation_message(
         base.push_str("\n\nRecent messages are preserved verbatim.");
     }
 
+    base.push_str("\n\nThe summary above is lossy and may omit the RESULT of an action that was still in progress. Do NOT assume any step (a file edit, a commit, a push, opening a PR, a test run) finished just because it appears above — re-check the current state with a tool before reporting that step as done.");
+
     if suppress_follow_up_questions {
         base.push_str("\nContinue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, and do not preface with continuation text.");
     }
@@ -508,8 +510,8 @@ fn collapse_blank_lines(content: &str) -> String {
 mod tests {
     use super::{
         collect_key_files, compact_session, estimate_image_tokens, estimate_session_tokens,
-        evict_older_image_bytes, format_compact_summary, infer_pending_work, should_compact,
-        CompactionConfig,
+        evict_older_image_bytes, format_compact_summary, get_compact_continuation_message,
+        infer_pending_work, should_compact, CompactionConfig,
     };
     use crate::session::{ContentBlock, ConversationMessage, MessageRole, Session};
 
@@ -641,6 +643,17 @@ mod tests {
     fn formats_compact_summary_like_upstream() {
         let summary = "<analysis>scratch</analysis>\n<summary>Kept work</summary>";
         assert_eq!(format_compact_summary(summary), "Summary:\nKept work");
+    }
+
+    #[test]
+    fn continuation_message_warns_against_assuming_completion() {
+        let msg =
+            get_compact_continuation_message("<summary>work in progress</summary>", false, true);
+        assert!(
+            msg.contains("re-check the current state with a tool"),
+            "continuation must tell the model to verify before claiming done: {msg}"
+        );
+        assert!(msg.contains("Do NOT assume"), "got: {msg}");
     }
 
     #[test]
