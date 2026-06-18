@@ -39,6 +39,13 @@ bumps are non-breaking bugfixes only.
   intentional rename-everywhere. Omitted/false is unchanged: exactly one match is
   required and more than one is still refused as ambiguous (the safe default).
 
+- **Redirect a tool at the `[y/N]` gate.** Instead of only allowing or denying a
+  dangerous tool, you can now type a free-text instruction at the approval
+  prompt — the tool is refused and your words are handed back to the model as
+  guidance, so it does what you asked instead of just stopping. `y`/`n` still
+  resolve on a single keypress; pressing any other key starts the redirect line.
+  The non-TTY/piped path is redirect-aware too.
+
 ### Changed
 
 - **Auto-compaction now tracks the context window.** The default compaction
