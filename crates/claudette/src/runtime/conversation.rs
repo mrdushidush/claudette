@@ -581,6 +581,12 @@ where
                                 // streak — i.e. consecutive_nav <
                                 // iters_since_mutation. Pure read churn is left
                                 // to search_budget_nudge so the two never double.
+                                // A read suppressed by (A) above is is_error and
+                                // already carries its own scroll-up/narrow/edit
+                                // steer, so the `!is_error` guard skips it: in a
+                                // single-file churn (A) does the steering; this
+                                // nudge covers the multi-file churn (A) can't
+                                // suppress.
                                 if !nudged_no_progress
                                     && is_nav
                                     && !is_error
@@ -881,12 +887,16 @@ fn duplicate_edit_body(tool_name: &str) -> String {
 }
 
 /// Parse [`READ_LOOP_LIMIT_ENV_VAR`]; falls back to [`READ_LOOP_LIMIT_DEFAULT`]
-/// for an absent / unparseable / zero value. Pure so it can be unit-tested
-/// without touching the (process-global, parallel-test-shared) environment.
+/// for an absent / unparseable / out-of-range value. The floor is 2, not 1:
+/// suppression triggers at `reads >= limit`, and the FIRST read must always
+/// return the real body, so a limit of 0 or 1 (which would suppress — and lie
+/// "unchanged since you read it earlier" about — the first read) is rejected
+/// back to the default. Pure so it can be unit-tested without touching the
+/// (process-global, parallel-test-shared) environment.
 fn read_loop_limit_from(value: Option<&str>) -> usize {
     value
         .and_then(|raw| raw.trim().parse::<usize>().ok())
-        .filter(|n| *n >= 1)
+        .filter(|n| *n >= 2)
         .unwrap_or(READ_LOOP_LIMIT_DEFAULT)
 }
 
@@ -1536,6 +1546,13 @@ mod tests {
         assert_eq!(super::read_loop_limit_from(None), 2, "absent -> default");
         assert_eq!(super::read_loop_limit_from(Some("5")), 5);
         assert_eq!(super::read_loop_limit_from(Some(" 3 ")), 3, "trimmed");
+        // Floor is 2: a limit of 0 or 1 would suppress the FIRST read (a lie),
+        // so both are rejected back to the default.
+        assert_eq!(
+            super::read_loop_limit_from(Some("1")),
+            2,
+            "1 -> floor default"
+        );
         assert_eq!(super::read_loop_limit_from(Some("0")), 2, "zero -> default");
         assert_eq!(
             super::read_loop_limit_from(Some("x")),
@@ -1822,6 +1839,45 @@ mod tests {
         assert!(
             !outputs.iter().any(|o| o.contains("no-progress:")),
             "a successful edit each round resets the counter; nudge must not fire: {outputs:?}"
+        );
+    }
+
+    #[test]
+    fn no_progress_nudge_does_not_fire_on_pure_read_churn() {
+        // 10 DISTINCT reads, NO edits. consecutive_nav and iters_since_mutation
+        // climb in lockstep, so the `consecutive_nav < iters_since_mutation`
+        // gate is never true: the no-progress nudge must stay silent (this churn
+        // is search_budget_nudge's job). Locks the single most fragile design-B
+        // invariant against a future refactor that would double-fire.
+        let tool_executor =
+            StaticToolExecutor::new().register("read_file", |input| Ok(format!("body of {input}")));
+        let batches: Vec<Vec<AssistantEvent>> = (1..=10)
+            .map(|k| {
+                tool_use(
+                    &format!("r{k}"),
+                    "read_file",
+                    &format!("{{\"path\":\"f{k}.rs\"}}"),
+                )
+            })
+            .collect();
+        let mut runtime = ConversationRuntime::new(
+            Session::new(),
+            ScriptApi { batches, i: 0 },
+            tool_executor,
+            rw_policy(),
+            vec!["sys".to_string()],
+        );
+
+        runtime.run_turn("read a lot", None).expect("finishes");
+
+        let outputs = tool_result_outputs(&runtime);
+        assert!(
+            !outputs.iter().any(|o| o.contains("no-progress:")),
+            "pure-read churn must NOT trigger the no-progress nudge: {outputs:?}"
+        );
+        assert!(
+            outputs.iter().any(|o| o.contains("search-budget:")),
+            "pure-read churn should still hit search_budget_nudge: {outputs:?}"
         );
     }
 
