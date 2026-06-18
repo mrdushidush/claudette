@@ -91,7 +91,8 @@ pub(super) fn schemas() -> Vec<Value> {
                     "properties": {
                         "path":     { "type": "string", "description": "File path (absolute or ~/)" },
                         "old_text": { "type": "string", "description": "Exact text to find and replace" },
-                        "new_text": { "type": "string", "description": "Replacement text" }
+                        "new_text": { "type": "string", "description": "Replacement text" },
+                        "replace_all": { "type": "boolean", "description": "When true, replace EVERY occurrence of old_text (for an intentional rename-everywhere) and report the count. Default false: exactly one match is required, and more than one is refused as ambiguous (the safe default)." }
                     },
                     "required": ["path", "old_text", "new_text"]
                 }
@@ -366,6 +367,10 @@ fn run_edit_file(input: &str) -> Result<String, String> {
         .get("new_text")
         .and_then(Value::as_str)
         .ok_or("edit_file: missing 'new_text'")?;
+    let replace_all = v
+        .get("replace_all")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
 
     // Boundary follows the active context (roast RC-B): in the interactive
     // secretary (no mission) this is $HOME-gated, the user having confirmed
@@ -394,6 +399,7 @@ fn run_edit_file(input: &str) -> Result<String, String> {
             ));
         }
         1 => {}
+        _ if replace_all && !old_text.is_empty() => {} // rename-everywhere: replace all n
         n => {
             return Err(format!(
                 "edit_file: old_text appears {n} times in {}. Supply a longer, unique old_text (include surrounding context) so the target is unambiguous.",
@@ -402,7 +408,11 @@ fn run_edit_file(input: &str) -> Result<String, String> {
         }
     }
 
-    let new_content = content.replacen(old_text, new_text, 1);
+    let new_content = if replace_all {
+        content.replace(old_text, new_text)
+    } else {
+        content.replacen(old_text, new_text, 1)
+    };
 
     // No-op guard (dogfood 2026-06-13): old_text == new_text writes the file
     // unchanged but reports ok:true — a false success that spirals small brains
@@ -447,6 +457,9 @@ fn run_edit_file(input: &str) -> Result<String, String> {
         "path": path.display().to_string(),
         "bytes": new_content.len(),
     });
+    if replace_all {
+        result["replacements"] = json!(match_count);
+    }
 
     // Codet post-edit hook for code files (same as write_file).
     if let Some(validation) = crate::codet::validate_code_file(&path, &[]) {
@@ -847,6 +860,62 @@ mod tests {
             after.as_deref(),
             Some(original),
             "file must not change on ambiguous match"
+        );
+    }
+
+    #[test]
+    fn edit_file_replace_all_replaces_every_occurrence() {
+        let path = home_join("replace_all");
+        fs::write(&path, "foo / foo / foo\n").unwrap();
+
+        let input =
+            json!({"path": &path, "old_text": "foo", "new_text": "bar", "replace_all": true})
+                .to_string();
+        let result = run_edit_file(&input);
+        let after = fs::read_to_string(&path).ok();
+        let _ = fs::remove_file(&path);
+
+        assert!(result.is_ok(), "expected ok, got {result:?}");
+        let out = result.unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["replacements"], json!(3), "got: {out}");
+        assert_eq!(after.as_deref(), Some("bar / bar / bar\n"));
+    }
+
+    #[test]
+    fn edit_file_without_replace_all_still_refuses_multiple_matches() {
+        let path = home_join("replace_all_no_default");
+        fs::write(&path, "foo / foo / foo\n").unwrap();
+
+        // Same input, no replace_all → the ambiguity guard still fires.
+        let input = json!({"path": &path, "old_text": "foo", "new_text": "bar"}).to_string();
+        let result = run_edit_file(&input);
+        let after = fs::read_to_string(&path).ok();
+        let _ = fs::remove_file(&path);
+
+        let err = result.expect_err("expected ambiguity error");
+        assert!(err.contains("appears 3 times"), "got: {err}");
+        assert_eq!(after.as_deref(), Some("foo / foo / foo\n"));
+    }
+
+    #[test]
+    fn edit_file_replace_all_still_fires_noop_guard() {
+        let path = home_join("replace_all_noop");
+        fs::write(&path, "foo foo\n").unwrap();
+
+        // old_text == new_text under replace_all is still a loud no-op, not ok:true.
+        let input =
+            json!({"path": &path, "old_text": "foo", "new_text": "foo", "replace_all": true})
+                .to_string();
+        let result = run_edit_file(&input);
+        let after_disk = fs::read_to_string(&path).unwrap();
+        let _ = fs::remove_file(&path);
+
+        let err = result.expect_err("identical old/new must be a no-op error");
+        assert!(err.contains("no change"), "got: {err}");
+        assert_eq!(
+            after_disk, "foo foo\n",
+            "file must not be modified by a no-op"
         );
     }
 

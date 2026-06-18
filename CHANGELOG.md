@@ -34,6 +34,11 @@ bumps are non-breaking bugfixes only.
   changing. Knobs: `CLAUDETTE_READ_LOOP_LIMIT` (default 2) and
   `CLAUDETTE_NO_READ_LOOP_BREAKER` to disable.
 
+- **`edit_file` `replace_all`.** An optional boolean (default false) that
+  replaces every occurrence of `old_text` and reports the count, for an
+  intentional rename-everywhere. Omitted/false is unchanged: exactly one match is
+  required and more than one is still refused as ambiguous (the safe default).
+
 ## [0.13.1] - 2026-06-17
 
 ### Changed
