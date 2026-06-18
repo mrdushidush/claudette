@@ -2788,13 +2788,13 @@ impl PermissionPrompter for CliPrompter {
                 let _ = writeln!(err, "    {}", theme::dim(line));
             }
         }
-        let _ = write!(err, "  Allow? [y/N] ");
+        let _ = write!(err, "  Allow? [y/N · or type a redirect] ");
         let _ = err.flush();
 
-        // Interactive terminal: accept a single keypress so `y` allows
-        // without Enter. Falls through to the line reader below when stdin
-        // isn't a TTY (piped / scripted / spawned agent) or raw mode is
-        // unavailable, keeping that path byte-identical to before.
+        // Interactive terminal: accept a single keypress so `y` allows / `n`
+        // denies without Enter, while any other key opens a free-text redirect.
+        // Falls through to the line reader below when stdin isn't a TTY (piped /
+        // scripted / spawned agent) or raw mode is unavailable.
         use std::io::IsTerminal as _;
         if io::stdin().is_terminal() {
             if let Some(decision) = read_single_key(&mut err) {
@@ -2805,16 +2805,7 @@ impl PermissionPrompter for CliPrompter {
         let stdin = io::stdin();
         let mut buf = String::new();
         match stdin.read_line(&mut buf) {
-            Ok(_) => {
-                let answer = buf.trim().to_lowercase();
-                if answer == "y" || answer == "yes" {
-                    PermissionPromptDecision::Allow
-                } else {
-                    PermissionPromptDecision::Deny {
-                        reason: "user denied permission".to_string(),
-                    }
-                }
-            }
+            Ok(_) => gate_line_decision(&buf),
             Err(_) => PermissionPromptDecision::Deny {
                 reason: "could not read user input".to_string(),
             },
@@ -2822,46 +2813,94 @@ impl PermissionPrompter for CliPrompter {
     }
 }
 
-/// Single-keypress confirmation for the `[y/N]` danger gate on an
-/// interactive terminal: `y`/`Y` allows immediately (no Enter needed); any
-/// other key — including Ctrl-C/Ctrl-D, `n`, Esc, Enter — denies. Returns
-/// `None` if raw mode can't be enabled, so the caller falls back to the
-/// line reader. Mirrors the TUI prompt's key handling in `tui.rs`.
+/// Classify a full line typed at the `[y/N]` permission gate.
+///
+/// - `y` / `yes` → allow.
+/// - empty / `n` / `no` → plain deny.
+/// - anything else → deny, but forward the typed text to the model as a
+///   *redirect*: the tool is refused, yet the user's instruction is handed
+///   back (via the deny reason, which becomes an error `tool_result`) so the
+///   model does what was asked instead of just stopping. Pure so the
+///   classification is unit-testable without a TTY.
+fn gate_line_decision(line: &str) -> PermissionPromptDecision {
+    let trimmed = line.trim();
+    let lower = trimmed.to_lowercase();
+    if lower == "y" || lower == "yes" {
+        PermissionPromptDecision::Allow
+    } else if trimmed.is_empty() || lower == "n" || lower == "no" {
+        PermissionPromptDecision::Deny {
+            reason: "user denied permission".to_string(),
+        }
+    } else {
+        PermissionPromptDecision::Deny {
+            reason: format!(
+                "The user declined to run this tool and gave this instruction \
+                 instead — follow it before continuing: {trimmed}"
+            ),
+        }
+    }
+}
+
+/// First-keypress confirmation for the `[y/N]` danger gate on an interactive
+/// terminal. `y`/`Y` allows and `n`/`N` denies immediately (no Enter needed);
+/// Esc / Enter / Ctrl-C / Ctrl-D deny; **any other printable key opens a
+/// free-text redirect** — that first character plus the rest of the line
+/// (read in cooked mode) is classified by [`gate_line_decision`], so the user
+/// can type an instruction for the model instead of a bare allow/deny.
+/// Returns `None` if raw mode can't be enabled, so the caller falls back to
+/// the line reader (which is redirect-aware too). Mirrors the TUI prompt's key
+/// handling in `tui.rs`.
 fn read_single_key(err: &mut impl io::Write) -> Option<PermissionPromptDecision> {
     use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
     enable_raw_mode().ok()?;
-    let mut allow = false;
-    loop {
+    // Read the first decisive keypress.
+    let first = loop {
         match event::read() {
             // Windows fires Press + Release — act on Press only.
-            Ok(Event::Key(k)) if k.kind == KeyEventKind::Press => {
-                allow = matches!(
-                    (k.code, k.modifiers),
-                    (
-                        KeyCode::Char('y' | 'Y'),
-                        KeyModifiers::NONE | KeyModifiers::SHIFT
-                    )
-                );
-                break; // first key press decides — anything but `y` denies
+            Ok(Event::Key(k)) if k.kind == KeyEventKind::Press => break Some(k),
+            Ok(_) => {}           // resize / mouse / key-release — keep waiting
+            Err(_) => break None, // read error denies
+        }
+    };
+    // ALWAYS restore cooked mode before any echo / line read below.
+    let _ = disable_raw_mode();
+
+    match first.map(|k| (k.code, k.modifiers)) {
+        // `y` / `Y` → allow instantly.
+        Some((KeyCode::Char('y' | 'Y'), KeyModifiers::NONE | KeyModifiers::SHIFT)) => {
+            let _ = writeln!(err, "y");
+            Some(PermissionPromptDecision::Allow)
+        }
+        // Any printable char that isn't `y`/`n` opens a redirect: echo it,
+        // read the rest of the line in cooked mode (so normal line editing
+        // works), then classify the whole line. The terminal echoes the rest
+        // and the trailing newline, so output lands on a fresh row after.
+        Some((KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT))
+            if c != 'n' && c != 'N' =>
+        {
+            let _ = write!(err, "{c}");
+            let _ = err.flush();
+            let mut rest = String::new();
+            if io::stdin().read_line(&mut rest).is_err() {
+                return Some(PermissionPromptDecision::Deny {
+                    reason: "could not read user input".to_string(),
+                });
             }
-            Ok(_) => {}      // resize / mouse / key-release — keep waiting
-            Err(_) => break, // read error denies
+            let mut line = String::with_capacity(rest.len() + 1);
+            line.push(c);
+            line.push_str(&rest);
+            Some(gate_line_decision(&line))
+        }
+        // `n`/`N`, Esc, Enter, Ctrl-C/Ctrl-D, read error — deny.
+        _ => {
+            let _ = writeln!(err, "n");
+            Some(PermissionPromptDecision::Deny {
+                reason: "user denied permission".to_string(),
+            })
         }
     }
-    // ALWAYS restore cooked mode before returning, on every path above.
-    let _ = disable_raw_mode();
-    // Raw mode suppressed the echo — print the resolved choice + newline so
-    // the transcript reads cleanly.
-    let _ = writeln!(err, "{}", if allow { "y" } else { "n" });
-    Some(if allow {
-        PermissionPromptDecision::Allow
-    } else {
-        PermissionPromptDecision::Deny {
-            reason: "user denied permission".to_string(),
-        }
-    })
 }
 
 /// The nudge message appended when the model returns an empty response.
@@ -3270,6 +3309,46 @@ mod tests {
         // so pin the strings.
         assert_eq!(CompactionTier::Soft.name(), "soft");
         assert_eq!(CompactionTier::Hard.name(), "hard");
+    }
+
+    #[test]
+    fn gate_line_decision_allows_on_yes() {
+        assert_eq!(gate_line_decision("y"), PermissionPromptDecision::Allow);
+        assert_eq!(
+            gate_line_decision("  Y \n"),
+            PermissionPromptDecision::Allow
+        );
+        assert_eq!(gate_line_decision("yes"), PermissionPromptDecision::Allow);
+    }
+
+    #[test]
+    fn gate_line_decision_plain_deny_on_empty_or_no() {
+        let plain = PermissionPromptDecision::Deny {
+            reason: "user denied permission".to_string(),
+        };
+        assert_eq!(gate_line_decision(""), plain);
+        assert_eq!(gate_line_decision("\n"), plain);
+        assert_eq!(gate_line_decision("n"), plain);
+        assert_eq!(gate_line_decision("NO"), plain);
+    }
+
+    #[test]
+    fn gate_line_decision_forwards_redirect_text() {
+        match gate_line_decision("edit foo.rs instead, leave bar.rs alone\n") {
+            PermissionPromptDecision::Deny { reason } => {
+                assert!(
+                    reason.contains("edit foo.rs instead, leave bar.rs alone"),
+                    "redirect must carry the user's instruction: {reason}"
+                );
+                assert!(
+                    reason.contains("follow it"),
+                    "redirect must tell the model to act on it: {reason}"
+                );
+            }
+            PermissionPromptDecision::Allow => {
+                panic!("expected a deny-with-redirect, got Allow")
+            }
+        }
     }
 
     #[test]
