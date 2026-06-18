@@ -48,6 +48,12 @@ bumps are non-breaking bugfixes only.
   full prompt re-prefill that made every turn slow once the window filled.
   `CLAUDETTE_COMPACT_THRESHOLD` still overrides it exactly.
 
+- **Safer mid-task compaction.** Auto-compaction now preserves 12 recent
+  messages (was 4) and the post-compaction continuation message tells the model
+  to re-verify state with a tool before reporting a step done — so a small brain
+  doesn't lose track of an in-progress action across a compact and confabulate
+  completion (e.g. claiming a PR is open that was never created).
+
 ## [0.13.1] - 2026-06-17
 
 ### Changed
