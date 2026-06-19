@@ -1902,13 +1902,18 @@ pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
                 // end-of-stream, so the status line below lands on its own row.
 
                 state.record_turn(summary.usage.input_tokens, summary.usage.output_tokens);
+                let ctx_gauge = format_ctx_gauge(
+                    estimate_session_tokens(runtime.session()),
+                    crate::api::current_num_ctx(),
+                );
                 eprintln!(
-                    "{} {}",
+                    "{} {} {}",
                     theme::BOLT,
                     theme::info(&format!(
                         "turn iter={} in={} out={}",
                         summary.iterations, summary.usage.input_tokens, summary.usage.output_tokens,
-                    ))
+                    )),
+                    theme::dim(&ctx_gauge),
                 );
                 if summary.hit_iteration_cap {
                     eprintln!(
@@ -2745,6 +2750,32 @@ where
     }
 }
 
+/// Render a token count compactly for the status line: `840`, `1k`, `64k`.
+/// Uses a 1024 base so a power-of-two context window prints round — a 65536
+/// `num_ctx` shows as `64k`, matching how the window is configured.
+fn humanize_tokens(n: usize) -> String {
+    if n < 1024 {
+        n.to_string()
+    } else {
+        format!("{}k", (n as f64 / 1024.0).round() as usize)
+    }
+}
+
+/// Build the post-turn context-window gauge, e.g. `ctx ~30k/64k (47%)`.
+/// `used` is the heuristic session-token estimate (`estimate_session_tokens`)
+/// — the SAME metric the auto-compaction gate uses; it omits the system prompt
+/// and tool schemas, hence the leading `~`. `num_ctx` is the brain's window.
+fn format_ctx_gauge(used: usize, num_ctx: u32) -> String {
+    let total = num_ctx as usize;
+    let pct = used.saturating_mul(100).checked_div(total).unwrap_or(0);
+    format!(
+        "ctx ~{}/{} ({}%)",
+        humanize_tokens(used),
+        humanize_tokens(total),
+        pct
+    )
+}
+
 /// Interactive CLI prompter. Prints tool name + a preview of the input,
 /// asks `[y/N]`, reads one line from stdin. Used by the REPL and by
 /// spawned agents in normal mode (dangerous tools bubble up to the user).
@@ -3349,6 +3380,22 @@ mod tests {
                 panic!("expected a deny-with-redirect, got Allow")
             }
         }
+    }
+
+    #[test]
+    fn humanize_tokens_compacts_with_1024_base() {
+        assert_eq!(humanize_tokens(840), "840");
+        assert_eq!(humanize_tokens(1024), "1k");
+        assert_eq!(humanize_tokens(65536), "64k");
+        assert_eq!(humanize_tokens(31000), "30k");
+    }
+
+    #[test]
+    fn format_ctx_gauge_shows_used_window_and_percent() {
+        // 32768 / 65536 = exactly 50%
+        assert_eq!(format_ctx_gauge(32768, 65536), "ctx ~32k/64k (50%)");
+        // a zero window must not divide by zero
+        assert_eq!(format_ctx_gauge(100, 0), "ctx ~100/0 (0%)");
     }
 
     #[test]
