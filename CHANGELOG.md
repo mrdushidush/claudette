@@ -23,6 +23,11 @@ bumps are non-breaking bugfixes only.
   signatures — from `.php` files, so PHP projects get the same
   one-line-per-symbol outline the other languages already had.
 
+- **`grep_search` context lines.** An optional `context` (int, capped at 10)
+  includes that many lines on each side of every match (ripgrep `-C`), each
+  flagged `is_match` vs context, with overlapping windows merged so no line
+  repeats. Default 0 is unchanged; `count_only` ignores it.
+
 - **Read-loop breaker.** A new content-aware guard for the read-only churn that
   the edit loop-breaker can't catch (a small brain re-reading the same large
   file around an edit that never lands). When `read_file` returns bytes

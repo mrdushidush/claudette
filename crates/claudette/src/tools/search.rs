@@ -22,6 +22,10 @@ const MAX_GREP_MATCHES: usize = 100;
 const MAX_GREP_FILES: usize = 5000;
 const MAX_GREP_LINE_CHARS: usize = 200;
 
+/// `grep_search`: max context lines per side (ripgrep -C). Keeps a window
+/// bounded even if a model passes a silly value.
+const MAX_GREP_CONTEXT: usize = 10;
+
 /// Directories grep_search never descends into (build output, dep caches, VCS
 /// metadata). Shared with repo_map via the parent module so the two code-search
 /// tools stay in lockstep. Without it, a single grep on a Rust/Node project
@@ -73,7 +77,8 @@ pub(super) fn schemas() -> Vec<Value> {
                         "path":    { "type": "string", "description": "Directory to search (default: the workspace/project root)" },
                         "glob":    { "type": "string", "description": "Optional filename glob to restrict the search (e.g. '*.rs', 'src/**/*.ts'). A bare name matches files at any depth; a pattern with '/' matches the path relative to the search root. When omitted, all files are searched." },
                         "count_only": { "type": "boolean", "description": "When true, return only the total match count and a per-file breakdown — no line bodies, and not capped at 100. Use to gauge how widespread a pattern is. Default false." },
-                        "case_sensitive": { "type": "boolean", "description": "When true, match the pattern with exact case. Default false (case-insensitive)." }
+                        "case_sensitive": { "type": "boolean", "description": "When true, match the pattern with exact case. Default false (case-insensitive)." },
+                        "context": { "type": "integer", "description": "Lines of surrounding context to include on EACH side of every match (ripgrep -C), capped at 10. Each returned line carries is_match (true = the matched line, false = context); overlapping windows are merged so no line repeats. Ignored when count_only is set. Default 0 (no context)." }
                     },
                     "required": ["pattern"]
                 }
@@ -275,6 +280,13 @@ fn run_grep_search(input: &str) -> Result<String, String> {
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
+    // Optional symmetric context window (ripgrep -C). Capped; 0 = today's
+    // behavior (no context, output byte-identical).
+    let context = v
+        .get("context")
+        .and_then(Value::as_u64)
+        .map_or(0, |n| (n as usize).min(MAX_GREP_CONTEXT));
+
     // Compile the pattern as a case-insensitive regex (ripgrep semantics —
     // what coding models reach for: alternation, `.?`, char classes). If it
     // isn't valid regex (a small brain occasionally passes a raw string with
@@ -299,6 +311,7 @@ fn run_grep_search(input: &str) -> Result<String, String> {
         }
     };
     let mut matches: Vec<Value> = Vec::new();
+    let mut match_total: usize = 0; // matched lines only (context lines excluded)
     let mut files_scanned: usize = 0;
     let mut truncated = false;
     let mut skipped_oversize: usize = 0;
@@ -389,22 +402,59 @@ fn run_grep_search(input: &str) -> Result<String, String> {
             continue;
         };
         let mut file_match_count: usize = 0;
+        // Context mode needs random access to the file's lines; only pay for it
+        // when context > 0 so the default path is unchanged.
+        let ctx_lines: Vec<&str> = if context > 0 {
+            content.lines().collect()
+        } else {
+            Vec::new()
+        };
+        let mut last_ctx_end: Option<usize> = None; // highest line index already emitted (dedup)
         for (lineno, line) in content.lines().enumerate() {
             if line_matches(line) {
                 if count_only {
-                    // Tally only — keep no line body, and do NOT break at
-                    // MAX_GREP_MATCHES: the whole point is the true total. The
-                    // walk is still bounded by the MAX_GREP_FILES file cap.
                     file_match_count += 1;
                     total_matches += 1;
-                } else {
+                } else if context == 0 {
                     let snippet: String = line.chars().take(MAX_GREP_LINE_CHARS).collect();
                     matches.push(json!({
                         "file": p.display().to_string(),
                         "line": lineno + 1,
                         "text": snippet,
                     }));
-                    if matches.len() >= MAX_GREP_MATCHES {
+                    match_total += 1;
+                    if match_total >= MAX_GREP_MATCHES {
+                        truncated = true;
+                        break 'walk;
+                    }
+                } else {
+                    // Emit [lineno-context ..= lineno+context], skipping lines an
+                    // earlier overlapping window already emitted (matches run in
+                    // increasing line order, so `end` is monotonic — no dup, no
+                    // backward move). Each line flagged is_match.
+                    let start = lineno.saturating_sub(context);
+                    let end = (lineno + context).min(ctx_lines.len().saturating_sub(1));
+                    let from = match last_ctx_end {
+                        Some(e) if e >= start => e + 1,
+                        _ => start,
+                    };
+                    // `from..=end` as an iterator (clippy needless_range_loop is
+                    // on + CI is -D warnings, so do NOT write `for j in from..=end`
+                    // with `ctx_lines[j]`). `take(end + 1).skip(from)` yields
+                    // exactly indices from..=end, and is empty when from > end
+                    // (the whole window was already emitted by an earlier match).
+                    for (j, ctx_line) in ctx_lines.iter().enumerate().take(end + 1).skip(from) {
+                        let snippet: String = ctx_line.chars().take(MAX_GREP_LINE_CHARS).collect();
+                        matches.push(json!({
+                            "file": p.display().to_string(),
+                            "line": j + 1,
+                            "text": snippet,
+                            "is_match": line_matches(ctx_line),
+                        }));
+                    }
+                    last_ctx_end = Some(end);
+                    match_total += 1; // count the MATCH, not its context lines
+                    if match_total >= MAX_GREP_MATCHES {
                         truncated = true;
                         break 'walk;
                     }
@@ -436,7 +486,7 @@ fn run_grep_search(input: &str) -> Result<String, String> {
             "mode": mode,
             "root": root.display().to_string(),
             "files_scanned": files_scanned,
-            "match_count": matches.len(),
+            "match_count": match_total,
             "truncated": truncated,
             "matches": matches,
         })
@@ -1292,6 +1342,76 @@ mod tests {
             "default mode returns line bodies: {out_d}"
         );
 
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn grep_search_context_includes_flagged_surrounding_lines() {
+        let _eg = crate::test_env_lock();
+        let base = user_home()
+            .join(".claudette")
+            .join("files")
+            .join("claudette-grep-context-test");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        fs::write(base.join("a.txt"), "aaa\nbbb\nneedle ccc\nddd\neee\n").unwrap();
+
+        let input = json!({
+            "pattern": "needle",
+            "path": base.to_str().unwrap(),
+            "context": 2
+        })
+        .to_string();
+        let out = run_grep_search(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        let ms = v["matches"].as_array().unwrap();
+        // 2 before + the match + 2 after = 5 entries, lines 1..=5
+        let lines: Vec<u64> = ms.iter().map(|m| m["line"].as_u64().unwrap()).collect();
+        assert_eq!(lines, vec![1, 2, 3, 4, 5], "got: {out}");
+        // only line 3 is the real match; the rest are context
+        for m in ms {
+            let expect = m["line"].as_u64().unwrap() == 3;
+            assert_eq!(
+                m["is_match"].as_bool().unwrap(),
+                expect,
+                "line {} flag wrong: {out}",
+                m["line"]
+            );
+        }
+        // match_count counts MATCH lines only, not the context lines
+        assert_eq!(v["match_count"].as_u64().unwrap(), 1, "got: {out}");
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn grep_search_context_dedupes_overlapping_windows() {
+        let _eg = crate::test_env_lock();
+        let base = user_home()
+            .join(".claudette")
+            .join("files")
+            .join("claudette-grep-context-overlap");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(&base).unwrap();
+        // matches on lines 2 and 4; context=2 makes their windows overlap at line 3
+        fs::write(base.join("a.txt"), "xxx\nneedle a\nyyy\nneedle b\nzzz\n").unwrap();
+
+        let input = json!({
+            "pattern": "needle",
+            "path": base.to_str().unwrap(),
+            "context": 2
+        })
+        .to_string();
+        let out = run_grep_search(&input).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        let ms = v["matches"].as_array().unwrap();
+        let lines: Vec<u64> = ms.iter().map(|m| m["line"].as_u64().unwrap()).collect();
+        // each of lines 1..=5 appears exactly once — the overlap isn't duplicated
+        assert_eq!(
+            lines,
+            vec![1, 2, 3, 4, 5],
+            "overlapping windows must not duplicate a line: {out}"
+        );
+        assert_eq!(v["match_count"].as_u64().unwrap(), 2, "got: {out}");
         let _ = fs::remove_dir_all(&base);
     }
 }
