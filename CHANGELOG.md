@@ -46,6 +46,11 @@ bumps are non-breaking bugfixes only.
   resolve on a single keypress; pressing any other key starts the redirect line.
   The non-TTY/piped path is redirect-aware too.
 
+- **Context-window gauge on the status line.** The post-turn `⚡ turn …` line now
+  ends with `ctx ~30k/64k (47%)` — the estimated session size against the brain's
+  `num_ctx`. It uses the same estimate the auto-compaction gate does, so it also
+  signals how close the session is to compacting (which fires at ~50%).
+
 ### Changed
 
 - **Auto-compaction now tracks the context window.** The default compaction
