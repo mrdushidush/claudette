@@ -10,6 +10,8 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-06-19
+
 ### Added
 
 - **`repo_map` C/C++ support.** `mode=map` now extracts C and C++ definitions —
