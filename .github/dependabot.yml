@@ -40,3 +40,25 @@ updates:
     labels:
       - "dependencies"
       - "ci"
+
+  # The VS Code extension's npm subtree was on security-alert life-support
+  # (only cargo + actions were scheduled). Keep it patched on the same cadence.
+  - package-ecosystem: "npm"
+    directory: "/editor/vscode"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps-dev"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "vscode"
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
