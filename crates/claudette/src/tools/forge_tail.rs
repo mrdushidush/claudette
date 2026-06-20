@@ -149,26 +149,28 @@ mod tests {
 
     #[test]
     fn forge_tail_reads_existing_log() {
-        // Plant a fake log file and confirm we read it.
-        let unique = format!(
-            "claudette-forge-tail-real-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_nanos())
-        );
-        let _ = std::fs::create_dir_all(forge_log_dir());
-        let log_path = forge_log_dir().join(format!("{unique}.log"));
-        std::fs::write(&log_path, "one\ntwo\nthree\nfour\nfive\n").unwrap();
+        // Run under an isolated HOME held by the shared env lock. forge_log_dir()
+        // resolves through $HOME, and a concurrent HOME-swapping test (e.g. in
+        // runtime/prompt.rs) used to yank the directory out from under us between
+        // the create_dir_all and the write — flaking this test with a NotFound on
+        // ubuntu CI. with_temp_home serialises against those and gives us a dir
+        // nothing else touches.
+        crate::with_temp_home(|_home| {
+            let unique = "claudette-forge-tail-real";
+            let dir = forge_log_dir();
+            std::fs::create_dir_all(&dir).expect("create forge log dir");
+            let log_path = dir.join(format!("{unique}.log"));
+            std::fs::write(&log_path, "one\ntwo\nthree\nfour\nfive\n").unwrap();
 
-        let out =
-            run_forge_tail(&json!({ "mission_id": &unique, "lines": 3 }).to_string()).expect("ok");
-        let v: Value = serde_json::from_str(&out).unwrap();
-        let _ = std::fs::remove_file(&log_path);
+            let out = run_forge_tail(&json!({ "mission_id": unique, "lines": 3 }).to_string())
+                .expect("ok");
+            let v: Value = serde_json::from_str(&out).unwrap();
 
-        assert_eq!(v["exists"], true);
-        assert_eq!(v["lines_returned"], 3);
-        let lines = v["lines"].as_array().unwrap();
-        assert_eq!(lines.last().unwrap(), "five");
-        assert_eq!(lines.first().unwrap(), "three");
+            assert_eq!(v["exists"], true);
+            assert_eq!(v["lines_returned"], 3);
+            let lines = v["lines"].as_array().unwrap();
+            assert_eq!(lines.last().unwrap(), "five");
+            assert_eq!(lines.first().unwrap(), "three");
+        });
     }
 }
