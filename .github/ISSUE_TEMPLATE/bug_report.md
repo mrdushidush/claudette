@@ -27,7 +27,7 @@ labels: ["bug"]
 
 - Claudette version (`claudette --version`):
 - Host OS + arch (e.g. `Windows 11 x64`, `macOS 14.5 arm64`, `Ubuntu 24.04 x64`):
-- Ollama version (`ollama --version`):
+- Backend + version (LM Studio or Ollama — e.g. `lms --version` / `ollama --version`):
 - Model + preset (`/preset`, `/brain` output, or the default):
 - GPU + VRAM, if relevant:
 
