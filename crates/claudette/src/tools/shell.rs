@@ -842,6 +842,7 @@ mod tests {
 
     #[test]
     fn edit_file_errors_on_ambiguous_match() {
+        let _eg = crate::test_env_lock(); // home-resolving: serialize vs temp-HOME swaps
         let path = home_join("ambig");
         let original = "alpha\nalpha\nbeta\n";
         fs::write(&path, original).unwrap();
@@ -865,6 +866,7 @@ mod tests {
 
     #[test]
     fn edit_file_replace_all_replaces_every_occurrence() {
+        let _eg = crate::test_env_lock(); // home-resolving: serialize vs temp-HOME swaps
         let path = home_join("replace_all");
         fs::write(&path, "foo / foo / foo\n").unwrap();
 
@@ -884,6 +886,7 @@ mod tests {
 
     #[test]
     fn edit_file_without_replace_all_still_refuses_multiple_matches() {
+        let _eg = crate::test_env_lock(); // home-resolving: serialize vs temp-HOME swaps
         let path = home_join("replace_all_no_default");
         fs::write(&path, "foo / foo / foo\n").unwrap();
 
@@ -900,6 +903,7 @@ mod tests {
 
     #[test]
     fn edit_file_replace_all_still_fires_noop_guard() {
+        let _eg = crate::test_env_lock(); // home-resolving: serialize vs temp-HOME swaps
         let path = home_join("replace_all_noop");
         fs::write(&path, "foo foo\n").unwrap();
 
@@ -921,6 +925,7 @@ mod tests {
 
     #[test]
     fn edit_file_replaces_unique_match() {
+        let _eg = crate::test_env_lock(); // home-resolving: serialize vs temp-HOME swaps
         let path = home_join("unique");
         fs::write(&path, "one\ntwo\nthree\n").unwrap();
 
@@ -935,6 +940,7 @@ mod tests {
 
     #[test]
     fn edit_file_errors_on_zero_matches() {
+        let _eg = crate::test_env_lock(); // home-resolving: serialize vs temp-HOME swaps
         let path = home_join("zero");
         let original = "one\ntwo\n";
         fs::write(&path, original).unwrap();
@@ -953,6 +959,7 @@ mod tests {
     fn edit_file_identical_old_new_is_a_loud_no_op() {
         // Dogfood 2026-06-13: old_text == new_text writes nothing but reported
         // ok:true. It must now FAIL with a no-op error and leave the file alone.
+        let _eg = crate::test_env_lock(); // home-resolving: serialize vs temp-HOME swaps
         let path = home_join("noop");
         let original = "alpha\nbeta\ngamma\n";
         fs::write(&path, original).unwrap();
@@ -972,6 +979,7 @@ mod tests {
         // Dogfood T2: old_text doubled the backslashes of a raw-string regex
         // (JSON-escaping confusion). The error must name the real cause, not
         // just say "not found".
+        let _eg = crate::test_env_lock(); // home-resolving: serialize vs temp-HOME swaps
         let path = home_join("nearmiss");
         let original = "fn pat() {\n    let re = r\"^\\s*fn\";\n}\n";
         fs::write(&path, original).unwrap();

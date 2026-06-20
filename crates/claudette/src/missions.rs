@@ -533,6 +533,9 @@ mod tests {
 
     #[test]
     fn path_under_permitted_roots_accepts_home_subpath() {
+        // home-resolving: serialize against the temp-HOME swaps in
+        // runtime/prompt.rs (path_under_permitted_roots re-reads $HOME).
+        let _eg = crate::test_env_lock();
         let home = std::env::var("USERPROFILE")
             .or_else(|_| std::env::var("HOME"))
             .expect("HOME or USERPROFILE must be set for this test");
