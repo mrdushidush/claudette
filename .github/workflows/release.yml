@@ -61,23 +61,31 @@ jobs:
           CLAUDETTE_SKIP_OLLAMA_PROBE: "1"
 
   tag-version-match:
-    name: tag matches Cargo.toml version
+    name: tag matches Cargo.toml + Cargo.lock version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
       - name: Compare tag to package version
         # Tag format `v0.2.3` must match the `version = "0.2.3"` line in
-        # Cargo.toml. Mismatch is almost always a forgot-to-bump in the
-        # release prep — fail fast rather than publish a wrong version.
+        # Cargo.toml *and* the claudette entry in Cargo.lock. A stale lockfile
+        # (bumped Cargo.toml but forgot `cargo update -p claudette`) sails past
+        # a Cargo.toml-only check and then fails the expensive `--locked`
+        # publish/build jobs minutes later — catch it here in seconds.
         # Skipped on workflow_dispatch (dry-run) — there is no tag to compare.
         if: github.event_name == 'push'
         run: |
           tag="${GITHUB_REF#refs/tags/v}"
           ver="$(grep -E '^version = ' crates/claudette/Cargo.toml | head -1 | sed -E 's/^version = "([^"]+)".*/\1/')"
+          lock_ver="$(grep -A1 '^name = "claudette"$' Cargo.lock | grep -E '^version = ' | head -1 | sed -E 's/^version = "([^"]+)".*/\1/')"
           echo "tag = $tag"
           echo "crates/claudette/Cargo.toml version = $ver"
+          echo "Cargo.lock claudette version = $lock_ver"
           if [ "$tag" != "$ver" ]; then
             echo "::error::tag $tag does not match crates/claudette/Cargo.toml version $ver"
+            exit 1
+          fi
+          if [ "$tag" != "$lock_ver" ]; then
+            echo "::error::tag $tag does not match Cargo.lock claudette version $lock_ver — run 'cargo update -p claudette' and commit the lockfile"
             exit 1
           fi
 

@@ -41,13 +41,20 @@ locally, CI will be green too:
 ```bash
 cargo fmt --all --check
 cargo clippy --all-targets --no-deps -- -D warnings
-cargo test --lib --bins
+cargo test --lib --bins --tests
 ```
 
-All must pass. The `--lib` suite has 1000+ tests plus 6 ignored (4
-POSIX-only hook tests, 2 live-recall smokes that need an LM Studio
-embedding server) — a PR that drops the pass count needs a
-justification in the description.
+All must pass. The suite has 1000+ tests plus 6 ignored (4 POSIX-only
+hook tests, 2 live-recall smokes that need an LM Studio embedding
+server) — a PR that drops the pass count needs a justification in the
+description. (`--tests` pulls in the `tests/` integration targets,
+notably the air-gap proof `offline_egress.rs` — CI runs these too.)
+
+**Platform coverage:** CI runs the test suite on **Ubuntu and Windows
+only**. macOS targets (`aarch64`/`x86_64-apple-darwin`) are *build*-checked
+at release time but not test-gated, and the x86_64 mac binary is
+cross-compiled. If your change has macOS-specific behaviour, test it
+locally — CI won't catch a mac-only regression.
 
 ## Commit style
 
