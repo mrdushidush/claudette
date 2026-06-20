@@ -61,7 +61,6 @@ pub enum SlashCommand {
     Capabilities,
     Exit,
     Validate(String),
-    Agents,
     /// Sprint 14: swap the whole preset bundle (brain + fallback) in one
     /// command. `fast` / `auto` / `smart`.
     PresetSwitch(Preset),
@@ -190,7 +189,6 @@ pub fn parse_slash_command(line: &str) -> Option<SlashCommand> {
                     .to_string(),
             ),
         },
-        "agents" => SlashCommand::Agents,
         "preset" => match arg.filter(|s| !s.is_empty()) {
             Some(p) => match p.parse::<Preset>() {
                 Ok(preset) => SlashCommand::PresetSwitch(preset),
@@ -374,10 +372,6 @@ where
             handle_validate(out, &path);
             SlashOutcome::Continue
         }
-        SlashCommand::Agents => {
-            handle_agents(out);
-            SlashOutcome::Continue
-        }
         SlashCommand::PresetSwitch(preset) => {
             handle_preset(out, runtime, preset, rebuild);
             SlashOutcome::Continue
@@ -483,7 +477,6 @@ fn print_help(out: &mut impl Write) {
                     "/validate (val) <path>",
                     "Run Codet code validator on a file",
                 ),
-                ("/agents", "List available agent types"),
                 ("/recall <query>", "Search cross-session memory"),
                 (
                     "/recall reprobe",
@@ -1252,27 +1245,6 @@ fn handle_reload<C, T, R>(
     }
 }
 
-fn handle_agents(out: &mut impl Write) {
-    let _ = writeln!(
-        out,
-        "{} {}",
-        theme::ROBOT,
-        theme::accent("available agents")
-    );
-    let agents: &[(&str, &str)] = &[(
-        "codet",
-        "code validation sidecar (automatic on write_file, supports py/rs/js/ts)",
-    )];
-    for (name, desc) in agents {
-        let _ = writeln!(out, "  {}  {}", theme::accent(name), theme::dim(desc));
-    }
-    let _ = writeln!(
-        out,
-        "\n  {}",
-        theme::dim("codet runs automatically on write_file/edit_file.")
-    );
-}
-
 fn handle_preset<C, T, R>(
     out: &mut impl Write,
     runtime: &mut ConversationRuntime<C, T>,
@@ -1993,12 +1965,6 @@ mod tests {
     fn parse_validate_without_path_is_invalid() {
         let parsed = parse_slash_command("/validate");
         assert!(matches!(parsed, Some(SlashCommand::Invalid(_))));
-    }
-
-    #[test]
-    fn parse_agents() {
-        assert_eq!(parse_slash_command("/agents"), Some(SlashCommand::Agents));
-        assert_eq!(parse_slash_command("/AGENTS"), Some(SlashCommand::Agents));
     }
 
     #[test]

@@ -9,8 +9,8 @@ do not backport fixes to prior minor versions.
 
 | Version | Supported |
 |---------|-----------|
-| latest `0.8.x` | ✅  |
-| `< 0.8`  | ❌        |
+| latest released `0.x` | ✅ |
+| any older release | ❌ |
 
 ## Reporting a vulnerability
 

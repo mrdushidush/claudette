@@ -24,7 +24,6 @@ Run `claudette --help` for the authoritative reference.
 
 ```
 /help                Show this list.
-/agents              List available sub-agent types.
 /validate <path>     Run Codet on an existing code file.
 /status              Session info + token counts.
 /cost                Lifetime token usage.
