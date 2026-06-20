@@ -70,8 +70,8 @@ Every candidate runs the same objective 50-task battery - 11 languages × 12 tas
 
 | Model | VRAM | Pass @ 50 | Best for |
 |-------|------|-----------|----------|
-| **`qwen3.6-35b-a3b`** (q3_k_xl) | 16 GB | **92%** | Best accuracy - the default |
-| `qwen3.5-4b` | **8 GB** | 90% | Best value - runs almost anywhere |
+| **`qwen3.5:4b`** | **8 GB** | 90% | **The default** - what `install` pulls; best value, runs on an 8 GB GPU or plain CPU |
+| `qwen3.6-35b-a3b` (q3_k_xl) | 16 GB | **92%** | Best accuracy - LM Studio only (not packaged on Ollama) |
 | `gpt-oss-20b` | 13 GB | 86% | Fastest |
 
 Full table, methodology, and the reusable harness → [MODEL-COMPARISON.md](runs/eval-2026-05-29/battery/MODEL-COMPARISON.md). Benching a model we haven't covered is the single most useful way to contribute - no Rust required.
