@@ -1059,4 +1059,91 @@ mod tests {
             );
         }
     }
+
+    /// Doc-drift guard (roast 2026-06-21, Wave 2.3): every `CLAUDETTE_*` env
+    /// var read in `src/` must be documented somewhere under `docs/`. New knob
+    /// without a doc line → this test fails until you document it (or add it to
+    /// `ALLOW` with a reason). Keeps `configuration.md`'s "every env var"
+    /// promise honest.
+    #[test]
+    fn every_env_var_is_documented() {
+        use std::collections::BTreeSet;
+        use std::path::Path;
+
+        /// Recursively append every `*.<ext>` file's contents under `dir`.
+        fn slurp(dir: &Path, ext: &str, out: &mut String) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    slurp(&path, ext, out);
+                } else if path.extension().and_then(|s| s.to_str()) == Some(ext) {
+                    if let Ok(s) = std::fs::read_to_string(&path) {
+                        out.push_str(&s);
+                        out.push('\n');
+                    }
+                }
+            }
+        }
+
+        /// Pull every `CLAUDETTE_[A-Z0-9_]+` token out of `hay`.
+        fn vars(hay: &str) -> BTreeSet<String> {
+            let bytes = hay.as_bytes();
+            let mut set = BTreeSet::new();
+            let mut search_from = 0;
+            while let Some(rel) = hay[search_from..].find("CLAUDETTE_") {
+                let start = search_from + rel;
+                let mut end = start + "CLAUDETTE_".len();
+                while end < bytes.len()
+                    && (bytes[end].is_ascii_uppercase()
+                        || bytes[end].is_ascii_digit()
+                        || bytes[end] == b'_')
+                {
+                    end += 1;
+                }
+                set.insert(hay[start..end].to_string());
+                search_from = end;
+            }
+            set
+        }
+
+        // Vars the guard intentionally ignores (not user-facing config).
+        const ALLOW: &[&str] = &[
+            "CLAUDETTE_ZZZ_TEST_NONEXISTENT_ABC_TOKEN", // secrets.rs test sentinel
+            "CLAUDETTE_FORGE_X",                        // sample code in a repomap test fixture
+            "CLAUDETTE_FORGE_Y",                        // ditto
+        ];
+
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut code = String::new();
+        slurp(&manifest.join("src"), "rs", &mut code);
+        let mut docs = String::new();
+        slurp(&manifest.join("../../docs"), "md", &mut docs);
+
+        // If the doc tree isn't on disk (e.g. a packaged build with tests/
+        // and docs/ stripped), there's nothing to check against — skip.
+        if docs.is_empty() {
+            return;
+        }
+
+        let documented = vars(&docs);
+        let mut missing: Vec<String> = vars(&code)
+            .into_iter()
+            // Captures ending in `_` are dynamic prefixes (e.g. the
+            // `CLAUDETTE_CODER_`/`CLAUDETTE_FORGE_` string fragments used to
+            // build var names), not real vars.
+            .filter(|v| !v.ends_with('_'))
+            .filter(|v| !ALLOW.contains(&v.as_str()))
+            .filter(|v| !documented.contains(v))
+            .collect();
+        missing.sort();
+        assert!(
+            missing.is_empty(),
+            "these CLAUDETTE_* env vars are read in src/ but documented in no docs/*.md \
+             (add them to docs/configuration.md, or to ALLOW with a reason):\n{}",
+            missing.join("\n")
+        );
+    }
 }

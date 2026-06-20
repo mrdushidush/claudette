@@ -73,6 +73,7 @@ Two layers enforce it: an HTTP-layer guard in the reqwest path checks the destin
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `CLAUDETTE_MAX_FIX_ROUNDS` | `2` | Cap on Coder→Verifier fix-loop rounds in `--forge`. Default 2 is the empirical sweet spot for local 8b coders. Raise to 4–6 if you've pinned a stronger Verifier model and want it to keep pushing back. Clamped at 10. |
+| `CLAUDETTE_FORGE_ABORT_WINDOW_SECS` | `3` | Grace window (seconds) to Ctrl-C out of a forge run before it starts working. Set `0` to skip the pause in CI / scripted runs. Clamped at 30. |
 
 ## Tokens (per-tool)
 
@@ -80,7 +81,7 @@ Two layers enforce it: an HTTP-layer guard in the reqwest path checks the destin
 |----------|---------|
 | `BRAVE_API_KEY` | Brave Search API key — required for `web_search`. |
 | `GITHUB_TOKEN` | GitHub PAT — required for the `github` tool group. Falls back to `CLAUDETTE_GITHUB_TOKEN` if unset. |
-| `TELEGRAM_BOT_TOKEN` | Bot token from `@BotFather` — required for `--telegram`. |
+| `TELEGRAM_BOT_TOKEN` | Bot token from `@BotFather` — required for `--telegram`. Falls back to `CLAUDETTE_TELEGRAM_TOKEN` if unset. |
 | `CLAUDETTE_TELEGRAM_CHAT` | Comma-separated chat-ID allowlist for the Telegram bot (same as repeating `--chat`). The bot default-denies when no allowlist is set. |
 | `CLAUDETTE_GOOGLE_CLIENT_ID` | Google OAuth client ID — required for `--auth-google` + the Calendar / Gmail tool groups. Falls back to `GOOGLE_CLIENT_ID`, or to `~/.claudette/secrets/google_oauth_client.json`. |
 | `CLAUDETTE_GOOGLE_CLIENT_SECRET` | Google OAuth client secret. Same fallback chain as the client ID. |
@@ -93,6 +94,16 @@ All tokens also support file-based fallback: save them to `~/.claudette/secrets/
 |----------|---------|---------|
 | `CLAUDETTE_WHISPER_BIN` | `whisper-cli` on PATH | Path to the `whisper.cpp` binary. |
 | `CLAUDETTE_WHISPER_MODEL` | `~/.claudette/models/ggml-large-v3-turbo.bin` | Path to the Whisper GGML model file. |
+| `CLAUDETTE_FFMPEG_BIN` | `ffmpeg` on PATH | Path to the `ffmpeg` binary (transcodes incoming Telegram voice notes for Whisper). |
+| `CLAUDETTE_TTS_VOICE_EN` | built-in English voice | edge-tts voice id used for English speech output. |
+| `CLAUDETTE_TTS_VOICE_HE` | built-in Hebrew voice | edge-tts voice id used for Hebrew speech output. |
+| `CLAUDETTE_TTS_MAX_CHARS` | `500` | Max reply length (characters) sent to edge-tts; longer replies are spoken truncated. |
+
+## Vision
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CLAUDETTE_VISION_MODEL` | `vision` | Model id used for image attachments. Override when your multimodal model is loaded under a different id (e.g. an LM Studio `@quant`-pinned name). |
 
 ## Cross-session recall
 
@@ -101,3 +112,29 @@ All tokens also support file-based fallback: save them to `~/.claudette/secrets/
 | `CLAUDETTE_RECALL_DISABLE` | unset | Set to `1` to disable post-turn recall indexing entirely (privacy / no embed model available). |
 | `CLAUDETTE_RECALL_MODEL` | `nomic-embed-text` | Embed model id. Under `CLAUDETTE_OPENAI_COMPAT=1`, set to whatever embedding model you've loaded in LM Studio (e.g. `text-embedding-nomic-embed-text-v1.5`). |
 | `CLAUDETTE_RECALL_DB` | `~/.claudette/recall.sqlite` | Override the recall DB path (mostly useful in tests). |
+
+## Permission bypass (use with care)
+
+These each **remove a confirmation gate**. They exist for unattended/CI runs and power users who know the trade-off — setting them weakens the per-tool permission model, so prefer `--offline` + scoped tokens over blanket bypass when you can.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CLAUDETTE_AUTO_APPROVE` | unset | ⚠️ Set to `1` to auto-approve **every** DangerFullAccess tool (`bash`, `edit_file`, `git push`, …) without the `[y/N]` prompt. Intended for trusted unattended runs. Do **not** combine with `--offline` if you need the air-gap to hold while `bash` can still open a socket — the offline guard blocks networked *tools*, not arbitrary shell commands. |
+| `CLAUDETTE_ALLOW_DESTRUCTIVE_GIT` | unset | ⚠️ Set to `1` to let destructive git operations (`reset --hard`, `clean -f`, force-push, branch delete) run without the extra destructive-git guard. |
+| `CLAUDETTE_ALLOW_SECRET_READS` | unset | ⚠️ Set to `1` to let file-read tools open paths the secret-file denylist normally blocks (`~/.ssh`, `*.pem`, `.env`, token files). |
+| `CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE` | unset | ⚠️ Set to `1` to let `web_fetch` reach private / loopback / link-local addresses, disabling the SSRF guard. Only for fetching from a host on your own LAN. |
+
+## Advanced / internal tuning
+
+Rarely needed; defaults are tuned for local small models. Mostly useful for debugging spirals or scripting.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CLAUDETTE_MAX_TOOLS` | unset (no cap) | Truncate the `tools` array sent per request to N entries (keeps the schema small for context-tight models). |
+| `CLAUDETTE_READ_DEFAULT_LINES` | `400` | Default number of lines `read_file` returns when no explicit range is given. |
+| `CLAUDETTE_READ_LOOP_LIMIT` | `2` | How many identical re-reads of the same file are tolerated before the read-loop breaker intervenes. |
+| `CLAUDETTE_NO_READ_LOOP_BREAKER` | unset | Set to `1` to disable the read-loop breaker entirely. |
+| `CLAUDETTE_WRITE_FILE_CODE_MAX_LINES` | `60` | Max lines `write_file` accepts for a code file in one call (nudges the model toward `edit_file` for large changes). |
+| `CLAUDETTE_NO_SPINNER` | unset | Set to `1` to suppress the REPL/TUI activity spinner (TTY only). |
+| `CLAUDETTE_MODEL_RELOAD_RETRY_MS` | `750` | Backoff (ms) before retrying a request after the backend reports the model was unloaded/reloaded. |
+| `CLAUDETTE_DISABLE_MODEL_RELOAD_RETRY` | unset | Set to `1` to disable the post-reload retry and fail fast instead. |
