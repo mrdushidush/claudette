@@ -1,0 +1,79 @@
+# Supply-chain policy, enforced in CI by `cargo deny check` (roast 2026-06-21,
+# Wave 3.1/3.2). A security-positioned, air-gapped project shipping 300+
+# transitive crates with no supply-chain gate is a contradiction; this closes
+# it. Runs alongside the standalone `cargo audit` job — deny re-checks the
+# RustSec advisory DB and adds license, duplicate-version, and source gates.
+#
+# Update procedure: if a new dependency trips this, prefer fixing the tree
+# (swap/drop the dep) over loosening policy. When a loosen is genuinely
+# warranted, add a *narrow, commented* exception below.
+
+[advisories]
+version = 2
+# A yanked crate in the lockfile means a `--locked` build pulls a version the
+# author retracted — treat it as hard a failure as a CVE.
+yanked = "deny"
+# ignore = [
+#   # "RUSTSEC-0000-0000", # why it's tolerated + tracking link
+# ]
+
+[licenses]
+version = 2
+# Permissive licenses only — every entry is OSI-approved and compatible with
+# claudette's own MIT OR Apache-2.0 dual license. The set is the minimum that
+# satisfies the current tree: OR-expressions are covered by MIT/Apache, while
+# `(MIT OR Apache-2.0) AND Unicode-3.0` and `Apache-2.0 AND ISC` force
+# Unicode-3.0 and ISC to be listed explicitly.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "BSL-1.0",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.9
+# exceptions = [
+#   # { allow = ["..."], crate = "some-crate" },
+# ]
+
+[bans]
+# Duplicate versions of the same crate bloat the binary and widen the audit
+# surface. Today the tree carries a handful of unavoidable transitive dupes
+# (getrandom, hashbrown, windows-sys, winnow, rand, foldhash, r-efi) pinned by
+# upstreams we don't control; they're skipped below so a *new* dupe we
+# introduce fails CI while the known ones don't block merges. Re-audit the
+# skip list when dependencies are bumped — `cargo tree -d` shows the current
+# set.
+multiple-versions = "deny"
+wildcards = "deny"
+# Crates allowed to appear at multiple versions (known, upstream-driven). Most
+# of these are the windows-sys 0.60/0.61 split dragging two copies of the
+# windows-targets → windows_* import-lib family; the rest are common transitive
+# pins. Keep in sync with `cargo tree -d`.
+skip = [
+    { crate = "getrandom" },
+    { crate = "hashbrown" },
+    { crate = "winnow" },
+    { crate = "windows-sys" },
+    { crate = "windows-targets" },
+    { crate = "windows_aarch64_gnullvm" },
+    { crate = "windows_aarch64_msvc" },
+    { crate = "windows_i686_gnu" },
+    { crate = "windows_i686_gnullvm" },
+    { crate = "windows_i686_msvc" },
+    { crate = "windows_x86_64_gnu" },
+    { crate = "windows_x86_64_gnullvm" },
+    { crate = "windows_x86_64_msvc" },
+    { crate = "wit-bindgen" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
