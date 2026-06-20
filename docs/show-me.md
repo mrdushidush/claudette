@@ -24,15 +24,15 @@ You'll get the note back from a search later even if you forgot the exact words 
 
 ## Calendar and email
 
-Once you've connected Google (one-time OAuth — see [`google_setup.md`](google_setup.md)), Claudette can read and write your calendar and inbox.
+Once you've connected Google (one-time OAuth — see [`google_setup.md`](google_setup.md)), Claudette can manage your calendar and read your inbox.
 
 - *"What's on my calendar tomorrow?"*
 - *"Schedule a 30-minute coffee with Sam on Thursday at 3pm."*
+- *"Move my Tuesday dentist appointment to Wednesday at the same time."*
 - *"Did Lisa email me about the lease this week?"*
-- *"Draft a reply to the landlord saying I'll send the deposit on Monday."*
-- *"Cancel my Tuesday dentist appointment and email the office."*
+- *"Summarize the unread mail from my landlord."*
 
-Drafts are saved as drafts. Nothing gets sent without you saying "send it."
+Calendar events are created, moved, and cancelled only after you confirm. Your **inbox is read-only** — Claudette can search and read mail (sending and drafting aren't built yet), so nothing ever leaves on its own.
 
 ---
 

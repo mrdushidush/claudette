@@ -1,6 +1,6 @@
 # Claudette vs. the open-source AI agent landscape
 
-_As of April 2026._
+_As of June 2026._
 
 "Open claw" ≈ **opencode** (SST) — the most-cited open-source alternative to Claude Code. This doc
 compares Claudette against opencode and the other leading open-source AI coding / agent tools so
@@ -10,7 +10,7 @@ we're honest about what Claudette is, what it isn't, and where it has room to gr
 
 | Tool | Language | Local models | Primary UI | Agent style | Target use case |
 |---|---|---|---|---|---|
-| **Claudette** | Rust (single crate) | Ollama-only by default | REPL + CLI + TUI + **Telegram bot** | Agent loop w/ 3 sub-agents + tiered-brain fallback | Personal secretary + coding (local-first) |
+| **Claudette** | Rust (single crate) | Ollama or LM Studio | REPL + CLI + TUI + **Telegram bot** | Agent loop + tiered-brain fallback (4B→9B) | Local-first coding agent + personal assistant |
 | **opencode** (SST) | Go | Yes, 75+ models | Terminal TUI + VS Code ext | Plan + Build agents | Coding agent replacing Claude Code |
 | **Aider** | Python | Yes, any LLM | Terminal REPL | Repo-mapped pair programming | Coding with deep git integration |
 | **OpenHands** | Python + Docker | Yes, via Ollama | Web UI + Docker sandbox | Autonomous agent with browser + shell | Full SWE-agent, SWE-bench 53%+ |
@@ -19,14 +19,14 @@ we're honest about what Claudette is, what it isn't, and where it has room to gr
 
 ## Where Claudette differs
 
-### 1. It's a secretary, not a coding tool
-opencode, Aider, Cline, Continue — all framed as coding agents. Claudette's 12 tool groups cover
-`calendar` (Google Calendar CRUD + RSVP), `schedule` (proactive reminders + recurring briefings),
-`gmail` (read-only with `<email>` provenance wrapping), `markets` (TradingView + Algorand),
-`facts` (Wikipedia / Open-Meteo weather), `telegram` (voice-capable bot interface), plus
-`git`/`ide`/`search`/`advanced`/`registry`/`github` — alongside `core` (notes, todos, time, files).
-Code-generation exists (Codet sidecar + Code Reviewer sub-agent) but is one capability among
-many, not the whole point.
+### 1. A coding agent that's also a full personal assistant
+opencode, Aider, Cline, Continue are coding agents and nothing else. Claudette's coding core
+(files, search, repo-map, tests, `git`/`github`, the Codet code-gen sidecar, and the `--forge`
+Planner→Coder→Verifier pipeline) is first-class — and it ships alongside a deep assistant toolset
+no other tool here carries: `calendar` (Google Calendar CRUD + RSVP), `schedule` (proactive
+reminders + recurring briefings), `gmail` (read-only with `<email>` provenance wrapping), `markets`,
+`facts` (Wikipedia / Open-Meteo weather), and `telegram` (voice-capable bot interface). 22 opt-in
+tool groups in all, so the base schema stays tiny until the model enables what it needs.
 
 ### 2. Four interfaces, including a Telegram bot
 None of the comparison tools ship a messaging-app interface. Send a voice note while walking, get a
