@@ -9,7 +9,7 @@ readme = "../../README.md"
 repository = "https://github.com/mrdushidush/claudette"
 homepage = "https://github.com/mrdushidush/claudette"
 authors = ["mrdushidush <mrdushidush@gmail.com>"]
-keywords = ["coding-agent", "local-llm", "privacy", "tui", "ollama"]
+keywords = ["air-gapped", "offline-first", "coding-agent", "local-llm", "privacy"]
 categories = ["command-line-utilities", "development-tools"]
 # Keep the published crate lean: the tests/ tree is benchmark-harness data
 # (run logs, results dirs, shell scripts, prompt fixtures) with no .rs targets,
