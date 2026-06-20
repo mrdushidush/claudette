@@ -601,6 +601,9 @@ mod tests {
     fn not_found_error_carries_near_miss_hint() {
         // Dogfood T2: a `before` with doubled backslashes must produce the
         // over-escaping diagnosis end-to-end, not the generic "copy exactly".
+        // home-resolving: serialize against the temp-HOME swaps in
+        // runtime/prompt.rs so $HOME doesn't change mid-test.
+        let _eg = crate::test_env_lock();
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .unwrap_or_else(|_| ".".into());
@@ -630,6 +633,9 @@ mod tests {
         // The dogfood 2026-06-13 spiral: before == after (the model could not
         // see its own doubled backslash). The edit must FAIL with a no-op error,
         // not report ok:true after writing nothing.
+        // home-resolving: serialize against the temp-HOME swaps in
+        // runtime/prompt.rs so $HOME doesn't change mid-test.
+        let _eg = crate::test_env_lock();
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .unwrap_or_else(|_| ".".into());
