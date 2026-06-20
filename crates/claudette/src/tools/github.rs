@@ -210,6 +210,12 @@ pub(super) fn schemas() -> Vec<Value> {
     ]
 }
 
+/// Base URL every `gh_*` handler targets. The egress guard checks this exact
+/// host, and every request builder below derives its URL from it — so the
+/// dispatch-level guard provably matches the destination the RequestBuilder
+/// will hit (rather than an unrelated host literal that could drift).
+const GITHUB_API_BASE: &str = "https://api.github.com";
+
 pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>> {
     // Resolve the handler first (so ownership of `name` is decided) but DON'T
     // run it yet — every gh_* tool reaches api.github.com, so the offline
@@ -228,7 +234,7 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
         "gh_create_pr" => run_gh_create_pr,
         _ => return None,
     };
-    if let Err(e) = crate::egress::guard("https://api.github.com") {
+    if let Err(e) = crate::egress::guard(GITHUB_API_BASE) {
         return Some(Err(e));
     }
     Some(handler(input))
@@ -299,7 +305,7 @@ fn github_post(
 /// callers that need it multiple times in a turn should cache it, but for
 /// single-tool-call paths this is fine.
 fn github_me(client: &reqwest::blocking::Client, token: &str) -> Result<String, String> {
-    let resp = github_get(client, "https://api.github.com/user", token)
+    let resp = github_get(client, &format!("{GITHUB_API_BASE}/user"), token)
         .send()
         .map_err(|e| format!("gh_me: request failed: {e}"))?;
     if !resp.status().is_success() {
@@ -318,7 +324,7 @@ fn github_me(client: &reqwest::blocking::Client, token: &str) -> Result<String, 
 fn github_search_issues(q: &str) -> Result<String, String> {
     let token = github_token()?;
     let client = external_http_client()?;
-    let resp = github_get(&client, "https://api.github.com/search/issues", &token)
+    let resp = github_get(&client, &format!("{GITHUB_API_BASE}/search/issues"), &token)
         .query(&[("q", q), ("per_page", "10"), ("sort", "updated")])
         .send()
         .map_err(|e| format!("gh_search_issues: request failed: {e}"))?;
@@ -388,7 +394,7 @@ fn run_gh_get_issue(input: &str) -> Result<String, String> {
 
     let token = github_token()?;
     let client = external_http_client()?;
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/issues/{number}");
+    let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{number}");
     let resp = github_get(&client, &url, &token)
         .send()
         .map_err(|e| format!("gh_get_issue: request failed: {e}"))?;
@@ -448,7 +454,7 @@ fn run_gh_create_issue(input: &str) -> Result<String, String> {
 
     let token = github_token()?;
     let client = external_http_client()?;
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/issues");
+    let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/issues");
     let payload = json!({ "title": title, "body": body });
 
     let resp = github_post(&client, &url, &token)
@@ -489,7 +495,7 @@ fn run_gh_comment_issue(input: &str) -> Result<String, String> {
 
     let token = github_token()?;
     let client = external_http_client()?;
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments");
+    let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{number}/comments");
     let payload = json!({ "body": body });
 
     let resp = github_post(&client, &url, &token)
@@ -523,7 +529,7 @@ fn run_gh_search_code(input: &str) -> Result<String, String> {
 
     let token = github_token()?;
     let client = external_http_client()?;
-    let resp = github_get(&client, "https://api.github.com/search/code", &token)
+    let resp = github_get(&client, &format!("{GITHUB_API_BASE}/search/code"), &token)
         .query(&[("q", query), ("per_page", "5")])
         .send()
         .map_err(|e| format!("gh_search_code: request failed: {e}"))?;
@@ -576,7 +582,7 @@ fn run_gh_list_repo_issues(input: &str) -> Result<String, String> {
 
     let token = github_token()?;
     let client = external_http_client()?;
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/issues");
+    let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/issues");
     let per_page = limit.to_string();
     let mut query: Vec<(&str, &str)> = vec![
         ("state", state),
@@ -651,7 +657,7 @@ fn run_gh_pr_status(input: &str) -> Result<String, String> {
 
     let token = github_token()?;
     let client = external_http_client()?;
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}");
+    let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}");
     let resp = github_get(&client, &url, &token)
         .send()
         .map_err(|e| format!("gh_pr_status: request failed: {e}"))?;
@@ -707,7 +713,7 @@ fn run_gh_pr_view(input: &str) -> Result<String, String> {
     let client = external_http_client()?;
 
     // PR metadata (same shape as gh_pr_status, plus body).
-    let pr_url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{number}");
+    let pr_url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{number}");
     let pr_resp = github_get(&client, &pr_url, &token)
         .send()
         .map_err(|e| format!("gh_pr_view: PR request failed: {e}"))?;
@@ -765,8 +771,7 @@ fn run_gh_pr_view(input: &str) -> Result<String, String> {
 
     // Recent issue comments — capped to last 20. Each is attacker-
     // controlled, so wrap in <untrusted> per-comment.
-    let comments_url =
-        format!("https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments");
+    let comments_url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{number}/comments");
     let comments_resp = github_get(&client, &comments_url, &token)
         .query(&[
             ("per_page", "20"),
@@ -812,7 +817,7 @@ fn run_gh_pr_view(input: &str) -> Result<String, String> {
     let mut checks_summary = json!(null);
     if !head_sha.is_empty() {
         let checks_url =
-            format!("https://api.github.com/repos/{owner}/{repo}/commits/{head_sha}/check-runs");
+            format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{head_sha}/check-runs");
         if let Ok(check_resp) = github_get(&client, &checks_url, &token).send() {
             if check_resp.status().is_success() {
                 if let Ok(check_data) = check_resp.json::<Value>() {
@@ -976,7 +981,7 @@ fn fetch_job_log(
 ) -> Result<String, String> {
     // GitHub redirects this endpoint to a signed URL — reqwest follows
     // redirects by default. Response body is plain text.
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/actions/jobs/{job_id}/logs");
+    let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/actions/jobs/{job_id}/logs");
     let resp = github_get(client, &url, token)
         .send()
         .map_err(|e| format!("gh_workflow_logs: fetch job {job_id}: {e}"))?;
@@ -1002,7 +1007,7 @@ fn resolve_run_from_pr(
     repo: &str,
     pr_num: i64,
 ) -> Result<i64, String> {
-    let pr_url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{pr_num}");
+    let pr_url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls/{pr_num}");
     let pr_resp = github_get(client, &pr_url, token)
         .send()
         .map_err(|e| format!("gh_workflow_logs: PR lookup failed: {e}"))?;
@@ -1020,7 +1025,7 @@ fn resolve_run_from_pr(
         .and_then(Value::as_str)
         .ok_or("gh_workflow_logs: PR has no head sha")?;
 
-    let runs_url = format!("https://api.github.com/repos/{owner}/{repo}/actions/runs");
+    let runs_url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/actions/runs");
     let runs_resp = github_get(client, &runs_url, token)
         .query(&[("head_sha", head_sha), ("per_page", "20")])
         .send()
@@ -1065,7 +1070,7 @@ fn list_failed_jobs(
     repo: &str,
     run_id: i64,
 ) -> Result<Vec<(i64, String)>, String> {
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/actions/runs/{run_id}/jobs");
+    let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/actions/runs/{run_id}/jobs");
     let resp = github_get(client, &url, token)
         .query(&[("per_page", "30")])
         .send()
@@ -1153,7 +1158,7 @@ fn run_gh_fork(input: &str) -> Result<String, String> {
 
     let token = github_token()?;
     let client = external_http_client()?;
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/forks");
+    let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/forks");
 
     let resp = github_post(&client, &url, &token)
         .json(&json!({}))
@@ -1197,7 +1202,7 @@ fn run_gh_create_pr(input: &str) -> Result<String, String> {
 
     let token = github_token()?;
     let client = external_http_client()?;
-    let url = format!("https://api.github.com/repos/{owner}/{repo}/pulls");
+    let url = format!("{GITHUB_API_BASE}/repos/{owner}/{repo}/pulls");
     let payload = json!({
         "title": title,
         "body": body,
