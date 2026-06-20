@@ -136,6 +136,9 @@ MISC:
                          Gmail/Calendar, markets/weather/wikipedia, GitHub, and
                          the Telegram bridge; the local brain + recall still
                          work. See `--offline` in --doctor for the allow-list.
+    --faceless           Drop the persona overlay (Eva for the assistant,
+                         CodeX-7 for the forge Coder) and run with a plain,
+                         name-free prompt. Same as CLAUDETTE_FACELESS=1.
     --help, -h           Show this help and exit.
     --version, -V        Show the claudette version and exit.
 
@@ -1027,12 +1030,20 @@ mod tests {
 
     #[test]
     fn help_text_mentions_every_flag() {
-        // Guardrail: if someone adds a new flag to parse_args they'll break
-        // this test until HELP_TEXT documents it. Keeps the two in sync.
+        // Guardrail: every long flag parse_args matches must be documented in
+        // HELP_TEXT. This list must mirror the `"--*"` arms in parse_args
+        // (`grep -oE '"--[a-z-]+"' main.rs | sort -u`) — adding a flag without
+        // a HELP_TEXT line breaks this test on purpose. Previously it checked
+        // only 11 of 15 and silently let --forge/--doctor/--faceless/--offline
+        // ship undocumented.
         for flag in [
             "--resume",
             "--telegram",
             "--tui",
+            "--forge",
+            "--doctor",
+            "--faceless",
+            "--offline",
             "--chat",
             "--auth-google",
             "--revoke",
