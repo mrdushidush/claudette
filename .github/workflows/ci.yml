@@ -82,7 +82,11 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2.9.1
-      - run: cargo test --lib --bins
+      # `--tests` is what makes the air-gap a CI-proven guarantee: it pulls in
+      # the integration targets under tests/ (notably offline_egress.rs, which
+      # drives every networked tool under CLAUDETTE_OFFLINE=1 and asserts each
+      # refuses before a socket opens). Without `--tests` that proof never ran.
+      - run: cargo test --lib --bins --tests
         env:
           CLAUDETTE_SKIP_OLLAMA_PROBE: "1"
 
