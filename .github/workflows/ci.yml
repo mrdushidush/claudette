@@ -71,6 +71,27 @@ jobs:
       - name: Run cargo audit
         run: cargo audit
 
+  deny:
+    name: cargo deny (supply chain)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2.9.1
+        with:
+          key: cargo-deny
+      # Install the CLI directly (same rationale as the cargo-audit job above):
+      # avoids a Node-20 third-party action and keeps the job permission set to
+      # contents:read. `cargo deny check` enforces deny.toml — license allow-list,
+      # duplicate-version bans, source allow-list, and a second pass over the
+      # RustSec advisory DB.
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - name: Run cargo deny
+        run: cargo deny check
+
   test:
     name: test (${{ matrix.os }})
     strategy:
