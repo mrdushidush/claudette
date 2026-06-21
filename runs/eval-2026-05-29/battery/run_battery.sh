@@ -65,11 +65,31 @@ while IFS=$'\t' read -r id lang type fixture timeout; do
     echo "### ---- claudette output ----"
   } > "$log"
 
-  start=$(date +%s)
-  ( cd "$work" && CLAUDETTE_WORKSPACE="$wswin" timeout "$timeout" "$BIN" "$prompt" ) >> "$log" 2>&1
-  ec=$?
-  elapsed=$(($(date +%s)-start))
-  echo "### EXIT=$ec  ELAPSED=${elapsed}s" >> "$log"
+  # Run claudette under a hard timeout. EC=124 on a LOCAL model is usually an
+  # LM Studio eviction / JIT-load flake — the model got unloaded and the cold
+  # reload blew the time budget — NOT a code regression (see the unload
+  # investigation note). Retry ONCE on a timeout: the first attempt warms the
+  # model, so a genuine flake passes on the retry while a real spiral times out
+  # again and keeps its (TIMEOUT) stamp, no longer masking real regressions.
+  # Tune with BATTERY_TIMEOUT_RETRIES (default 1; 0 disables).
+  retries="${BATTERY_TIMEOUT_RETRIES:-1}"
+  attempt=0
+  while : ; do
+    start=$(date +%s)
+    ( cd "$work" && CLAUDETTE_WORKSPACE="$wswin" timeout "$timeout" "$BIN" "$prompt" ) >> "$log" 2>&1
+    ec=$?
+    elapsed=$(($(date +%s)-start))
+    { [ "$ec" -ne 124 ] || [ "$attempt" -ge "$retries" ]; } && break
+    attempt=$((attempt+1))
+    echo "### TIMEOUT (ec=124) — retry $attempt/$retries (likely model eviction; warming)" >> "$log"
+    # Fresh work tree for the retry so a partial mutation from the timed-out
+    # attempt doesn't taint the verifier.
+    rm -rf "$work"; cp -r "$BAT/fixtures/$fixture" "$work"
+    [ -f "$BAT/setup/$id.sh" ] && bash "$BAT/setup/$id.sh" "$work" >/dev/null 2>&1
+  done
+  suffix=""
+  [ "$attempt" -gt 0 ] && suffix="  (after $attempt timeout-retr$([ "$attempt" -eq 1 ] && echo y || echo ies))"
+  echo "### EXIT=$ec  ELAPSED=${elapsed}s$suffix" >> "$log"
 
   res="$(bash "$BAT/verify/$id.sh" "$work" "$log" 2>&1)"
   status="$(printf '%s\n' "$res" | sed -n 's/^RESULT: \([A-Z]*\).*/\1/p' | head -1)"
