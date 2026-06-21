@@ -218,11 +218,6 @@ struct App {
     paste_file: paste::PasteFile,
     working: bool,
 
-    // ── Easter egg ────────────────────────────────────────────────────────
-    /// Space Invaders modal. `Some` while the game is being played; `None`
-    /// otherwise. Toggled via Ctrl+G.
-    space_game: Option<space::SpaceGame>,
-
     // ── Permissions ───────────────────────────────────────────────────────
     /// Pending DangerFullAccess confirmation modal. Outranks every other
     /// input mode while `Some` — the worker thread is blocked on the answer.
@@ -263,7 +258,6 @@ impl Default for App {
             paste_notice: None,
             paste_file: paste::PasteFile::new(),
             working: false,
-            space_game: None,
             permission_prompt: None,
             all_tool_records: Vec::new(),
             notes: NotesState::default(),
@@ -291,11 +285,9 @@ impl App {
                 required_mode,
                 resp_tx,
             } => {
-                // A permission question outranks the easter egg and any
-                // pane edit mode — force-close them so their input branches
-                // can't starve the modal (the worker is blocked until the
-                // user answers).
-                self.space_game = None;
+                // A permission question outranks any pane edit mode —
+                // force-close it so its input branch can't starve the modal
+                // (the worker is blocked until the user answers).
                 self.notes.filter_editing = false;
                 self.permission_prompt = Some(PermissionPrompt {
                     tool_name,
@@ -803,9 +795,8 @@ fn run_loop(
         }
 
         // Permission modal — highest-priority input mode; owns its own
-        // draw + poll, then loops. Must come BEFORE the Space Invaders
-        // branch (whose `continue` would otherwise starve it) — and the
-        // event handler force-closes the game/filter modes on arrival.
+        // draw + poll, then loops. The event handler force-closes the
+        // pane edit modes on arrival so they can't starve it.
         // The worker thread is parked in `decide()` until we answer via
         // `resp_tx`; every exit path that drops the prompt instead (quit,
         // `?` error) reads as a deny on the worker side.
@@ -857,29 +848,6 @@ fn run_loop(
                                 }
                             }
                             _ => {}
-                        }
-                    }
-                }
-            }
-            continue;
-        }
-
-        // Space Invaders modal — own its own input + tick loop, then loop.
-        if let Some(game) = app.space_game.as_mut() {
-            game.tick();
-            terminal.draw(|f| render::render(f, &app))?;
-            if event::poll(Duration::from_millis(50))? {
-                if let Event::Key(k) = event::read()? {
-                    if k.kind == KeyEventKind::Press {
-                        // Ctrl+G also exits the modal (the same way it opened
-                        // it), so a power user can flip in and out fast.
-                        let close_via_chord = matches!(
-                            (k.code, k.modifiers),
-                            (KeyCode::Char('g' | 'G'), KeyModifiers::CONTROL)
-                        );
-                        let game = app.space_game.as_mut().expect("space_game was Some above");
-                        if close_via_chord || game.handle_input(k.code) {
-                            app.space_game = None;
                         }
                     }
                 }
@@ -977,11 +945,6 @@ fn run_loop(
             (KeyCode::Char('c' | 'd'), KeyModifiers::CONTROL) => {
                 let _ = user_tx.send(UserInput::Quit);
                 return Ok(());
-            }
-
-            // Space Invaders easter egg — Ctrl+G to launch, Esc/q to close.
-            (KeyCode::Char('g' | 'G'), KeyModifiers::CONTROL) if !app.working => {
-                app.space_game = Some(space::SpaceGame::new());
             }
 
             // Tab switching (works even while Claudette is thinking).
@@ -1225,4 +1188,3 @@ fn run_loop(
 
 mod paste;
 mod render;
-mod space;

@@ -54,14 +54,8 @@ pub(super) fn render(f: &mut Frame, app: &App) {
     render_status(f, app, outer[2]);
     render_input(f, app, outer[3]);
 
-    // Space Invaders easter egg — overlay covers the whole area when active.
-    if let Some(game) = app.space_game.as_ref() {
-        game.draw(f, area);
-    }
-
     // Permission confirmation modal — drawn last so it sits above
-    // everything, including the easter-egg overlay. The worker thread is
-    // blocked until the user answers.
+    // everything else. The worker thread is blocked until the user answers.
     if let Some(prompt) = app.permission_prompt.as_ref() {
         render_permission_modal(f, prompt, area);
     }
@@ -78,7 +72,7 @@ pub(super) fn render(f: &mut Frame, app: &App) {
 /// rationale as `CliPrompter`). The char count in the title makes a body
 /// that scrolls below the fold detectable at a glance.
 fn render_permission_modal(f: &mut Frame, prompt: &super::PermissionPrompt, area: Rect) {
-    // ~70% × ~60%, centred — same overlay shape as the Space Invaders modal.
+    // ~70% × ~60%, centred.
     let ow = (area.width.saturating_mul(7) / 10).clamp(24.min(area.width), area.width);
     let oh = (area.height.saturating_mul(6) / 10).clamp(6.min(area.height), area.height);
     let ox = area.x + area.width.saturating_sub(ow) / 2;
