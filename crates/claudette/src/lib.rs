@@ -55,6 +55,7 @@ pub mod missions;
 pub mod model_config;
 pub mod prompt;
 pub mod recall;
+pub mod redact;
 pub mod run;
 pub mod scheduler;
 pub mod secrets;

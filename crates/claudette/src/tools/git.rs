@@ -218,23 +218,30 @@ fn run_git(args: &[&str]) -> Result<String, String> {
     // mission tree. Outside of a mission this resolves to the process
     // cwd — i.e. exactly the pre-T2 behaviour.
     let cwd = crate::missions::active_cwd();
+    // Redact credential-shaped argv before echoing to stderr: a model can pass
+    // a PAT through `git remote set-url …token@github.com` or a `-c http.
+    // extraheader=Authorization: Bearer …`, and this debug line lands in the
+    // terminal scrollback verbatim. (roast 2026-06-21, Wave 1.3)
+    let args_fmt = format!("{args:?}");
+    let args_dbg = crate::redact::redact(&args_fmt);
     eprintln!(
         "  {} {}",
         crate::theme::dim("▸"),
         crate::theme::dim(&format!(
-            "git: using {git_exe:?}, args={args:?}, cwd={}",
+            "git: using {git_exe:?}, args={args_dbg}, cwd={}",
             cwd.display()
         )),
     );
     let result = run_command_with_timeout(&git_exe, args, 30, Some(&cwd));
     if !result.success {
+        let stderr_head = result.stderr.chars().take(200).collect::<String>();
+        let stderr_dbg = crate::redact::redact(&stderr_head);
         eprintln!(
             "  {} {}",
             crate::theme::dim("▸"),
             crate::theme::dim(&format!(
-                "git: failed — exit={:?} stderr={:?}",
+                "git: failed — exit={:?} stderr={stderr_dbg:?}",
                 result.exit_code,
-                result.stderr.chars().take(200).collect::<String>()
             )),
         );
     }
