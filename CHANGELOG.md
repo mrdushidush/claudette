@@ -10,6 +10,8 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-06-21
+
 ### Changed
 
 - **The default build is now a lean, air-gapped coding agent.** The
@@ -20,6 +22,10 @@ bumps are non-breaking bugfixes only.
   setting. Opt back in with `cargo install claudette --features integrations`
   (or `cargo build --features integrations`). Previously `integrations` was on
   by default and you opted *out* via `--no-default-features`.
+- **Internal `secretary` → `agent` rename.** The library's public re-exports
+  were renamed to match the coding-agent identity (`AgentToolExecutor`,
+  `agent_system_prompt`, `agent_tools_json`, `run_agent`, …). Behaviour is
+  unchanged; this only affects code that consumed the crate as a library.
 
 ### Removed
 
@@ -2199,7 +2205,9 @@ Initial public release of Claudette as a standalone repository.
 
 ---
 
-[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/mrdushidush/claudette/compare/v0.14.0...v0.15.0
+[0.14.0]: https://github.com/mrdushidush/claudette/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/mrdushidush/claudette/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/mrdushidush/claudette/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/mrdushidush/claudette/compare/v0.11.0...v0.12.0
