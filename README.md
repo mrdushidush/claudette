@@ -88,6 +88,7 @@ Runs on 8 GB VRAM or plain CPU; 16 GB for the 35B brain. Footprint details → [
 - [docs/power-user.md](docs/power-user.md) - LM Studio recipe, brain pinning, forge knobs
 - [docs/hardware.md](docs/hardware.md) - VRAM/RAM/disk by preset, CPU-only mode
 - [docs/usage.md](docs/usage.md) - CLI flags, slash commands, Telegram commands
+- [docs/troubleshooting.md](docs/troubleshooting.md) - symptom-keyed fixes (silent hang, model-reload 400, recall 501, not_configured)
 - [docs/architecture.md](docs/architecture.md) - module layout, tool-group + Codet contracts, storage layout
 - [docs/forge.md](docs/forge.md) - forge pipeline, brownfield missions, `models.toml`
 - [docs/comparison.md](docs/comparison.md) - side-by-side vs. opencode / Aider / OpenHands / Cline / Continue
