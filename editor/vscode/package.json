@@ -112,7 +112,7 @@
         "lint": "tsc --noEmit"
     },
     "devDependencies": {
-        "@types/node": "^20.11.0",
+        "@types/node": "^26.0.0",
         "@types/vscode": "^1.125.0",
         "@vscode/vsce": "^3.9.2",
         "typescript": "^5.3.3"
