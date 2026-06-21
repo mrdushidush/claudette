@@ -87,7 +87,7 @@ Five tabs across the top — switch with number keys or cycle with `Tab` /
 - **Slash commands work here too** — `/help`, `/brownfield`, `/forge`, `/recall`,
   everything the REPL has.
 - **`Ctrl+V`** pastes an image or text block into your next message.
-- **`Ctrl+C`** (or `Ctrl+D`) quits. (`Ctrl+G` is a coffee break — try it.)
+- **`Ctrl+C`** (or `Ctrl+D`) quits.
 
 ## Forge: hands-off code changes with a review gate
 
