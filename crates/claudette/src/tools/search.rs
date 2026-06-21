@@ -530,7 +530,7 @@ fn run_web_fetch(input: &str) -> Result<String, String> {
 
     let resp = client
         .get(url)
-        .header("User-Agent", "claudette/1.0 (Claudette personal secretary)")
+        .header("User-Agent", "claudette/1.0 (Claudette coding agent)")
         .header("Accept", "text/html,application/xhtml+xml,text/plain")
         .send()
         .map_err(|e| format!("web_fetch: request failed: {e}"))?;

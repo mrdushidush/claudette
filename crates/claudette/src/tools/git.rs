@@ -285,7 +285,7 @@ fn reject_destructive(args: &[&str]) -> Result<(), String> {
             if arg == b {
                 return Err(format!(
                     "git: destructive flag `{arg}` is blocked for safety. \
-                     If you really need it, run git manually outside the secretary."
+                     If you really need it, run git manually outside claudette."
                 ));
             }
         }

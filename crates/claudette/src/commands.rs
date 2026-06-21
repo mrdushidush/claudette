@@ -470,7 +470,7 @@ fn print_help(out: &mut impl Write) {
         (
             "tools & memory",
             &[
-                ("/tools", "List the secretary's tools"),
+                ("/tools", "List claudette's tools"),
                 ("/memory (mem)", "Show CLAUDETTE.MD memory in use"),
                 ("/reload", "Re-read CLAUDETTE.MD without losing history"),
                 (
@@ -1097,7 +1097,7 @@ fn handle_tools(out: &mut impl Write) {
         out,
         "{} {} {}",
         theme::SPARKLES,
-        theme::accent("secretary tools"),
+        theme::accent("agent tools"),
         theme::dim(&format!(
             "(core {} + {} optional groups)",
             registry.core_tool_names().len(),
@@ -1211,7 +1211,7 @@ fn handle_memory(out: &mut impl Write) {
             let _ = writeln!(
                 out,
                 "  {}",
-                theme::dim("(no memory file — create one to give the secretary background)")
+                theme::dim("(no memory file — create one to give the agent background)")
             );
         }
     }

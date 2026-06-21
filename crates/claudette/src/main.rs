@@ -83,7 +83,7 @@ struct CliArgs {
 /// CLI flag table is synced to this block. Keep lines under 80 columns so
 /// it fits an 80-wide terminal without wrapping awkwardly.
 const HELP_TEXT: &str = "\
-claudette — a local-first AI personal secretary, powered by Ollama.
+claudette — a local-first AI coding agent, powered by Ollama.
 
 USAGE:
     claudette [FLAGS] [PROMPT...]

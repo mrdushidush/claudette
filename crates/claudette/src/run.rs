@@ -1775,7 +1775,7 @@ pub fn run_agent_repl(opts: SessionOptions) -> Result<()> {
         "{} {} {}",
         theme::ROBOT,
         theme::brand("claudette"),
-        theme::dim("— your local secretary")
+        theme::dim("— your local coding agent")
     );
     eprintln!(
         "{} {}",

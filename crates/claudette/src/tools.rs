@@ -198,7 +198,7 @@ fn build_tools_json() -> Value {
             "type": "function",
             "function": {
                 "name": "get_capabilities",
-                "description": "Show the secretary's config, available tools, and limits. Use for 'what can you do' questions.",
+                "description": "Show claudette's config, available tools, and limits. Use for 'what can you do' questions.",
                 "parameters": { "type": "object", "properties": {}, "required": [] }
             }
         },
@@ -402,7 +402,7 @@ fn run_get_capabilities() -> String {
 
     json!({
         "name": "Claudette",
-        "kind": "personal AI secretary",
+        "kind": "local-first AI coding agent",
         "model": crate::run::current_model(),
         "runtime": "crate::ConversationRuntime over Ollama /api/chat",
         "context_window": {
@@ -420,7 +420,7 @@ fn run_get_capabilities() -> String {
         "sandbox": {
             "read": "user $HOME (/home/<user> or C:\\Users\\<user>) — symlinks/junctions resolved as such, system dirs not blocked but ACL-protected anyway",
             "write": files_dir().display().to_string(),
-            "rationale": "writes are sandboxed to ~/.claudette/files/ so the secretary cannot overwrite the user's real documents by accident or hallucination",
+            "rationale": "writes are sandboxed to ~/.claudette/files/ so the agent cannot overwrite the user's real documents by accident or hallucination",
         },
         "storage": {
             "notes": notes::notes_dir().display().to_string(),

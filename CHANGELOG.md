@@ -10,6 +10,26 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Changed
+
+- **Claudette now introduces itself as a coding agent, not a "personal
+  secretary."** The `get_capabilities` self-report, `--help`, the REPL banner,
+  the `/tools` header, the Telegram `/start` greeting, and the `web_fetch`
+  User-Agent all describe a "local-first AI coding agent." This finishes the
+  user-visible side of the identity cleanup the `secretary`→`agent` code rename
+  began. (The internal system prompt is unchanged — a coding-agent system
+  prompt measurably regressed the small `qwen3.5-4b` brain on git-inspection
+  tasks, so it was deliberately left alone.)
+
+### Fixed
+
+- **The read-only git inspectors (`git_status`/`git_diff`/`git_log`) are now
+  loop-broken like the other navigation tools.** Previously they were a blind
+  spot: an exact-repeat call was re-executed and re-bloated the context. They
+  now dedup identical repeats and count toward the search budget, while a real
+  mutation (`git_add`/`git_commit`/`git_checkout`) still clears the dedup set so
+  a legitimate re-check after a change is kept.
+
 ## [0.15.0] - 2026-06-21
 
 ### Changed

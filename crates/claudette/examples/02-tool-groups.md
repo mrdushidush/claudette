@@ -56,10 +56,10 @@ advertisable tool — core plus every optional group with the
 
 ```
 > /tools
-✨ secretary tools (core 17 + 12 optional groups)
+✨ agent tools (core 17 + 12 optional groups)
   ⚡ core (always loaded)
     • get_current_time: Returns the current date, time, weekday, and timezone.
-    • get_capabilities: Show the secretary's config, available tools, and limits.
+    • get_capabilities: Show claudette's config, available tools, and limits.
     • note_create, note_list, note_read, note_delete
     • todo_add, todo_list, todo_set_status, todo_delete
     • read_file, write_file, list_dir
