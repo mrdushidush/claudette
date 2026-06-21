@@ -294,7 +294,7 @@ where
 
     /// Register a fallback that maps an unknown tool name to a list of
     /// real tool names to suggest. Used by claudette to turn the brain's
-    /// confabulated *group* names (`facts`, `markets`, `notes`) into the
+    /// confabulated *group* names (`facts`, `git`, `notes`) into the
     /// group's actual tools — `PermissionPolicy::suggest_for` is generic
     /// and can't know which tool group a name refers to.
     #[must_use]

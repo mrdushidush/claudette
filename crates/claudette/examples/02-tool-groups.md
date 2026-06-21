@@ -10,7 +10,7 @@ mechanic so you can see it happen live.
 Every tool schema the model sees costs input tokens. Advertising all
 70 tools at once runs ~25 KB of JSON schema on every turn. Core-only
 is ~4.7 KB. For a chatty REPL session that never touches GitHub or
-markets data, that 80% reduction is real savings.
+the web, that 80% reduction is real savings.
 
 ## Groups at a glance
 
@@ -24,7 +24,6 @@ markets data, that 80% reduction is real savings.
 | `facts` | 4 | Wikipedia, Open-Meteo weather |
 | `registry` | 4 | crates.io, npmjs |
 | `github` | 6 | PRs/issues/code search |
-| `markets` | 7 | TradingView quotes, Algorand ASA |
 | `telegram` | 3 | Bot send/poll/photo |
 | `calendar` | 5 | Google Calendar CRUD + RSVP |
 | `schedule` | 4 | One-shot + recurring reminders |
@@ -72,7 +71,7 @@ advertisable tool — core plus every optional group with the
   ⚡ facts — 2 tool(s), enable with enable_tools({group: "facts"})
     • wikipedia, weather
 
-  [… 10 more groups: ide, search, advanced, registry, github, markets,
+  [… more groups: ide, search, advanced, registry, github,
      telegram, calendar, schedule, gmail …]
 
   core schema: 4711 chars — enabling a group grows this temporarily
@@ -92,7 +91,7 @@ second weather question in the same session is a direct
 
 In `--telegram` and `--tui` modes the user can't confirm permissions
 turn-by-turn, so Claudette auto-enables the "safe" groups at startup:
-`markets`, `facts`, `search`, `advanced`, `git`. See `src/run.rs`
+`facts`, `search`, `advanced`, `git`. See `src/run.rs`
 (Telegram) and `src/tui_worker.rs` (TUI) for the exact lists — both
 call the same `ToolRegistry::enable` path.
 

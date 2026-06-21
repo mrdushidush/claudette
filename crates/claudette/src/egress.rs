@@ -17,7 +17,7 @@
 //!     in the reqwest path of each network-reaching tool, before the request
 //!     leaves the process. Recall embeddings and brain / vision calls to the
 //!     local backend pass the allow-list; `web_search` / `web_fetch` / `gmail`
-//!     / `calendar` / `google_auth` / `tv_get_quote` / `wikipedia` / `weather`
+//!     / `calendar` / `google_auth` / `wikipedia` / `weather`
 //!     / Telegram are blocked.
 //!
 //!  2. **Dispatch / subprocess layer** — tools that shell out to the network
@@ -89,8 +89,7 @@ pub const NET_TOOLS: &[&str] = &[
     "calendar_create_event",
     "calendar_update_event",
     "calendar_delete_event",
-    // Keyless facts / markets
-    "tv_get_quote",
+    // Keyless facts
     "wikipedia",
     "weather",
     // Telegram bridge
@@ -297,7 +296,6 @@ mod tests {
             "https://api.search.brave.com/res/v1/web/search",
             "https://en.wikipedia.org/w/api.php",
             "https://api.open-meteo.com/v1/forecast",
-            "https://scanner.tradingview.com/america/scan",
             "https://api.telegram.org/bot123/getUpdates",
             "https://localhost.evil.com/x",
             "http://user:pass@evil.com/path",

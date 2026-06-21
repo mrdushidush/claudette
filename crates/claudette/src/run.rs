@@ -2098,7 +2098,7 @@ fn build_runtime_with_brain_inner(
     }
     // Clone the registry handle for the unknown-tool hinter before the
     // executor consumes it. The hinter maps a confabulated *group* name
-    // (e.g. `facts`, `markets`) to that group's actual tools so the brain
+    // (e.g. `facts`, `git`) to that group's actual tools so the brain
     // gets a useful "did you mean?" list instead of an empty array.
     let hinter_registry = Arc::clone(&registry);
     let executor = SecretaryToolExecutor::with_registry(registry);
@@ -2473,10 +2473,6 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("gh_comment_issue", WorkspaceWrite)
         .with_tool_requirement("gh_fork", WorkspaceWrite)
         .with_tool_requirement("gh_create_pr", WorkspaceWrite)
-        // ── Sprint 9 Phase 0b: markets group (read-only) ─────────────
-        // v0.6.0 decom: tv_technical_rating, tv_search_symbol,
-        // tv_economic_calendar, and all vestige_* tools dropped.
-        .with_tool_requirement("tv_get_quote", ReadOnly)
         // ── Sprint 10: telegram group ────────────────────────────────
         // tg_send is network EGRESS (posts arbitrary text to an arbitrary
         // chat) — a second exfil sink, so it's gated at DangerFullAccess in

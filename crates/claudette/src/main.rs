@@ -133,7 +133,7 @@ MISC:
     --offline            Enforce the air-gap: hard-block every outbound network
                          call except the local model backend + loopback. Same
                          as CLAUDETTE_OFFLINE=1. Blocks web_search/web_fetch,
-                         Gmail/Calendar, markets/weather/wikipedia, GitHub, and
+                         Gmail/Calendar, weather/wikipedia, GitHub, and
                          the Telegram bridge; the local brain + recall still
                          work. See `--offline` in --doctor for the allow-list.
     --faceless           Drop the persona overlay (Eva for the assistant,
