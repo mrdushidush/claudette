@@ -33,22 +33,24 @@ name = "oauth_smoke"
 required-features = ["integrations"]
 
 [features]
-default = ["integrations"]
-# `integrations` bundles the external personal-assistant surface that reaches
-# out to third-party clouds: Google OAuth + Gmail + Calendar, and the Telegram
-# bot. It is ON by default. Build a lean, coding-focused binary with NONE of it
-# compiled in via `--no-default-features` (a "coding-only" build — there is no
-# Google/Telegram code in the binary at all, so it cannot reach those services
-# even by misconfiguration). The coding core (files, search, git, shell,
-# quality, vision, recall, notes, todos, scheduler, …) is unaffected.
+# OFF by default: Claudette ships as a lean, air-gapped *coding agent*. The
+# default `cargo install claudette` / release binary contains NO cloud code —
+# no Google/Telegram, no voice/tts/briefing — so it cannot reach those services
+# even by misconfiguration; the air-gap guarantee is structural, not a setting.
+# The coding core (files, search, git, shell, quality, vision, recall, notes,
+# todos, scheduler, …) is in every build.
+default = []
+# `integrations` opts back IN to the external personal-assistant surface that
+# reaches third-party clouds: Google OAuth + Gmail + Calendar, the Telegram bot,
+# and the Telegram-only voice/tts + morning-briefing helpers. Build it with
+# `cargo install claudette --features integrations` (or `cargo build --features
+# integrations`).
 #
-# The PRIMARY effect is code-surface reduction (the #[cfg(feature =
-# "integrations")] modules — google_auth, telegram_mode, the gmail/calendar
-# tool groups — are not compiled), which is what makes the air-gap guarantee
-# structural rather than configurable. It ALSO drops a real dependency:
-# `getrandom` (the OAuth loopback-state entropy source) is used only by
-# google_auth, so it is gated behind this feature via `dep:getrandom` and
-# leaves the tree entirely under `--no-default-features`.
+# Turning it on compiles the #[cfg(feature = "integrations")] modules
+# (google_auth, telegram_mode, voice, tts, briefing, and the gmail/calendar
+# tool groups) and pulls one real dependency: `getrandom` (the OAuth
+# loopback-state entropy source), gated via `dep:getrandom` so it leaves the
+# tree entirely in the default coding-only build.
 integrations = ["dep:getrandom"]
 
 [dependencies]

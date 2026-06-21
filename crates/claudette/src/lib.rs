@@ -1,7 +1,9 @@
 //! Claudette — an air-gapped, local-first AI coding agent that drives one
-//! local model (LM Studio or Ollama). It also carries a personal-assistant
-//! surface (notes, calendar, Telegram, voice), gated behind the default-on
-//! `integrations` feature; the coding agent is the core and the headline.
+//! local model (LM Studio or Ollama). The coding agent is the whole product:
+//! the default build carries no cloud code. An optional personal-assistant
+//! surface (Gmail/Calendar, Telegram, voice/tts, morning briefing) lives behind
+//! the off-by-default `integrations` feature — opt in with
+//! `cargo install claudette --features integrations`.
 //!
 //! This crate bundles the agent-loop/session/compaction/permissions kernel
 //! (`src/runtime/*.rs`) and the Claudette tool/REPL/TUI layer (tools, REPL,
@@ -34,9 +36,13 @@ pub mod session;
 #[path = "runtime/usage.rs"]
 pub mod usage;
 
-// ── Claudette secretary layer ────────────────────────────────────────────
+// ── Claudette agent layer ─────────────────────────────────────────────────
 pub mod api;
 pub mod brain_selector;
+// Morning-briefing helper — part of the personal-assistant surface, compiled
+// only into an `integrations` build (the bot consumes it; `--briefing` sets it
+// up). See Cargo.toml `[features]`.
+#[cfg(feature = "integrations")]
 pub mod briefing;
 pub mod clock;
 pub mod codet;
@@ -72,11 +78,17 @@ pub mod theme;
 pub mod tool_groups;
 pub mod tools;
 pub mod transcript;
+// Text-to-speech for Telegram voice replies — only used by `telegram_mode`,
+// so it rides the same `integrations` gate.
+#[cfg(feature = "integrations")]
 pub mod tts;
 pub mod tui;
 pub mod tui_events;
 pub mod tui_executor;
 pub mod tui_worker;
+// Speech-to-text for inbound Telegram voice notes — only used by
+// `telegram_mode`, so it rides the same `integrations` gate.
+#[cfg(feature = "integrations")]
 pub mod voice;
 
 // ── Public re-exports ────────────────────────────────────────────────────

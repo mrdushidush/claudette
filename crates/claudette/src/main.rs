@@ -20,15 +20,17 @@
 use std::process::ExitCode;
 
 use claudette::{
-    briefing, clock, probe_ollama, run_forge_mission, run_secretary, run_secretary_repl, scheduler,
-    theme, try_load_session, workspace_startup_diagnostics, SessionOptions,
+    probe_ollama, run_forge_mission, run_secretary, run_secretary_repl, theme, try_load_session,
+    workspace_startup_diagnostics, SessionOptions,
 };
 use claudette::{ContentBlock, Session};
-// External-cloud integrations: only compiled into a default-features build.
+// External-cloud integrations: only compiled into an `integrations` build.
 // See Cargo.toml `[features]` and the `dispatch_google_auth` / `dispatch_telegram`
-// helpers below, which carry the coding-only fallback.
+// / `run_briefing_setup` helpers below, which carry the coding-only fallback.
+// `clock` + `scheduler` are here too: their only main.rs use is the real
+// `run_briefing_setup`, which is integrations-only.
 #[cfg(feature = "integrations")]
-use claudette::{google_auth, secrets, telegram_mode};
+use claudette::{briefing, clock, google_auth, scheduler, secrets, telegram_mode};
 
 /// Parsed CLI invocation. Any flag below that doesn't make sense with the
 /// selected mode is quietly ignored (the old tuple contract) — the parser
@@ -587,9 +589,9 @@ fn dispatch_google_auth(_scope: Option<&str>, _revoke: bool) -> ExitCode {
         "{} {}",
         theme::error(theme::ERR_GLYPH),
         theme::error(
-            "--auth-google needs the `integrations` feature — this is a coding-only build \
-             (compiled --no-default-features), so there is no Google code in it. Reinstall \
-             with default features to use Gmail/Calendar."
+            "--auth-google needs the `integrations` feature — this is a coding-only build (the \
+             default), so there is no Google code in it. Reinstall with `--features integrations` \
+             to use Gmail/Calendar."
         )
     );
     ExitCode::FAILURE
@@ -641,9 +643,9 @@ fn dispatch_telegram(_chat_ids: Vec<i64>, _allow_any_chat: bool, _resume: bool) 
         "{} {}",
         theme::error(theme::ERR_GLYPH),
         theme::error(
-            "--telegram needs the `integrations` feature — this is a coding-only build \
-             (compiled --no-default-features), so the Telegram bridge isn't in it. Reinstall \
-             with default features to run the bot."
+            "--telegram needs the `integrations` feature — this is a coding-only build (the \
+             default), so the Telegram bridge isn't in it. Reinstall with `--features \
+             integrations` to run the bot."
         )
     );
     ExitCode::FAILURE
@@ -653,6 +655,11 @@ fn dispatch_telegram(_chat_ids: Vec<i64>, _allow_any_chat: bool, _resume: bool) 
 /// `--briefing` CLI flag. Does not talk to Telegram at all — the running
 /// bot picks the new entry up on its next startup (or immediately if
 /// already running, since tools write to the same jsonl).
+///
+/// The briefing is part of the personal-assistant surface, so the real
+/// implementation is only present in an `integrations` build; the coding-only
+/// build carries the stub below.
+#[cfg(feature = "integrations")]
 fn run_briefing_setup(time: Option<&str>, days: Option<&str>) -> ExitCode {
     let time_str = time.unwrap_or("07:00");
     let days_spec = days.unwrap_or("weekdays").to_lowercase();
@@ -764,6 +771,23 @@ fn run_briefing_setup(time: Option<&str>, days: Option<&str>) -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Coding-only fallback: the morning briefing is part of the assistant surface,
+/// which isn't compiled into a default (no-`integrations`) build. Explain and
+/// exit non-zero rather than silently doing nothing.
+#[cfg(not(feature = "integrations"))]
+fn run_briefing_setup(_time: Option<&str>, _days: Option<&str>) -> ExitCode {
+    eprintln!(
+        "{} {}",
+        theme::error(theme::ERR_GLYPH),
+        theme::error(
+            "--briefing needs the `integrations` feature — this is a coding-only build, so the \
+             morning-briefing helper isn't in it. Reinstall with `--features integrations` to \
+             schedule briefings."
+        )
+    );
+    ExitCode::FAILURE
 }
 
 #[cfg(test)]
@@ -948,6 +972,11 @@ mod tests {
         assert_eq!(a.auth_google_scope, None);
     }
 
+    // Scope keywords (`gmail` / `calendar`) are only recognised when the
+    // `integrations` feature compiles in `google_auth::AuthContext`; the
+    // coding-only build deliberately lets the token fall through as a prompt
+    // word (see the parse loop's `ExpectNext::AuthGoogleScope` arm).
+    #[cfg(feature = "integrations")]
     #[test]
     fn parse_args_auth_google_with_gmail_scope() {
         let a = parse_args(&["--auth-google".into(), "gmail".into()]);
@@ -956,6 +985,17 @@ mod tests {
         assert!(a.prompt_words.is_empty());
     }
 
+    #[cfg(not(feature = "integrations"))]
+    #[test]
+    fn parse_args_auth_google_scope_falls_through_in_coding_only_build() {
+        // No Google scope keywords exist here, so `gmail` is just a prompt word.
+        let a = parse_args(&["--auth-google".into(), "gmail".into()]);
+        assert!(a.auth_google);
+        assert_eq!(a.auth_google_scope, None);
+        assert_eq!(a.prompt_words, vec!["gmail".to_string()]);
+    }
+
+    #[cfg(feature = "integrations")]
     #[test]
     fn parse_args_auth_google_with_calendar_scope_then_revoke() {
         let a = parse_args(&["--auth-google".into(), "calendar".into(), "--revoke".into()]);
