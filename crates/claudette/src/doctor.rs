@@ -651,7 +651,7 @@ fn probe_egress() -> Status {
         print_row(
             "  deny",
             Status::Ok,
-            "everything else (web_search/web_fetch, gmail/calendar, markets/weather/wikipedia, github, telegram)",
+            "everything else (web_search/web_fetch, gmail/calendar, weather/wikipedia, github, telegram)",
         );
     } else {
         print_row(

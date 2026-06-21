@@ -61,7 +61,6 @@ mod gmail {
     }
 }
 mod ide;
-mod markets;
 mod mission;
 mod near_miss;
 mod notes;
@@ -145,7 +144,6 @@ const GROUPS: &[(SchemasFn, DispatchFn)] = &[
     (github::schemas, github::dispatch),
     (gmail::schemas, gmail::dispatch),
     (ide::schemas, ide::dispatch),
-    (markets::schemas, markets::dispatch),
     (mission::schemas, mission::dispatch),
     (notes::schemas, notes::dispatch),
     (patch::schemas, patch::dispatch),
@@ -1286,7 +1284,6 @@ pub(super) fn parse_json_input(input: &str, tool: &str) -> Result<Value, String>
 }
 
 // GitHub group (gh_*) lives in src/tools/github.rs.
-// Markets group (tv_get_quote) lives in src/tools/markets.rs.
 
 // Telegram group (tg_send, tg_send_photo) lives in src/tools/telegram.rs.
 
@@ -1306,9 +1303,6 @@ mod tests {
     // npm_info_rejects_missing_name) live in src/tools/registry.rs.
 
     // GitHub-group tests (gh_*, github_token) live in src/tools/github.rs.
-
-    // Markets-group tests (tv_get_quote, resolve_tv_symbol) live in
-    // src/tools/markets.rs.
 
     // wmo_label, resolve_location, hebrew_city_alias tests live in
     // src/tools/facts.rs alongside their implementations.

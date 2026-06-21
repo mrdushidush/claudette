@@ -51,8 +51,6 @@ pub enum ToolGroup {
     Registry,
     /// GitHub API (PRs, issues, code search). Requires `GITHUB_TOKEN`.
     Github,
-    /// Market data: `TradingView` quotes/ratings/calendar + `vestige.fi` Algorand ASAs.
-    Markets,
     /// Telegram bot: send messages, poll updates, send photos.
     Telegram,
     /// Google Calendar: list / create / update / delete events, RSVP.
@@ -101,7 +99,6 @@ impl ToolGroup {
             Self::Facts => "facts",
             Self::Registry => "registry",
             Self::Github => "github",
-            Self::Markets => "markets",
             Self::Telegram => "telegram",
             Self::Calendar => "calendar",
             Self::Schedule => "schedule",
@@ -134,7 +131,6 @@ impl ToolGroup {
             Self::Facts => "reference lookups: wikipedia (summary or search via `mode`), weather (no API key needed)",
             Self::Registry => "package registries: crates.io and npm package metadata (version, downloads, homepage)",
             Self::Github => "github + brownfield missions: gh_inbox(scope=my_prs|assigned|repo_issues), issue+PR ops, code search, clone/fork, mission_start + mission_state(action=status|list|attach|exit) + mission_submit (requires GITHUB_TOKEN)",
-            Self::Markets => "market data: TradingView quotes (stocks/crypto/forex/futures, bare or qualified tickers)",
             Self::Telegram => "telegram bot: tg_send (text, or photo via optional `photo` URL — caption becomes the text). Requires TELEGRAM_BOT_TOKEN.",
             Self::Calendar => "google calendar: list/create/update/delete events. calendar_update_event takes optional `rsvp` for RSVP-only edits. Requires claudette --auth-google.",
             Self::Schedule => "proactive reminders: one-shot + recurring schedules that fire prompts back at you",
@@ -149,7 +145,7 @@ impl ToolGroup {
 
     /// All groups in a stable order, for schema generation and tests.
     #[must_use]
-    pub fn all() -> [ToolGroup; 22] {
+    pub fn all() -> [ToolGroup; 21] {
         [
             Self::Notes,
             Self::Todos,
@@ -163,7 +159,6 @@ impl ToolGroup {
             Self::Facts,
             Self::Registry,
             Self::Github,
-            Self::Markets,
             Self::Telegram,
             Self::Calendar,
             Self::Schedule,
@@ -210,9 +205,6 @@ impl ToolGroup {
             "facts" | "wikipedia" | "weather" => Some(Self::Facts),
             "registry" | "crates" | "npm" => Some(Self::Registry),
             "github" | "gh" => Some(Self::Github),
-            "markets" | "market" | "tradingview" | "tv" | "vestige" | "stocks" | "crypto" => {
-                Some(Self::Markets)
-            }
             "telegram" | "tg" | "tg_bot" => Some(Self::Telegram),
             "calendar" | "gcal" | "google-calendar" | "google_calendar" => Some(Self::Calendar),
             "schedule" | "scheduler" | "reminders" | "reminder" => Some(Self::Schedule),
@@ -283,7 +275,6 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         | "mission_start"
         | "mission_state"
         | "mission_submit" => Some(ToolGroup::Github),
-        "tv_get_quote" => Some(ToolGroup::Markets),
         // tg_send(photo?) subsumes the v0.6.0 tg_send_photo name.
         "tg_send" => Some(ToolGroup::Telegram),
         // calendar_update_event(rsvp=...) subsumes the v0.6.0
@@ -525,9 +516,6 @@ mod tests {
         assert_eq!(ToolGroup::parse("facts"), Some(ToolGroup::Facts));
         assert_eq!(ToolGroup::parse("registry"), Some(ToolGroup::Registry));
         assert_eq!(ToolGroup::parse("github"), Some(ToolGroup::Github));
-        assert_eq!(ToolGroup::parse("markets"), Some(ToolGroup::Markets));
-        assert_eq!(ToolGroup::parse("tradingview"), Some(ToolGroup::Markets));
-        assert_eq!(ToolGroup::parse("vestige"), Some(ToolGroup::Markets));
         assert_eq!(ToolGroup::parse("telegram"), Some(ToolGroup::Telegram));
     }
 
@@ -552,6 +540,9 @@ mod tests {
         assert_eq!(ToolGroup::parse(""), None);
         assert_eq!(ToolGroup::parse("unknown"), None);
         assert_eq!(ToolGroup::parse("core"), None);
+        // W5.1: the markets group was amputated — its aliases no longer parse.
+        assert_eq!(ToolGroup::parse("markets"), None);
+        assert_eq!(ToolGroup::parse("tradingview"), None);
     }
 
     #[test]
@@ -584,13 +575,15 @@ mod tests {
         assert_eq!(group_of("mission_list"), None);
         assert_eq!(group_of("mission_attach"), None);
         assert_eq!(group_of("mission_exit"), None);
-        assert_eq!(group_of("tv_get_quote"), Some(ToolGroup::Markets));
         assert_eq!(group_of("tg_send"), Some(ToolGroup::Telegram));
         // v0.6.0: tg_send_photo merged into tg_send(photo?) — no longer a tool name.
         assert_eq!(group_of("tg_send_photo"), None);
         // v0.6.0 decom: these tools no longer exist anywhere.
         assert_eq!(group_of("crate_search"), None);
         assert_eq!(group_of("npm_search"), None);
+        // W5.1 amputation: the TradingView/markets scraper was removed — a
+        // web scraper has no place in an air-gapped coding agent.
+        assert_eq!(group_of("tv_get_quote"), None);
         assert_eq!(group_of("tv_technical_rating"), None);
         assert_eq!(group_of("tv_search_symbol"), None);
         assert_eq!(group_of("tv_economic_calendar"), None);
