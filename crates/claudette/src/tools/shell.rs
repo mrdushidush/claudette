@@ -158,7 +158,29 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
     Some(result)
 }
 
+/// Wave 1.1 (roast 2026-06-21): refuse the raw-shell escape hatch under
+/// `--offline`. `bash` / `bash_background` run an arbitrary command — an
+/// UNGUARDABLE egress vector, since a curl/scp/ssh/python/nc denylist leaks by
+/// construction — so the only honest air-gap posture is to refuse the whole
+/// tool while offline rather than pretend a substring filter closes the hole.
+/// The structured tools (edit_file, search, git_* locals, the build/test
+/// runners) keep coding offline-capable. Returns the uniform `BLOCK_PREFIX`
+/// refusal so the air-gap proof (`tests/offline_egress.rs`) recognises it.
+/// Called *before* input parsing so a refusal fires regardless of arguments.
+fn refuse_bash_under_offline(tool: &str) -> Result<(), String> {
+    if crate::egress::is_offline() {
+        return Err(format!(
+            "{}: {tool} is disabled under offline mode — a raw shell command can reach the \
+             network in ways the air-gap guard cannot inspect (curl/scp/ssh/python/nc/…). Use \
+             the structured tools instead, or disable offline mode to run shell commands.",
+            crate::egress::BLOCK_PREFIX
+        ));
+    }
+    Ok(())
+}
+
 fn run_bash(input: &str) -> Result<String, String> {
+    refuse_bash_under_offline("bash")?;
     let v: Value =
         serde_json::from_str(input).map_err(|e| format!("bash: invalid JSON ({e}): {input}"))?;
     let command = v
@@ -486,6 +508,7 @@ fn run_edit_file(input: &str) -> Result<String, String> {
 // ────── background-job family ────────────────────────────────────────────
 
 fn run_bash_background(input: &str) -> Result<String, String> {
+    refuse_bash_under_offline("bash_background")?;
     let v = parse_json_input(input, "bash_background")?;
     let command = v
         .get("command")

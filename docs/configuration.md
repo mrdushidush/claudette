@@ -53,6 +53,7 @@ Both the brain (`/v1/chat/completions`) and recall (`/v1/embeddings`) resolve to
 
 - **Allowed:** the resolved model backend host (`OLLAMA_HOST`, even a LAN box you opted into with `CLAUDETTE_ALLOW_REMOTE_OLLAMA=1` — matched at the host level, so any port on that box is reachable) and loopback (`localhost`, `127.0.0.0/8`, `::1`). The brain, recall embeddings, and local vision keep working.
 - **Blocked:** `web_search` / `web_fetch`, `gmail_*` / `calendar_*` / `--auth-google`, `tv_get_quote`, `wikipedia`, `weather`, the `gh_*` GitHub tools, `tg_send`, remote `git_push` / `git_clone`, the brownfield `mission_start` clone and `mission_submit` push, and text-to-speech (edge-tts).
+- **Refused wholesale:** `bash` / `bash_background`. A raw shell command can reach the network in ways no allow-list can inspect (`curl`, `scp`, `python -c`, `nc`), and a denylist of those leaks by construction — so under `--offline` the shell tools are refused entirely. Keep coding offline with the structured tools (`edit_file`, search, local `git_*`, the build/test runners).
 - **`--offline` + `--telegram`** is refused at startup — the Telegram bridge is a cloud relay (`api.telegram.org`) and can't run air-gapped.
 
 Inspect the live allow-list with `claudette --offline --doctor` — the **egress / air-gap** section prints exactly what's reachable and notes that the Google-OAuth live probe is skipped (it can't run offline).
@@ -119,7 +120,7 @@ These each **remove a confirmation gate**. They exist for unattended/CI runs and
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `CLAUDETTE_AUTO_APPROVE` | unset | ⚠️ Set to `1` to auto-approve **every** DangerFullAccess tool (`bash`, `edit_file`, `git push`, …) without the `[y/N]` prompt. Intended for trusted unattended runs. Do **not** combine with `--offline` if you need the air-gap to hold while `bash` can still open a socket — the offline guard blocks networked *tools*, not arbitrary shell commands. |
+| `CLAUDETTE_AUTO_APPROVE` | unset | ⚠️ Set to `1` to auto-approve **every** DangerFullAccess tool (`bash`, `edit_file`, `git push`, …) without the `[y/N]` prompt. Intended for trusted unattended runs. Safe to combine with `--offline`: the shell tools (`bash` / `bash_background`) are refused wholesale under offline mode, so even blanket auto-approval can't run a network-capable shell command air-gapped. |
 | `CLAUDETTE_ALLOW_DESTRUCTIVE_GIT` | unset | ⚠️ Set to `1` to let destructive git operations (`reset --hard`, `clean -f`, force-push, branch delete) run without the extra destructive-git guard. |
 | `CLAUDETTE_ALLOW_SECRET_READS` | unset | ⚠️ Set to `1` to let file-read tools open paths the secret-file denylist normally blocks (`~/.ssh`, `*.pem`, `.env`, token files). |
 | `CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE` | unset | ⚠️ Set to `1` to let `web_fetch` reach private / loopback / link-local addresses, disabling the SSRF guard. Only for fetching from a host on your own LAN. |

@@ -46,8 +46,11 @@ pub const OFFLINE_ENV: &str = "CLAUDETTE_OFFLINE";
 pub const BLOCK_PREFIX: &str = "blocked by offline mode (--offline / CLAUDETTE_OFFLINE)";
 
 /// Canonical registry of every tool whose normal operation reaches the network
-/// and is therefore gated by [`guard`] / [`guard_subprocess`] under offline
-/// mode. This is the single source of truth the no-egress integration test
+/// and is therefore gated under offline mode — plus the raw-shell escape hatch
+/// (`bash` / `bash_background`), which is *not* network-by-default but is
+/// refused wholesale because its egress is unguardable. All are gated by
+/// [`guard`] / [`guard_subprocess`] / the bash offline-refusal. This is the
+/// single source of truth the no-egress integration test
 /// (`tests/offline_egress.rs`) iterates: it drives each tool through
 /// `dispatch_tool` with `CLAUDETTE_OFFLINE=1` and asserts every one refuses
 /// with a [`BLOCK_PREFIX`] message — turning the air-gap from a documented
@@ -97,6 +100,13 @@ pub const NET_TOOLS: &[&str] = &[
     "git_clone",
     "mission_start",
     "mission_submit",
+    // Raw-shell escape hatch. `bash` / `bash_background` run an arbitrary
+    // command, so they are an unguardable egress vector (a curl/scp/python
+    // denylist leaks by construction). Under offline mode they are refused
+    // *wholesale* — the honest posture — so they belong in the air-gap proof.
+    // (roast 2026-06-21, Wave 1.1)
+    "bash",
+    "bash_background",
 ];
 
 /// Returns true when offline mode is enabled. Truthy = set, non-empty, and not

@@ -100,7 +100,7 @@ The default compaction threshold of 1M tokens is effectively "off" — it exists
 
 ## Disabling network paths
 
-The blunt instrument is the master flag — **`claudette --offline`** (or `CLAUDETTE_OFFLINE=1`), shipped in v0.8.9. It enforces the air-gap: every outbound call except the local model backend + loopback is hard-blocked, in both the in-process HTTP path and any subprocess (`git`, `gh`, edge-tts). Inspect the live allow-list with `claudette --offline --doctor`, and see [Enforced offline mode](configuration.md#enforced-offline-mode---offline) in `configuration.md` for the full block/allow list. This is the recommended way to go dark.
+The blunt instrument is the master flag — **`claudette --offline`** (or `CLAUDETTE_OFFLINE=1`), shipped in v0.8.9. It enforces the air-gap: every outbound call except the local model backend + loopback is hard-blocked, in both the in-process HTTP path and any subprocess (`git`, `gh`, edge-tts). The raw `bash` / `bash_background` tools — the one egress vector no allow-list can inspect — are refused **wholesale** under `--offline` (use the structured tools to keep coding). Inspect the live allow-list with `claudette --offline --doctor`, and see [Enforced offline mode](configuration.md#enforced-offline-mode---offline) in `configuration.md` for the full block/allow list. This is the recommended way to go dark.
 
 For finer-grained control — disabling one outbound path while leaving the rest live — unset the relevant token instead of flipping the master flag:
 
