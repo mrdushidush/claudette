@@ -11,11 +11,12 @@ saves us both from a 500-line PR that doesn't fit the project's
 direction. Bug reports with a reproducer are always welcome without
 prior discussion; feature proposals work best as an issue first.
 
-**What Claudette is:** a local-first AI personal secretary in Rust.
-Single binary, Ollama-only brain path by default, four interfaces
-(REPL, one-shot, TUI, Telegram bot). See
-[`docs/comparison.md`](docs/comparison.md) for where Claudette sits
-relative to other agents.
+**What Claudette is:** an air-gapped, local-first AI coding agent in
+Rust. Single binary, one local model (LM Studio or Ollama), four
+interfaces (REPL, one-shot, TUI, Telegram bot). It also carries a
+personal-assistant surface (notes, calendar, voice), but the coding
+agent is the core. See [`docs/comparison.md`](docs/comparison.md) for
+where Claudette sits relative to other agents.
 
 **What Claudette isn't going to become:** a hosted SaaS, a plugin
 marketplace, a VS Code extension, a multi-cloud-provider abstraction.
