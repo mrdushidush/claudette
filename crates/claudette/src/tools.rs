@@ -2135,6 +2135,13 @@ mod tests {
 
     #[test]
     fn glob_search_matches_files_under_home() {
+        // Hold the global env lock for the whole test: it creates a path under
+        // $HOME (via files_dir) and then dispatches a tool that re-validates
+        // $HOME, so it must not run while another test swaps HOME (with_temp_home
+        // and the runtime/prompt test both take this same lock). Without it the
+        // path created under the real HOME fails validation against a swapped
+        // HOME, and grep/glob returns Err — the flaky failure seen in CI.
+        let _env = crate::test_env_lock();
         // Seed three files inside the sandbox; glob a recursive .txt match.
         let dir = temp_seed_dir(
             "glob",
@@ -2192,6 +2199,8 @@ mod tests {
 
     #[test]
     fn grep_search_finds_substring_match() {
+        // See glob_search_matches_files_under_home: serialise against HOME swaps.
+        let _env = crate::test_env_lock();
         let dir = temp_seed_dir(
             "grep",
             &[
@@ -2231,6 +2240,8 @@ mod tests {
 
     #[test]
     fn grep_search_skips_hidden_directories() {
+        // See glob_search_matches_files_under_home: serialise against HOME swaps.
+        let _env = crate::test_env_lock();
         let dir = temp_seed_dir("grep-hidden", &[(".secret/inside.md", "FINDME")]);
         let input = json!({
             "pattern": "FINDME",
