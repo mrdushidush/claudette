@@ -1,8 +1,12 @@
-//! Claudette — local-first AI personal secretary, powered by Ollama.
+//! Claudette — an air-gapped, local-first AI coding agent that drives one
+//! local model (LM Studio or Ollama). It also carries a personal-assistant
+//! surface (notes, calendar, Telegram, voice), gated behind the default-on
+//! `integrations` feature; the coding agent is the core and the headline.
 //!
 //! This crate bundles the agent-loop/session/compaction/permissions kernel
-//! (`src/runtime/*.rs`) and the Claudette secretary layer (tools, REPL, TUI,
-//! Codet sidecar, agents, Telegram bot). Single-crate — no path dependencies.
+//! (`src/runtime/*.rs`) and the Claudette tool/REPL/TUI layer (tools, REPL,
+//! TUI, Codet sidecar, plus the feature-gated assistant integrations).
+//! Single-crate — no path dependencies.
 //!
 //! Runtime modules are mounted at the crate root via `#[path = "runtime/..."]`
 //! attributes so their internal `use crate::session::X` / `use crate::compact::X`
