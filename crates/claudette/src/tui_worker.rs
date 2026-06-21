@@ -5,7 +5,7 @@
 //!
 //! Written as a self-contained module so it can build its own runtime with
 //! `TuiToolExecutor` injected — the existing `build_runtime_streaming` in
-//! `run.rs` is typed to `SecretaryToolExecutor` and is left untouched.
+//! `run.rs` is typed to `AgentToolExecutor` and is left untouched.
 
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
@@ -19,9 +19,9 @@ use crate::api::{tui_text_callback, OllamaApiClient};
 use crate::commands::{
     dispatch_slash_command, parse_slash_command, ReplState, SlashCommand, SlashOutcome,
 };
-use crate::executor::SecretaryToolExecutor;
+use crate::executor::AgentToolExecutor;
 use crate::memory::try_load_memory;
-use crate::prompt::secretary_system_prompt_with_memory;
+use crate::prompt::agent_system_prompt_with_memory;
 use crate::run::{
     build_permission_policy, compact_threshold, current_model, index_turn_for_recall,
     probe_recall_at_startup, recall_index_allowed, save_session,
@@ -51,7 +51,7 @@ fn build_tui_runtime(session: Session, tui_tx: SyncSender<TuiEvent>) -> TuiRunti
         .with_text_callback(tui_text_callback(tui_tx.clone()));
 
     let hinter_registry = Arc::clone(&registry);
-    let inner = SecretaryToolExecutor::with_registry(registry);
+    let inner = AgentToolExecutor::with_registry(registry);
     let executor = TuiToolExecutor::new(inner, tui_tx);
 
     let policy = build_permission_policy();
@@ -62,7 +62,7 @@ fn build_tui_runtime(session: Session, tui_tx: SyncSender<TuiEvent>) -> TuiRunti
         api_client,
         executor,
         policy,
-        secretary_system_prompt_with_memory(memory.as_deref(), false),
+        agent_system_prompt_with_memory(memory.as_deref(), false),
     )
     .with_max_iterations(crate::run::max_iterations())
     // Same graceful iteration-cap landing as the REPL chokepoint in
@@ -287,7 +287,7 @@ pub fn spawn_worker(
         probe_recall_at_startup();
 
         // Rehydrate any persisted non-ephemeral mission (F8a fix). Mirrors
-        // the REPL startup in run_secretary_repl. Outcome is surfaced via
+        // the REPL startup in run_agent_repl. Outcome is surfaced via
         // TuiEvent::Info so the user sees it in the chat history rather
         // than the terminal stderr (which the TUI swallows).
         let outcome = crate::missions::try_rehydrate_active_mission();

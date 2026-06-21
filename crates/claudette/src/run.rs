@@ -13,13 +13,13 @@ use anyhow::{Context, Result};
 
 use crate::api::{stdout_text_callback, telegram_text_callback, OllamaApiClient};
 use crate::commands::{dispatch_slash_command, parse_slash_command, ReplState, SlashOutcome};
-use crate::executor::SecretaryToolExecutor;
+use crate::executor::AgentToolExecutor;
 use crate::forge;
 use crate::memory::try_load_memory;
 use crate::model_config;
 use crate::prompt::{
-    faceless_mode_enabled, forge_planner_system_prompt, forge_system_prompt,
-    forge_verifier_system_prompt, secretary_system_prompt_with_memory,
+    agent_system_prompt_with_memory, faceless_mode_enabled, forge_planner_system_prompt,
+    forge_system_prompt, forge_verifier_system_prompt,
 };
 use crate::theme;
 use crate::tool_groups::{ToolGroup, ToolRegistry};
@@ -278,7 +278,7 @@ pub fn save_session_at(session: &Session, path: &std::path::Path) -> Result<()> 
 /// Run a single user turn through the secretary agent loop and return the
 /// turn summary. With `opts.resume = true`, loads the saved session first.
 /// With `opts.autosave = true`, writes the session back after the turn.
-pub fn run_secretary(user_input: &str, opts: SessionOptions) -> Result<TurnSummary> {
+pub fn run_agent(user_input: &str, opts: SessionOptions) -> Result<TurnSummary> {
     let session = if opts.resume {
         try_load_session()?.ok_or_else(|| {
             anyhow::anyhow!("no saved session at {}", default_session_path().display())
@@ -387,7 +387,7 @@ fn env_flag_enabled(name: &str) -> bool {
 /// one-shot (`claudette "fix the bug"`) can apply an edit, since one-shot has
 /// no prompter to answer. OFF by default — the normal flow still prompts.
 /// Enable only when you trust the prompt + workspace (`CLAUDETTE_AUTO_APPROVE=1`).
-pub(crate) fn secretary_auto_approve_enabled() -> bool {
+pub(crate) fn agent_auto_approve_enabled() -> bool {
     env_flag_enabled("CLAUDETTE_AUTO_APPROVE")
 }
 
@@ -776,7 +776,7 @@ fn forge_phase0_preflight(mission: &crate::missions::Mission) -> Result<Option<(
 /// 5. **Submitter** — final Coder turn with `should_submit=true` that only
 ///    calls `mission_submit` (PR opens here, not earlier).
 ///
-/// `opts.resume` and `opts.autosave` behave as in [`run_secretary`]: forge
+/// `opts.resume` and `opts.autosave` behave as in [`run_agent`]: forge
 /// turns are part of the same session log when `--resume` was passed; a
 /// one-off forge invocation without `--resume` doesn't clobber the REPL
 /// session.
@@ -1721,7 +1721,7 @@ fn parse_verifier_response(text: &str) -> VerifierResult {
 /// `commands.rs`) and never reach the model. Exits on EOF, the `/exit`
 /// command, or the bare words `exit`/`quit`/`:q` (kept for muscle memory).
 /// Always autosaves after every model turn when `opts.autosave` is set.
-pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
+pub fn run_agent_repl(opts: SessionOptions) -> Result<()> {
     theme::init();
 
     let session = if opts.resume {
@@ -2000,7 +2000,7 @@ pub fn run_secretary_repl(opts: SessionOptions) -> Result<()> {
 /// without dropping the conversation history).
 pub(crate) fn build_runtime(
     session: Session,
-) -> ConversationRuntime<OllamaApiClient, SecretaryToolExecutor> {
+) -> ConversationRuntime<OllamaApiClient, AgentToolExecutor> {
     build_runtime_inner(session, false, false)
 }
 
@@ -2011,7 +2011,7 @@ pub(crate) fn build_runtime(
 pub(crate) fn build_runtime_streaming(
     session: Session,
     telegram: bool,
-) -> ConversationRuntime<OllamaApiClient, SecretaryToolExecutor> {
+) -> ConversationRuntime<OllamaApiClient, AgentToolExecutor> {
     build_runtime_inner(session, true, telegram)
 }
 
@@ -2019,7 +2019,7 @@ fn build_runtime_inner(
     session: Session,
     streaming: bool,
     telegram: bool,
-) -> ConversationRuntime<OllamaApiClient, SecretaryToolExecutor> {
+) -> ConversationRuntime<OllamaApiClient, AgentToolExecutor> {
     // Sprint 14: pull brain model + limits from the process-global
     // `model_config::active()` snapshot. Slash commands (`/preset`,
     // `/brain`) mutate the active config; the next `build_runtime_*`
@@ -2038,7 +2038,7 @@ pub(crate) fn build_runtime_with_brain(
     brain: &crate::model_config::RoleConfig,
     streaming: bool,
     telegram: bool,
-) -> ConversationRuntime<OllamaApiClient, SecretaryToolExecutor> {
+) -> ConversationRuntime<OllamaApiClient, AgentToolExecutor> {
     build_runtime_with_brain_inner(session, brain, streaming, telegram, None)
 }
 
@@ -2055,7 +2055,7 @@ fn build_runtime_with_brain_inner(
     streaming: bool,
     telegram: bool,
     system_override: Option<Vec<String>>,
-) -> ConversationRuntime<OllamaApiClient, SecretaryToolExecutor> {
+) -> ConversationRuntime<OllamaApiClient, AgentToolExecutor> {
     // One shared ToolRegistry is the single source of truth for the
     // `tools` field on every request. The API client reads from it (via
     // ToolsProvider::Dynamic) and the executor mutates it when the model
@@ -2101,12 +2101,12 @@ fn build_runtime_with_brain_inner(
     // (e.g. `facts`, `git`) to that group's actual tools so the brain
     // gets a useful "did you mean?" list instead of an empty array.
     let hinter_registry = Arc::clone(&registry);
-    let executor = SecretaryToolExecutor::with_registry(registry);
+    let executor = AgentToolExecutor::with_registry(registry);
     // Daily-driver accept-edits: when CLAUDETTE_AUTO_APPROVE is set, the
     // interactive secretary auto-allows every tool (no [y/N]); otherwise the
     // normal WorkspaceWrite + prompt policy applies. Single chokepoint for
     // REPL, one-shot, and TUI (all build their runtime here).
-    let policy = if secretary_auto_approve_enabled() {
+    let policy = if agent_auto_approve_enabled() {
         build_permission_policy().with_active_mode(crate::PermissionMode::Allow)
     } else {
         build_permission_policy()
@@ -2114,7 +2114,7 @@ fn build_runtime_with_brain_inner(
     let memory = try_load_memory();
 
     let system_prompt = system_override
-        .unwrap_or_else(|| secretary_system_prompt_with_memory(memory.as_deref(), telegram));
+        .unwrap_or_else(|| agent_system_prompt_with_memory(memory.as_deref(), telegram));
 
     ConversationRuntime::new(session, api_client, executor, policy, system_prompt)
         // Tools in optional groups need 3+ iterations (enable_tools → tool call
@@ -2154,7 +2154,7 @@ fn build_forge_runtime(
     session: Session,
     mission: &crate::missions::Mission,
     should_submit: bool,
-) -> ConversationRuntime<OllamaApiClient, SecretaryToolExecutor> {
+) -> ConversationRuntime<OllamaApiClient, AgentToolExecutor> {
     // v0b: persona overlay. Auto-load the bundled `codex7` coder persona for
     // forge mode. The persona's voice + backstory get woven into the system
     // prompt via `forge_system_prompt`. Lookup failures fall back to an
@@ -2201,7 +2201,7 @@ fn build_forge_runtime(
 /// v0c: phase-aware forge runtime builder. Used by the Coder runtime (full
 /// toolset, `Role::Coder` model from `models.toml`) and by the Planner /
 /// Verifier turns (no tool groups, different role-routing). Centralises the
-/// `OllamaApiClient` + `SecretaryToolExecutor` + permission policy + hinter
+/// `OllamaApiClient` + `AgentToolExecutor` + permission policy + hinter
 /// setup that every forge phase needs.
 fn build_forge_role_runtime(
     session: Session,
@@ -2209,7 +2209,7 @@ fn build_forge_role_runtime(
     role: forge::types::Role,
     system_prompt: Vec<String>,
     tool_groups: &[ToolGroup],
-) -> ConversationRuntime<OllamaApiClient, SecretaryToolExecutor> {
+) -> ConversationRuntime<OllamaApiClient, AgentToolExecutor> {
     let mut brain = model_config::active().brain;
 
     // v0b/v0c: models.toml role-routing. If the user has the requested role
@@ -2232,7 +2232,7 @@ fn build_forge_role_runtime(
         .with_text_callback(stdout_text_callback());
 
     let hinter_registry = Arc::clone(&registry);
-    let executor = SecretaryToolExecutor::with_registry(registry);
+    let executor = AgentToolExecutor::with_registry(registry);
     // Forge phases auto-approve every tool call when CLAUDETTE_FORGE_AUTO_APPROVE
     // is set (unattended/scripted runs). PermissionMode::Allow short-circuits
     // authorize() so the CliPrompter is never consulted. Forge-only: secretary
@@ -2942,7 +2942,7 @@ const EMPTY_RESPONSE_NUDGE: &str =
 /// schema), this injects a nudge message and retries once. Both the REPL
 /// and Telegram mode use this.
 pub(crate) fn run_turn_with_retry(
-    runtime: &mut ConversationRuntime<OllamaApiClient, SecretaryToolExecutor>,
+    runtime: &mut ConversationRuntime<OllamaApiClient, AgentToolExecutor>,
     input: &str,
     prompter: Option<&mut dyn PermissionPrompter>,
 ) -> Result<TurnSummary, String> {
@@ -2984,7 +2984,7 @@ pub(crate) fn run_turn_with_retry(
 /// and, if so, compact it in place. Returns `Some(removed)` if compaction
 /// happened, `None` otherwise.
 ///
-/// Called from [`run_secretary_repl`] after every model turn. The metric
+/// Called from [`run_agent_repl`] after every model turn. The metric
 /// is `crate::estimate_session_tokens` (a char-count heuristic that
 /// scales with the actual session size), not the cumulative input-token
 /// counter that grows monotonically.
@@ -2997,7 +2997,7 @@ pub(crate) fn run_turn_with_retry(
 ///   Only fires when the user opts in via `CLAUDETTE_SOFT_COMPACT_THRESHOLD`.
 /// - Below both: no-op.
 pub(crate) fn maybe_compact_session(
-    runtime: &mut ConversationRuntime<OllamaApiClient, SecretaryToolExecutor>,
+    runtime: &mut ConversationRuntime<OllamaApiClient, AgentToolExecutor>,
     telegram: bool,
 ) -> Option<CompactionOutcome> {
     let estimated = estimate_session_tokens(runtime.session());
@@ -3520,7 +3520,7 @@ mod tests {
         }
     }
 
-    /// Regression test: every tool name advertised in `secretary_tools_json`
+    /// Regression test: every tool name advertised in `agent_tools_json`
     /// must have a matching entry in `build_permission_policy()` so the
     /// unknown-tool short-circuit (added v0.2.3) does not swallow real tools
     /// before they reach the dispatcher.
@@ -3535,7 +3535,7 @@ mod tests {
     #[test]
     fn every_advertised_tool_has_permission_requirement() {
         let policy = build_permission_policy();
-        let full = crate::tools::secretary_tools_json();
+        let full = crate::tools::agent_tools_json();
         let arr = full.as_array().cloned().unwrap_or_default();
 
         let mut missing: Vec<String> = Vec::new();

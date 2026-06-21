@@ -1,4 +1,4 @@
-//! `TuiToolExecutor` — wraps `SecretaryToolExecutor` and fires `TuiEvent`s
+//! `TuiToolExecutor` — wraps `AgentToolExecutor` and fires `TuiEvent`s
 //! before and after every tool call so the TUI can show live tool activity.
 
 use std::sync::mpsc::SyncSender;
@@ -6,19 +6,19 @@ use std::time::Instant;
 
 use crate::{ToolError, ToolExecutor};
 
-use crate::executor::SecretaryToolExecutor;
+use crate::executor::AgentToolExecutor;
 use crate::tui_events::TuiEvent;
 
 /// Executor wired to the TUI. Delegates every call to the inner secretary
 /// executor and emits `ToolCallStart` / `ToolCallDone` events on the channel.
 pub struct TuiToolExecutor {
-    inner: SecretaryToolExecutor,
+    inner: AgentToolExecutor,
     tx: SyncSender<TuiEvent>,
 }
 
 impl TuiToolExecutor {
     #[must_use]
-    pub fn new(inner: SecretaryToolExecutor, tx: SyncSender<TuiEvent>) -> Self {
+    pub fn new(inner: AgentToolExecutor, tx: SyncSender<TuiEvent>) -> Self {
         Self { inner, tx }
     }
 }

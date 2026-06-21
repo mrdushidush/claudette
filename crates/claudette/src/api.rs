@@ -2626,13 +2626,13 @@ mod tests {
         let mut empty_tools = OllamaApiClient::new("test", json!([]));
         empty_tools.num_ctx = 16384;
         empty_tools.num_predict = 1024;
-        let mut full_tools = OllamaApiClient::new("test", crate::secretary_tools_json());
+        let mut full_tools = OllamaApiClient::new("test", crate::agent_tools_json());
         full_tools.num_ctx = 16384;
         full_tools.num_predict = 1024;
 
         let empty_budget = empty_tools.history_budget_chars(&request);
         let full_budget = full_tools.history_budget_chars(&request);
-        let tools_chars = crate::secretary_tools_json().to_string().len();
+        let tools_chars = crate::agent_tools_json().to_string().len();
 
         assert!(
             full_budget < empty_budget,

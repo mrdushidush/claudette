@@ -14,7 +14,7 @@
 //!
 //! Mutation model: the registry lives behind an `Arc<Mutex<_>>` shared by
 //! [`OllamaApiClient`] (which reads it to build the `tools` field) and
-//! [`crate::executor::SecretaryToolExecutor`] (which writes it when the
+//! [`crate::executor::AgentToolExecutor`] (which writes it when the
 //! model invokes `enable_tools`). Both halves of the runtime see the same
 //! registry, so an enable in one turn is visible on the next turn.
 
@@ -225,7 +225,7 @@ impl ToolGroup {
 /// and ships only after the model calls `enable_tools`.
 ///
 /// The synthetic `enable_tools` meta-tool is added by [`ToolRegistry::new`]
-/// and isn't pulled from `secretary_tools_json`. `get_current_time` is
+/// and isn't pulled from `agent_tools_json`. `get_current_time` is
 /// kept in core because it's tiny (~25 tokens), used in nearly every
 /// conversation, and asking the model to call `enable_tools(time)` first
 /// would burn an unnecessary round-trip.
@@ -302,7 +302,7 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
 }
 
 /// Mutable tool registry shared between [`crate::api::OllamaApiClient`] and
-/// [`crate::executor::SecretaryToolExecutor`]. Holds the core tools (always
+/// [`crate::executor::AgentToolExecutor`]. Holds the core tools (always
 /// included) plus the optional groups keyed by [`ToolGroup`], and the set of
 /// currently-enabled groups.
 pub struct ToolRegistry {
@@ -319,12 +319,12 @@ impl ToolRegistry {
     /// Build the registry from the full tool list in [`crate::tools`].
     ///
     /// The `enable_tools` meta-tool is **synthesized** here (not loaded from
-    /// `secretary_tools_json`) because it's stateful — its implementation
+    /// `agent_tools_json`) because it's stateful — its implementation
     /// lives in the executor, not in [`crate::tools::dispatch_tool`], so we
     /// don't want it in the stateless tool list.
     #[must_use]
     pub fn new() -> Self {
-        let full = crate::tools::secretary_tools_json();
+        let full = crate::tools::agent_tools_json();
         let arr = full.as_array().cloned().unwrap_or_default();
 
         let mut core: Vec<Value> = Vec::with_capacity(CORE_TOOL_NAMES.len());
@@ -441,7 +441,7 @@ impl ToolRegistry {
 
     /// List of core tool names (for `/tools` display). Returns the synthesized
     /// `enable_tools` first, followed by the core tools pulled from
-    /// `secretary_tools_json`.
+    /// `agent_tools_json`.
     #[must_use]
     pub fn core_tool_names(&self) -> Vec<String> {
         self.core
@@ -607,14 +607,14 @@ mod tests {
     #[test]
     fn every_advertised_tool_is_classified() {
         // Catches the class of bug where a new tool gets added to
-        // `crate::tools::secretary_tools_json` (so it shows up in the schema)
+        // `crate::tools::agent_tools_json` (so it shows up in the schema)
         // but the maintainer forgets to add it to either CORE_TOOL_NAMES or
         // the `group_of` match arms — the registry's `for tool in arr`
         // loop silently drops such tools, so the brain never sees them in
         // an `enable_tools(group)` advertise. Exactly how `note_update`
         // shipped to v0.2.2-line `[Unreleased]` invisibly until v0.2.3
         // reconciliation.
-        let full = crate::tools::secretary_tools_json();
+        let full = crate::tools::agent_tools_json();
         let arr = full.as_array().cloned().unwrap_or_default();
         let mut unclassified: Vec<String> = Vec::new();
         for tool in arr {
@@ -831,7 +831,7 @@ mod tests {
     /// Run with `cargo test -p claudette schema_size_report -- --nocapture`.
     #[test]
     fn schema_size_report() {
-        let old_full = crate::tools::secretary_tools_json().to_string().len();
+        let old_full = crate::tools::agent_tools_json().to_string().len();
 
         let reg = ToolRegistry::new();
         let core_only = reg.current_schema_chars();

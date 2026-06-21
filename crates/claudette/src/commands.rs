@@ -2,7 +2,7 @@
 //!
 //! Slash commands are how the user controls the REPL itself (sessions,
 //! memory, status, exit) without sending text to the model. They are matched
-//! in [`run::run_secretary_repl`] BEFORE the line is dispatched to the LLM:
+//! in [`run::run_agent_repl`] BEFORE the line is dispatched to the LLM:
 //! any line starting with `/` is parsed via [`parse_slash_command`], and a
 //! non-`None` return value is handled inside the REPL loop without ever
 //! reaching the model.
@@ -30,7 +30,7 @@ use crate::model_config::{self, ModelConfig, Preset};
 use crate::run::{compact_threshold, current_model, default_session_path, sessions_dir};
 use crate::theme;
 use crate::tool_groups::{ToolGroup, ToolRegistry};
-use crate::tools::secretary_tools_json;
+use crate::tools::agent_tools_json;
 
 // === Public types ============================================================
 
@@ -281,7 +281,7 @@ fn parse_sessions_subcommand(arg: Option<&str>) -> SlashCommand {
 // === Dispatcher ==============================================================
 
 /// Run a parsed slash command. Generic over the concrete runtime so both the
-/// REPL (`ConversationRuntime<OllamaApiClient, SecretaryToolExecutor>`) and
+/// REPL (`ConversationRuntime<OllamaApiClient, AgentToolExecutor>`) and
 /// the TUI (`ConversationRuntime<OllamaApiClient, TuiToolExecutor>`) can use
 /// the same dispatcher. `out` is where human-readable output is written —
 /// stderr for the REPL, a buffer shipped via `TuiEvent::Info` for the TUI.
@@ -1135,13 +1135,13 @@ fn handle_tools(out: &mut impl Write) {
 }
 
 /// Print a short "• name: description" line for each tool in `names`,
-/// looking up the description in the full `secretary_tools_json` registry.
+/// looking up the description in the full `agent_tools_json` registry.
 fn describe_tool_group(out: &mut impl Write, names: &[String]) {
-    let full = secretary_tools_json();
+    let full = agent_tools_json();
     let arr: &[serde_json::Value] = full.as_array().map_or(&[], Vec::as_slice);
     for name in names {
         // enable_tools is synthesized by ToolRegistry and doesn't live in
-        // secretary_tools_json — give it a hard-coded description.
+        // agent_tools_json — give it a hard-coded description.
         let desc_owned;
         let desc: &str = if name == "enable_tools" {
             "Load an optional tool group (git, ide, search, advanced)."
