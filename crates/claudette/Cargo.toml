@@ -41,7 +41,15 @@ default = ["integrations"]
 # Google/Telegram code in the binary at all, so it cannot reach those services
 # even by misconfiguration). The coding core (files, search, git, shell,
 # quality, vision, recall, notes, todos, scheduler, …) is unaffected.
-integrations = []
+#
+# The PRIMARY effect is code-surface reduction (the #[cfg(feature =
+# "integrations")] modules — google_auth, telegram_mode, the gmail/calendar
+# tool groups — are not compiled), which is what makes the air-gap guarantee
+# structural rather than configurable. It ALSO drops a real dependency:
+# `getrandom` (the OAuth loopback-state entropy source) is used only by
+# google_auth, so it is gated behind this feature via `dep:getrandom` and
+# leaves the tree entirely under `--no-default-features`.
+integrations = ["dep:getrandom"]
 
 [dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json", "multipart"] }
@@ -76,7 +84,9 @@ arboard = "3"
 image = { version = "0.25", default-features = false, features = ["png"] }
 # OS-entropy source for the OAuth loopback state parameter. Kept to
 # `getrandom` (small, widely deployed) instead of pulling all of `rand`.
-getrandom = "0.4"
+# OAuth lives entirely behind the `integrations` feature, so this is an
+# optional dep activated by it — a `--no-default-features` build drops it.
+getrandom = { version = "0.4", optional = true }
 # Cross-session recall feature: SQLite for the embedded vector store at
 # ~/.claudette/recall.sqlite. `bundled` ships its own libsqlite3 so users
 # don't need a system sqlite — same trade-off as keeping the whole CLI a
