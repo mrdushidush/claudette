@@ -739,7 +739,7 @@ pub fn run_telegram_bot(
 fn run_synthetic_turn(
     http: &reqwest::blocking::Client,
     base_url: &str,
-    runtime: &mut crate::ConversationRuntime<crate::OllamaApiClient, crate::SecretaryToolExecutor>,
+    runtime: &mut crate::ConversationRuntime<crate::OllamaApiClient, crate::AgentToolExecutor>,
     chat_id: i64,
     prompt: &str,
     _voice_lang: &str,

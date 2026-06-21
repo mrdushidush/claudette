@@ -29,10 +29,10 @@ fn print_section(label: &str, content: &str) {
 fn main() {
     println!("=== claudette turn-1 payload breakdown ===\n");
     println!("cwd: {}", std::env::current_dir().unwrap().display());
-    println!("(secretary_system_prompt walks ancestor chain from here)\n");
+    println!("(agent_system_prompt walks ancestor chain from here)\n");
 
     // 1. Secretary system prompt — no memory, not concise (REPL/TUI default).
-    let prompt_vec = claudette::secretary_system_prompt();
+    let prompt_vec = claudette::agent_system_prompt();
     let prompt = prompt_vec.join("\n\n");
     println!("--- system prompt (concatenated) ---");
     print_section("system_prompt total", &prompt);

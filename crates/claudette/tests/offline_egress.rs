@@ -14,8 +14,8 @@
 //! zero egress. We point `OLLAMA_HOST` at loopback so the backend stays
 //! allow-listed (the brain/recall path must keep working under offline mode).
 
+use claudette::agent_tools_json;
 use claudette::egress::{self, BLOCK_PREFIX, INTEGRATION_NET_TOOLS, NET_TOOLS};
-use claudette::secretary_tools_json;
 use claudette::tools::dispatch_tool;
 
 /// Every network-reaching tool present in *this* build: the always-on set plus
@@ -128,7 +128,7 @@ fn net_tools_registry_is_consistent_and_covers_network_families() {
     // (b) Every registered net tool is a real, dispatchable tool that appears
     // in the advertised schema (catches a rename/removal that would silently
     // drop a tool from coverage).
-    let schema = secretary_tools_json();
+    let schema = agent_tools_json();
     let schema_names: HashSet<String> = schema
         .as_array()
         .expect("tool schema is a JSON array")

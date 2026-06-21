@@ -20,7 +20,7 @@
 use std::process::ExitCode;
 
 use claudette::{
-    probe_ollama, run_forge_mission, run_secretary, run_secretary_repl, theme, try_load_session,
+    probe_ollama, run_agent, run_agent_repl, run_forge_mission, theme, try_load_session,
     workspace_startup_diagnostics, SessionOptions,
 };
 use claudette::{ContentBlock, Session};
@@ -378,7 +378,7 @@ fn main() -> ExitCode {
             resume,
             autosave: true,
         };
-        match run_secretary_repl(opts) {
+        match run_agent_repl(opts) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!(
@@ -397,7 +397,7 @@ fn main() -> ExitCode {
             autosave: resume,
         };
         let prompt = prompt_args.join(" ");
-        match run_secretary(&prompt, opts) {
+        match run_agent(&prompt, opts) {
             Ok(summary) => {
                 if let Some(last) = summary.assistant_messages.last() {
                     for block in &last.blocks {

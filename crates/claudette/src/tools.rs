@@ -2,7 +2,7 @@
 //!
 //! Each tool is declared as a JSON object compatible with Ollama's
 //! `/api/chat` `tools` parameter. `dispatch_tool` is the sync entry point
-//! `SecretaryToolExecutor` calls to actually run them.
+//! `AgentToolExecutor` calls to actually run them.
 //!
 //! Storage layout (created on first write):
 //!
@@ -215,12 +215,12 @@ fn build_tools_json() -> Value {
 }
 
 #[must_use]
-pub fn secretary_tools_json() -> Value {
+pub fn agent_tools_json() -> Value {
     tools_json_cached().clone()
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Dispatcher — entry point called by SecretaryToolExecutor
+// Dispatcher — entry point called by AgentToolExecutor
 // ────────────────────────────────────────────────────────────────────────────
 
 pub fn dispatch_tool(name: &str, input: &str) -> Result<String, String> {
@@ -1941,7 +1941,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_edit_path_secretary_allows_home_paths() {
+    fn validate_edit_path_agent_allows_home_paths() {
         // No mission active → delegates to validate_read_path: a file under
         // $HOME but outside the scratch sandbox stays editable, as the
         // interactive secretary has always allowed. (No regression — roast RC-B.)

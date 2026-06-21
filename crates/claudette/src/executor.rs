@@ -19,14 +19,14 @@ use crate::tools::dispatch_tool;
 /// `Default::default()` is intentionally **not** implemented — the registry
 /// must be built once per runtime and shared, so callers always go through
 /// [`Self::with_registry`] (or [`Self::stateless`] for tests and agents).
-pub struct SecretaryToolExecutor {
+pub struct AgentToolExecutor {
     /// Shared registry. `None` = agents / tests that don't want the
     /// `enable_tools` feature; in that mode `enable_tools` calls return an
     /// error so the model can adapt.
     registry: Option<Arc<Mutex<ToolRegistry>>>,
 }
 
-impl SecretaryToolExecutor {
+impl AgentToolExecutor {
     /// Build an executor wired to a shared tool registry. `enable_tools`
     /// calls will mutate `registry` and be visible to subsequent
     /// `OllamaApiClient::build_chat_body` calls that read from the same
@@ -54,13 +54,13 @@ impl SecretaryToolExecutor {
     }
 }
 
-impl Default for SecretaryToolExecutor {
+impl Default for AgentToolExecutor {
     fn default() -> Self {
         Self::stateless()
     }
 }
 
-impl ToolExecutor for SecretaryToolExecutor {
+impl ToolExecutor for AgentToolExecutor {
     fn execute(&mut self, tool_name: &str, input: &str) -> Result<String, ToolError> {
         if tool_name == "enable_tools" {
             // ReadOnly meta-tool — never recorded in the action transcript.
@@ -198,7 +198,7 @@ mod tests {
     #[test]
     fn transcript_records_mutating_calls_but_never_readonly() {
         crate::with_temp_home(|home| {
-            let mut ex = SecretaryToolExecutor::stateless();
+            let mut ex = AgentToolExecutor::stateless();
             let tpath = home
                 .join(".claudette")
                 .join("transcript")
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn stateless_executor_rejects_enable_tools() {
-        let mut exec = SecretaryToolExecutor::stateless();
+        let mut exec = AgentToolExecutor::stateless();
         let result = exec.execute("enable_tools", r#"{"group":"git"}"#);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn stateless_executor_dispatches_core_tool() {
-        let mut exec = SecretaryToolExecutor::stateless();
+        let mut exec = AgentToolExecutor::stateless();
         let result = exec.execute("get_current_time", "{}");
         assert!(result.is_ok(), "core tools should still work: {result:?}");
         assert!(result.unwrap().contains("iso8601"));
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn wired_executor_enables_git_group() {
         let registry = Arc::new(Mutex::new(ToolRegistry::new()));
-        let mut exec = SecretaryToolExecutor::with_registry(registry.clone());
+        let mut exec = AgentToolExecutor::with_registry(registry.clone());
 
         assert!(!registry.lock().unwrap().is_enabled(ToolGroup::Git));
 
@@ -258,7 +258,7 @@ mod tests {
     #[test]
     fn wired_executor_reports_already_enabled_on_second_call() {
         let registry = Arc::new(Mutex::new(ToolRegistry::new()));
-        let mut exec = SecretaryToolExecutor::with_registry(registry);
+        let mut exec = AgentToolExecutor::with_registry(registry);
 
         let first = exec.execute("enable_tools", r#"{"group":"ide"}"#).unwrap();
         assert!(first.contains("\"already_enabled\":false"));
@@ -270,7 +270,7 @@ mod tests {
     #[test]
     fn wired_executor_unknown_group_errors_clearly() {
         let registry = Arc::new(Mutex::new(ToolRegistry::new()));
-        let mut exec = SecretaryToolExecutor::with_registry(registry);
+        let mut exec = AgentToolExecutor::with_registry(registry);
         // Use a name that is not a valid group or alias.
         let err = exec
             .execute("enable_tools", r#"{"group":"does-not-exist-xyz"}"#)
@@ -296,7 +296,7 @@ mod tests {
         // brain can keep working instead of spiraling.
         for input in ["{}", r#"{"group":""}"#, r#"{"group":"   "}"#] {
             let registry = Arc::new(Mutex::new(ToolRegistry::new()));
-            let mut exec = SecretaryToolExecutor::with_registry(Arc::clone(&registry));
+            let mut exec = AgentToolExecutor::with_registry(Arc::clone(&registry));
             let out = exec
                 .execute("enable_tools", input)
                 .unwrap_or_else(|e| panic!("input {input:?} should not error: {e}"));
@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn wired_executor_bad_json_errors() {
         let registry = Arc::new(Mutex::new(ToolRegistry::new()));
-        let mut exec = SecretaryToolExecutor::with_registry(registry);
+        let mut exec = AgentToolExecutor::with_registry(registry);
         let err = exec
             .execute("enable_tools", "not json at all")
             .unwrap_err()
@@ -336,7 +336,7 @@ mod tests {
     #[test]
     fn wired_executor_still_dispatches_non_meta_tools() {
         let registry = Arc::new(Mutex::new(ToolRegistry::new()));
-        let mut exec = SecretaryToolExecutor::with_registry(registry);
+        let mut exec = AgentToolExecutor::with_registry(registry);
         let result = exec.execute("get_current_time", "{}").unwrap();
         assert!(result.contains("iso8601"));
     }

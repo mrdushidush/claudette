@@ -31,11 +31,11 @@ use std::path::PathBuf;
 use crate::{ContentBlock, ConversationRuntime, PermissionPrompter, Session, TurnSummary};
 
 use crate::api::OllamaApiClient;
-use crate::executor::SecretaryToolExecutor;
+use crate::executor::AgentToolExecutor;
 use crate::model_config;
 use crate::run::{build_runtime_streaming, build_runtime_with_brain, run_turn_with_retry};
 
-type SecretaryRuntime = ConversationRuntime<OllamaApiClient, SecretaryToolExecutor>;
+type AgentRuntime = ConversationRuntime<OllamaApiClient, AgentToolExecutor>;
 
 /// Why we decided a primary-brain turn was stuck. Logged to
 /// `fallback.jsonl` so we can tune the thresholds against real data.
@@ -89,7 +89,7 @@ const TOOL_ERROR_STREAK_THRESHOLD: usize = 3;
 /// `runtime` pointer is mutated in place so the next turn starts from
 /// whatever session state we ended up with.
 pub fn run_turn_with_fallback(
-    runtime: &mut SecretaryRuntime,
+    runtime: &mut AgentRuntime,
     input: &str,
     prompter: &mut Option<&mut dyn PermissionPrompter>,
 ) -> Result<TurnSummary, String> {
