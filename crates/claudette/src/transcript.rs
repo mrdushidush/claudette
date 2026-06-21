@@ -130,11 +130,16 @@ pub fn snapshot_to_trash(original: &Path) -> std::io::Result<PathBuf> {
 /// failed write logs to stderr and returns — it must never fail the tool
 /// call it describes.
 pub fn record(tool: &str, input: &str, undo: Option<Value>) {
-    let capped: String = if input.chars().count() > MAX_RECORDED_INPUT_CHARS {
-        let head: String = input.chars().take(MAX_RECORDED_INPUT_CHARS).collect();
-        format!("{head}… [capped, {} chars total]", input.chars().count())
+    // Mask credential-shaped substrings BEFORE capping/storing: tool input can
+    // carry a PAT (e.g. a `git remote set-url` with an embedded token), and the
+    // transcript is a plaintext file on disk. Redact first so the secret never
+    // lands in actions.jsonl. (roast 2026-06-21, Wave 1.3)
+    let redacted = crate::redact::redact(input);
+    let capped: String = if redacted.chars().count() > MAX_RECORDED_INPUT_CHARS {
+        let head: String = redacted.chars().take(MAX_RECORDED_INPUT_CHARS).collect();
+        format!("{head}… [capped, {} chars total]", redacted.chars().count())
     } else {
-        input.to_string()
+        redacted.into_owned()
     };
     let line = json!({
         "ts": now_ms() as u64,
@@ -565,6 +570,28 @@ mod tests {
             let stored = v.get("input").and_then(Value::as_str).unwrap();
             assert!(stored.chars().count() < 2_100, "input must be capped");
             assert!(stored.contains("capped"), "cap marker missing");
+        });
+    }
+
+    #[test]
+    fn record_redacts_secrets_before_writing_to_disk() {
+        // Wave 1.3: a PAT pasted into a tool argument must never reach the
+        // plaintext transcript file on disk.
+        with_temp_home(|_| {
+            record(
+                "run_bash",
+                r#"{"command":"git push https://ghp_ABCDEFGHIJKLMNOP0123456789@github.com/o/r"}"#,
+                None,
+            );
+            let raw = fs::read_to_string(transcript_path()).unwrap();
+            assert!(
+                !raw.contains("ghp_ABCDEFGHIJKLMNOP"),
+                "the PAT must not be persisted: {raw}"
+            );
+            assert!(
+                raw.contains("redacted"),
+                "a redaction marker should remain: {raw}"
+            );
         });
     }
 
