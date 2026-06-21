@@ -145,3 +145,44 @@ jobs:
         with:
           key: msrv
       - run: cargo build --locked
+
+  coverage:
+    name: coverage (llvm-cov)
+    runs-on: ubuntu-latest
+    # NON-BLOCKING by design: coverage is a signal, not a gate, so a flake in
+    # the tool (or a dip in the number) must never block a PR. `continue-on-
+    # error` keeps the job green-with-warning, and it is deliberately NOT added
+    # to the required-status-checks set. 1,100+ tests is volume, not proof of
+    # coverage — this surfaces the actual exercised fraction, especially the
+    # untested unwraps that `panic=abort` turns into hard crashes in prod.
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6.0.3
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2.9.1
+        with:
+          key: coverage
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+      # Collect once, then emit two reports from the same instrumentation data:
+      # a human-readable summary in the job log and an lcov.info artifact for
+      # local inspection / future upload to a coverage service.
+      - name: Collect coverage
+        run: cargo llvm-cov --no-report --lib --bins --tests
+        env:
+          CLAUDETTE_SKIP_OLLAMA_PROBE: "1"
+      - name: Summary (job log)
+        run: cargo llvm-cov report --summary-only
+      - name: lcov report
+        run: cargo llvm-cov report --lcov --output-path lcov.info
+      - name: Upload lcov artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: coverage-lcov
+          path: lcov.info
+          if-no-files-found: warn
+          retention-days: 7
