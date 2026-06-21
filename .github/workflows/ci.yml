@@ -49,7 +49,12 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2.9.1
+      # Default features are now OFF (the shipped binary is the lean coding
+      # agent), so this lints the default build. The second pass keeps the
+      # off-by-default `integrations` surface (Gmail/Calendar/Telegram/voice/
+      # tts/briefing) from rotting uncompiled.
       - run: cargo clippy --all-targets --no-deps -- -D warnings
+      - run: cargo clippy --all-targets --all-features --no-deps -- -D warnings
 
   audit:
     name: cargo audit (RustSec advisories)
@@ -108,6 +113,12 @@ jobs:
       # drives every networked tool under CLAUDETTE_OFFLINE=1 and asserts each
       # refuses before a socket opens). Without `--tests` that proof never ran.
       - run: cargo test --lib --bins --tests
+        env:
+          CLAUDETTE_SKIP_OLLAMA_PROBE: "1"
+      # Re-run with the off-by-default `integrations` feature on so the optional
+      # cloud surface (Gmail/Calendar/Telegram/voice/tts/briefing) and its slice
+      # of the offline-egress proof stay tested.
+      - run: cargo test --all-features --lib --bins --tests
         env:
           CLAUDETTE_SKIP_OLLAMA_PROBE: "1"
 

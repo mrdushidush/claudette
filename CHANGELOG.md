@@ -10,6 +10,23 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Changed
+
+- **The default build is now a lean, air-gapped coding agent.** The
+  `integrations` feature — Gmail/Calendar, the Telegram bot, and the
+  Telegram-only voice/tts + morning-briefing (`--briefing`) helpers — is now
+  **off by default**. `cargo install claudette` and the release binaries
+  contain no cloud code at all, so the air-gap is structural rather than a
+  setting. Opt back in with `cargo install claudette --features integrations`
+  (or `cargo build --features integrations`). Previously `integrations` was on
+  by default and you opted *out* via `--no-default-features`.
+
+### Removed
+
+- **The TradingView / `markets` tool group** (`tv_get_quote`). A scraper of
+  `scanner.tradingview.com` has no place in an air-gapped coding agent.
+- **The Space Invaders easter egg** (the TUI `Ctrl+G` game).
+
 ## [0.14.0] - 2026-06-19
 
 ### Added

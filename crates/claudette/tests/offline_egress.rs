@@ -14,9 +14,16 @@
 //! zero egress. We point `OLLAMA_HOST` at loopback so the backend stays
 //! allow-listed (the brain/recall path must keep working under offline mode).
 
-use claudette::egress::{self, BLOCK_PREFIX, NET_TOOLS};
+use claudette::egress::{self, BLOCK_PREFIX, INTEGRATION_NET_TOOLS, NET_TOOLS};
 use claudette::secretary_tools_json;
 use claudette::tools::dispatch_tool;
+
+/// Every network-reaching tool present in *this* build: the always-on set plus
+/// the integration-only set (empty in a coding-only build). The air-gap proof
+/// must cover exactly the tools the schema actually advertises.
+fn all_net_tools() -> impl Iterator<Item = &'static str> {
+    NET_TOOLS.iter().chain(INTEGRATION_NET_TOOLS).copied()
+}
 
 /// Serialises the env-mutating tests: `CLAUDETTE_OFFLINE` / `OLLAMA_HOST` are
 /// process-global, so parallel tests in this binary would otherwise race.
@@ -79,7 +86,7 @@ fn every_net_tool_refuses_under_offline() {
     let _lock = ENV_LOCK.lock().unwrap();
     let _env = OfflineEnv::set();
 
-    for &tool in NET_TOOLS {
+    for tool in all_net_tools() {
         match dispatch_tool(tool, offline_probe_input(tool)) {
             Ok(out) => panic!("{tool} reached the network under offline mode (returned Ok): {out}"),
             Err(err) => assert!(
@@ -112,9 +119,9 @@ fn backend_and_loopback_stay_allowed_under_offline() {
 fn net_tools_registry_is_consistent_and_covers_network_families() {
     use std::collections::HashSet;
 
-    // (a) No duplicate entries in the registry.
+    // (a) No duplicate entries in the registry (across both lists).
     let mut seen = HashSet::new();
-    for &t in NET_TOOLS {
+    for t in all_net_tools() {
         assert!(seen.insert(t), "duplicate entry in NET_TOOLS: {t}");
     }
 
@@ -129,7 +136,7 @@ fn net_tools_registry_is_consistent_and_covers_network_families() {
         .filter_map(|t| t.pointer("/function/name").and_then(|v| v.as_str()))
         .map(str::to_string)
         .collect();
-    for &t in NET_TOOLS {
+    for t in all_net_tools() {
         assert!(
             schema_names.contains(t),
             "NET_TOOLS lists '{t}' but it is not in the tool schema (renamed or removed?)"
@@ -142,7 +149,7 @@ fn net_tools_registry_is_consistent_and_covers_network_families() {
     // siblings, so they can't be swept by prefix and are maintained by hand in
     // egress::NET_TOOLS.
     const ALWAYS_NET_PREFIXES: &[&str] = &["gh_", "gmail_", "calendar_", "tg_"];
-    let registry: HashSet<&str> = NET_TOOLS.iter().copied().collect();
+    let registry: HashSet<&str> = all_net_tools().collect();
     for name in &schema_names {
         if ALWAYS_NET_PREFIXES.iter().any(|p| name.starts_with(p)) {
             assert!(

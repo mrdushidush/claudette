@@ -80,20 +80,12 @@ pub const NET_TOOLS: &[&str] = &[
     "gh_workflow_logs",
     "gh_fork",
     "gh_create_pr",
-    // Google (Gmail + Calendar)
-    "gmail_list",
-    "gmail_search",
-    "gmail_read",
-    "gmail_list_labels",
-    "calendar_list_events",
-    "calendar_create_event",
-    "calendar_update_event",
-    "calendar_delete_event",
     // Keyless facts
     "wikipedia",
     "weather",
-    // Telegram bridge
-    "tg_send",
+    // Google (Gmail + Calendar) + Telegram are integration-only and listed in
+    // INTEGRATION_NET_TOOLS below, so this list stays consistent with the
+    // coding-only schema (where those tools don't exist).
     // Network-reaching git + brownfield-mission subprocesses
     "git_push",
     "git_clone",
@@ -107,6 +99,27 @@ pub const NET_TOOLS: &[&str] = &[
     "bash",
     "bash_background",
 ];
+
+/// Network-reaching tools that exist **only** in an `integrations` build:
+/// Gmail/Calendar (Google REST) and the Telegram bridge. Kept separate from
+/// [`NET_TOOLS`] so the air-gap proof stays consistent with the advertised
+/// schema in a coding-only build, where these tools are stubbed out entirely.
+/// Empty when the feature is off. The offline-egress test iterates both lists.
+#[cfg(feature = "integrations")]
+pub const INTEGRATION_NET_TOOLS: &[&str] = &[
+    "gmail_list",
+    "gmail_search",
+    "gmail_read",
+    "gmail_list_labels",
+    "calendar_list_events",
+    "calendar_create_event",
+    "calendar_update_event",
+    "calendar_delete_event",
+    "tg_send",
+];
+/// Coding-only build: no Gmail/Calendar/Telegram tools are compiled in.
+#[cfg(not(feature = "integrations"))]
+pub const INTEGRATION_NET_TOOLS: &[&str] = &[];
 
 /// Returns true when offline mode is enabled. Truthy = set, non-empty, and not
 /// literally `"0"` — matching the convention used by `CLAUDETTE_FACELESS`,
