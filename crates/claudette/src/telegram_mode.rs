@@ -496,7 +496,7 @@ pub fn run_telegram_bot(
                 } else if text.starts_with('/') {
                     let reply = match text.as_str() {
                         "/start" => Some(
-                            "Hello! I'm Claudette, your AI personal secretary. \
+                            "Hello! I'm Claudette, your local-first AI coding agent. \
                                  Send me any message and I'll help you out."
                                 .to_string(),
                         ),
