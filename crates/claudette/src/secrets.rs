@@ -3,9 +3,11 @@
 //! Tokens persist across terminal sessions in plain-text files at
 //! `~/.claudette/secrets/<name>.token`. New files written via this
 //! module's `write_secret_file` helper are created with mode 0600 on
-//! Unix (plain `std::fs::write` on Windows, where POSIX mode bits do
-//! not apply); reads use `fs::read_to_string` and do not re-enforce
-//! the mode on pre-existing files. Env vars take precedence so
+//! Unix; on Windows they are written and then tightened with `icacls`
+//! (remove inherited ACEs, grant only the current user) — the closest
+//! dependency-free analogue to 0600, since POSIX mode bits do not apply.
+//! Reads use `fs::read_to_string` and do not re-enforce the ACL on
+//! pre-existing files. Env vars take precedence so
 //! `export GITHUB_TOKEN=...` still overrides a file-backed token.
 //!
 //! Lookup order:
@@ -44,7 +46,61 @@ pub(crate) fn write_secret_file(path: &Path, contents: &[u8]) -> std::io::Result
     }
     #[cfg(not(unix))]
     {
-        std::fs::write(path, contents)
+        std::fs::write(path, contents)?;
+        // Best-effort ACL tightening. `std::fs::write` inherits the parent
+        // directory's ACL; under the user profile that's already
+        // user+SYSTEM+Admins (not world-readable), but on a relocated HOME it
+        // could be permissive. Mirror the Unix 0600 intent: remove inheritance
+        // and grant only the current user. A failure is warned, never fatal —
+        // the token is still written and usable.
+        harden_windows_acl(path);
+        Ok(())
+    }
+}
+
+/// Restrict a freshly-written secret file to the current user on Windows via
+/// the built-in `icacls`: remove inherited ACEs (`/inheritance:r`) and grant
+/// the current account Full control (`/grant:r`). The crate forbids
+/// `unsafe_code`, so the Win32 ACL APIs are out — shelling out to `icacls` is
+/// the dependency-free path. Best-effort: surfaced as a warning on failure but
+/// never fails the write.
+#[cfg(not(unix))]
+fn harden_windows_acl(path: &Path) {
+    let user = std::env::var("USERNAME").unwrap_or_default();
+    if user.is_empty() {
+        // Can't name the grantee — leave the inherited (profile) ACL in place.
+        return;
+    }
+    // Prefer DOMAIN\USER; icacls accepts a bare username too.
+    let principal = match std::env::var("USERDOMAIN") {
+        Ok(d) if !d.is_empty() => format!("{d}\\{user}"),
+        _ => user,
+    };
+    let grant = format!("{principal}:F");
+    let warn = |msg: String| {
+        eprintln!(
+            "{} {}",
+            crate::theme::warn(crate::theme::WARN_GLYPH),
+            crate::theme::warn(&msg)
+        );
+    };
+    match std::process::Command::new("icacls")
+        .arg(path)
+        .arg("/inheritance:r")
+        .arg("/grant:r")
+        .arg(&grant)
+        .output()
+    {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => warn(format!(
+            "secrets: could not restrict ACL on {}: {}",
+            path.display(),
+            String::from_utf8_lossy(&out.stderr).trim()
+        )),
+        Err(e) => warn(format!(
+            "secrets: icacls unavailable, ACL not tightened on {}: {e}",
+            path.display()
+        )),
     }
 }
 
@@ -254,6 +310,38 @@ mod tests {
         let result = read_secret("zzztestfile88");
         let _ = std::fs::remove_file(&path);
         assert_eq!(result.unwrap(), "file-based-token");
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn windows_write_removes_acl_inheritance() {
+        use std::process::Command;
+        // icacls is a Windows built-in; skip defensively if it's somehow gone.
+        if Command::new("icacls").arg("/?").output().is_err() {
+            return;
+        }
+        let path = std::env::temp_dir().join(format!(
+            "claudette-acltest-{}-{:?}.token",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        write_secret_file(&path, b"secret-value").unwrap();
+
+        // Still readable by us after tightening.
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap().trim(),
+            "secret-value"
+        );
+
+        // /inheritance:r drops the inherited ACEs, so no "(I)" flag remains.
+        let out = Command::new("icacls").arg(&path).output().unwrap();
+        let acl = String::from_utf8_lossy(&out.stdout).to_string();
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            !acl.contains("(I)"),
+            "inherited ACEs should be removed by /inheritance:r, got:\n{acl}"
+        );
     }
 
     #[test]
