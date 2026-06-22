@@ -841,10 +841,26 @@ fn search_budget_nudge(n: usize) -> String {
 /// useful work. These are the calls the loop-breaker dedups; a repeat returns
 /// [`duplicate_call_body`] instead of re-running the tool. Mutating tools are
 /// deliberately excluded — re-reading after an edit is legitimate.
+///
+/// The read-only git inspectors (`git_status`/`git_diff`/`git_log`) belong here
+/// too: they return identical bytes when nothing has changed, and a small brain
+/// nudged to "investigate the repo state" will re-issue them turn after turn
+/// (measured 2026-06-21: the coding-agent persona drove qwen3.5-4b from iter≈3
+/// to the iter=40 cap on "show git status", regressing brain100 89%→78%). They
+/// are nav, not mutation, so an intervening real mutation still clears `seen_nav`
+/// (line ~496) and a legitimate re-check after an edit/commit is NOT suppressed.
 fn is_navigation_tool(name: &str) -> bool {
     matches!(
         name,
-        "read_file" | "grep_search" | "glob_search" | "list_dir" | "semantic_grep" | "repo_map"
+        "read_file"
+            | "grep_search"
+            | "glob_search"
+            | "list_dir"
+            | "semantic_grep"
+            | "repo_map"
+            | "git_status"
+            | "git_diff"
+            | "git_log"
     )
 }
 
@@ -1344,6 +1360,12 @@ mod tests {
             "glob_search",
             "list_dir",
             "semantic_grep",
+            "repo_map",
+            // Read-only git inspectors: identical bytes on re-run, the small-brain
+            // git-spiral that hit the iteration cap (2026-06-21 persona regression).
+            "git_status",
+            "git_diff",
+            "git_log",
         ] {
             assert!(super::is_navigation_tool(nav), "{nav} should be navigation");
         }
@@ -1351,7 +1373,11 @@ mod tests {
             "edit_file",
             "apply_diff",
             "bash",
+            // Mutating git tools stay non-nav: re-running them after a change is
+            // legitimate, and a mutation must clear the nav dedup set.
             "git_commit",
+            "git_add",
+            "git_checkout",
             "write_file",
             "add",
         ] {
@@ -1424,6 +1450,85 @@ mod tests {
         );
         assert_eq!(summary.iterations, 3);
         // Second tool_result is the suppressed duplicate (is_error = true).
+        let dup = runtime
+            .session()
+            .messages
+            .iter()
+            .find_map(|m| {
+                m.blocks.iter().find_map(|b| match b {
+                    ContentBlock::ToolResult {
+                        output, is_error, ..
+                    } if *is_error => Some(output.clone()),
+                    _ => None,
+                })
+            })
+            .expect("a suppressed duplicate tool_result should exist");
+        assert!(dup.contains("duplicate call suppressed"), "got: {dup}");
+    }
+
+    #[test]
+    fn duplicate_git_status_is_suppressed_not_re_executed() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // The git-tool spiral (2026-06-21 persona regression): the brain
+        // re-issues the IDENTICAL git_status twice while "investigating the
+        // repo state", then answers. Before git_* were classified as
+        // navigation this looped uncounted to the iteration cap. Now the loop
+        // must execute it once, suppress the exact repeat, and finish.
+        struct GitSpiralApi {
+            calls: usize,
+        }
+        impl ApiClient for GitSpiralApi {
+            fn stream(
+                &mut self,
+                _request: &ApiRequest<'_>,
+            ) -> Result<Vec<AssistantEvent>, RuntimeError> {
+                self.calls += 1;
+                match self.calls {
+                    1 | 2 => Ok(vec![
+                        AssistantEvent::ToolUse {
+                            id: format!("gs-{}", self.calls),
+                            name: "git_status".to_string(),
+                            input: "{}".to_string(),
+                        },
+                        AssistantEvent::MessageStop,
+                    ]),
+                    _ => Ok(vec![
+                        AssistantEvent::TextDelta("clean".to_string()),
+                        AssistantEvent::MessageStop,
+                    ]),
+                }
+            }
+        }
+
+        let exec_count = Rc::new(Cell::new(0usize));
+        let ec = Rc::clone(&exec_count);
+        let tool_executor = StaticToolExecutor::new().register("git_status", move |_input| {
+            ec.set(ec.get() + 1);
+            Ok("On branch main\nnothing to commit, working tree clean".to_string())
+        });
+        let permission_policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("git_status", PermissionMode::ReadOnly);
+
+        let mut runtime = ConversationRuntime::new(
+            Session::new(),
+            GitSpiralApi { calls: 0 },
+            tool_executor,
+            permission_policy,
+            vec!["sys".to_string()],
+        );
+
+        let summary = runtime
+            .run_turn("show me the git status", None)
+            .expect("loop should finish");
+
+        assert_eq!(
+            exec_count.get(),
+            1,
+            "git_status must execute once; the identical repeat is suppressed"
+        );
+        assert_eq!(summary.iterations, 3);
         let dup = runtime
             .session()
             .messages
