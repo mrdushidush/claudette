@@ -9,8 +9,12 @@ set -uo pipefail
 
 MODEL="${1:-qwen3.5:4b}"
 OUTDIR="${2:-tests/results_brain100}"
-BINARY="D:/dev/claudette/target/release/claudette.exe"
-PROMPTS_FILE="${BRAIN100_PROMPTS:-D:/dev/claudette/tests/brain100_prompts.txt}"
+# Both default to the in-repo locations but are overridable: CLAUDETTE_BIN
+# points the harness at an arbitrary build (e.g. an A/B control binary), and
+# BRAIN100_PROMPTS at a different prompt corpus. The prompts default tracks the
+# crate restructure — the fixtures now live under crates/claudette/tests/.
+BINARY="${CLAUDETTE_BIN:-D:/dev/claudette/target/release/claudette.exe}"
+PROMPTS_FILE="${BRAIN100_PROMPTS:-D:/dev/claudette/crates/claudette/tests/brain100_prompts.txt}"
 DELAY=1
 
 mkdir -p "$OUTDIR"
