@@ -111,6 +111,19 @@ cargo build --release -p claudette
 
 ---
 
+## Roadmap
+
+Where Claudette is headed, and where help is most welcome:
+
+- **Broaden "Claudette Certified" coverage.** Battery-test more local models so `--doctor` can recommend the best fit for any GPU. Benching a model we haven't covered is the single most useful contribution — [no Rust required](https://github.com/mrdushidush/claudette/labels/good%20first%20issue).
+- **A leaner core.** Fold the overlapping edit tools into one canonical `edit_file` and keep trimming the dependency tree, for a smaller, faster single binary.
+- **Small-model reliability.** Keep hardening the agent loop against tool-call spirals so the 4B / 8 GB default stays dependable.
+- **More reach.** Editor integrations and deployment recipes (Pi / VPS / home-server) beyond today's VS Code extension and docker-compose.
+
+Newcomer-friendly tasks carry the [`good first issue`](https://github.com/mrdushidush/claudette/labels/good%20first%20issue) label; broader direction lives in the [issues](https://github.com/mrdushidush/claudette/issues). This is a roadmap, not a promise — priorities shift with what users hit.
+
+---
+
 ## Contributing
 
 Bugs and PRs welcome - see [CONTRIBUTING.md](CONTRIBUTING.md). Conventional Commits (`feat:`, `fix:`, `docs:`, …). Security issues go through the private advisory flow in [SECURITY.md](SECURITY.md), not a public issue. Contributions are dual-licensed MIT OR Apache-2.0.
