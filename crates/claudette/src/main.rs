@@ -173,6 +173,7 @@ DOCS:
     SECURITY.md            Vulnerability reporting
 ";
 
+#[allow(clippy::too_many_lines)]
 fn main() -> ExitCode {
     // Load env vars from .env files. ONLY the canonical ~/.claudette/.env
     // is auto-loaded — we explicitly do NOT walk CWD or its parents, because

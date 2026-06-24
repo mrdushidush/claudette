@@ -89,6 +89,7 @@ const PARAGRAPH_MERGE_THRESHOLD: usize = 80;
 /// function returns `Err` early otherwise — **default-deny** prevents a
 /// "ran the bot without thinking and exposed it to every username-guesser"
 /// footgun.
+#[allow(clippy::too_many_lines)]
 pub fn run_telegram_bot(
     allowed_chat_ids: Vec<i64>,
     allow_any_chat: bool,

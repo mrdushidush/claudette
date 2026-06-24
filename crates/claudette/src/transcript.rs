@@ -162,6 +162,7 @@ pub fn record(tool: &str, input: &str, undo: Option<Value>) {
 /// (b) hasn't already been undone. Restores the trashed/pre-image file back
 /// to its original location (the trash copy is **kept** — recoverability
 /// bias), appends an `undo` entry, and returns a human-readable summary.
+#[allow(clippy::too_many_lines)]
 pub fn undo_last() -> Result<String, String> {
     let path = transcript_path();
     let raw = fs::read_to_string(&path)

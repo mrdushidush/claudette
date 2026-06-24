@@ -149,6 +149,7 @@ impl HookRunner {
         HookRunResult::allow(messages)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run_command(
         &self,
         command: &str,

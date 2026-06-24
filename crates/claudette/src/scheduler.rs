@@ -468,6 +468,7 @@ impl Scheduler {
     /// Load entries from `path`, apply per-entry catch-up policy, return a
     /// vector of immediate firings the consumer should dispatch before the
     /// next poll. Creates an empty jsonl if the file doesn't exist.
+    #[allow(clippy::too_many_lines)]
     pub fn load(path: PathBuf, clock: Arc<dyn Clock>) -> Result<(Self, Vec<Firing>), String> {
         let mut scheduler = Self::new(path.clone(), clock.clone());
         let raw = match std::fs::read_to_string(&path) {

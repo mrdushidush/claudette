@@ -21,6 +21,7 @@ use serde_json::{json, Value};
 
 use super::{external_http_client, extract_str, parse_json_input, wrap_untrusted};
 
+#[allow(clippy::too_many_lines)]
 pub(super) fn schemas() -> Vec<Value> {
     vec![
         json!({
@@ -696,6 +697,7 @@ fn run_gh_pr_status(input: &str) -> Result<String, String> {
 /// last 20 issue-comments + check-runs summary in one tool call. Folds
 /// the gh_pr_status use case (everything that tool returned is in here
 /// too, just under different keys for clarity).
+#[allow(clippy::too_many_lines)]
 fn run_gh_pr_view(input: &str) -> Result<String, String> {
     let v = parse_json_input(input, "gh_pr_view")?;
     let owner = extract_str(&v, "owner", "gh_pr_view")?;

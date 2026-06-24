@@ -18,6 +18,7 @@ use crate::theme;
 /// `commands.rs`) and never reach the model. Exits on EOF, the `/exit`
 /// command, or the bare words `exit`/`quit`/`:q` (kept for muscle memory).
 /// Always autosaves after every model turn when `opts.autosave` is set.
+#[allow(clippy::too_many_lines)]
 pub fn run_agent_repl(opts: SessionOptions) -> Result<()> {
     theme::init();
 

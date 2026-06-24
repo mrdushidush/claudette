@@ -95,6 +95,7 @@ struct Symbol {
     sig: String,
 }
 
+#[allow(clippy::too_many_lines)]
 fn run_repo_map(input: &str) -> Result<String, String> {
     let v: Value = serde_json::from_str(input)
         .map_err(|e| format!("repo_map: invalid JSON ({e}): {input}"))?;

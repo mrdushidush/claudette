@@ -300,6 +300,7 @@ fn javascript_url(lower: &str) -> bool {
 /// Apply every rule to a single added line. Returns `(severity, rule, message)`
 /// for each match. Case-sensitive where the construct is (JS APIs), with a
 /// lowercased copy for keyword checks.
+#[allow(clippy::too_many_lines)]
 fn classify(line: &str) -> Vec<(Severity, &'static str, &'static str)> {
     use Severity::{High, Medium};
     let l = line;
