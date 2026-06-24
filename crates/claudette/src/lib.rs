@@ -50,6 +50,7 @@ pub mod commands;
 pub mod diff_preview;
 pub mod doctor;
 pub mod egress;
+pub mod env_config;
 pub mod executor;
 pub mod firstrun;
 pub mod forge;

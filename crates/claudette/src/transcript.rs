@@ -35,19 +35,14 @@ use serde_json::{json, Value};
 /// uncapped `write_file` content would balloon the log.
 const MAX_RECORDED_INPUT_CHARS: usize = 2_000;
 
-fn home_dir() -> PathBuf {
-    let raw = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(raw)
-}
-
 pub(crate) fn trash_dir() -> PathBuf {
-    home_dir().join(".claudette").join("trash")
+    crate::env_config::home_dir()
+        .join(".claudette")
+        .join("trash")
 }
 
 pub(crate) fn transcript_path() -> PathBuf {
-    home_dir()
+    crate::env_config::home_dir()
         .join(".claudette")
         .join("transcript")
         .join("actions.jsonl")

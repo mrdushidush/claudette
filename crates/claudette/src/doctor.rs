@@ -63,15 +63,8 @@ fn print_fix(cmd: &str) {
     eprintln!("      {} {}", theme::accent("↳ fix:"), theme::dim(cmd));
 }
 
-fn home_dir() -> PathBuf {
-    let raw = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(raw)
-}
-
 fn claudette_home() -> PathBuf {
-    home_dir().join(".claudette")
+    crate::env_config::home_dir().join(".claudette")
 }
 
 /// Entry point — runs every probe and returns the exit code for the CLI.
