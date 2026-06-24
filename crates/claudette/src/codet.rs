@@ -62,14 +62,15 @@ pub fn coder_model() -> String {
     crate::model_config::active().coder.model
 }
 
-/// Whether code validation is enabled. Defaults to true; set
-/// `CLAUDETTE_VALIDATE_CODE=false` to disable (useful for debugging
-/// or when the coder model isn't pulled yet).
+/// Whether code validation is enabled. **Off by default (Wave B):** the codet
+/// post-edit second-pass (swap to the coder model, re-validate, auto-fix) added
+/// latency and, per the maintainer, no longer earns its keep on current models
+/// ("codet sucks now"). Opt back in with `CLAUDETTE_VALIDATE_CODE=true`
+/// (also `1` / `yes` / `on`); any other value — or unset — leaves it off.
 #[must_use]
 pub fn validation_enabled() -> bool {
-    std::env::var("CLAUDETTE_VALIDATE_CODE").map_or(true, |v| {
-        !matches!(v.to_lowercase().as_str(), "false" | "0" | "no" | "off")
-    })
+    std::env::var("CLAUDETTE_VALIDATE_CODE")
+        .is_ok_and(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes" | "on"))
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -131,17 +131,18 @@ Fails in tests do NOT re-enter the surgical fix loop — they're reported
 to the user as text. Tests are a quality signal, not a regeneration
 trigger.
 
-## 7. Disabling Codet
+## 7. Codet validation (opt-in)
 
-If the fix loop gets in your way (you just want the raw output, no
-validation):
+Codet's post-write validation (syntax check + auto-fix loop) is **off by
+default** — code writes/edits return the model's output directly. If you want
+the extra validation pass back, opt in:
 
 ```bash
-export CLAUDETTE_VALIDATE_CODE=false
+export CLAUDETTE_VALIDATE_CODE=true   # also accepts 1 / yes / on
 ```
 
-`generate_code` then writes the file and returns. No syntax check, no
-fix loop, no tests.
+With it enabled, `generate_code` (and `edit_file`/`write_file` on code files)
+runs a syntax check and, on failure, a fix loop before returning.
 
 ## 8. Known limitations
 
