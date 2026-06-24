@@ -175,9 +175,9 @@ fn invoke(framework: Framework, filter: Option<&str>, cwd: &Path) -> CommandResu
             // the project's package.json `test` script for everything else.
             let pattern = filter.map(|f| format!("--testNamePattern={f}"));
             let mut args: Vec<&str> = vec!["test"];
-            if pattern.is_some() {
+            if let Some(p) = pattern.as_deref() {
                 args.push("--");
-                args.push(pattern.as_deref().unwrap());
+                args.push(p);
             }
             run_command_with_timeout("npm", &args, TEST_TIMEOUT_SECS, Some(cwd))
         }

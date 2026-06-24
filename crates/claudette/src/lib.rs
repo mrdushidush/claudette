@@ -15,6 +15,11 @@
 //! paths resolve without rewriting.
 
 #![recursion_limit = "256"]
+// Production code must not panic via `.unwrap()` — the binary builds with
+// `panic = "abort"`, so a stray unwrap is a hard process crash, not a catchable
+// error. `cfg_attr(not(test), …)` keeps the ban off `#[cfg(test)]` code, where
+// `.unwrap()` is idiomatic. (Wave F.1 — production unwrap audit.)
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
 
 // ── Embedded runtime kernel ──────────────────────────────────────────────
 #[path = "runtime/compact.rs"]

@@ -17,6 +17,10 @@
 //! single-shot mode only saves when --resume is passed, so a one-off
 //! invocation can't clobber a long REPL conversation.
 
+// Production code must not panic via `.unwrap()` (the binary builds with
+// `panic = "abort"`). Test code is exempt. (Wave F.1 — production unwrap audit.)
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 use std::process::ExitCode;
 
 use claudette::{
