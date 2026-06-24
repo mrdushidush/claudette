@@ -270,7 +270,8 @@ fn parse_every(rest: &str, clock: &dyn Clock) -> Result<ParsedSchedule, String> 
         "day" => build_daily_from_time(t, clock),
         "weekday" => build_weekdays_from_time(t, clock),
         day if parse_weekday(day).is_some() => {
-            let dow = parse_weekday(day).unwrap();
+            let dow = parse_weekday(day)
+                .expect("match guard already verified parse_weekday(day).is_some()");
             build_weekly_from_time(dow, t, clock)
         }
         other => {
