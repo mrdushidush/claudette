@@ -55,6 +55,7 @@ fn run(name: &str, input: &str) {
 /// HTTPS — public clone, no auth needed.
 const NEEDS_TOKEN: &[&str] = &["list", "body", "pr", "status", "mission-submit", "pipeline"];
 
+#[allow(clippy::too_many_lines)]
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = args.first().map_or("list", String::as_str);

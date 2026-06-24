@@ -589,6 +589,7 @@ fn render_todos_tab(f: &mut Frame, app: &App, area: Rect) {
 // HW tab
 // ─────────────────────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_lines)]
 fn render_hw_tab(f: &mut Frame, app: &App, area: Rect) {
     let hw = &app.hw;
     let mut lines: Vec<Line> = Vec::new();

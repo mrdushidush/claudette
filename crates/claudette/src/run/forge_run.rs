@@ -459,6 +459,7 @@ fn forge_phase0_preflight(mission: &crate::missions::Mission) -> Result<Option<(
 /// turns are part of the same session log when `--resume` was passed; a
 /// one-off forge invocation without `--resume` doesn't clobber the REPL
 /// session.
+#[allow(clippy::too_many_lines)]
 pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnSummary> {
     // ── Auto-bootstrap ──────────────────────────────────────────────────
     // If no mission is active, try to bootstrap an ephemeral one rooted at

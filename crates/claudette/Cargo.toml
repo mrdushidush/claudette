@@ -117,7 +117,6 @@ pedantic = { level = "warn", priority = -1 }
 module_name_repetitions = "allow"
 missing_panics_doc = "allow"
 missing_errors_doc = "allow"
-too_many_lines = "allow"
 cast_possible_truncation = "allow"
 cast_sign_loss = "allow"
 cast_precision_loss = "allow"
@@ -136,4 +135,3 @@ match_same_arms = "allow"
 uninlined_format_args = "allow"
 # Upstream (forked-runtime) style:
 doc_markdown = "allow"
-too_many_arguments = "allow"

@@ -317,6 +317,7 @@ where
     /// Same as [`Self::run_turn`] but the user message also carries N image
     /// attachments (`(media_type, base64_data)` pairs). Used by the TUI's
     /// clipboard-paste / `@path` flow.
+    #[allow(clippy::too_many_lines)]
     pub fn run_turn_with_images(
         &mut self,
         user_input: impl Into<String>,

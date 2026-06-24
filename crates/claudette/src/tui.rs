@@ -275,6 +275,7 @@ impl Default for App {
 }
 
 impl App {
+    #[allow(clippy::too_many_lines)]
     fn handle_tui_event(&mut self, event: TuiEvent) {
         match event {
             TuiEvent::Token(delta) => self.streaming_text.push_str(&delta),
@@ -721,6 +722,7 @@ pub fn run_tui(session: Session) -> Result<()> {
 // Event loop
 // ─────────────────────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_lines)]
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
     tui_rx: &Receiver<TuiEvent>,

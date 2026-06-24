@@ -288,6 +288,7 @@ fn parse_sessions_subcommand(arg: Option<&str>) -> SlashCommand {
 /// `rebuild` is the callback that produces a fresh runtime from a session;
 /// it's used by commands that swap the conversation context (`/clear`,
 /// `/load`, `/reload`, `/compact`, `/preset`, `/brain`).
+#[allow(clippy::too_many_lines)]
 pub fn dispatch_slash_command<C, T, W, R>(
     cmd: SlashCommand,
     runtime: &mut ConversationRuntime<C, T>,
@@ -437,6 +438,7 @@ where
 
 // === Handlers ================================================================
 
+#[allow(clippy::too_many_lines)]
 fn print_help(out: &mut impl Write) {
     // Grouped by purpose so the user can scan visually instead of skimming
     // a 23-line flat list. The first section header doubles as the title.

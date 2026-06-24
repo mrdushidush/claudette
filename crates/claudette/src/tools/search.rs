@@ -204,6 +204,7 @@ fn run_glob_search(input: &str) -> Result<String, String> {
     .to_string())
 }
 
+#[allow(clippy::too_many_lines)]
 fn run_grep_search(input: &str) -> Result<String, String> {
     let v: Value = serde_json::from_str(input)
         .map_err(|e| format!("grep_search: invalid JSON ({e}): {input}"))?;

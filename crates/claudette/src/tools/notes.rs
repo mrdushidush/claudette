@@ -195,6 +195,7 @@ fn run_note_create(input: &str) -> Result<String, String> {
     Ok(result.to_string())
 }
 
+#[allow(clippy::too_many_lines)]
 fn run_note_list(input: &str) -> Result<String, String> {
     let v: Value = serde_json::from_str(input).unwrap_or(json!({}));
     let filter_tag = v

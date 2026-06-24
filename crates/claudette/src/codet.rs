@@ -443,6 +443,7 @@ fn rust_syntax_check_ok(result: &CommandResult) -> bool {
 // Python validation
 // ────────────────────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_lines)]
 fn validate_python(path: &Path, references: &[ReferenceFile]) -> CodetResult {
     let mut fixes_applied: u32 = 0;
     let mut attempts_made: u32 = 0;
@@ -848,6 +849,7 @@ struct Patch {
     replace: String,
 }
 
+#[allow(clippy::too_many_lines)]
 fn try_fix_loop(
     path: &Path,
     original_content: &str,

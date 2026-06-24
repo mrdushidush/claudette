@@ -1010,6 +1010,7 @@ impl OllamaApiClient {
     /// spec.)
     ///
     /// Generic over `BufRead` so the unit tests can pass a `Cursor` directly.
+    #[allow(clippy::too_many_lines)]
     fn consume_sse_lines<R: BufRead>(
         &self,
         reader: R,

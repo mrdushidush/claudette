@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 
 use crate::test_runner::run_command_with_timeout;
 
+#[allow(clippy::too_many_lines)]
 pub(super) fn schemas() -> Vec<Value> {
     vec![
         json!({

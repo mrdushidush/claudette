@@ -401,6 +401,7 @@ fn run_mission_attach(input: &str) -> Result<String, String> {
 
 // ─── mission_submit (capstone) ───────────────────────────────────────────
 
+#[allow(clippy::too_many_lines)]
 fn run_mission_submit(input: &str) -> Result<String, String> {
     // Submitting pushes to origin and opens a PR via the GitHub API — both
     // are network egress. Refuse up front under offline mode rather than doing
