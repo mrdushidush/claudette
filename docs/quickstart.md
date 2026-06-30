@@ -20,6 +20,14 @@ The `qwen3.5:4b` brain handles every tool-using flow on its own. Prefer LM
 Studio or a bigger model? See [configuration.md](configuration.md) and
 [hardware.md](hardware.md).
 
+> **Integrations are opt-in at build time.** The default install is a lean,
+> air-gapped coding agent with **no cloud code**. The Telegram bot, Gmail,
+> Google Calendar, and the voice / morning-briefing helpers live behind the
+> `integrations` feature — install with `cargo install claudette --features
+> integrations` if you want them. The `--telegram`, `--auth-google`, and
+> `--briefing` flows below all need that build; without it they print a
+> one-line "reinstall with `--features integrations`" notice.
+
 ## 2. Verify (30 sec)
 
 ```bash
@@ -54,7 +62,7 @@ different command:
 claudette                            # interactive REPL
 claudette --tui                      # fullscreen TUI
 claudette "your prompt here"         # one-shot, prints reply and exits
-claudette --telegram --chat any      # Telegram bot
+claudette --telegram --chat any      # Telegram bot (needs --features integrations)
 claudette --resume                   # resume last session
 claudette --offline "..."            # enforced air-gap: block all cloud egress
 ```
@@ -184,7 +192,7 @@ claudette
 > what's the status of PR #5?
 ```
 
-### Google Calendar + Gmail (needs OAuth)
+### Google Calendar + Gmail (needs `--features integrations` + OAuth)
 
 Walkthrough: [google_setup.md](google_setup.md).
 
@@ -195,7 +203,7 @@ claudette
 > what's on my calendar tomorrow?
 ```
 
-### Telegram bot with voice
+### Telegram bot with voice (needs `--features integrations`)
 
 Get a token from `@BotFather`, set `TELEGRAM_BOT_TOKEN`, pull a Whisper model
 under `~/.claudette/models/ggml-large-v3-turbo.bin`:
@@ -207,7 +215,7 @@ claudette --telegram --chat any   # accept all chats; for production use --chat 
 Send a voice note — Claudette transcribes it (Whisper), runs the turn, replies
 in text. Type `/voice` for spoken replies too.
 
-### Morning briefing
+### Morning briefing (needs `--features integrations`)
 
 ```bash
 claudette --briefing                       # 07:00 weekdays: calendar + weather + email

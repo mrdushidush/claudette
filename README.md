@@ -34,6 +34,8 @@ ollama pull qwen3.5:4b        # 3.4 GB model, one-time download
 claudette "what time is it?"
 ```
 
+**Want the cloud integrations** (Telegram bot, Gmail, Google Calendar, voice in/out, morning briefing)? They reach third-party services, so they are **not** in the default coding-only build — install with `cargo install claudette --features integrations` (or add `--features integrations` to a `cargo build`). Without it, `--telegram`, `--auth-google`, and `--briefing` print a one-line "reinstall with `--features integrations`" notice instead of running.
+
 Prefer not to pipe curl into a shell? Grab a [prebuilt release](https://github.com/mrdushidush/claudette/releases/latest) - each ships a SHA256. No GPU? The 4B model runs on plain CPU. Full setup and first flows → [docs/quickstart.md](docs/quickstart.md).
 
 ---
