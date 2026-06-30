@@ -22,8 +22,8 @@ src/
 ├── run.rs            — Runtime builder, REPL loop, autosave, session compaction, forge pipeline
 ├── executor.rs       — SecretaryToolExecutor: enable_tools meta-tool + dispatch
 ├── tools.rs          — Aggregates per-group schemas + routes dispatch_tool() through each sub-module
-├── tools/            — One module per tool cluster (calendar, codegen, facts, file_ops, git, github, gmail, ide, markets, notes, registry, schedule, search, shell, telegram, todos, web_search)
-├── tool_groups.rs    — ToolRegistry + the 18 on-demand tool-group definitions
+├── tools/            — One module per tool cluster (calendar, codegen, facts, file_ops, git, github, gmail, ide, notes, registry, schedule, search, shell, telegram, todos, web_search)
+├── tool_groups.rs    — ToolRegistry + the 21 on-demand tool-group definitions
 ├── codet.rs          — Code-generation sidecar (syntax check, surgical fix loop, tests)
 ├── test_runner.rs    — Python/Rust/JS/TS syntax + test runners
 ├── commands.rs       — Slash-command parsers and handlers
@@ -49,33 +49,38 @@ src/
 
 ## The on-demand tool-group contract
 
-`ToolRegistry` lives behind an `Arc<Mutex<_>>`. The `OllamaApiClient` reads it on every `/api/chat` request, so when the model calls `enable_tools("markets")`, the executor mutates the shared registry and the next API call advertises the expanded tool list. Adding a new tool group is a three-step change (add enum variant, register tool set, document the group) and costs zero context until first use.
+`ToolRegistry` lives behind an `Arc<Mutex<_>>`. The `OllamaApiClient` reads it on every `/api/chat` request, so when the model calls `enable_tools("git")`, the executor mutates the shared registry and the next API call advertises the expanded tool list. Adding a new tool group is a three-step change (add enum variant, register tool set, document the group) and costs zero context until first use.
 
 ## Tool groups
 
-22 groups, ~80 tools total as of v0.6.0 (added Quality, Semantic, Vision, Clipboard; collapsed 18 lesser-used tools into polymorphic merges + outright drops). Schema cost: ~840 chars (~210 tokens) on every turn until the model enables a group; the full 22-group surface is ~34 KB if every group is loaded at once. A follow-up will trim back toward the ~26 KB target by dropping the v0.6.0 deprecation-alias arms (still dispatched for one release) and tightening verbose descriptions.
+21 groups, ~80 tools total as of v0.6.0 (added Quality, Semantic, Vision, Clipboard; collapsed 18 lesser-used tools into polymorphic merges + outright drops). Schema cost: ~840 chars (~210 tokens) on every turn until the model enables a group; the full 21-group surface is ~34 KB if every group is loaded at once. A follow-up will trim back toward the ~26 KB target by dropping the v0.6.0 deprecation-alias arms (still dispatched for one release) and tightening verbose descriptions.
+
+The `gmail`, `calendar`, and `telegram` groups are compiled **only** into an `integrations` build (`cargo install claudette --features integrations`); the default coding-only binary omits them entirely — see [Install](../README.md#install).
 
 | Group | Tools | What it does |
 |-------|-------|--------------|
 | **core** (always on) | 3 | `enable_tools` (the meta-tool), `get_current_time`, `load_workspace_rules` |
-| `notes` | 5 | Personal notes — create, list, read, update, delete |
-| `todos` | 5 | Todo list — add, list, complete, uncomplete, delete |
-| `files` | 3 | `read_file`, `write_file` (sandboxed under `~/.claudette/files/`), `list_dir` |
+| `notes` | 4 | Personal notes — `note_create` (upsert), list, read, delete |
+| `todos` | 4 | Todo list — add, list, set status, delete |
+| `files` | 3 | `read_file`, `write_file`, `list_dir` |
 | `code` | 1 | `generate_code` — routes through the Codet coder + validator pipeline |
 | `meta` | 1 | `get_capabilities` — config, tool inventory, limits |
 | `git` | 9 | status, diff, log, add, commit, branch, checkout, push, clone |
 | `ide` | 3 | Open in editor (`code`), reveal in file manager, open URL in browser |
-| `search` | 4 | `web_search` (Brave), `web_fetch`, `glob_search`, `grep_search` |
-| `advanced` | 2 | Bash shell, `apply_diff` / `edit_file` (find/replace) |
-| `facts` | 4 | Wikipedia search/summary, Open-Meteo weather (current/forecast) |
-| `registry` | 4 | crates.io info/search, npmjs info/search |
-| `github` | 16 | PRs (list, status, fork, create), issues (get, create, comment, list-repo, list-assigned), code search, **brownfield missions** (start, status, list, attach, exit, submit) |
-| `markets` | 7 | TradingView quotes/ratings/calendar, Algorand ASA stats via vestige.fi |
-| `telegram` | 3 | Bot messaging: send messages, poll updates, send photos |
-| `calendar` | 5 | Google Calendar: list / create / update / delete events, RSVP |
+| `search` | 5 | `repo_map`, `grep_search`, `glob_search`, `web_search` (Brave), `web_fetch` |
+| `advanced` | 7 | `bash` (+ `bash_background` / `bash_status` / `bash_tail`), `edit_file`, `apply_diff`, `ask_user` |
+| `facts` | 2 | `wikipedia` (summary/search), `weather` (Open-Meteo) |
+| `registry` | 2 | `crate_info` (crates.io), `npm_info` (npmjs) |
+| `github` | 15 | PRs (status, view, fork, create), issues (inbox, get, create, comment, list-repo), code search, **brownfield missions** (start, state, submit), `forge_tail` |
+| `telegram` | 1 | `tg_send` — bot messaging (text or photo). **`integrations` build only.** |
+| `calendar` | 4 | Google Calendar: list / create / update / delete events (RSVP via update). **`integrations` build only.** |
 | `schedule` | 4 | Proactive reminders: one-shot + recurring schedules that fire prompts back at you |
-| `gmail` | 4 | Gmail (read-only): list, search, read, list labels — with `<email>` provenance wrapping |
+| `gmail` | 4 | Gmail (read-only): list, search, read, list labels — with `<email>` provenance wrapping. **`integrations` build only.** |
 | `recall` | 1 | Cross-session memory: semantic search over past conversation turns (`recall <query>`) |
+| `quality` | 3 | `run_tests`, `diagnostics` (cargo check / clippy / tsc / mypy / ruff), `apply_patch` (atomic multi-file unified diff) |
+| `semantic` | 1 | `semantic_grep` — workspace search with token-overlap ranking (fuzzier than grep) |
+| `vision` | 2 | `screenshot_capture` (PNG to `~/.claudette/files/`), `image_describe` (needs a VLM loaded in LM Studio) |
+| `clipboard` | 2 | `clipboard_read`, `clipboard_write` (text only, 1 MB cap) |
 
 ## Codet sidecar contract
 

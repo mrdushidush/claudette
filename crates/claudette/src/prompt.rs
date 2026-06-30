@@ -60,7 +60,7 @@ fn default_assistant_persona() -> Option<crate::forge::personas::Persona> {
 /// discovered via `crate::ProjectContext`.
 #[must_use]
 pub fn agent_system_prompt_with_memory(memory: Option<&str>, concise: bool) -> Vec<String> {
-    // Verbose manifest — 17 groups × verb-level summary (~440 tokens). A
+    // Verbose manifest — 21 groups × verb-level summary (~440 tokens). A
     // terser variant (5-8 tokens per line) regressed brain100 on qwen3.5-4b
     // from 94% to 84%: the small brain needs the verb decomposition to
     // chain `enable_tools(group)` into the right specific tool name without

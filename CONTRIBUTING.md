@@ -84,7 +84,7 @@ existing history is the style guide.
 3. Wire it into the `dispatch` match at the top of the module.
 4. For a new group: add a `ToolGroup` variant in
    `src/tool_groups.rs`, register the group's schemas and dispatcher
-   in `src/tools.rs` (follow the 18 existing groups as templates).
+   in `src/tools.rs` (follow the 21 existing groups as templates).
 5. Add at least one unit test covering the happy path and one
    covering a known failure mode (missing parameter, invalid JSON,
    boundary condition).
