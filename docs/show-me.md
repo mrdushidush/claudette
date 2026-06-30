@@ -36,12 +36,11 @@ Calendar events are created, moved, and cancelled only after you confirm. Your *
 
 ---
 
-## Weather, news, markets, knowledge
+## Weather, news, knowledge
 
 These work out of the box; some surface more detail with a free API key (Brave, etc — see [`configuration.md`](configuration.md)).
 
 - *"Is it going to rain in Tel Aviv tonight?"*
-- *"What's Bitcoin trading at?"*
 - *"Look up the half-life of cesium-137."*
 - *"Who won the 1994 World Cup, and what was the score?"*
 - *"Find me three news articles from this week about Mars Sample Return."*
@@ -84,9 +83,9 @@ If you ever told Claudette something in any session, you can pull it back.
 
 ---
 
-## Code (optional)
+## Code
 
-Claudette is not primarily a coding agent — but it includes one. `generate_code` and `--forge` route through a dedicated coder model.
+Claudette is first and foremost a coding agent. `generate_code` and `--forge` route through a dedicated coder model.
 
 - *"Write me a Python script that renames every .HEIC in this folder to .jpg using ffmpeg."*
 - *"Add a dark-mode toggle to my React app's settings page."*

@@ -24,8 +24,8 @@ opencode, Aider, Cline, Continue are coding agents and nothing else. Claudette's
 (files, search, repo-map, tests, `git`/`github`, the Codet code-gen sidecar, and the `--forge`
 Planner→Coder→Verifier pipeline) is first-class — and it ships alongside a deep assistant toolset
 no other tool here carries: `calendar` (Google Calendar CRUD + RSVP), `schedule` (proactive
-reminders + recurring briefings), `gmail` (read-only with `<email>` provenance wrapping), `markets`,
-`facts` (Wikipedia / Open-Meteo weather), and `telegram` (voice-capable bot interface). 22 opt-in
+reminders + recurring briefings), `gmail` (read-only with `<email>` provenance wrapping),
+`facts` (Wikipedia / Open-Meteo weather), and `telegram` (voice-capable bot interface). 21 opt-in
 tool groups in all, so the base schema stays tiny until the model enables what it needs.
 
 ### 2. Four interfaces, including a Telegram bot
