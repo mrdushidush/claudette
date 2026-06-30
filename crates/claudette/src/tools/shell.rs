@@ -10,9 +10,11 @@
 //! are auto-allowed.
 //!
 //! Background-job storage layout (`~/.claudette/jobs/`):
-//!   <id>.meta — JSON {job_id, pid, cmd, cwd, started_at}
-//!   <id>.out  — captured stdout
-//!   <id>.err  — captured stderr
+//!   <id>.meta — JSON {job_id, pid, cmd, cwd, started_at}. `cmd` is redacted
+//!               before it is written (roast 2026-06-30); the file is created
+//!               0600 / icacls-tightened like the secret store.
+//!   <id>.out  — captured stdout (0600). The child writes raw bytes; `bash_tail`
+//!   <id>.err  — captured stderr (0600). redacts each line on the way back out.
 //!   <id>.done — written by the reaper thread on child exit:
 //!               first line = exit code, second line = ended_at RFC3339.
 //!   No index.json — listings derive from <id>.meta globs at query time,
@@ -527,9 +529,14 @@ fn run_bash_background(input: &str) -> Result<String, String> {
     let job_id = new_job_id();
     let (meta_path, out_path, err_path, done_path) = job_paths(&job_id);
 
-    let out_file = fs::File::create(&out_path)
+    // 0600 on Unix / icacls-tightened on Windows (roast 2026-06-30): the
+    // child writes raw stdout/stderr here — a leaked AWS key in `env` output or
+    // a token in a build log would otherwise land under the default umask,
+    // readable by co-tenant users. The `bash_tail` reader redacts on the way
+    // back out; this closes the at-rest half.
+    let out_file = crate::secrets::create_private_file(&out_path)
         .map_err(|e| format!("bash_background: open {} failed: {e}", out_path.display()))?;
-    let err_file = fs::File::create(&err_path)
+    let err_file = crate::secrets::create_private_file(&err_path)
         .map_err(|e| format!("bash_background: open {} failed: {e}", err_path.display()))?;
 
     // Same platform-specific shell selection as the sync `bash` tool —
@@ -558,13 +565,20 @@ fn run_bash_background(input: &str) -> Result<String, String> {
     let meta = JobMeta {
         job_id: job_id.clone(),
         pid,
-        cmd: command.to_string(),
+        // Redact before persisting (roast 2026-06-30): the command can carry a
+        // PAT (`git push https://x-access-token:<PAT>@…`) and bash_status echoes
+        // meta.cmd back to the model. Mask it at rest and on the way out.
+        cmd: crate::redact::redact(command).into_owned(),
         cwd: cwd.display().to_string(),
         started_at: chrono::Local::now().to_rfc3339(),
     };
-    fs::write(
+    // 0600 / icacls — the meta file holds the (now redacted) command and pid;
+    // keep it owner-only like the secret store rather than umask-default.
+    crate::secrets::write_secret_file(
         &meta_path,
-        serde_json::to_string_pretty(&meta).unwrap_or_default(),
+        serde_json::to_string_pretty(&meta)
+            .unwrap_or_default()
+            .as_bytes(),
     )
     .map_err(|e| format!("bash_background: write meta failed: {e}"))?;
 
@@ -690,12 +704,54 @@ fn tail_file(path: &Path, n: usize) -> Vec<String> {
     let s = fs::read_to_string(path).unwrap_or_default();
     let all: Vec<&str> = s.lines().collect();
     let start = all.len().saturating_sub(n);
-    all[start..].iter().map(|s| (*s).to_string()).collect()
+    // Redact each surfaced line (roast 2026-06-30): the child wrote raw
+    // stdout/stderr to disk, so a token echoed by a build/log command would
+    // otherwise reach the model (and any transcript) verbatim.
+    all[start..]
+        .iter()
+        .map(|s| crate::redact::redact(s).into_owned())
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tail_file_redacts_surfaced_secrets() {
+        // The child writes raw stdout to disk; bash_tail must redact what it
+        // surfaces to the model so a leaked key/token never round-trips.
+        let path = std::env::temp_dir().join(format!(
+            "claudette-tailtest-{}-{}.out",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        std::fs::write(
+            &path,
+            "starting build\nexport AWS=AKIAIOSFODNN7EXAMPLE\n\
+             remote https://ghp_ABCDEFGHIJKLMNOP0123456789@github.com/x/y\ndone\n",
+        )
+        .expect("write tmp out");
+        let lines = tail_file(&path, 100);
+        let _ = std::fs::remove_file(&path);
+        let joined = lines.join("\n");
+        assert!(
+            !joined.contains("AKIAIOSFODNN7EXAMPLE"),
+            "leaked aws key: {joined}"
+        );
+        assert!(
+            !joined.contains("ghp_ABCDEFGHIJKLMNOP"),
+            "leaked github token: {joined}"
+        );
+        assert!(joined.contains("<redacted:aws-key>"), "got: {joined}");
+        assert!(joined.contains("<redacted:github-token>"), "got: {joined}");
+        assert!(
+            joined.contains("starting build") && joined.contains("done"),
+            "non-secret lines must survive: {joined}"
+        );
+    }
 
     #[test]
     fn bash_rejects_missing_command() {
