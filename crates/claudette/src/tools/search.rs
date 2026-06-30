@@ -522,12 +522,16 @@ fn run_web_fetch(input: &str) -> Result<String, String> {
             "web_fetch: only http:// and https:// URLs are allowed, got: {url}"
         ));
     }
-    validate_fetch_target(url)?;
+    // SSRF guard: resolve the host ONCE and validate every address it maps to.
+    // The validated addresses are pinned into the client (below) so reqwest
+    // connects to exactly what we checked — a DNS-rebinding answer can't swap an
+    // internal IP in between the check and the TCP connect.
+    let target = validate_fetch_target(url)?;
     // Offline mode: the SSRF guard above already rejects loopback/private
     // targets, so any URL that reaches here is public — block it.
     crate::egress::guard(url)?;
 
-    let client = web_fetch_client()?;
+    let client = web_fetch_client(&target)?;
 
     let resp = client
         .get(url)
@@ -568,31 +572,59 @@ fn run_web_fetch(input: &str) -> Result<String, String> {
     .to_string())
 }
 
-/// Build the blocking HTTP client `web_fetch` uses, carrying a **custom
-/// redirect policy** that re-runs [`validate_fetch_target`] on every redirect
-/// hop. Without this, `validate_fetch_target(url)?` only checks the *initial*
-/// URL while reqwest then silently follows up to 10 redirects — so a public
-/// page returning `301 → http://169.254.169.254/` (cloud metadata) or
-/// `→ http://192.168.0.1/` would bypass the SSRF guard. The policy refuses any
-/// redirect target the guard rejects, and caps the chain at 10 hops (matching
-/// reqwest's default) so a redirect loop can't spin forever.
-fn web_fetch_client() -> Result<reqwest::blocking::Client, String> {
+/// Build the blocking HTTP client `web_fetch` uses. Two layers of SSRF defense:
+///
+///  * **Connection pinning** — when `target` carries validated addresses (the
+///    normal case), the client resolves `target.host` to exactly those IPs via
+///    `resolve_to_addrs`. reqwest then connects to the addresses we already
+///    checked instead of re-resolving the name at connect time, so a low-TTL
+///    DNS-rebinding answer can't slip an internal IP in between the
+///    [`validate_fetch_target`] check and the socket connect (the TOCTOU window
+///    the previous code left open). The `Host` header and TLS SNI still use the
+///    original hostname.
+///  * **Per-redirect re-validation** — a custom redirect policy re-runs
+///    [`validate_fetch_target`] on every hop, so a public page returning
+///    `301 → http://169.254.169.254/` (cloud metadata) or `→ 192.168.0.1` is
+///    refused, and the chain is capped at 10 hops so a loop can't spin forever.
+///
+/// Redirect hops to a *different* host are re-resolved by reqwest for their own
+/// connection: they are re-validated (a static internal redirect is blocked) but
+/// not IP-pinned, so a rebinding answer on a redirect hop is a narrower residual
+/// — closing it fully would mean following redirects manually. (roast 2026-06-30)
+fn web_fetch_client(target: &FetchTarget) -> Result<reqwest::blocking::Client, String> {
     let policy = reqwest::redirect::Policy::custom(|attempt| {
         if attempt.previous().len() >= 10 {
             return attempt.error(std::io::Error::other("web_fetch: too many redirects"));
         }
         match validate_fetch_target(attempt.url().as_str()) {
-            Ok(()) => attempt.follow(),
+            Ok(_) => attempt.follow(),
             // The SSRF guard rejected this redirect target — turn it into a
             // hard error so the chain stops here instead of being followed.
             Err(msg) => attempt.error(std::io::Error::other(msg)),
         }
     });
-    reqwest::blocking::Client::builder()
+    let mut builder = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(WEB_FETCH_TIMEOUT_SECS))
-        .redirect(policy)
+        .redirect(policy);
+    if !target.addrs.is_empty() {
+        // Pin the connection to the validated IP(s). Empty addrs only happens
+        // under CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE=1, where the user opted into
+        // reaching arbitrary LAN hosts and we deliberately don't pin.
+        builder = builder.resolve_to_addrs(&target.host, &target.addrs);
+    }
+    builder
         .build()
         .map_err(|e| format!("web_fetch: build http client: {e}"))
+}
+
+/// A validated `web_fetch` destination: the original hostname plus the resolved
+/// addresses that passed the SSRF check. The addresses are pinned into the
+/// client so the connection can't be rebound to an internal IP after the check.
+/// `addrs` is empty only under `CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE=1`, which
+/// means "allowed, don't pin".
+struct FetchTarget {
+    host: String,
+    addrs: Vec<std::net::SocketAddr>,
 }
 
 /// SSRF guard for `web_fetch`. Refuses URLs whose host is loopback, private
@@ -601,9 +633,20 @@ fn web_fetch_client() -> Result<reqwest::blocking::Client, String> {
 /// resolved so a public name pointing at an internal address is also caught.
 /// Opt out with `CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE=1` (users fetching their
 /// own LAN services). (roast 2026-06-02 H2)
-fn validate_fetch_target(url: &str) -> Result<(), String> {
+///
+/// Resolution is **fail-closed** (roast 2026-06-30): a host that fails to
+/// resolve, or resolves to zero addresses, is refused rather than falling
+/// through to `Ok` — otherwise a name that didn't resolve at check time but
+/// resolved at connect time skipped the guard. On success the validated
+/// addresses are returned so the caller can pin the connection to them.
+fn validate_fetch_target(url: &str) -> Result<FetchTarget, String> {
     if std::env::var("CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE").as_deref() == Ok("1") {
-        return Ok(());
+        // Opted into LAN fetches: skip both the block-list and IP pinning (the
+        // point is to reach arbitrary user-controlled hosts).
+        return Ok(FetchTarget {
+            host: String::new(),
+            addrs: Vec::new(),
+        });
     }
     // Caller already validated the scheme as lowercase http:// or https://.
     let (rest, default_port) = if let Some(r) = url.strip_prefix("https://") {
@@ -611,7 +654,8 @@ fn validate_fetch_target(url: &str) -> Result<(), String> {
     } else if let Some(r) = url.strip_prefix("http://") {
         (r, 80u16)
     } else {
-        return Ok(());
+        // Unreachable: the caller validated the scheme. Fail closed anyway.
+        return Err("web_fetch: only http:// and https:// URLs are allowed".to_string());
     };
     let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
     let hostport = authority.rsplit('@').next().unwrap_or(authority);
@@ -645,22 +689,39 @@ fn validate_fetch_target(url: &str) -> Result<(), String> {
         return Err(blocked_target_msg(&host));
     }
 
-    // IP literal → check directly. Hostname → resolve and check every address.
+    // IP literal → check directly, pin to that single address.
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
         if is_blocked_fetch_ip(&ip) {
             return Err(blocked_target_msg(&host));
         }
-        return Ok(());
+        return Ok(FetchTarget {
+            host,
+            addrs: vec![std::net::SocketAddr::new(ip, port)],
+        });
     }
+
+    // Hostname → resolve ONCE and fail closed. The old code checked addresses
+    // only inside `if let Ok(addrs)` and fell through to `Ok(())` on a
+    // resolution error or empty result, so an unresolvable-at-check name that
+    // resolved at connect time bypassed the guard. Now that is a refusal, and
+    // the validated addresses are returned to pin the connection.
     use std::net::ToSocketAddrs;
-    if let Ok(addrs) = (host.as_str(), port).to_socket_addrs() {
-        for addr in addrs {
-            if is_blocked_fetch_ip(&addr.ip()) {
-                return Err(blocked_target_msg(&host));
-            }
+    let resolved: Vec<std::net::SocketAddr> = (host.as_str(), port)
+        .to_socket_addrs()
+        .map_err(|e| format!("web_fetch: could not resolve host '{host}': {e}"))?
+        .collect();
+    if resolved.is_empty() {
+        return Err(format!("web_fetch: host '{host}' resolved to no addresses"));
+    }
+    for addr in &resolved {
+        if is_blocked_fetch_ip(&addr.ip()) {
+            return Err(blocked_target_msg(&host));
         }
     }
-    Ok(())
+    Ok(FetchTarget {
+        host,
+        addrs: resolved,
+    })
 }
 
 fn blocked_target_msg(host: &str) -> String {
@@ -750,7 +811,13 @@ mod tests {
             }
         });
 
-        let client = web_fetch_client().expect("build client");
+        // Build an unpinned client (empty addrs) so it can reach the loopback
+        // test server; the redirect policy is what we're exercising here.
+        let client = web_fetch_client(&FetchTarget {
+            host: String::new(),
+            addrs: Vec::new(),
+        })
+        .expect("build client");
         let result = client.get(format!("http://{addr}/")).send();
         let _ = server.join();
 
@@ -758,6 +825,31 @@ mod tests {
             result.is_err(),
             "redirect to the 169.254.169.254 metadata host must be refused"
         );
+    }
+
+    #[test]
+    fn web_fetch_fails_closed_on_unresolvable_host() {
+        // roast 2026-06-30: a host that doesn't resolve must be REFUSED, not
+        // fall through to Ok (which let reqwest re-resolve at connect time, the
+        // TOCTOU bypass). `.invalid` is reserved by RFC 6761 to never resolve.
+        let r = validate_fetch_target("http://nonexistent-host.invalid/");
+        assert!(r.is_err(), "an unresolvable host must fail closed, got Ok");
+    }
+
+    #[test]
+    fn web_fetch_returns_pinnable_addrs_for_public_ip() {
+        // A public IP literal is allowed AND carries the validated address so
+        // the client can pin the connection to it (no re-resolution).
+        let target = validate_fetch_target("https://1.1.1.1/").expect("public IP allowed");
+        assert!(
+            !target.addrs.is_empty(),
+            "must return the validated address to pin"
+        );
+        assert!(
+            target.addrs.iter().all(|a| !is_blocked_fetch_ip(&a.ip())),
+            "pinned addresses must all be public"
+        );
+        assert!(target.addrs.iter().any(|a| a.port() == 443), "port carried");
     }
 
     #[test]
