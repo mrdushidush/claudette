@@ -58,6 +58,34 @@ pub(crate) fn write_secret_file(path: &Path, contents: &[u8]) -> std::io::Result
     }
 }
 
+/// Create (or truncate) a file restricted to the current user and return the
+/// open write handle. Unix: `OpenOptions::mode(0o600)` so the restrictive mode
+/// comes from the create syscall (no umask race). Windows: create then
+/// best-effort `icacls` tighten (mirrors [`write_secret_file`]).
+///
+/// Use this — rather than [`write_secret_file`] — when a *child process* writes
+/// the bytes through the returned handle (e.g. the background-job stdout/stderr
+/// capture files), so we hold the file but not its contents.
+pub(crate) fn create_private_file(path: &Path) -> std::io::Result<std::fs::File> {
+    #[cfg(unix)]
+    {
+        use std::fs::OpenOptions;
+        use std::os::unix::fs::OpenOptionsExt;
+        OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+    }
+    #[cfg(not(unix))]
+    {
+        let f = std::fs::File::create(path)?;
+        harden_windows_acl(path);
+        Ok(f)
+    }
+}
+
 /// Restrict a freshly-written secret file to the current user on Windows via
 /// the built-in `icacls`: remove inherited ACEs (`/inheritance:r`) and grant
 /// the current account Full control (`/grant:r`). The crate forbids
@@ -259,6 +287,36 @@ mod tests {
         assert!(path.ends_with("github.token"));
         let path = secret_file_path("TELEGRAM");
         assert!(path.ends_with("telegram.token"));
+    }
+
+    #[test]
+    fn create_private_file_writes_and_truncates() {
+        use std::io::Write;
+        let path = std::env::temp_dir().join(format!(
+            "claudette-priv-{}-{}.tmp",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        {
+            let mut f = create_private_file(&path).expect("create");
+            f.write_all(b"first-longer-contents").expect("write");
+        }
+        // A second create truncates (no stale bytes leak through).
+        {
+            let mut f = create_private_file(&path).expect("recreate");
+            f.write_all(b"x").expect("write");
+        }
+        let body = std::fs::read_to_string(&path).unwrap_or_default();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "must be owner read/write only, got {mode:o}");
+        }
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(body, "x", "create must truncate prior contents");
     }
 
     #[test]
