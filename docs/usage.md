@@ -4,17 +4,21 @@
 
 Run `claudette --help` for the authoritative reference.
 
+Flags marked **(integrations)** need a build with `--features integrations`
+(`cargo install claudette --features integrations`). The default coding-only
+binary has no cloud code, so it errors with a one-line reinstall hint instead.
+
 | Flag | Effect |
 |------|--------|
 | `--resume`, `-r` | Continue the most recent saved session. |
-| `--telegram`, `-t` | Run as a Telegram bot (needs `TELEGRAM_BOT_TOKEN`). |
+| `--telegram`, `-t` | **(integrations)** Run as a Telegram bot (needs `TELEGRAM_BOT_TOKEN`). |
 | `--tui` | Launch the fullscreen TUI. |
 | `--forge "<prompt>"` | Run forge-mode (Planner → Coder → Verifier pipeline) against the active brownfield mission. Requires an active mission — start one with `/brownfield <repo>` or `mission_start` first. |
 | `--chat <id>` | Restrict Telegram bot to a specific chat ID. Repeatable, or set `CLAUDETTE_TELEGRAM_CHAT` to a comma-separated list. The bot **default-denies** when no allowlist is provided. |
 | `--chat any` | Explicit accept-all: serve every incoming Telegram chat. Required to start the bot with no allowlist. Prints a loud warning. |
-| `--auth-google [scope]` | Run the loopback OAuth flow. Scope is `calendar` (default) or `gmail`. Stores tokens under `~/.claudette/secrets/`. |
+| `--auth-google [scope]` | **(integrations)** Run the loopback OAuth flow. Scope is `calendar` (default) or `gmail`. Stores tokens under `~/.claudette/secrets/`. |
 | `--revoke` | Pair with `--auth-google` to revoke consent and delete the local token file. |
-| `--briefing` | Write a recurring morning-briefing schedule entry and exit. |
+| `--briefing` | **(integrations)** Write a recurring morning-briefing schedule entry and exit. |
 | `--time HH:MM` | Modifier for `--briefing`. Default `07:00`. |
 | `--days <spec>` | Modifier for `--briefing`. One of `weekdays` (default), `daily`, or a single weekday name. |
 | `--help`, `-h` | Show the flag reference and exit. |
