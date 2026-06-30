@@ -29,17 +29,26 @@ fn rules() -> &'static [(Regex, &'static str)] {
         // never a runtime condition.
         let r = |p: &str| Regex::new(p).expect("redaction pattern must compile");
         vec![
-            // `Authorization: Bearer <token>` / `Bearer <token>` — keep the
-            // scheme word, drop the credential.
+            // `Authorization: Bearer <token>` / `Bearer <token>` /
+            // `Basic <base64>` — keep the scheme word, drop the credential.
             (
-                r(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}"),
-                "Bearer <redacted>",
+                r(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}"),
+                "${1} <redacted>",
             ),
-            // GitHub PATs and friends: ghp_, gho_, ghu_, ghs_, ghr_.
+            // GitHub classic PATs and friends: ghp_, gho_, ghu_, ghs_, ghr_.
             (
                 r(r"\bgh[pousr]_[A-Za-z0-9]{16,}"),
                 "<redacted:github-token>",
             ),
+            // GitHub *fine-grained* PATs — the current default since 2022
+            // (github_pat_<22>_<59>). The bare `gh[pousr]_` rule above does NOT
+            // match this prefix (the char after `gh` is `i`). (roast 2026-06-30)
+            (
+                r(r"\bgithub_pat_[A-Za-z0-9_]{20,}"),
+                "<redacted:github-token>",
+            ),
+            // GitLab personal / project / group access tokens: glpat-…
+            (r(r"\bglpat-[A-Za-z0-9_-]{16,}"), "<redacted:gitlab-token>"),
             // Slack tokens: xoxb-, xoxp-, xoxa-, xoxr-, xoxs-.
             (
                 r(r"\bxox[baprs]-[A-Za-z0-9-]{8,}"),
@@ -54,6 +63,20 @@ fn rules() -> &'static [(Regex, &'static str)] {
                 r(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}"),
                 "<redacted:api-key>",
             ),
+            // JSON Web Tokens: three base64url segments. The `eyJ` prefix is
+            // base64 of `{"` (the JSON header), so this is high-precision and
+            // won't match arbitrary dotted identifiers or git refs.
+            (
+                r(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
+                "<redacted:jwt>",
+            ),
+            // PEM private-key blocks (RSA / EC / OPENSSH / PKCS#8). Spans
+            // newlines via the `(?s)` dot-matches-newline flag; lazy `.*?` stops
+            // at the first END line. The whole block becomes one marker.
+            (
+                r(r"(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----"),
+                "<redacted:private-key>",
+            ),
             // `x-access-token:<pat>@` and `<user>:<pat>@github` URL creds.
             // The char classes exclude `<>` so this rule can never re-match an
             // already-substituted `<redacted:KIND>` marker (whose internal
@@ -61,6 +84,20 @@ fn rules() -> &'static [(Regex, &'static str)] {
             (
                 r(r"://[^/\s:@<>]+:[^/\s:@<>]{8,}@"),
                 "://<redacted:url-credential>@",
+            ),
+            // Backstop for secret-bearing headers / fields that carry a value
+            // with no recognised token shape: `X-Api-Key: …`, `PRIVATE-TOKEN: …`,
+            // `api_key=…`. Keeps the field name + separator. The value class
+            // `[^\s<]\S*` requires a non-`<` first char, so it never re-matches
+            // an already-substituted `<redacted:…>` marker (keeps redaction
+            // idempotent). `authorization` is intentionally omitted — the
+            // Bearer/Basic and url-credential rules above already cover it, and
+            // including it here would clobber the preserved scheme word. Scoped
+            // to compound header/field names that don't occur in prose, so it
+            // won't mangle a sentence containing "password:". (roast 2026-06-30)
+            (
+                r(r"(?i)\b(x-api-key|x-auth-token|private-token|api[_-]?key)(\s*[:=]\s*)[^\s<]\S*"),
+                "${1}${2}<redacted:header-secret>",
             ),
         ]
     })
@@ -119,6 +156,84 @@ mod tests {
             redact("token=ya29.a0AfH6SMxxxxxxxxxxxxxxxxxxxx").contains("<redacted:google-token>")
         );
         assert!(redact("OPENAI=sk-proj-abcdefghijklmnopqrstuvwx").contains("<redacted:api-key>"));
+    }
+
+    #[test]
+    fn masks_github_fine_grained_pat() {
+        let tok = "github_pat_11ABCDE0Y0abcdefghijkl_mnopqrstuvwxyzABCDEFGHIJ1234567890abcdEFGH";
+        let input = format!("git remote set-url o https://{tok}@github.com/x/y");
+        let out = redact(&input);
+        assert!(!out.contains("mnopqrstuvwxyz"), "got: {out}");
+        assert!(out.contains("<redacted:github-token>"), "got: {out}");
+    }
+
+    #[test]
+    fn masks_gitlab_pat() {
+        let out = redact("PRIVATE-TOKEN: glpat-ABCdef123456_-XYZ7890");
+        assert!(!out.contains("glpat-ABCdef123456"), "got: {out}");
+        assert!(out.contains("redacted"), "got: {out}");
+    }
+
+    #[test]
+    fn masks_jwt() {
+        let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.\
+                   eyJzdWIiOiIxMjM0NTY3ODkwIn0.\
+                   SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+        let input = format!("token={jwt}");
+        let out = redact(&input);
+        assert!(
+            !out.contains("SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV"),
+            "got: {out}"
+        );
+        assert!(out.contains("<redacted:jwt>"), "got: {out}");
+    }
+
+    #[test]
+    fn masks_pem_private_key_block() {
+        let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\n\
+                   b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\n\
+                   AAAAAAAAABAAAABAAAA\n\
+                   -----END OPENSSH PRIVATE KEY-----";
+        let input = format!("here is the key:\n{pem}\nbye");
+        let out = redact(&input);
+        assert!(!out.contains("b3BlbnNzaC1rZXk"), "got: {out}");
+        assert!(out.contains("<redacted:private-key>"), "got: {out}");
+        assert!(
+            out.contains("here is the key:"),
+            "surrounding text kept: {out}"
+        );
+        assert!(out.contains("bye"), "got: {out}");
+    }
+
+    #[test]
+    fn masks_bare_api_key_header() {
+        let out = redact("X-Api-Key: 7c4f9a0b1d2e3f4a5b6c7d8e");
+        assert!(!out.contains("7c4f9a0b1d2e"), "got: {out}");
+        assert!(out.contains("<redacted:header-secret>"), "got: {out}");
+        assert!(out.contains("X-Api-Key:"), "field name preserved: {out}");
+    }
+
+    #[test]
+    fn masks_basic_auth_keeps_scheme() {
+        let out = redact("Authorization: Basic dXNlcm5hbWU6c3VwZXJzZWNyZXQ=");
+        assert!(out.contains("Basic <redacted>"), "got: {out}");
+        assert!(!out.contains("c3VwZXJzZWNyZXQ"), "got: {out}");
+    }
+
+    #[test]
+    fn header_backstop_is_idempotent() {
+        let once = redact("api_key=supersecretvalue123456").into_owned();
+        assert!(once.contains("<redacted:header-secret>"), "got: {once}");
+        let twice = redact(&once);
+        assert_eq!(twice, once, "re-redaction must be stable: {twice}");
+    }
+
+    #[test]
+    fn does_not_mangle_prose_with_password_word() {
+        // The header backstop is scoped to compound field names, so an English
+        // sentence containing "password:" must survive untouched.
+        let s = "Reset your password: click the link we emailed you.";
+        assert_eq!(redact(s), s);
     }
 
     #[test]
