@@ -94,7 +94,17 @@ impl Session {
     }
 
     pub fn save_to_path(&self, path: impl AsRef<Path>) -> Result<(), SessionError> {
-        fs::write(path, self.to_json().render())?;
+        // Redact secret-shaped substrings and write owner-only (roast
+        // 2026-06-30). The autosaved session (and the `/save` slash) persists
+        // every raw tool result — a read `.env`, bash stdout, a token in a git
+        // error. The on-disk copy must not be a plaintext credential store
+        // readable by co-tenant users: mirror the transcript redaction and the
+        // secret store's 0600/icacls perms. Redaction is scoped to this disk
+        // sink so `to_json` stays a faithful in-memory view. Markers contain no
+        // quotes/backslashes, so the JSON stays valid and round-trips.
+        let rendered = self.to_json().render();
+        let safe = crate::redact::redact(&rendered);
+        crate::secrets::write_secret_file(path.as_ref(), safe.as_bytes())?;
         Ok(())
     }
 
@@ -472,5 +482,53 @@ mod tests {
             restored.messages[1].usage.expect("usage").total_tokens(),
             17
         );
+    }
+
+    #[test]
+    fn save_redacts_secrets_and_writes_owner_only() {
+        // A tool result carrying credentials must NOT land plaintext on disk,
+        // and the file must be owner-only (roast 2026-06-30).
+        let mut session = Session::new();
+        session.messages.push(ConversationMessage::tool_result(
+            "t1",
+            "bash",
+            "AWS_SECRET=AKIAIOSFODNN7EXAMPLE remote ghp_ABCDEFGHIJKLMNOP0123456789",
+            false,
+        ));
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("runtime-session-redact-{nanos}.json"));
+        session.save_to_path(&path).expect("session should save");
+        let on_disk = fs::read_to_string(&path).expect("read back");
+        // The redacted session must still be valid JSON that loads.
+        let reloaded = Session::load_from_path(&path).expect("redacted session must still parse");
+        #[cfg(unix)]
+        let mode = {
+            use std::os::unix::fs::PermissionsExt;
+            fs::metadata(&path).expect("metadata").permissions().mode() & 0o777
+        };
+        fs::remove_file(&path).expect("temp file should be removable");
+
+        assert!(
+            !on_disk.contains("AKIAIOSFODNN7EXAMPLE"),
+            "aws key leaked to disk: {on_disk}"
+        );
+        assert!(
+            !on_disk.contains("ghp_ABCDEFGHIJKLMNOP"),
+            "github token leaked to disk: {on_disk}"
+        );
+        assert!(
+            on_disk.contains("<redacted:aws-key>"),
+            "redaction marker missing: {on_disk}"
+        );
+        // The marker survived the round-trip in the tool-result output.
+        let ContentBlock::ToolResult { output, .. } = &reloaded.messages[0].blocks[0] else {
+            panic!("expected a tool_result block");
+        };
+        assert!(output.contains("<redacted:aws-key>"), "got: {output}");
+        #[cfg(unix)]
+        assert_eq!(mode, 0o600, "session file must be owner-only, got {mode:o}");
     }
 }
