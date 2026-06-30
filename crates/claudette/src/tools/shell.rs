@@ -163,10 +163,14 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
 /// UNGUARDABLE egress vector, since a curl/scp/ssh/python/nc denylist leaks by
 /// construction — so the only honest air-gap posture is to refuse the whole
 /// tool while offline rather than pretend a substring filter closes the hole.
-/// The structured tools (edit_file, search, git_* locals, the build/test
-/// runners) keep coding offline-capable. Returns the uniform `BLOCK_PREFIX`
-/// refusal so the air-gap proof (`tests/offline_egress.rs`) recognises it.
-/// Called *before* input parsing so a refusal fires regardless of arguments.
+/// The structured tools (edit_file, search, git_* locals) keep coding
+/// offline-capable; the build/test runners (`run_tests` / `diagnostics`) are
+/// refused too, for the same unguardable-egress reason — they execute arbitrary
+/// build scripts / test code (roast 2026-06-30, H1; see
+/// `quality::refuse_toolchain_under_offline`). Returns the uniform
+/// `BLOCK_PREFIX` refusal so the air-gap proof (`tests/offline_egress.rs`)
+/// recognises it. Called *before* input parsing so a refusal fires regardless
+/// of arguments.
 fn refuse_bash_under_offline(tool: &str) -> Result<(), String> {
     if crate::egress::is_offline() {
         return Err(format!(

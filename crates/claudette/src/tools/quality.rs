@@ -125,7 +125,42 @@ fn detect_framework(start: &Path) -> Option<Framework> {
     None
 }
 
+/// Roast 2026-06-30 (H1): refuse the build/test toolchain runners under
+/// `--offline`. `run_tests` / `diagnostics` shell out to cargo/npm/pytest/go,
+/// which compile and execute arbitrary build scripts, test bodies, and
+/// proc-macros and may fetch uncached dependencies over the network — the SAME
+/// unguardable egress vector `bash` is refused for (the air-gap guard cannot
+/// inspect what a build script does). The only honest offline posture is to
+/// refuse the whole tool. Returns the uniform [`crate::egress::BLOCK_PREFIX`]
+/// refusal so the air-gap proof (`tests/offline_egress.rs`) recognises it.
+///
+/// `offline` is passed in (rather than read from the env here) so the policy is
+/// unit-testable without mutating process-global state; production call sites
+/// pass [`crate::egress::is_offline`] and call this *before* parsing input so
+/// the refusal is argument-independent and fires before any subprocess spawn.
+fn refuse_toolchain_under_offline(
+    tool: &str,
+    toolchain: &str,
+    offline: bool,
+) -> Result<(), String> {
+    if offline {
+        return Err(format!(
+            "{}: {tool} is disabled under offline mode — it runs {toolchain}, which compiles \
+             and executes arbitrary build scripts, test code, and proc-macros and may fetch \
+             dependencies over the network in ways the air-gap guard cannot inspect. Disable \
+             offline mode to run the project toolchain.",
+            crate::egress::BLOCK_PREFIX
+        ));
+    }
+    Ok(())
+}
+
 fn run_tests(input: &str) -> Result<String, String> {
+    refuse_toolchain_under_offline(
+        "run_tests",
+        "the project test suite (cargo/npm/pytest/go test)",
+        crate::egress::is_offline(),
+    )?;
     let v = parse_json_input(input, "run_tests")?;
     let cwd = crate::missions::active_cwd();
     let requested = v.get("framework").and_then(Value::as_str).unwrap_or("auto");
@@ -281,6 +316,24 @@ impl BuildTestOutcome {
 /// return a [`BuildTestOutcome`]. `timeout_secs` bounds *each* sub-step.
 /// Never panics; an undetectable framework yields `ran=false`.
 pub(crate) fn run_build_and_tests(dir: &Path, timeout_secs: u64) -> BuildTestOutcome {
+    // Air-gap (roast 2026-06-30, H1): the build/test toolchain executes
+    // arbitrary build scripts and test code and may fetch dependencies — the
+    // same unguardable egress vector the dispatched run_tests/diagnostics tools
+    // are refused for. Under offline mode the forge Verifier skips it rather
+    // than run the toolchain. Advisory (build_ok/tests_ok stay None), so it
+    // never flips a pass to a hard fail — verification is simply incomplete.
+    if crate::egress::is_offline() {
+        return BuildTestOutcome {
+            ran: false,
+            build_ok: None,
+            tests_ok: None,
+            summary: "build+test verification skipped under offline mode \
+                      (--offline / CLAUDETTE_OFFLINE) — the project toolchain executes \
+                      arbitrary build/test code and is not run while air-gapped"
+                .to_string(),
+            framework: "none",
+        };
+    }
     let Some(framework) = detect_framework(dir) else {
         return BuildTestOutcome {
             ran: false,
@@ -523,6 +576,11 @@ fn detect_diag_tool(start: &Path) -> Option<DiagTool> {
 }
 
 fn run_diagnostics(input: &str) -> Result<String, String> {
+    refuse_toolchain_under_offline(
+        "diagnostics",
+        "the project typechecker/linter (cargo check/clippy, tsc, mypy, ruff)",
+        crate::egress::is_offline(),
+    )?;
     let v = parse_json_input(input, "diagnostics")?;
     let cwd = crate::missions::active_cwd();
     let requested = v.get("tool").and_then(Value::as_str).unwrap_or("auto");
@@ -996,6 +1054,28 @@ mod tests {
             .filter_map(|v| v.pointer("/function/name").and_then(Value::as_str))
             .collect();
         assert_eq!(names, ["run_tests", "diagnostics"]);
+    }
+
+    #[test]
+    fn refuse_toolchain_under_offline_blocks_only_when_offline() {
+        // Off → no-op, the tool proceeds.
+        assert!(
+            refuse_toolchain_under_offline("run_tests", "the test suite", false).is_ok(),
+            "offline OFF must not block the toolchain runners"
+        );
+        // On → refused with the uniform air-gap prefix the proof asserts on.
+        let err = refuse_toolchain_under_offline("run_tests", "the test suite", true).unwrap_err();
+        assert!(
+            err.starts_with(crate::egress::BLOCK_PREFIX),
+            "must use the shared air-gap prefix: {err}"
+        );
+        assert!(err.contains("run_tests"), "names the refused tool: {err}");
+        assert!(
+            err.contains("offline mode"),
+            "explains why it was refused: {err}"
+        );
+        // diagnostics shares the same policy.
+        assert!(refuse_toolchain_under_offline("diagnostics", "the linter", true).is_err());
     }
 
     #[test]

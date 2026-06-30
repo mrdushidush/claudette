@@ -47,9 +47,11 @@ pub const BLOCK_PREFIX: &str = "blocked by offline mode (--offline / CLAUDETTE_O
 
 /// Canonical registry of every tool whose normal operation reaches the network
 /// and is therefore gated under offline mode — plus the raw-shell escape hatch
-/// (`bash` / `bash_background`), which is *not* network-by-default but is
-/// refused wholesale because its egress is unguardable. All are gated by
-/// [`guard`] / [`guard_subprocess`] / the bash offline-refusal. This is the
+/// (`bash` / `bash_background`) and the build/test toolchain runners
+/// (`run_tests` / `diagnostics`), which are *not* network-by-default but are
+/// refused wholesale because their egress is unguardable (arbitrary shell /
+/// build-script / test-code execution). All are gated by [`guard`] /
+/// [`guard_subprocess`] / the bash + toolchain offline-refusals. This is the
 /// single source of truth the no-egress integration test
 /// (`tests/offline_egress.rs`) iterates: it drives each tool through
 /// `dispatch_tool` with `CLAUDETTE_OFFLINE=1` and asserts every one refuses
@@ -98,6 +100,14 @@ pub const NET_TOOLS: &[&str] = &[
     // (roast 2026-06-21, Wave 1.1)
     "bash",
     "bash_background",
+    // Build/test toolchain runners. `run_tests` / `diagnostics` shell out to
+    // cargo / npm / pytest / go, which compile and execute arbitrary build
+    // scripts, test bodies, and proc-macros and may fetch uncached dependencies
+    // from a package registry — the SAME unguardable egress vector as `bash`
+    // (the guard cannot inspect what a build script does). Refused wholesale
+    // under offline mode. (roast 2026-06-30, H1)
+    "run_tests",
+    "diagnostics",
 ];
 
 /// Network-reaching tools that exist **only** in an `integrations` build:
