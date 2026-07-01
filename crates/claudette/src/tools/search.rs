@@ -640,7 +640,7 @@ struct FetchTarget {
 /// resolved at connect time skipped the guard. On success the validated
 /// addresses are returned so the caller can pin the connection to them.
 fn validate_fetch_target(url: &str) -> Result<FetchTarget, String> {
-    if std::env::var("CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE").as_deref() == Ok("1") {
+    if crate::env_config::is_enabled("CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE") {
         // Opted into LAN fetches: skip both the block-list and IP pinning (the
         // point is to reach arbitrary user-controlled hosts).
         return Ok(FetchTarget {

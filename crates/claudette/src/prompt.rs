@@ -29,10 +29,7 @@ pub fn agent_system_prompt() -> Vec<String> {
 /// persona overlay is best-effort and never load-bearing.
 #[must_use]
 pub fn faceless_mode_enabled() -> bool {
-    matches!(
-        std::env::var("CLAUDETTE_FACELESS").as_deref(),
-        Ok("1" | "true" | "yes" | "on")
-    )
+    crate::env_config::is_enabled("CLAUDETTE_FACELESS")
 }
 
 /// Bundled Eva persona — the assistant-mode voice. Baked into the binary so

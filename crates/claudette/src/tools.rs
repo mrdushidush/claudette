@@ -839,7 +839,7 @@ pub(super) fn path_under_workspace(path: &Path) -> bool {
 /// against. Returns the denial reason when `path` is sensitive, else `None`.
 /// Opt out wholesale with `CLAUDETTE_ALLOW_SECRET_READS=1`.
 fn sensitive_read_denial(path: &Path, home: &Path) -> Option<String> {
-    if std::env::var("CLAUDETTE_ALLOW_SECRET_READS").as_deref() == Ok("1") {
+    if crate::env_config::is_enabled("CLAUDETTE_ALLOW_SECRET_READS") {
         return None;
     }
 

@@ -67,10 +67,7 @@ fn max_fix_rounds() -> u32 {
 /// throwaway repos. Off by default; affects forge phases only (secretary/TUI
 /// keep the normal WorkspaceWrite+prompt policy).
 pub(crate) fn forge_auto_approve_enabled() -> bool {
-    matches!(
-        std::env::var("CLAUDETTE_FORGE_AUTO_APPROVE").as_deref(),
-        Ok("1" | "true" | "yes" | "on")
-    )
+    env_flag_enabled("CLAUDETTE_FORGE_AUTO_APPROVE")
 }
 
 fn security_override_enabled() -> bool {

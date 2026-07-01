@@ -248,7 +248,11 @@ fn run_bash(input: &str) -> Result<String, String> {
 
 /// Refuse a destructive git command that would discard uncommitted tracked work.
 fn destructive_git_guard(command: &str, cwd: &Path) -> Result<(), String> {
-    if std::env::var_os("CLAUDETTE_ALLOW_DESTRUCTIVE_GIT").is_some() {
+    // Fail-SAFE: only a canonical truthy value bypasses the guard. A previous
+    // `var_os(...).is_some()` check was fail-OPEN — `=0` / `=false` / `""` all
+    // disabled the data-loss guard despite the docs saying "=1". (roast
+    // 2026-06-30 Theme C)
+    if crate::env_config::is_enabled("CLAUDETTE_ALLOW_DESTRUCTIVE_GIT") {
         return Ok(());
     }
     let Some((op, work_dir)) = scan_destructive_git(command) else {
@@ -840,8 +844,13 @@ mod tests {
 
     #[test]
     fn guard_refuses_reset_hard_on_dirty_tree_but_allows_clean() {
-        // Skip if git is unavailable or the override is set in the env.
-        if std::env::var_os("CLAUDETTE_ALLOW_DESTRUCTIVE_GIT").is_some() {
+        // Hold the env lock so the sibling fail-safe test (which mutates
+        // CLAUDETTE_ALLOW_DESTRUCTIVE_GIT) can't flip the guard mid-assertion.
+        let _lock = crate::test_env_lock();
+        // Skip if git is unavailable or the override is *enabled* in the env
+        // (matches the guard's own fail-safe check — a falsey value no longer
+        // bypasses the guard, so the test can still run).
+        if crate::env_config::is_enabled("CLAUDETTE_ALLOW_DESTRUCTIVE_GIT") {
             return;
         }
         let git_ok = std::process::Command::new("git")
@@ -890,6 +899,72 @@ mod tests {
         // A non-destructive command on the same dirty tree still passes.
         assert!(destructive_git_guard("git status", &dir).is_ok());
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn destructive_git_guard_is_fail_safe_not_fail_open() {
+        // Regression for roast 2026-06-30 Theme C: the guard used to check
+        // `var_os(...).is_some()`, so ANY value — `=0`, `=false`, `""` —
+        // disabled the data-loss guard (fail-OPEN) despite the docs saying
+        // "=1". It must now bypass ONLY on a canonical truthy value.
+        let _lock = crate::test_env_lock();
+        let key = "CLAUDETTE_ALLOW_DESTRUCTIVE_GIT";
+        let prev = std::env::var(key).ok();
+
+        let git_ok = std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if !git_ok {
+            return;
+        }
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let dir = std::env::temp_dir().join(format!("claudette-gitguard-failsafe-{nanos}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&dir)
+                .output()
+                .unwrap()
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@example.com"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "init"]);
+        // Make the tree dirty so the guard has something to protect.
+        std::fs::write(dir.join("a.txt"), "two\n").unwrap();
+        assert!(git_tracked_dirty(&dir).iter().any(|f| f == "a.txt"));
+
+        // Falsey / empty values must NOT bypass — the guard stays active.
+        for v in ["0", "false", "off", ""] {
+            std::env::set_var(key, v);
+            assert!(
+                destructive_git_guard("git reset --hard origin/main", &dir).is_err(),
+                "value '{v}' must NOT bypass the guard (fail-open regression)"
+            );
+        }
+
+        // Canonical truthy values (case-insensitive) bypass as documented.
+        for v in ["1", "true", "TRUE", "yes", "on"] {
+            std::env::set_var(key, v);
+            assert!(
+                destructive_git_guard("git reset --hard origin/main", &dir).is_ok(),
+                "value '{v}' should bypass the guard"
+            );
+        }
+
+        match prev {
+            Some(v) => std::env::set_var(key, v),
+            None => std::env::remove_var(key),
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
