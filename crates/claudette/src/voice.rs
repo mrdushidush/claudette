@@ -124,10 +124,8 @@ fn whisper_bin_from(value: Option<&str>) -> String {
 /// Path to the GGML model file.
 fn whisper_model() -> PathBuf {
     let env_override = std::env::var("CLAUDETTE_WHISPER_MODEL").ok();
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    whisper_model_from(env_override.as_deref(), &home)
+    let home = crate::env_config::home_dir();
+    whisper_model_from(env_override.as_deref(), &home.to_string_lossy())
 }
 
 /// Pure predicate behind [`whisper_model`]. See [`whisper_bin_from`].

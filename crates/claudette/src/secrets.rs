@@ -106,10 +106,9 @@ fn harden_windows_acl(path: &Path) {
 
 /// Resolve the secrets directory: `~/.claudette/secrets/`.
 fn secrets_dir() -> PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".claudette").join("secrets")
+    crate::env_config::home_dir()
+        .join(".claudette")
+        .join("secrets")
 }
 
 /// Read a secret by logical name (e.g. `"github"`, `"telegram"`).

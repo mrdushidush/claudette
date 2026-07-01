@@ -112,10 +112,7 @@ pub fn default_model_map() -> ModelMap {
 /// Default TOML path: `~/.claudettes-forge/models.toml`.
 #[must_use]
 pub fn default_toml_path() -> PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home)
+    crate::env_config::home_dir()
         .join(".claudettes-forge")
         .join("models.toml")
 }

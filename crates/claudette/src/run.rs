@@ -111,10 +111,9 @@ pub fn default_session_path() -> PathBuf {
 /// Resolve the directory holding all session JSON files. `pub(crate)` so the
 /// slash-command dispatcher can list / save / load named sessions under it.
 pub(crate) fn sessions_dir() -> PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".claudette").join("sessions")
+    crate::env_config::home_dir()
+        .join(".claudette")
+        .join("sessions")
 }
 
 /// Try to load a saved session from the default path. Returns

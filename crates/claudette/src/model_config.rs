@@ -283,10 +283,9 @@ fn env_u32(key: &str) -> Option<u32> {
 /// Default path for the TOML overlay: `~/.claudette/models.toml`.
 #[must_use]
 pub fn default_toml_path() -> PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".claudette").join("models.toml")
+    crate::env_config::home_dir()
+        .join(".claudette")
+        .join("models.toml")
 }
 
 // ─── Process-global active state ────────────────────────────────────────────

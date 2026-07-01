@@ -331,10 +331,7 @@ fn run_load_workspace_rules() -> String {
 // ────────────────────────────────────────────────────────────────────────────
 
 pub(super) fn user_home() -> PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home)
+    crate::env_config::home_dir()
 }
 
 pub(super) fn claudette_home() -> PathBuf {

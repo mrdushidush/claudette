@@ -257,10 +257,7 @@ struct FallbackEvent<'a> {
 /// Path for the fallback event log: `~/.claudette/fallback.jsonl`.
 #[must_use]
 pub fn fallback_log_path() -> PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home)
+    crate::env_config::home_dir()
         .join(".claudette")
         .join("fallback.jsonl")
 }

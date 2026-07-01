@@ -411,10 +411,9 @@ impl App {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn notes_dir() -> PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".claudette").join("notes")
+    crate::env_config::home_dir()
+        .join(".claudette")
+        .join("notes")
 }
 
 fn scan_notes(tag_filter: Option<&str>) -> Vec<NoteEntry> {
@@ -485,10 +484,9 @@ fn parse_note(content: &str) -> NoteEntry {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn todos_path() -> PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".claudette").join("todos.json")
+    crate::env_config::home_dir()
+        .join(".claudette")
+        .join("todos.json")
 }
 
 fn load_todos() -> Vec<TodoItem> {
