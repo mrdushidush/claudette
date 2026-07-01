@@ -69,8 +69,7 @@ pub fn coder_model() -> String {
 /// (also `1` / `yes` / `on`); any other value — or unset — leaves it off.
 #[must_use]
 pub fn validation_enabled() -> bool {
-    std::env::var("CLAUDETTE_VALIDATE_CODE")
-        .is_ok_and(|v| matches!(v.to_lowercase().as_str(), "true" | "1" | "yes" | "on"))
+    crate::env_config::is_enabled("CLAUDETTE_VALIDATE_CODE")
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -65,10 +65,7 @@ impl fmt::Display for Finding {
 /// True when the security-review stage is enabled.
 #[must_use]
 pub fn enabled() -> bool {
-    matches!(
-        std::env::var("CLAUDETTE_FORGE_SECURITY_REVIEW").as_deref(),
-        Ok("1" | "true" | "yes" | "on")
-    )
+    crate::env_config::is_enabled("CLAUDETTE_FORGE_SECURITY_REVIEW")
 }
 
 /// Scan a unified diff and return findings for every added line that

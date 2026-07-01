@@ -197,12 +197,11 @@ pub fn run_agent(user_input: &str, opts: SessionOptions) -> Result<TurnSummary> 
     Ok(summary)
 }
 
-/// True for the canonical truthy env values. Shared by the forge gate knobs.
+/// True for the canonical truthy env values (case-insensitive). Shared by the
+/// forge gate knobs. Thin shim over the crate-wide [`crate::env_config::is_enabled`]
+/// so run/forge call sites keep a short local name.
 fn env_flag_enabled(name: &str) -> bool {
-    matches!(
-        std::env::var(name).as_deref(),
-        Ok("1" | "true" | "yes" | "on")
-    )
+    crate::env_config::is_enabled(name)
 }
 
 /// Opt-in: run the *interactive secretary* (REPL / one-shot / TUI) in
