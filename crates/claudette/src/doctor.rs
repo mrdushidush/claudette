@@ -90,6 +90,9 @@ pub fn run() -> i32 {
     print_section("environment");
     bump(probe_env());
 
+    print_section("safety overrides");
+    bump(probe_safety_overrides());
+
     print_section("egress / air-gap");
     bump(probe_egress());
 
@@ -223,6 +226,57 @@ fn redact_for_display(var: &str, val: &str) -> String {
     let chars: Vec<char> = val.chars().collect();
     let tail: String = chars[chars.len().saturating_sub(4)..].iter().collect();
     format!("*** ({} chars, …{tail})", chars.len())
+}
+
+// ─── Safety overrides ────────────────────────────────────────────────────
+
+/// Capability / guard overrides — the knobs that loosen (or, for
+/// `VALIDATE_CODE`, change) Claudette's safe defaults. Surfaced as their own
+/// section so `claudette --doctor` can answer "why did it auto-approve / bypass
+/// the git guard / read a secret / skip the forge review" at a glance. The flat
+/// env list buried these, so an active override was effectively invisible.
+/// (roast 2026-06-30 Theme C — the `doctor_lists_every_safety_override` test
+/// keeps this in sync with the knobs the runtime actually honours.)
+const SAFETY_VARS: &[&str] = &[
+    // Secretary / core capability gates.
+    "CLAUDETTE_AUTO_APPROVE",
+    "CLAUDETTE_ALLOW_DESTRUCTIVE_GIT",
+    "CLAUDETTE_ALLOW_SECRET_READS",
+    "CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE",
+    "CLAUDETTE_VALIDATE_CODE",
+    // Forge gates — each one relaxes a submit-time safety check.
+    "CLAUDETTE_FORGE_AUTO_APPROVE",
+    "CLAUDETTE_FORGE_SECURITY_OVERRIDE",
+    "CLAUDETTE_FORGE_SUBMIT_ON_FAIL",
+    "CLAUDETTE_FORGE_ALLOW_DIRTY",
+    "CLAUDETTE_FORGE_NO_BUILD_CHECK",
+    "CLAUDETTE_FORGE_NO_REVIEW",
+];
+
+/// Show which safety/capability overrides are currently set, and to what. We
+/// print the raw value (these are flags, not secrets) rather than interpreting
+/// truthiness here — seeing `=0` vs `=1` is exactly what the user needs when
+/// asking "is my git guard really off?". A set override is a `Warn` (deviation
+/// worth confirming), never an `Err` — overrides are legitimate, just notable.
+fn probe_safety_overrides() -> Status {
+    let mut active = 0;
+    for var in SAFETY_VARS {
+        if let Ok(val) = std::env::var(var) {
+            if !val.is_empty() {
+                active += 1;
+                print_row(var, Status::Warn, &format!("set to \"{val}\""));
+            }
+        }
+    }
+    if active == 0 {
+        print_row(
+            "no safety overrides set",
+            Status::Ok,
+            "all guard / capability knobs at their safe defaults",
+        );
+        return Status::Ok;
+    }
+    Status::Warn
 }
 
 // ─── Brain ───────────────────────────────────────────────────────────────
@@ -806,6 +860,57 @@ fn probe_secrets() -> Status {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn doctor_lists_every_safety_override() {
+        // roast 2026-06-30 Theme C: doctor claimed to surface the CLAUDETTE_*
+        // config but its env list omitted every capability/guard override, so
+        // an active loosening (auto-approve, secret reads, a bypassed forge
+        // gate) was invisible during triage. Each override below MUST stay in
+        // the dedicated `safety overrides` section. Add any NEW guard/capability
+        // knob here and to `SAFETY_VARS` — this test fails until you do.
+        const EXPECTED: &[&str] = &[
+            "CLAUDETTE_AUTO_APPROVE",
+            "CLAUDETTE_ALLOW_DESTRUCTIVE_GIT",
+            "CLAUDETTE_ALLOW_SECRET_READS",
+            "CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE",
+            "CLAUDETTE_VALIDATE_CODE",
+            "CLAUDETTE_FORGE_AUTO_APPROVE",
+            "CLAUDETTE_FORGE_SECURITY_OVERRIDE",
+            "CLAUDETTE_FORGE_SUBMIT_ON_FAIL",
+            "CLAUDETTE_FORGE_ALLOW_DIRTY",
+            "CLAUDETTE_FORGE_NO_BUILD_CHECK",
+            "CLAUDETTE_FORGE_NO_REVIEW",
+        ];
+        for var in EXPECTED {
+            assert!(
+                SAFETY_VARS.contains(var),
+                "doctor's safety-overrides section omits {var} — an active \
+                 override would be invisible"
+            );
+        }
+    }
+
+    #[test]
+    fn safety_vars_are_distinct_prefixed_and_not_double_listed() {
+        use std::collections::BTreeSet;
+        let uniq: BTreeSet<&&str> = SAFETY_VARS.iter().collect();
+        assert_eq!(
+            uniq.len(),
+            SAFETY_VARS.len(),
+            "duplicate entry in SAFETY_VARS"
+        );
+        for var in SAFETY_VARS {
+            assert!(
+                var.starts_with("CLAUDETTE_"),
+                "{var} is not a CLAUDETTE_* knob"
+            );
+            assert!(
+                !TRACKED_VARS.contains(var),
+                "{var} is in both SAFETY_VARS and TRACKED_VARS — it would print twice"
+            );
+        }
+    }
 
     #[test]
     fn extract_model_names_ollama_shape() {
