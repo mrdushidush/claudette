@@ -530,10 +530,7 @@ fn run_git_checkout(input: &str) -> Result<String, String> {
 /// Resolve `~/.claudette/missions/`. Mirrors the home-resolution pattern in
 /// `crate::secrets::secrets_dir`.
 fn missions_root() -> std::path::PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    std::path::PathBuf::from(home)
+    crate::env_config::home_dir()
         .join(".claudette")
         .join("missions")
 }

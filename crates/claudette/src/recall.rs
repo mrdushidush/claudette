@@ -147,10 +147,9 @@ pub fn default_recall_db_path() -> PathBuf {
             return PathBuf::from(p);
         }
     }
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".claudette").join("recall.sqlite")
+    crate::env_config::home_dir()
+        .join(".claudette")
+        .join("recall.sqlite")
 }
 
 // ────────────────────────────────────────────────────────────────────────────

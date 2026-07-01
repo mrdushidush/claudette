@@ -69,10 +69,9 @@ fn active_slot() -> &'static Mutex<Option<Mission>> {
 /// `crate::secrets::secrets_dir` and `tools::git::missions_root`.
 #[must_use]
 pub fn missions_root() -> PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".claudette").join("missions")
+    crate::env_config::home_dir()
+        .join(".claudette")
+        .join("missions")
 }
 
 /// Validate a mission slug. Same rules as `git_clone`'s dest validator:

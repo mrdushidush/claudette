@@ -812,10 +812,7 @@ static GLOBAL: OnceLock<Mutex<Scheduler>> = OnceLock::new();
 
 /// Default path for the persistent schedule file: `~/.claudette/schedule.jsonl`.
 pub fn default_path() -> PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home)
+    crate::env_config::home_dir()
         .join(".claudette")
         .join("schedule.jsonl")
 }
