@@ -183,6 +183,12 @@ pub struct TurnSummary {
     /// summary, and the turn's work may be unfinished — callers should
     /// surface that to the user.
     pub hit_iteration_cap: bool,
+    /// Set when the iteration-cap landing came back with no usable text and an
+    /// honest state-of-work line was synthesized in its place. The streaming
+    /// REPL prints replies as deltas arrive, so an empty landing streams
+    /// nothing — the caller prints this instead. `None` when the landing
+    /// produced real text (already streamed) or the cap was not hit.
+    pub synthesized_reply: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -355,6 +361,17 @@ where
         // re-read and change tactic. Kept separate from seen_nav: edits are not
         // navigation, and a suppressed edit must not perturb the nav dedup.
         let mut seen_edits: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // Loop-breaker (denied calls): exact (name, args) of calls the
+        // permission gate DENIED this turn. A small brain that reaches for an
+        // escalation-tier tool — `bash` to run git, `web_fetch` while the
+        // session is non-interactive — gets a single-shot auto-deny and then
+        // re-issues the IDENTICAL call to the iteration cap (the 2026-07-03
+        // spiral: `git … log` via bash, denied 40×, empty final answer). Unlike
+        // `seen_nav` this is NOT cleared by a mutation: a denial is a
+        // permission-tier fact that intervening state does not change. The
+        // first denial returns the (actionable) reason; a byte-identical repeat
+        // returns a change-tactic pointer (see the Deny arm below).
+        let mut seen_denied: std::collections::HashSet<String> = std::collections::HashSet::new();
         // Read-loop breaker (plans/read-loop-breaker-2026-06-17.md): per-path
         // content hash + how many times a read_file returned those exact bytes
         // this turn. Unlike `seen_nav` this is NOT cleared by a mutating tool —
@@ -372,6 +389,7 @@ where
         let mut iters_since_mutation = 0usize;
         let mut nudged_no_progress = false;
         let mut hit_iteration_cap = false;
+        let mut synthesized_reply: Option<String> = None;
 
         loop {
             iterations += 1;
@@ -386,7 +404,7 @@ where
                 // `git checkout -b` after the full test gate had passed. One
                 // extra text-only call turns the dead turn into a
                 // state-of-work handoff the user can act on.
-                let (landing, refusals) = self.iteration_cap_landing(has_images)?;
+                let (landing, refusals, synthesized) = self.iteration_cap_landing(has_images)?;
                 self.session.messages.push(landing.clone());
                 assistant_messages.push(landing);
                 for refusal in refusals {
@@ -394,6 +412,7 @@ where
                     tool_results.push(refusal);
                 }
                 hit_iteration_cap = true;
+                synthesized_reply = synthesized;
                 break;
             }
 
@@ -614,7 +633,20 @@ where
                         }
                     }
                     PermissionOutcome::Deny { reason } => {
-                        ConversationMessage::tool_result(tool_use_id, tool_name, reason, true)
+                        // Loop-breaker (denied calls): the first denial this
+                        // turn returns the (actionable) reason; a byte-identical
+                        // repeat returns a change-tactic pointer instead of the
+                        // same wall, so a brain that keeps re-issuing an
+                        // escalation-tier call (bash for git while
+                        // non-interactive) is steered to a workspace-tier tool
+                        // rather than spiraling to the iteration cap.
+                        let key = format!("{tool_name}\u{1f}{input}");
+                        if seen_denied.insert(key) {
+                            ConversationMessage::tool_result(tool_use_id, tool_name, reason, true)
+                        } else {
+                            let body = duplicate_denied_body(&tool_name);
+                            ConversationMessage::tool_result(tool_use_id, tool_name, body, true)
+                        }
                     }
                 };
                 self.session.messages.push(result_message.clone());
@@ -631,6 +663,7 @@ where
             usage: self.usage_tracker.cumulative_usage(),
             auto_compaction,
             hit_iteration_cap,
+            synthesized_reply,
         })
     }
 
@@ -641,10 +674,23 @@ where
     /// protocol stays consistent for the next turn. If the landing request
     /// itself fails, the classic hard-cap error is returned so callers see
     /// the same failure they did before graceful landing existed.
+    ///
+    /// Returns `(landing_message, tool_refusals, synthesized_reply)`. The third
+    /// element is `Some(text)` only when the model returned no usable text and
+    /// the empty-landing guard synthesized one — the caller uses it to print a
+    /// reply in the streaming REPL, which shows text as it arrives and so would
+    /// otherwise display nothing for an empty landing.
     fn iteration_cap_landing(
         &mut self,
         has_images: bool,
-    ) -> Result<(ConversationMessage, Vec<ConversationMessage>), RuntimeError> {
+    ) -> Result<
+        (
+            ConversationMessage,
+            Vec<ConversationMessage>,
+            Option<String>,
+        ),
+        RuntimeError,
+    > {
         let hard_cap_error =
             || RuntimeError::new("conversation loop exceeded the maximum number of iterations");
 
@@ -658,11 +704,38 @@ where
             .api_client
             .stream(&request)
             .map_err(|_| hard_cap_error())?;
-        let (assistant_message, usage) =
+        let (mut assistant_message, usage) =
             build_assistant_message(events).map_err(|_| hard_cap_error())?;
         if let Some(usage) = usage {
             self.usage_tracker.record(usage);
         }
+
+        // Empty-landing guard: if the model defied the text-only landing
+        // prompt and returned no usable text (blank message, or only tool
+        // calls that get refused below), synthesize an honest state-of-work
+        // line. Otherwise the caller warns about "the reply above" that is not
+        // there and single-shot prints nothing — the silent tail of the
+        // 2026-07-03 spiral.
+        let has_text = assistant_message
+            .blocks
+            .iter()
+            .any(|block| matches!(block, ContentBlock::Text { text } if !text.trim().is_empty()));
+        let synthesized_reply = if has_text {
+            None
+        } else {
+            let fallback = iteration_cap_fallback_reply(last_tool_error(&self.session.messages));
+            // Drop any blank/whitespace-only text blocks so the synthesized
+            // line is the reply's only text (some consumers render the first
+            // text block, not a join). Tool-use blocks are kept — they still
+            // need matching refusals below.
+            assistant_message.blocks.retain(
+                |block| !matches!(block, ContentBlock::Text { text } if text.trim().is_empty()),
+            );
+            assistant_message.blocks.push(ContentBlock::Text {
+                text: fallback.clone(),
+            });
+            Some(fallback)
+        };
 
         let refusals = assistant_message
             .blocks
@@ -678,7 +751,7 @@ where
             })
             .collect();
 
-        Ok((assistant_message, refusals))
+        Ok((assistant_message, refusals, synthesized_reply))
     }
 
     #[must_use]
@@ -901,6 +974,58 @@ fn duplicate_edit_body(tool_name: &str) -> String {
          already applied (the target is gone). Re-read the file with read_file to see its \
          CURRENT contents, then send a DIFFERENT edit that matches what is actually there.\"}}"
     )
+}
+
+/// Tool result for a call the permission gate already DENIED earlier this
+/// turn, re-issued byte-for-byte. A denial is a permission-tier fact a retry
+/// cannot change, so instead of echoing the same wall we point the brain at
+/// the escape hatch. Mirrors [`duplicate_call_body`] / [`duplicate_edit_body`]
+/// for denied calls (the 2026-07-03 bash-git spiral: the same denied `git log`
+/// via bash re-issued to the iteration cap, producing an empty final answer).
+fn duplicate_denied_body(tool_name: &str) -> String {
+    format!(
+        "{{\"error\":\"duplicate denied call suppressed\",\"tool\":\"{tool_name}\",\"hint\":\"This \
+         EXACT call was already denied earlier in this turn and will be denied again — repeating \
+         it cannot succeed. Use a tool that stays within workspace-write instead: for read-only \
+         git run enable_tools git then git_log / git_diff / git_status rather than {tool_name}. If \
+         nothing available can do it without escalation, stop and say what is blocked.\"}}"
+    )
+}
+
+/// The most recent error tool_result in `messages` — the obstacle that most
+/// likely stalled the turn. Used to make a synthesized iteration-cap reply
+/// concrete ("last obstacle: …") instead of a bare "task incomplete". Scans
+/// newest-first and returns the first non-empty error body.
+fn last_tool_error(messages: &[ConversationMessage]) -> Option<&str> {
+    messages.iter().rev().find_map(|message| {
+        message.blocks.iter().rev().find_map(|block| match block {
+            ContentBlock::ToolResult {
+                output,
+                is_error: true,
+                ..
+            } if !output.trim().is_empty() => Some(output.as_str()),
+            _ => None,
+        })
+    })
+}
+
+/// Honest stand-in when the graceful-landing request comes back with no text
+/// (a small brain sometimes defies the text-only landing prompt and emits an
+/// empty message or only tool calls). Without this the caller warns about "the
+/// reply above" that does not exist and single-shot prints nothing — the exact
+/// silent failure the 2026-07-03 spiral produced. One blocking-error line is
+/// enough context; keep it short.
+fn iteration_cap_fallback_reply(last_error: Option<&str>) -> String {
+    let base = "I hit this turn's tool-call iteration limit before finishing and produced no \
+                summary. The task is incomplete.";
+    match last_error {
+        Some(err) => {
+            let first_line = err.lines().next().unwrap_or(err).trim();
+            let obstacle: String = first_line.chars().take(300).collect();
+            format!("{base} Last obstacle: {obstacle}")
+        }
+        None => base.to_string(),
+    }
 }
 
 /// Parse [`READ_LOOP_LIMIT_ENV_VAR`]; falls back to [`READ_LOOP_LIMIT_DEFAULT`]
@@ -1623,6 +1748,145 @@ mod tests {
             })
             .expect("a suppressed duplicate tool_result should exist");
         assert!(dup.contains("duplicate edit suppressed"), "got: {dup}");
+    }
+
+    #[test]
+    fn duplicate_denied_call_is_suppressed_not_re_executed() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        // The 2026-07-03 spiral: the brain reaches for an escalation-tier tool
+        // (bash to run git) while the session is non-interactive, gets a
+        // single-shot auto-deny, and re-issues the IDENTICAL call. The first
+        // denial returns the actionable reason; the exact repeat must be
+        // suppressed with a change-tactic pointer, and bash must NEVER run.
+        struct DeniedSpiralApi {
+            calls: usize,
+        }
+        impl ApiClient for DeniedSpiralApi {
+            fn stream(
+                &mut self,
+                _request: &ApiRequest<'_>,
+            ) -> Result<Vec<AssistantEvent>, RuntimeError> {
+                self.calls += 1;
+                match self.calls {
+                    1 | 2 => Ok(vec![
+                        AssistantEvent::ToolUse {
+                            id: format!("bash-{}", self.calls),
+                            name: "bash".to_string(),
+                            input: "{\"cmd\":\"git log -1\"}".to_string(),
+                        },
+                        AssistantEvent::MessageStop,
+                    ]),
+                    _ => Ok(vec![
+                        AssistantEvent::TextDelta("giving up on the shell".to_string()),
+                        AssistantEvent::MessageStop,
+                    ]),
+                }
+            }
+        }
+
+        let exec_count = Rc::new(Cell::new(0usize));
+        let ec = Rc::clone(&exec_count);
+        let tool_executor = StaticToolExecutor::new().register("bash", move |_input| {
+            ec.set(ec.get() + 1);
+            Ok("SHOULD NOT RUN".to_string())
+        });
+        // bash escalates to danger-full-access; active mode is workspace-write
+        // and run_turn passes no prompter → the non-interactive auto-deny path.
+        let permission_policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("bash", PermissionMode::DangerFullAccess);
+
+        let mut runtime = ConversationRuntime::new(
+            Session::new(),
+            DeniedSpiralApi { calls: 0 },
+            tool_executor,
+            permission_policy,
+            vec!["sys".to_string()],
+        );
+
+        let summary = runtime
+            .run_turn("what was the last commit?", None)
+            .expect("loop should finish");
+
+        assert_eq!(
+            exec_count.get(),
+            0,
+            "bash is denied before execution; it must never run"
+        );
+        assert_eq!(summary.iterations, 3);
+
+        let errors: Vec<String> = summary
+            .tool_results
+            .iter()
+            .filter_map(|m| {
+                m.blocks.iter().find_map(|b| match b {
+                    ContentBlock::ToolResult {
+                        output, is_error, ..
+                    } if *is_error => Some(output.clone()),
+                    _ => None,
+                })
+            })
+            .collect();
+        assert_eq!(errors.len(), 2, "two denials, both recorded");
+        // First denial: the actionable escalation reason (steers to git tools).
+        assert!(
+            errors[0].contains("non-interactive") && errors[0].contains("enable_tools git"),
+            "first denial should be actionable, got: {}",
+            errors[0]
+        );
+        // Exact repeat: the change-tactic pointer, not the same wall again.
+        assert!(
+            errors[1].contains("duplicate denied call suppressed"),
+            "repeat should be suppressed, got: {}",
+            errors[1]
+        );
+    }
+
+    #[test]
+    fn graceful_cap_synthesizes_reply_when_landing_has_no_text() {
+        // The model defies the text-only landing prompt and returns only a
+        // tool call (no text). The turn must still surface an honest, non-empty
+        // state-of-work line — both in the last assistant message (for
+        // renderers / single-shot) and in summary.synthesized_reply (for the
+        // streaming REPL, which showed nothing live). Without this the turn
+        // ends silently — the tail of the 2026-07-03 spiral.
+        let api = CapSpiralApi::new(vec![
+            AssistantEvent::ToolUse {
+                id: "landing-tool".to_string(),
+                name: "step".to_string(),
+                input: "{}".to_string(),
+            },
+            AssistantEvent::MessageStop,
+        ]);
+        let (mut runtime, _executed) = cap_test_runtime(api, 2);
+        runtime = runtime.with_graceful_iteration_cap();
+
+        let summary = runtime
+            .run_turn("spiral", None)
+            .expect("graceful cap must return Ok");
+
+        assert!(summary.hit_iteration_cap);
+        let synthesized = summary
+            .synthesized_reply
+            .as_deref()
+            .expect("an empty landing must synthesize a reply");
+        assert!(
+            synthesized.contains("iteration limit") && synthesized.contains("incomplete"),
+            "got: {synthesized}"
+        );
+        // The synthesized text is also the landing message's only text block.
+        let last_text = summary
+            .assistant_messages
+            .last()
+            .and_then(|m| {
+                m.blocks.iter().find_map(|b| match b {
+                    ContentBlock::Text { text } => Some(text.clone()),
+                    _ => None,
+                })
+            })
+            .expect("landing must carry synthesized text");
+        assert_eq!(last_text, synthesized);
     }
 
     #[test]
