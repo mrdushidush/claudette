@@ -198,6 +198,14 @@ pub fn run_agent_repl(opts: SessionOptions) -> Result<()> {
                 // text delta to stdout via `stdout_text_callback`. The model's
                 // text terminator newline is also fired by the callback at
                 // end-of-stream, so the status line below lands on its own row.
+                //
+                // Exception: an empty iteration-cap landing streamed nothing
+                // (the model returned no text), so the runtime synthesized an
+                // honest state-of-work line. Print it here — otherwise the cap
+                // warning below points at "the reply above" that isn't there.
+                if let Some(reply) = &summary.synthesized_reply {
+                    println!("{reply}");
+                }
 
                 state.record_turn(summary.usage.input_tokens, summary.usage.output_tokens);
                 let ctx_gauge = format_ctx_gauge(

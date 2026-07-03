@@ -1127,6 +1127,7 @@ fn empty_turn_summary() -> TurnSummary {
         usage: crate::TokenUsage::default(),
         auto_compaction: None,
         hit_iteration_cap: false,
+        synthesized_reply: None,
     }
 }
 

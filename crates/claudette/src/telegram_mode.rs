@@ -1311,6 +1311,7 @@ mod tests {
             usage: crate::TokenUsage::default(),
             auto_compaction: None,
             hit_iteration_cap: false,
+            synthesized_reply: None,
         };
         let text = extract_response_text(&summary);
         assert!(text.contains("no text"));

@@ -458,6 +458,7 @@ mod tests {
             usage: TokenUsage::default(),
             auto_compaction: None,
             hit_iteration_cap: false,
+            synthesized_reply: None,
         }
     }
 

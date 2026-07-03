@@ -268,9 +268,13 @@ impl PermissionPolicy {
                 },
                 None => PermissionOutcome::Deny {
                     reason: format!(
-                        "tool '{tool_name}' requires approval to escalate from {} to {}",
-                        current_mode.as_str(),
-                        required_mode.as_str()
+                        "tool '{tool_name}' requires approval to escalate from {current} to {}, \
+                         but this session is non-interactive so it cannot be approved. Use a tool \
+                         that stays within {current} instead — for read-only git, enable_tools git \
+                         then git_log / git_diff / git_status rather than a shell — or stop and \
+                         report what is blocked.",
+                        required_mode.as_str(),
+                        current = current_mode.as_str(),
                     ),
                 },
             };
