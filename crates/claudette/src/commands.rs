@@ -98,10 +98,17 @@ pub enum SlashCommand {
     /// mission is active. Mirrors the `--forge "<prompt>"` CLI flag from
     /// inside the REPL.
     Forge(String),
-    /// One-step undo of the last destructive action: restores the trashed
-    /// file / pre-image recorded in the action transcript
-    /// (`~/.claudette/transcript/actions.jsonl`). Works in REPL and TUI.
-    Undo,
+    /// Undo the last turn's destructive actions from the action transcript
+    /// (`~/.claudette/transcript/actions.jsonl`), restoring each trashed file
+    /// / pre-image. `whole_turn` is the default (`/undo`); `/undo one` sets it
+    /// `false` for the older single-action behavior. Works in REPL and TUI.
+    Undo {
+        whole_turn: bool,
+    },
+    /// Render the cumulative diff of the last turn's file changes — each
+    /// trashed pre-image against the file now on disk — via the same colored
+    /// unified-diff renderer the `[y/N]` gate uses. Read-only.
+    Diff,
     /// Recognised as starting with `/` but unusable: unknown name, missing
     /// required argument, etc. Carries a human-readable error.
     Invalid(String),
@@ -205,7 +212,14 @@ pub fn parse_slash_command(line: &str) -> Option<SlashCommand> {
             None => SlashCommand::Invalid("/coder requires a model name".to_string()),
         },
         "models" => SlashCommand::Models,
-        "undo" => SlashCommand::Undo,
+        "undo" => {
+            let one = arg
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|a| a.eq_ignore_ascii_case("one"));
+            SlashCommand::Undo { whole_turn: !one }
+        }
+        "diff" => SlashCommand::Diff,
         "recall" => match arg.filter(|s| !s.is_empty()) {
             Some(arg) if arg.eq_ignore_ascii_case("reprobe") => SlashCommand::RecallReprobe,
             Some(query) => SlashCommand::Recall(query),
@@ -389,10 +403,26 @@ where
             handle_models(out);
             SlashOutcome::Continue
         }
-        SlashCommand::Undo => {
-            match crate::transcript::undo_last() {
+        SlashCommand::Undo { whole_turn } => {
+            let result = if whole_turn {
+                crate::transcript::undo_last_turn()
+            } else {
+                crate::transcript::undo_last()
+            };
+            match result {
                 Ok(msg) => {
                     let _ = writeln!(out, "{} {}", theme::OK_GLYPH, theme::ok(&msg));
+                }
+                Err(e) => {
+                    let _ = writeln!(out, "{} {}", theme::WARN_GLYPH, theme::warn(&e));
+                }
+            }
+            SlashOutcome::Continue
+        }
+        SlashCommand::Diff => {
+            match crate::transcript::diff_last_turn() {
+                Ok(diff) => {
+                    let _ = writeln!(out, "{diff}");
                 }
                 Err(e) => {
                     let _ = writeln!(out, "{} {}", theme::WARN_GLYPH, theme::warn(&e));
@@ -486,7 +516,12 @@ fn print_help(out: &mut impl Write) {
                 ),
                 (
                     "/undo",
-                    "Restore the last destructive action from ~/.claudette/trash/",
+                    "Undo the last turn's destructive actions (restore from ~/.claudette/trash/)",
+                ),
+                ("/undo one", "Undo just the single most-recent action"),
+                (
+                    "/diff",
+                    "Show the diff of what the last turn changed on disk",
                 ),
             ],
         ),
@@ -1908,6 +1943,32 @@ mod tests {
             parse_slash_command("/cap"),
             Some(SlashCommand::Capabilities)
         );
+    }
+
+    #[test]
+    fn parse_undo_defaults_to_whole_turn_and_one_opts_out() {
+        assert_eq!(
+            parse_slash_command("/undo"),
+            Some(SlashCommand::Undo { whole_turn: true })
+        );
+        assert_eq!(
+            parse_slash_command("/undo one"),
+            Some(SlashCommand::Undo { whole_turn: false })
+        );
+        // Case-insensitive, and anything else keeps the whole-turn default.
+        assert_eq!(
+            parse_slash_command("/undo ONE"),
+            Some(SlashCommand::Undo { whole_turn: false })
+        );
+        assert_eq!(
+            parse_slash_command("/undo everything"),
+            Some(SlashCommand::Undo { whole_turn: true })
+        );
+    }
+
+    #[test]
+    fn parse_diff() {
+        assert_eq!(parse_slash_command("/diff"), Some(SlashCommand::Diff));
     }
 
     #[test]

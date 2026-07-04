@@ -22,7 +22,8 @@
 //! Everything stays under `~/.claudette/` — local-only, never uploaded,
 //! consistent with the privacy posture in `PRIVACY.md`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::fmt::Write as _;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -97,6 +98,39 @@ pub fn take_pending_undo() -> Option<Value> {
     PENDING_UNDO.with(|p| p.borrow_mut().take())
 }
 
+thread_local! {
+    /// The id of the turn currently in progress, stamped onto every
+    /// transcript line [`record`]ed during it so `/undo` and `/diff` can
+    /// group a whole turn's actions. `None` until the first [`begin_turn`] —
+    /// lines recorded outside any turn carry `turn: null` and the
+    /// turn-scoped ops treat each as its own singleton (falling back to
+    /// single-entry behavior).
+    static CURRENT_TURN_ID: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// Per-process monotonic turn counter — the tie-breaker in the turn id.
+    static TURN_COUNTER: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Open a new turn: mint a fresh turn id so subsequent [`record`] lines are
+/// tagged with it. Called at every turn entry point, alongside
+/// `tools::set_current_turn_paths` (same thread — tools run synchronously on
+/// the worker thread that recorded the turn). The id is
+/// `<unix_ms>-<pid>-<counter>`, globally unique: the transcript is
+/// append-only and outlives the process, so a bare counter would collide
+/// with another session's turns and make "undo the last turn" ambiguous.
+pub fn begin_turn() {
+    let n = TURN_COUNTER.with(|c| {
+        let v = c.get();
+        c.set(v.wrapping_add(1));
+        v
+    });
+    let id = format!("{}-{}-{n}", now_ms(), std::process::id());
+    CURRENT_TURN_ID.with(|t| *t.borrow_mut() = Some(id));
+}
+
+fn current_turn_id() -> Option<String> {
+    CURRENT_TURN_ID.with(|t| t.borrow().clone())
+}
+
 /// Move `original` into the trash instead of deleting it. Returns the trash
 /// path. Falls back to copy+remove when `rename` crosses filesystems.
 /// Leaves an undo ref for [`take_pending_undo`].
@@ -138,6 +172,7 @@ pub fn record(tool: &str, input: &str, undo: Option<Value>) {
     };
     let line = json!({
         "ts": now_ms() as u64,
+        "turn": current_turn_id(),
         "tool": tool,
         "input": capped,
         "undo": undo.unwrap_or(Value::Null),
@@ -158,46 +193,134 @@ pub fn record(tool: &str, input: &str, undo: Option<Value>) {
     }
 }
 
-/// Undo the most recent transcript entry that (a) carries an undo ref and
-/// (b) hasn't already been undone. Restores the trashed/pre-image file back
-/// to its original location (the trash copy is **kept** — recoverability
-/// bias), appends an `undo` entry, and returns a human-readable summary.
-#[allow(clippy::too_many_lines)]
-pub fn undo_last() -> Result<String, String> {
-    let path = transcript_path();
-    let raw = fs::read_to_string(&path)
+/// Read + parse the transcript into one `Value` per line (unparseable lines
+/// dropped). Returns the `nothing to undo` error string when the file is
+/// missing so callers can surface it verbatim.
+fn read_entries() -> Result<Vec<Value>, String> {
+    let raw = fs::read_to_string(transcript_path())
         .map_err(|_| "nothing to undo (no actions recorded yet)".to_string())?;
-
-    let entries: Vec<Value> = raw
+    Ok(raw
         .lines()
         .filter_map(|l| serde_json::from_str(l).ok())
-        .collect();
+        .collect())
+}
 
-    // Entries already reverted by a previous /undo — keyed on the TRASH
-    // PATH, which is collision-free by construction (the `-1`/`-2` suffix
-    // loop in `trash_target_for`). Keying on `ts` broke batch deletes: a
-    // model emitting 3 note_deletes in one assistant message runs them in
-    // a sub-millisecond loop, all sharing one ms timestamp — undoing the
-    // first marked the SIBLINGS as undone too, making them unreachable
-    // (caught by the adversarial review with a standalone repro).
-    let undone: Vec<&str> = entries
+/// Trash paths already reverted by a previous `/undo` — keyed on the TRASH
+/// PATH, which is collision-free by construction (the `-1`/`-2` suffix loop
+/// in `trash_target_for`). Keying on `ts` broke batch deletes: a model
+/// emitting 3 note_deletes in one assistant message runs them in a
+/// sub-millisecond loop, all sharing one ms timestamp — undoing the first
+/// marked the SIBLINGS as undone too, making them unreachable (caught by the
+/// adversarial review with a standalone repro).
+fn undone_trash_set(entries: &[Value]) -> Vec<String> {
+    entries
         .iter()
         .filter(|e| e.get("tool").and_then(Value::as_str) == Some("undo"))
         .filter_map(|e| e.get("undone_trash").and_then(Value::as_str))
-        .collect();
+        .map(str::to_string)
+        .collect()
+}
 
-    let target = entries.iter().rev().find(|e| {
-        e.get("undo")
-            .and_then(|u| u.get("trash"))
-            .and_then(Value::as_str)
-            .is_some_and(|t| !undone.contains(&t))
-    });
+/// True when `entry` carries a recoverable pre-image not yet reverted.
+fn is_recoverable(entry: &Value, undone: &[String]) -> bool {
+    entry
+        .get("undo")
+        .and_then(|u| u.get("trash"))
+        .and_then(Value::as_str)
+        .is_some_and(|t| !undone.iter().any(|u| u == t))
+}
+
+/// Undo the most recent transcript entry that (a) carries an undo ref and
+/// (b) hasn't already been undone — the `/undo one` behavior. Restores the
+/// trashed/pre-image file back to its original location (the trash copy is
+/// **kept** — recoverability bias), appends an `undo` entry, and returns a
+/// human-readable summary.
+pub fn undo_last() -> Result<String, String> {
+    let entries = read_entries()?;
+    let undone = undone_trash_set(&entries);
+    let target = entries.iter().rev().find(|e| is_recoverable(e, &undone));
     let Some(entry) = target else {
         return Err(
             "nothing to undo (no recorded action carries a recoverable pre-image)".to_string(),
         );
     };
+    restore_entry(entry, &transcript_path())
+}
 
+/// Undo every recoverable action of the **last turn** as one step (the
+/// default `/undo`). The last turn is the turn id carried by the most recent
+/// recoverable, not-yet-undone entry; a turn's entries are contiguous in the
+/// append-only log, so we revert that entry and every sibling sharing its
+/// turn id, **newest-first** (correct when a file was edited twice in the
+/// turn — the last restore lands the turn's original pre-image). A `null`
+/// turn id (recorded outside `begin_turn`) groups only with itself, degrading
+/// gracefully to single-entry behavior.
+pub fn undo_last_turn() -> Result<String, String> {
+    let entries = read_entries()?;
+    let undone = undone_trash_set(&entries);
+
+    let Some(last) = entries.iter().rev().find(|e| is_recoverable(e, &undone)) else {
+        return Err(
+            "nothing to undo (no recorded action carries a recoverable pre-image)".to_string(),
+        );
+    };
+    let turn = last.get("turn").and_then(Value::as_str).map(str::to_string);
+
+    // Newest-first group of this turn's still-recoverable entries.
+    let group: Vec<&Value> = match &turn {
+        Some(id) => entries
+            .iter()
+            .rev()
+            .filter(|e| e.get("turn").and_then(Value::as_str) == Some(id.as_str()))
+            .filter(|e| is_recoverable(e, &undone))
+            .collect(),
+        None => vec![last],
+    };
+
+    let path = transcript_path();
+    let mut summaries = Vec::new();
+    let mut errors = Vec::new();
+    for e in group {
+        match restore_entry(e, &path) {
+            Ok(s) => summaries.push(s),
+            Err(err) => errors.push(err),
+        }
+    }
+    if summaries.is_empty() {
+        return Err(errors
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| "nothing to undo".to_string()));
+    }
+    let mut out = if summaries.len() == 1 {
+        summaries.remove(0)
+    } else {
+        let mut s = format!("undid the last turn — restored {} files:", summaries.len());
+        for line in &summaries {
+            s.push_str("\n  • ");
+            s.push_str(line);
+        }
+        s
+    };
+    if !errors.is_empty() {
+        let _ = write!(
+            out,
+            "\n  ({} could not be restored: {})",
+            errors.len(),
+            errors.join("; ")
+        );
+    }
+    Ok(out)
+}
+
+/// Restore a single transcript `entry`'s pre-image: the shared core of
+/// `undo_last` (one entry) and `undo_last_turn` (every recoverable entry of a
+/// turn). Re-validates both paths against a tampered `actions.jsonl`, backs
+/// up any newer content at the target first (fail-closed), copies the
+/// pre-image back, and appends an `undo` marker keyed on the collision-free
+/// trash path. `path` is the transcript file to append the marker to.
+#[allow(clippy::too_many_lines)]
+fn restore_entry(entry: &Value, path: &Path) -> Result<String, String> {
     let ts = entry.get("ts").and_then(Value::as_u64).unwrap_or(0);
     let tool = entry
         .get("tool")
@@ -292,7 +415,7 @@ pub fn undo_last() -> Result<String, String> {
     let marker = fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&path)
+        .open(path)
         .and_then(|mut f| writeln!(f, "{line}"));
     if let Err(e) = marker {
         eprintln!(
@@ -310,6 +433,71 @@ pub fn undo_last() -> Result<String, String> {
             "restored {original} from trash (undid {tool}; the trash copy at {trash} is kept)"
         ),
     })
+}
+
+/// Render the cumulative diff of the **last turn** — for `/diff`. For each
+/// entry of the most recent turn that carries a pre-image, diffs the trashed
+/// pre-image (before) against the file now on disk (after), via the same
+/// colored renderer the `[y/N]` edit gate uses. Read-only: no restore, no
+/// markers, no shadow-git. A `move_to_trash` deletion shows as an all-`-`
+/// block (the file is gone from disk); an overwrite shows the real hunk.
+///
+/// Limitation: brand-new file *creates* carry no pre-image (nothing was
+/// snapshotted), so they don't appear — `/diff` covers overwrites and
+/// deletes, which is what the recoverability machinery tracks.
+pub fn diff_last_turn() -> Result<String, String> {
+    let entries = fs::read_to_string(transcript_path())
+        .map_err(|_| "no actions recorded yet — nothing to diff".to_string())?
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .collect::<Vec<_>>();
+
+    // Last turn = the turn id on the most recent entry that carries one.
+    let turn = entries
+        .iter()
+        .rev()
+        .find_map(|e| e.get("turn").and_then(Value::as_str).map(str::to_string))
+        .ok_or_else(|| "no turn-tagged actions recorded yet — nothing to diff".to_string())?;
+
+    // That turn's pre-image-bearing entries, in reading (oldest-first) order.
+    let group: Vec<&Value> = entries
+        .iter()
+        .filter(|e| e.get("turn").and_then(Value::as_str) == Some(turn.as_str()))
+        .filter(|e| e.get("undo").and_then(|u| u.get("trash")).is_some())
+        .collect();
+    if group.is_empty() {
+        return Err(
+            "the last turn changed no files with a recoverable pre-image \
+                    (brand-new files aren't tracked by /diff)"
+                .to_string(),
+        );
+    }
+
+    let mut blocks = Vec::new();
+    for e in group {
+        let undo_ref = e.get("undo").cloned().unwrap_or(Value::Null);
+        let (Some(trash), Some(original)) = (
+            undo_ref.get("trash").and_then(Value::as_str),
+            undo_ref.get("original").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        // before = the trashed pre-image; after = the file now on disk (empty
+        // when the action deleted it, i.e. move_to_trash left nothing behind).
+        let before = fs::read_to_string(trash).unwrap_or_default();
+        let after = fs::read_to_string(original).unwrap_or_default();
+        if before == after {
+            continue;
+        }
+        blocks.push(crate::diff_preview::render_file_change(original, &before, &after).join("\n"));
+    }
+    if blocks.is_empty() {
+        return Err(
+            "the last turn's changes are no longer on disk (reverted or already undone)"
+                .to_string(),
+        );
+    }
+    Ok(blocks.join("\n\n"))
 }
 
 #[cfg(test)]
@@ -601,6 +789,146 @@ mod tests {
                 take_pending_undo().is_none(),
                 "second take must be empty — no stale undo may leak to the next tool call"
             );
+        });
+    }
+
+    #[test]
+    fn undo_last_turn_restores_every_action_of_the_turn() {
+        with_temp_home(|home| {
+            // One turn deletes two files.
+            begin_turn();
+            let a = write_tmp(home, "a.md", "AAA");
+            let b = write_tmp(home, "b.md", "BBB");
+            let _ = move_to_trash(&a).unwrap();
+            record("note_delete", "a", take_pending_undo());
+            let _ = move_to_trash(&b).unwrap();
+            record("note_delete", "b", take_pending_undo());
+
+            let msg = undo_last_turn().expect("undo whole turn");
+            assert!(a.exists() && b.exists(), "both files restored: {msg}");
+            assert_eq!(fs::read_to_string(&a).unwrap(), "AAA");
+            assert_eq!(fs::read_to_string(&b).unwrap(), "BBB");
+
+            let err = undo_last_turn().unwrap_err();
+            assert!(err.contains("nothing to undo"), "got: {err}");
+        });
+    }
+
+    #[test]
+    fn undo_last_turn_leaves_earlier_turns_intact() {
+        with_temp_home(|home| {
+            begin_turn();
+            let a = write_tmp(home, "a.md", "AAA");
+            let _ = move_to_trash(&a).unwrap();
+            record("note_delete", "a", take_pending_undo());
+
+            begin_turn(); // a distinct, later turn
+            let b = write_tmp(home, "b.md", "BBB");
+            let _ = move_to_trash(&b).unwrap();
+            record("note_delete", "b", take_pending_undo());
+
+            let msg = undo_last_turn().expect("undo last turn");
+            assert!(b.exists(), "last turn's file restored: {msg}");
+            assert!(!a.exists(), "the earlier turn must stay untouched: {msg}");
+
+            // A second whole-turn undo reaches back to the prior turn.
+            let msg2 = undo_last_turn().expect("undo prior turn");
+            assert!(a.exists(), "prior turn now restored: {msg2}");
+        });
+    }
+
+    #[test]
+    fn undo_one_reverts_a_single_action_within_a_multi_action_turn() {
+        with_temp_home(|home| {
+            begin_turn();
+            let a = write_tmp(home, "a.md", "AAA");
+            let b = write_tmp(home, "b.md", "BBB");
+            let _ = move_to_trash(&a).unwrap();
+            record("note_delete", "a", take_pending_undo());
+            let _ = move_to_trash(&b).unwrap();
+            record("note_delete", "b", take_pending_undo());
+
+            // `/undo one` == undo_last: only the most recent action (b).
+            let msg = undo_last().expect("undo one");
+            assert!(b.exists(), "b restored: {msg}");
+            assert!(
+                !a.exists(),
+                "a stays deleted after a single-step undo: {msg}"
+            );
+        });
+    }
+
+    #[test]
+    fn undo_last_turn_without_turn_ids_falls_back_to_single_entry() {
+        with_temp_home(|home| {
+            // No begin_turn() — entries carry turn: null, so the turn-scoped
+            // undo degrades to reverting just the newest recoverable action.
+            let a = write_tmp(home, "a.md", "AAA");
+            let b = write_tmp(home, "b.md", "BBB");
+            let _ = move_to_trash(&a).unwrap();
+            record("note_delete", "a", take_pending_undo());
+            let _ = move_to_trash(&b).unwrap();
+            record("note_delete", "b", take_pending_undo());
+
+            let msg = undo_last_turn().expect("fallback undo");
+            assert!(b.exists() && !a.exists(), "only the newest restored: {msg}");
+        });
+    }
+
+    #[test]
+    fn diff_last_turn_renders_the_turns_changes() {
+        with_temp_home(|home| {
+            begin_turn();
+            let f = write_tmp(home, "doc.txt", "line one\nOLD\nline three\n");
+            let _ = snapshot_to_trash(&f).unwrap();
+            record("write_file", "doc.txt", take_pending_undo());
+            fs::write(&f, "line one\nNEW\nline three\n").unwrap();
+
+            let diff = diff_last_turn().expect("diff should render");
+            assert!(diff.contains("doc.txt"), "header missing: {diff}");
+            assert!(diff.contains("- OLD"), "removal missing: {diff}");
+            assert!(diff.contains("+ NEW"), "addition missing: {diff}");
+            // Unchanged lines stay dim context, never `-`/`+` markers.
+            assert!(
+                !diff.contains("- line one"),
+                "context wrongly marked: {diff}"
+            );
+        });
+    }
+
+    #[test]
+    fn diff_last_turn_covers_only_the_last_turn() {
+        with_temp_home(|home| {
+            // Turn 1 overwrites f1; turn 2 overwrites f2. /diff shows only f2.
+            begin_turn();
+            let f1 = write_tmp(home, "one.txt", "V1\n");
+            let _ = snapshot_to_trash(&f1).unwrap();
+            record("write_file", "one.txt", take_pending_undo());
+            fs::write(&f1, "V1b\n").unwrap();
+
+            begin_turn();
+            let f2 = write_tmp(home, "two.txt", "V2\n");
+            let _ = snapshot_to_trash(&f2).unwrap();
+            record("write_file", "two.txt", take_pending_undo());
+            fs::write(&f2, "V2b\n").unwrap();
+
+            let diff = diff_last_turn().expect("diff should render");
+            assert!(diff.contains("two.txt"), "last turn's file shown: {diff}");
+            assert!(
+                !diff.contains("one.txt"),
+                "earlier turn must not appear: {diff}"
+            );
+        });
+    }
+
+    #[test]
+    fn diff_last_turn_with_no_pre_images_is_explicit() {
+        with_temp_home(|_| {
+            begin_turn();
+            // A mutating action that carries no pre-image (e.g. todo_add).
+            record("todo_add", "whatever", None);
+            let err = diff_last_turn().unwrap_err();
+            assert!(err.contains("no files"), "got: {err}");
         });
     }
 }
