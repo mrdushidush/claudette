@@ -46,7 +46,7 @@ Prefer not to pipe curl into a shell? Grab a [prebuilt release](https://github.c
 |------|---------|-----|
 | **REPL** | `claudette` | Conversational shell; autosaves every turn |
 | **One-shot** | `claudette "..."` | Print a reply and exit; pipe-friendly |
-| **TUI** | `claudette --tui` | Fullscreen UI, 5 tabs, live tool panel |
+| **TUI** _(experimental)_ | `claudette --tui` | Demo-only fullscreen UI, 5 tabs; known rendering rough edges — the REPL is the daily driver |
 | **Telegram** | `claudette --telegram` | Voice-capable chat from your phone |
 
 - **80+ tools across 21 opt-in groups.** The model turns a group on (`enable_tools("git")`) only when it needs it, so the base schema stays ~200 tokens however many tools exist. Point Claudette at a repo and the coding core - files, search, tests - is pre-enabled.

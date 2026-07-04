@@ -99,8 +99,10 @@ MODES (pick one; default is interactive REPL):
     --resume, -r         Continue the most recent saved session. Works in
                          REPL and single-shot.
     --telegram, -t       Run as a Telegram bot. Requires TELEGRAM_BOT_TOKEN.
-    --tui                Launch the fullscreen ratatui TUI (Chat / Tools /
-                         Notes / Todos / HW tabs).
+    --tui                [experimental] Launch the fullscreen ratatui TUI
+                         (Chat / Tools / Notes / Todos / HW tabs). Demo-only:
+                         has known rendering rough edges (doubled text, tool
+                         pane, footer). The REPL is the supported daily driver.
     --forge \"<prompt>\"   Run the prompt in forge-mode inside the active
                          brownfield mission. Errors if no mission is active —
                          start one with /brownfield <repo> first. v0a runs a
@@ -161,7 +163,7 @@ EXAMPLES:
     claudette                            # start the REPL
     claudette \"what time is it?\"         # one-shot
     claudette -r                         # resume last session
-    claudette --tui                      # fullscreen TUI
+    claudette --tui                      # fullscreen TUI (experimental/demo-only)
     claudette --auth-google calendar     # OAuth once
     claudette --briefing --time 08:30    # weekday briefings at 08:30
     claudette --telegram --chat 12345    # bot restricted to one chat
@@ -439,7 +441,7 @@ fn main() -> ExitCode {
 /// Supported flags:
 /// - `--resume` / `-r` — resume saved session
 /// - `--telegram` / `-t` — run as Telegram bot
-/// - `--tui` — launch the ratatui TUI
+/// - `--tui` — launch the ratatui TUI (experimental / demo-only)
 /// - `--chat <id>` — restrict to this chat ID (repeatable)
 /// - `--auth-google` — run the Google OAuth loopback flow and save tokens
 /// - `--revoke` — paired with `--auth-google`, revokes tokens and deletes
