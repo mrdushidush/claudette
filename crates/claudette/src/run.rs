@@ -170,6 +170,7 @@ pub fn run_agent(user_input: &str, opts: SessionOptions) -> Result<TurnSummary> 
     // Stash any file paths from the raw user prompt — bypasses the brain's
     // tendency to drop them when constructing tool-call arguments.
     crate::tools::set_current_turn_paths(crate::tools::extract_user_prompt_paths(user_input));
+    crate::transcript::begin_turn();
 
     // Sprint 14: even single-shot runs go through the fallback wrapper so
     // brain100 / brownfield benchmarks can measure Auto-preset escalation
@@ -282,6 +283,7 @@ pub(crate) fn run_turn_with_retry(
     // Stash any file paths from the raw user input — covers Telegram (its
     // single call site) plus any future caller of run_turn_with_retry.
     crate::tools::set_current_turn_paths(crate::tools::extract_user_prompt_paths(input));
+    crate::transcript::begin_turn();
 
     // Drain any deferred coder lease before the brain runs so the coder
     // doesn't contend with the brain for VRAM. The coalesced-swap design

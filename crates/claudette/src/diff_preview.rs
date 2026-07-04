@@ -38,7 +38,17 @@ fn render_replacement(input: &str, old_key: &str, new_key: &str) -> Option<Vec<S
     let path = v.get("path").and_then(Value::as_str)?;
     let old = v.get(old_key).and_then(Value::as_str)?;
     let new = v.get(new_key).and_then(Value::as_str)?;
+    Some(render_file_change(path, old, new))
+}
 
+/// Render a whole-file before→after change as a single colored hunk: a
+/// `path` header, then the changed middle as `-`/`+` with the common
+/// leading/trailing lines kept as dim context. Shared by the edit-tool
+/// preview (`render_replacement`) and `/diff`'s last-turn rendering
+/// (`transcript::diff_last_turn`), which feeds it a trashed pre-image vs the
+/// file now on disk. Never truncates.
+#[must_use]
+pub fn render_file_change(path: &str, old: &str, new: &str) -> Vec<String> {
     let old_lines: Vec<&str> = old.split('\n').collect();
     let new_lines: Vec<&str> = new.split('\n').collect();
 
@@ -63,7 +73,7 @@ fn render_replacement(input: &str, old_key: &str, new_key: &str) -> Option<Vec<S
     for line in &old_lines[old_lines.len() - suffix..] {
         out.push(theme::dim(&format!("  {line}")).to_string());
     }
-    Some(out)
+    out
 }
 
 /// Render an apply_patch unified diff with per-line coloring: file headers and
@@ -175,6 +185,20 @@ mod tests {
     fn non_edit_tool_returns_none() {
         assert!(render("bash", r#"{"command":"ls"}"#).is_none());
         assert!(render("read_file", r#"{"path":"f"}"#).is_none());
+    }
+
+    /// The `/diff` entry point: a whole-file before→after. A deletion
+    /// (after is empty) shows the removed content as `-` lines.
+    #[test]
+    fn render_file_change_shows_a_deletion_as_removals() {
+        let out = render_file_change("gone.md", "kept line\n", "");
+        let joined = out.join("\n");
+        assert!(joined.contains("gone.md"), "header missing: {joined}");
+        assert!(joined.contains("- kept line"), "removal missing: {joined}");
+        assert!(
+            !joined.contains("+ "),
+            "nothing added on a delete: {joined}"
+        );
     }
 
     #[test]
