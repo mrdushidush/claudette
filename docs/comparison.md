@@ -10,7 +10,7 @@ we're honest about what Claudette is, what it isn't, and where it has room to gr
 
 | Tool | Language | Local models | Primary UI | Agent style | Target use case |
 |---|---|---|---|---|---|
-| **Claudette** | Rust (single crate) | Ollama or LM Studio | REPL + CLI + TUI + **Telegram bot** | Agent loop + tiered-brain fallback (4B→9B) | Local-first coding agent + personal assistant |
+| **Claudette** | Rust (single crate) | Ollama or LM Studio | REPL + CLI + **Telegram bot** _(+ experimental TUI)_ | Agent loop + tiered-brain fallback (4B→9B) | Local-first coding agent + personal assistant |
 | **opencode** (SST) | Go | Yes, 75+ models | Terminal TUI + VS Code ext | Plan + Build agents | Coding agent replacing Claude Code |
 | **Aider** | Python | Yes, any LLM | Terminal REPL | Repo-mapped pair programming | Coding with deep git integration |
 | **OpenHands** | Python + Docker | Yes, via Ollama | Web UI + Docker sandbox | Autonomous agent with browser + shell | Full SWE-agent, SWE-bench 53%+ |
