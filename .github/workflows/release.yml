@@ -1,14 +1,24 @@
 name: Release
 
 # Triggered by pushing a v-prefix tag (e.g. `git tag v0.2.3 && git push --tags`).
-# Three things happen, in order:
-#   1. `verify`           — full test/clippy/fmt gate on the tagged commit.
+# The gate mirrors ci.yml so a tag can't ship anything a PR to main couldn't:
+#   1. `verify`           — fmt + clippy + test on the tagged commit, in BOTH
+#                           default (lean) and `--all-features` (integrations)
+#                           passes. We publish the crate *source*, not just the
+#                           lean binary, so a downstream `--features integrations`
+#                           build must not be shipped broken.
 #   2. `tag-version-match`— guards against forgot-to-bump in release prep.
-#   3. `publish`          — `cargo publish` to crates.io via OIDC (no stored
+#   3. `audit` + `deny`   — RustSec advisory scan + supply-chain policy at the
+#                           release boundary. A tag can be cut hours/days after
+#                           the last main CI run; the advisory DB moves daily, so
+#                           re-checking here stops a `--locked` publish of a tree
+#                           that has since grown a known CVE. `publish` and
+#                           `build-binaries` both gate on these. (roast 2026-06-30)
+#   4. `publish`          — `cargo publish` to crates.io via OIDC (no stored
 #                           token); idempotent (already-published = success).
 #                           `build-binaries` matrix produces prebuilt archives
 #                           for win/linux/macos in parallel.
-#   4. `release`          — once every matrix leg is green (independent of the
+#   5. `release`          — once every matrix leg is green (independent of the
 #                           crates.io publish), attach all binary archives +
 #                           their SHA256 sidecars to a GitHub Release with
 #                           auto-generated notes.
@@ -29,8 +39,9 @@ on:
       - "v*"
   # Manual dry-run: build the binary matrix without publishing to crates.io
   # or cutting a GitHub Release. Lets us validate matrix changes (e.g. a new
-  # runner image, a target triple swap) before tagging v* for real. Runs the
-  # `verify` and `build-binaries` jobs; skips `publish` and `release`.
+  # runner image, a target triple swap) before tagging v* for real. Runs
+  # `verify`, `audit`, `deny`, and `build-binaries`; skips `publish` and
+  # `release` (both gated on `github.event_name == 'push'`).
   workflow_dispatch:
 
 # Default-deny everything; the publish job opts back into id-token:write
@@ -53,10 +64,20 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2.9.1
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --no-deps -- -D warnings
+      # Second pass keeps the off-by-default `integrations` surface (Gmail/
+      # Calendar/Telegram/voice/tts/briefing) from being published broken:
+      # `cargo publish` ships the crate source, so a downstream build with
+      # `--features integrations` must compile+lint clean. Mirrors ci.yml.
+      - run: cargo clippy --all-targets --all-features --no-deps -- -D warnings
       # `--tests` includes the integration targets under tests/ (notably
       # offline_egress.rs, the end-to-end air-gap proof) so a release can't ship
       # with the flagship guarantee silently broken.
       - run: cargo test --lib --bins --tests
+        env:
+          CLAUDETTE_SKIP_OLLAMA_PROBE: "1"
+      # And the same suite with `integrations` on, so the optional cloud surface
+      # and its slice of the offline-egress proof are tested at the tag.
+      - run: cargo test --all-features --lib --bins --tests
         env:
           CLAUDETTE_SKIP_OLLAMA_PROBE: "1"
 
@@ -89,10 +110,49 @@ jobs:
             exit 1
           fi
 
+  # audit + deny mirror the ci.yml jobs of the same name, re-run at the release
+  # boundary. main was green when the release commit merged, but the RustSec
+  # advisory DB updates daily and a tag can be cut hours/days later — this makes
+  # it impossible to `--locked`-publish (or ship binaries for) a tree that has
+  # since grown a known advisory or a supply-chain-policy violation. Both the
+  # CLI-install approach and the contents:read-only permission set match ci.yml
+  # (no Node-20 third-party action, no extra scopes). (roast 2026-06-30)
+  audit:
+    name: cargo audit (RustSec advisories)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2.9.1
+        with:
+          key: cargo-audit
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Run cargo audit
+        run: cargo audit
+
+  deny:
+    name: cargo deny (supply chain)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2.9.1
+        with:
+          key: cargo-deny
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+      - name: Run cargo deny
+        run: cargo deny check
+
   publish:
     name: cargo publish (crates.io)
     runs-on: ubuntu-latest
-    needs: [verify, tag-version-match]
+    needs: [verify, tag-version-match, audit, deny]
     # Tag-push only — never publish on workflow_dispatch dry-runs.
     if: github.event_name == 'push'
     # OIDC exchange needs id-token:write.
@@ -101,7 +161,18 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-      - uses: dtolnay/rust-toolchain@stable
+      # SHA-pinned here, unlike the rolling `@stable` used everywhere else in CI.
+      # This is the ONE job that holds `id-token: write` — a compromised rolling
+      # tag of dtolnay/rust-toolchain would get code-exec in the same job that
+      # mints the crates.io publish token, i.e. it could publish a backdoored
+      # crate. Everywhere else the action only has contents:read, so the
+      # small/single-author/widely-used rationale for leaving it rolling (see
+      # ci.yml) still holds; here the privilege makes pinning the action *code*
+      # worth the manual refresh. `toolchain:` is now a required input because
+      # the SHA ref can't carry the branch-name channel selection. (roast 2026-06-30)
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9  # v1
+        with:
+          toolchain: stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2.9.1
       - name: Exchange OIDC token for crates.io publish token
         uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18  # v1.0.5
@@ -131,7 +202,7 @@ jobs:
 
   build-binaries:
     name: build ${{ matrix.target }}
-    needs: [verify, tag-version-match]
+    needs: [verify, tag-version-match, audit, deny]
     # Five archives total: win-x64, linux-x64, linux-arm64, macos-x64,
     # macos-arm64. linux-arm64 uses GitHub's free arm64 runner. macOS x64
     # cross-compiles from macos-latest (Apple Silicon) via the universal
@@ -211,7 +282,8 @@ jobs:
     runs-on: ubuntu-latest
     # Decoupled from `publish`: the GitHub Release (binaries + SHA256 sidecars)
     # is independent of crates.io, so a publish hiccup must NOT skip it.
-    # `build-binaries` transitively requires `verify` + `tag-version-match`.
+    # `build-binaries` transitively requires `verify` + `tag-version-match`
+    # + `audit` + `deny`.
     # (roast 2026-06-02 — was `needs: [publish, build-binaries]`, which dropped
     # binaries for three consecutive tags when publish failed on already-exists.)
     needs: [build-binaries]
