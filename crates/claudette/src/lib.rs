@@ -7,7 +7,7 @@
 //!
 //! This crate bundles the agent-loop/session/compaction/permissions kernel
 //! (`src/runtime/*.rs`) and the Claudette tool/REPL/TUI layer (tools, REPL,
-//! TUI, Codet sidecar, plus the feature-gated assistant integrations).
+//! TUI, plus the feature-gated assistant integrations).
 //! Single-crate — no path dependencies.
 //!
 //! Runtime modules are mounted at the crate root via `#[path = "runtime/..."]`
@@ -50,7 +50,6 @@ pub mod brain_selector;
 #[cfg(feature = "integrations")]
 pub mod briefing;
 pub mod clock;
-pub mod codet;
 pub mod commands;
 pub mod diff_preview;
 pub mod doctor;

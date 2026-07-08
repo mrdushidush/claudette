@@ -8,20 +8,16 @@
 //! - **Smart**  — brain=qwen3.5:9b, no fallback. When the user knows the
 //!   upcoming conversation is hard and wants to skip the swap dance.
 //!
-//! Coder is a single slot — out of scope for Sprint 14, but configured here
-//! alongside brain so the whole "which models am I running" state lives in
-//! one place.
-//!
 //! ## Resolution chain
 //! Lowest→highest priority:
 //! 1. Preset defaults
 //! 2. TOML overlay at `~/.claudette/models.toml` (optional)
 //! 3. Env vars: `CLAUDETTE_MODEL`, `CLAUDETTE_FALLBACK_BRAIN_MODEL`,
-//!    `CLAUDETTE_CODER_MODEL`, plus per-role `_NUM_CTX` / `_NUM_PREDICT`
+//!    plus per-role `_NUM_CTX` / `_NUM_PREDICT`
 //! 4. Slash command live override (persists for the process via
 //!    [`set_active`] — picked up on the next `build_runtime_streaming` call)
 //!
-//! Two roles: brain (conversational) + coder (Codet sidecar).
+//! One role: brain (conversational), with an optional fallback brain.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -69,7 +65,7 @@ impl std::str::FromStr for Preset {
 
 // ─── RoleConfig ─────────────────────────────────────────────────────────────
 
-/// Settings for one role (brain, fallback brain, or coder). `num_ctx` and
+/// Settings for one role (brain or fallback brain). `num_ctx` and
 /// `num_predict` are carried explicitly so the slash-command UI can show
 /// "what's this role actually going to run with" without walking back
 /// through env vars.
@@ -95,7 +91,7 @@ impl RoleConfig {
 
 /// The resolved state of every role + whether fallback is active. Built
 /// once per process at REPL startup via [`ModelConfig::resolve`] and
-/// mutated in place by the `/preset`, `/brain`, `/coder` slash commands.
+/// mutated in place by the `/preset`, `/brain` slash commands.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelConfig {
     pub preset: Preset,
@@ -103,37 +99,32 @@ pub struct ModelConfig {
     /// `None` for Fast/Smart, `Some(...)` for Auto. `brain_selector` reads
     /// this to decide whether to run the fallback dance on stuck signals.
     pub fallback_brain: Option<RoleConfig>,
-    pub coder: RoleConfig,
 }
 
 impl ModelConfig {
     /// Preset defaults. Numbers match the env-var defaults already shipping:
     /// 16K ctx / 6K predict for brain (fits the 8 GB VRAM budget once the
-    /// `q8_0` KV cache is on), 49K ctx / 12K predict for coder.
+    /// `q8_0` KV cache is on).
     #[must_use]
     pub fn from_preset(preset: Preset) -> Self {
         let brain_fast = RoleConfig::new("qwen3.5:4b", 16384, 6144);
         let brain_smart = RoleConfig::new("qwen3.5:9b", 16384, 6144);
-        let coder = RoleConfig::new("qwen3-coder:30b", 49152, 12288);
 
         match preset {
             Preset::Fast => Self {
                 preset,
                 brain: brain_fast,
                 fallback_brain: None,
-                coder,
             },
             Preset::Auto => Self {
                 preset,
                 brain: brain_fast,
                 fallback_brain: Some(brain_smart),
-                coder,
             },
             Preset::Smart => Self {
                 preset,
                 brain: brain_smart,
                 fallback_brain: None,
-                coder,
             },
         }
     }
@@ -183,15 +174,12 @@ impl ModelConfig {
             apply_role_override(&mut merged, ov);
             self.fallback_brain = Some(merged);
         }
-        if let Some(ov) = parsed.coder {
-            apply_role_override(&mut self.coder, ov);
-        }
         self
     }
 
     /// Merge environment overrides. Honors the existing `CLAUDETTE_MODEL`
-    /// / `CLAUDETTE_NUM_CTX` / `CLAUDETTE_NUM_PREDICT` / `CLAUDETTE_CODER_*`
-    /// env vars so Sprint 14 doesn't break anyone's existing setup. Adds
+    /// / `CLAUDETTE_NUM_CTX` / `CLAUDETTE_NUM_PREDICT` env vars so Sprint 14
+    /// doesn't break anyone's existing setup. Adds
     /// `CLAUDETTE_FALLBACK_BRAIN_MODEL` as the new knob.
     #[must_use]
     pub fn merge_env(mut self) -> Self {
@@ -219,15 +207,6 @@ impl ModelConfig {
                 });
             }
         }
-        if let Ok(v) = std::env::var("CLAUDETTE_CODER_MODEL") {
-            self.coder.model = v;
-        }
-        if let Some(v) = env_u32("CLAUDETTE_CODER_NUM_CTX") {
-            self.coder.num_ctx = v;
-        }
-        if let Some(v) = env_u32("CLAUDETTE_CODER_NUM_PREDICT") {
-            self.coder.num_predict = v;
-        }
         self
     }
 
@@ -254,7 +233,6 @@ struct TomlOverlay {
     preset: Option<String>,
     brain: Option<TomlRoleOverride>,
     fallback_brain: Option<TomlRoleOverride>,
-    coder: Option<TomlRoleOverride>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -291,7 +269,7 @@ pub fn default_toml_path() -> PathBuf {
 // ─── Process-global active state ────────────────────────────────────────────
 
 /// The single shared state every `build_runtime_*` call reads from. Slash
-/// commands (`/preset`, `/brain`, `/coder`) mutate it; the next REPL turn
+/// commands (`/preset`, `/brain`) mutate it; the next REPL turn
 /// picks up the new values because runtimes are rebuilt on demand.
 ///
 /// A `Mutex` behind a `OnceLock` is simpler than plumbing `Arc<Mutex<...>>`
@@ -404,10 +382,6 @@ mod tests {
 [brain]
 model = "qwen3.5:4b-custom"
 num_ctx = 32768
-
-[coder]
-model = "qwen3-coder:14b"
-num_predict = 4096
 "#,
         )
         .unwrap();
@@ -417,8 +391,6 @@ num_predict = 4096
         assert_eq!(cfg.brain.num_ctx, 32768);
         // num_predict untouched by toml → preset default survives.
         assert_eq!(cfg.brain.num_predict, 6144);
-        assert_eq!(cfg.coder.model, "qwen3-coder:14b");
-        assert_eq!(cfg.coder.num_predict, 4096);
 
         let _ = std::fs::remove_file(&path);
     }

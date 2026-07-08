@@ -1,8 +1,8 @@
 //! IDE group — fire-and-forget subprocesses that hand control to the user's
 //! OS shell: VS Code, the file manager, the browser.
 //!
-//! Three tools, no shared network state, no Codet involvement. Platform
-//! branches are `#[cfg(target_os = "windows")]` vs Unix (`xdg-open`).
+//! Three tools, no shared network state. Platform branches are
+//! `#[cfg(target_os = "windows")]` vs Unix (`xdg-open`).
 //!
 //! Parent-module helpers used: `validate_read_path` (so we don't launch the
 //! editor or the file manager on a path outside the user's home/cwd).
@@ -48,7 +48,7 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "open_url",
-                "description": "Open a URL or local file in the default browser. Accepts http/https URLs, file:// URIs, absolute local file paths, OR a bare filename that resolves under ~/.claudette/files/. For files just produced by generate_code/write_file, pass the absolute `path` field from that tool's response — do not reconstruct a file:// URL by hand.",
+                "description": "Open a URL or local file in the default browser. Accepts http/https URLs, file:// URIs, absolute local file paths, OR a bare filename that resolves under ~/.claudette/files/. For a file just produced by write_file, pass the absolute `path` field from that tool's response — do not reconstruct a file:// URL by hand.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -155,9 +155,9 @@ fn run_open_url(input: &str) -> Result<String, String> {
         .ok_or("open_url: missing 'url'")?;
 
     // Accept http(s), file:// URIs, absolute local paths, AND bare filenames
-    // that resolve under ~/.claudette/files/ (matches write_file/generate_code
-    // sandbox convention — model often gets back a path and either passes the
-    // bare filename or mangles the absolute path; this absorbs both cases).
+    // that resolve under ~/.claudette/files/ (matches the write_file sandbox
+    // convention — model often gets back a path and either passes the bare
+    // filename or mangles the absolute path; this absorbs both cases).
     let is_url =
         url.starts_with("http://") || url.starts_with("https://") || url.starts_with("file://");
 

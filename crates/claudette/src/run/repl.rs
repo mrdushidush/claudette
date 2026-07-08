@@ -146,7 +146,6 @@ pub fn run_agent_repl(opts: SessionOptions) -> Result<()> {
             }
         }
 
-        crate::tools::set_current_turn_paths(crate::tools::extract_user_prompt_paths(trimmed));
         crate::transcript::begin_turn();
 
         // Vision: if the line contains image-file path tokens (drag-drop

@@ -87,7 +87,7 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "edit_file",
-                "description": "Legacy single-string text replace (one occurrence only). Prefer apply_patch for multi-line / multi-file edits — v0.6.0 marks this for removal in a future release. For new files use write_file or generate_code.",
+                "description": "Legacy single-string text replace (one occurrence only). Prefer apply_patch for multi-line / multi-file edits — v0.6.0 marks this for removal in a future release. For new files use write_file.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -491,25 +491,6 @@ fn run_edit_file(input: &str) -> Result<String, String> {
     });
     if replace_all {
         result["replacements"] = json!(match_count);
-    }
-
-    // Codet post-edit hook for code files (same as write_file).
-    if let Some(validation) = crate::codet::validate_code_file(&path, &[]) {
-        result["validation"] = validation.to_json();
-        if let crate::codet::CodetStatus::CouldNotFix { ref last_error } = validation.status {
-            let short_err: String = last_error.lines().take(3).collect::<Vec<_>>().join(" | ");
-            eprintln!(
-                "{} {}",
-                crate::theme::warn(crate::theme::WARN_GLYPH),
-                crate::theme::warn(&format!(
-                    "codet: {} failed validation after {} attempt(s), {} landed — {}",
-                    path.display(),
-                    validation.attempts_made,
-                    validation.fixes_applied,
-                    short_err,
-                ))
-            );
-        }
     }
 
     Ok(result.to_string())
