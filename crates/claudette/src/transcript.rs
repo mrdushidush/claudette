@@ -78,8 +78,7 @@ fn trash_target_for(original: &Path) -> std::io::Result<PathBuf> {
 thread_local! {
     /// The undo ref produced by the most recent trash operation on this
     /// thread. Tools run synchronously on the worker thread, so the
-    /// executor can [`take_pending_undo`] right after dispatch — same
-    /// pattern as `tools::set_current_turn_paths`.
+    /// executor can [`take_pending_undo`] right after dispatch.
     static PENDING_UNDO: RefCell<Option<Value>> = const { RefCell::new(None) };
 }
 

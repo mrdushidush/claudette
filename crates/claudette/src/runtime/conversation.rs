@@ -98,8 +98,8 @@ fn build_turn_system_prompt(base: &[String], has_images: bool) -> Vec<String> {
 /// `messages` is a `Cow` so the hot path in `run_turn` can borrow
 /// `Session::messages` instead of cloning the full history on every loop
 /// iteration — that clone was O(n) in message count and held megabyte-scale
-/// image blocks. Test code and one-shot callers (e.g. `codet`) construct
-/// the owned variant; the runtime constructs the borrowed variant.
+/// image blocks. Test code and one-shot callers construct the owned
+/// variant; the runtime constructs the borrowed variant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiRequest<'a> {
     pub system_prompt: Vec<String>,

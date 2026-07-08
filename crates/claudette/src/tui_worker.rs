@@ -308,9 +308,6 @@ pub fn spawn_worker(
                 UserInput::Message { text, images } => {
                     let _ = tui_tx.send(TuiEvent::Working(true));
 
-                    crate::tools::set_current_turn_paths(crate::tools::extract_user_prompt_paths(
-                        &text,
-                    ));
                     crate::transcript::begin_turn();
                     let image_pairs: Vec<(String, String)> = images
                         .into_iter()

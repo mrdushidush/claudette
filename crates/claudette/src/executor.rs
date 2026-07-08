@@ -73,8 +73,8 @@ impl ToolExecutor for AgentToolExecutor {
         // Action transcript — mutating tools only (ReadOnly reads would be
         // noise and a privacy footgun), best-effort, AFTER dispatch so the
         // log reflects what actually happened. `take_pending_undo` collects
-        // the trash/pre-image ref a tool left on this thread (same
-        // thread-local pattern as `set_current_turn_paths`) — and is taken
+        // the trash/pre-image ref a tool left on this thread (a
+        // thread-local set during dispatch) — and is taken
         // unconditionally so a failed call can never leak its ref onto the
         // next call's line. A failed call IS still recorded when it left an
         // undo ref (e.g. snapshot succeeded, write failed — the pre-image

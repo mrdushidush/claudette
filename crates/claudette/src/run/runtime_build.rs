@@ -420,7 +420,6 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("todo_set_status", WorkspaceWrite)
         .with_tool_requirement("todo_delete", WorkspaceWrite)
         .with_tool_requirement("write_file", WorkspaceWrite)
-        .with_tool_requirement("generate_code", WorkspaceWrite)
         .with_tool_requirement("web_search", WorkspaceWrite)
         // web_fetch is network EGRESS to a model-supplied URL — the exfil sink
         // in the prompt-injection chain (roast 2026-06-02 H2). Gated at

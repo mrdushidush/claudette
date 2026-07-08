@@ -650,7 +650,6 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
             ),
         };
         let mut coder_runtime = build_forge_runtime(session.clone(), &mission, false);
-        crate::tools::set_current_turn_paths(crate::tools::extract_user_prompt_paths(&coder_input));
         crate::transcript::begin_turn();
         let _ = crate::brain_selector::run_turn_with_fallback(
             &mut coder_runtime,
@@ -1036,7 +1035,6 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
          requested. Call mission_submit with a short PR title summarising the change, and note \
          in the body that automated review found unresolved issues. Do nothing else."
     };
-    crate::tools::set_current_turn_paths(crate::tools::extract_user_prompt_paths(submit_input));
     crate::transcript::begin_turn();
     let submit_summary = crate::brain_selector::run_turn_with_fallback(
         &mut submit_runtime,

@@ -41,7 +41,6 @@ mod calendar {
     }
 }
 mod clipboard;
-mod codegen;
 mod dialog;
 mod facts;
 mod file_ops;
@@ -88,14 +87,6 @@ mod todos;
 mod vision;
 mod web_search;
 
-// Pub re-exports for entry points that pre-extract paths from the raw
-// user prompt before each turn (REPL / single-shot / Telegram / TUI).
-// Moved to src/tools/codegen.rs alongside the reference-file
-// infrastructure they feed into; re-exported here so call sites keep
-// the stable `crate::tools::set_current_turn_paths` / `...extract_user_prompt_paths`
-// paths.
-pub use codegen::{extract_user_prompt_paths, set_current_turn_paths};
-
 /// Directories the code-search tools (`grep_search`, `repo_map`) never descend
 /// into: build output, dependency caches, and VCS metadata. Single source of
 /// truth shared across the search modules. `.gitignore` already covers most of
@@ -134,7 +125,6 @@ type DispatchFn = fn(&str, &str) -> Option<Result<String, String>>;
 const GROUPS: &[(SchemasFn, DispatchFn)] = &[
     (calendar::schemas, calendar::dispatch),
     (clipboard::schemas, clipboard::dispatch),
-    (codegen::schemas, codegen::dispatch),
     (dialog::schemas, dialog::dispatch),
     (facts::schemas, facts::dispatch),
     (file_ops::schemas, file_ops::dispatch),
@@ -461,8 +451,8 @@ fn run_get_capabilities() -> String {
 pub(super) const MAX_FILE_BYTES: usize = 1024 * 1024; // 1 MB
 
 /// Expand a leading `~` to the user's home directory. Other tildes are left
-/// alone (matching shell behaviour). `pub(crate)` so the `/validate` slash
-/// command can reuse the same tilde logic as the file-ops tools.
+/// alone (matching shell behaviour). `pub(crate)` so the search tools
+/// (`tools/search.rs`) can reuse the same tilde logic as the file-ops tools.
 pub(crate) fn expand_tilde(input: &str) -> PathBuf {
     if let Some(rest) = input
         .strip_prefix("~/")
@@ -576,16 +566,6 @@ fn resolve_via_workspace_roots(relative: &Path) -> Option<PathBuf> {
     }
     None
 }
-
-// Codegen group — generate_code, along with reference-file
-// extraction (collect_reference_files, extract_path_candidates,
-// resolve_reference, looks_like_path, has_code_extension) and the
-// per-turn user-prompt path stash (set_current_turn_paths,
-// extract_user_prompt_paths, CURRENT_TURN_PATHS) live in
-// src/tools/codegen.rs. set_current_turn_paths and extract_user_prompt_paths
-// are pub-re-exported from this module for REPL/Telegram/TUI entry points.
-// `is_code_extension` + CODE_EXTENSIONS moved with write_file into
-// src/tools/file_ops.rs.
 
 /// Resolved workspace roots — the three places `validate_read_path` looks
 /// for allowed reads, captured into one value so the resolution rules are
@@ -896,8 +876,8 @@ fn sensitive_read_denial(path: &Path, home: &Path) -> Option<String> {
 }
 
 /// The process CWD when it is itself under a `CLAUDETTE_WORKSPACE` root, else
-/// `None`. Used to resolve *bare relative* write targets (`write_file`,
-/// `generate_code`) to the user's project instead of the scratch sandbox: a
+/// `None`. Used to resolve *bare relative* write targets (`write_file`) to
+/// the user's project instead of the scratch sandbox: a
 /// user who `cd`'d into their workspace and said "create helpers.py here"
 /// means the project, not `~/.claudette/files/`.
 pub(super) fn workspace_cwd() -> Option<PathBuf> {
@@ -1012,7 +992,7 @@ pub(super) fn validate_write_path(input: &str) -> Result<PathBuf, String> {
 /// project file or a dotfile — but in **forge-mode** the autonomous Coder
 /// must not be able to reach outside the mission tree (e.g. rewrite
 /// `~/.ssh/config` or `~/.aws/credentials`). That was the residual half of
-/// roast RC-B: `write_file`/`generate_code` were already confined by
+/// roast RC-B: `write_file` was already confined by
 /// [`validate_write_path`], but the in-place editors were not.
 ///
 /// Policy (matches `write_file`, so all mutating tools share one boundary):
@@ -1046,8 +1026,6 @@ fn validate_edit_path_inner(input: &str, mission_active: bool) -> Result<PathBuf
 // git_branch, git_checkout, git_push) lives in src/tools/git.rs.
 
 // Shell + edit group (bash, edit_file) lives in src/tools/shell.rs.
-
-// Codegen group (generate_code) lives in src/tools/codegen.rs.
 
 // Search group (glob_search, grep_search, web_fetch) lives in
 // src/tools/search.rs. `strip_html` and `strip_tag_block` stay here because
@@ -2000,13 +1978,7 @@ mod tests {
             core.iter().any(|n| n == "get_current_time"),
             "get_current_time must be in core"
         );
-        for moved in &[
-            "get_capabilities",
-            "read_file",
-            "todo_add",
-            "generate_code",
-            "web_search",
-        ] {
+        for moved in &["get_capabilities", "read_file", "todo_add", "web_search"] {
             assert!(
                 !core.iter().any(|n| n == moved),
                 "{moved} should now live in a group, not core"
@@ -2023,7 +1995,7 @@ mod tests {
             .filter_map(|g| g.get("name").and_then(Value::as_str))
             .collect();
         for required in &[
-            "notes", "todos", "files", "code", "meta", "git", "ide", "search", "advanced",
+            "notes", "todos", "files", "meta", "git", "ide", "search", "advanced",
         ] {
             assert!(
                 group_names.contains(required),
@@ -2463,9 +2435,4 @@ mod tests {
         let err = dispatch_tool("todo_delete", &json!({ "id": todo_id }).to_string()).unwrap_err();
         assert!(err.contains("no todo with id"), "got: {err}");
     }
-
-    // Reference-file extraction tests (looks_like_path_*, has_code_extension_*,
-    // extract_path_candidates_*, collect_reference_files_*,
-    // extract_user_prompt_paths_*, set_current_turn_paths_*) live in
-    // src/tools/codegen.rs alongside their implementations.
 }
