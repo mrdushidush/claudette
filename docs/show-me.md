@@ -85,7 +85,7 @@ If you ever told Claudette something in any session, you can pull it back.
 
 ## Code
 
-Claudette is first and foremost a coding agent. `generate_code` and `--forge` route through a dedicated coder model.
+Claudette is first and foremost a coding agent. It writes and edits code directly with `write_file`/`edit_file`/`apply_diff`, and `--forge` runs an autonomous plan→code→verify→submit loop.
 
 - *"Write me a Python script that renames every .HEIC in this folder to .jpg using ffmpeg."*
 - *"Add a dark-mode toggle to my React app's settings page."*

@@ -49,7 +49,7 @@ Prefer not to pipe curl into a shell? Grab a [prebuilt release](https://github.c
 | **TUI** _(experimental)_ | `claudette --tui` | Demo-only fullscreen UI, 5 tabs; known rendering rough edges — the REPL is the daily driver |
 | **Telegram** | `claudette --telegram` | Voice-capable chat from your phone |
 
-- **80+ tools across 21 opt-in groups.** The model turns a group on (`enable_tools("git")`) only when it needs it, so the base schema stays ~200 tokens however many tools exist. Point Claudette at a repo and the coding core - files, search, tests - is pre-enabled.
+- **80+ tools across 20 opt-in groups.** The model turns a group on (`enable_tools("git")`) only when it needs it, so the base schema stays ~200 tokens however many tools exist. Point Claudette at a repo and the coding core - files, search, tests - is pre-enabled.
 - **Forge - an autonomous code pipeline.** `claudette --forge "<task>"` runs Planner → Coder → Verifier → fix-loop → Submitter. The Verifier actually builds and runs the tests each round (`cargo`, `go`, `pytest`, `npm`), so a diff that doesn't compile or breaks a test can't pass - and no PR opens until you approve the plan and the full diff. → [docs/forge.md](docs/forge.md)
 - **Brownfield missions.** `mission_start("owner/repo")` clones a repo, routes file ops into it, and `mission_submit` branches, commits, pushes, and opens the PR - one tool chain.
 - **Also a personal assistant.** Notes, todos, calendar, Gmail, weather, web search, and a Telegram bot with voice in (Whisper) and out (edge-tts, English or Hebrew).
@@ -93,7 +93,7 @@ Runs on 8 GB VRAM or plain CPU; 16 GB for the 35B brain. Footprint details → [
 - [docs/hardware.md](docs/hardware.md) - VRAM/RAM/disk by preset, CPU-only mode
 - [docs/usage.md](docs/usage.md) - CLI flags, slash commands, Telegram commands
 - [docs/troubleshooting.md](docs/troubleshooting.md) - symptom-keyed fixes (silent hang, model-reload 400, recall 501, not_configured)
-- [docs/architecture.md](docs/architecture.md) - module layout, tool-group + Codet contracts, storage layout
+- [docs/architecture.md](docs/architecture.md) - module layout, tool-group contract, storage layout
 - [docs/forge.md](docs/forge.md) - forge pipeline, brownfield missions, `models.toml`
 - [docs/comparison.md](docs/comparison.md) - side-by-side vs. opencode / Aider / OpenHands / Cline / Continue
 - [docs/deploy.md](docs/deploy.md) - Pi / VPS / home-server via docker-compose

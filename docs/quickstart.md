@@ -226,7 +226,7 @@ claudette --briefing --time 08:30 --days weekdays
 
 - [`configuration.md`](configuration.md) — every env var, token fallbacks, recall settings
 - [`forge.md`](forge.md) — the full Forge pipeline, review gate, build/test gate, role-routing
-- [`hardware.md`](hardware.md) — VRAM per preset, the 30b-on-8GB recipe
+- [`hardware.md`](hardware.md) — VRAM per preset, running a big brain on constrained VRAM
 - [`usage.md`](usage.md) — full CLI flag reference + every slash command
-- [`architecture.md`](architecture.md) — module layout, tool-group contract, Codet sidecar
+- [`architecture.md`](architecture.md) — module layout, tool-group contract, forge pipeline
 - [`comparison.md`](comparison.md) — honest side-by-side vs. other open-source agents

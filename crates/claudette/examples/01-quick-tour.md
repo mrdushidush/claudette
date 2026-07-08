@@ -45,7 +45,6 @@ Here are the files in `D:/dev/claudette/src`:
 - agents.rs
 - api.rs
 - brain_selector.rs
-- codet.rs
 ...
 - voice.rs
 
