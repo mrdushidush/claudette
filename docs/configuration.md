@@ -60,15 +60,6 @@ Inspect the live allow-list with `claudette --offline --doctor` — the **egress
 
 Two layers enforce it: an HTTP-layer guard in the reqwest path checks the destination host of every in-process request, and a dispatch-layer guard refuses tools that reach the network through a subprocess where the HTTP guard can't see the destination. The host-matching logic lives in [`src/egress.rs`](../crates/claudette/src/egress.rs).
 
-## Codet (code-generation sidecar)
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `CLAUDETTE_CODER_MODEL` | `qwen3-coder:30b` | Coder model. Set to `qwen2.5-coder:14b` on RAM-constrained hosts. |
-| `CLAUDETTE_CODER_NUM_CTX` | `49152` | Coder context window. Drop to `16384` on 32 GB RAM boxes. |
-| `CLAUDETTE_CODER_NUM_PREDICT` | `12288` | Max output tokens the coder can emit in one call. |
-| `CLAUDETTE_VALIDATE_CODE` | `false` | Codet auto-validation after code writes/edits. Off by default; set `true`/`1`/`yes`/`on` to opt in. |
-
 ## Forge mode
 
 | Variable | Default | Purpose |

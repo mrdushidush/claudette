@@ -101,7 +101,7 @@ The default brain is `qwen3.5:4b` running locally via Ollama. The model's weight
 
 Vision: same story. Pasting a screenshot with <kbd>Alt</kbd>+<kbd>V</kbd> sends image bytes to your local Ollama, not to any cloud vision service.
 
-Codet (the code-gen sidecar) and the auto-fallback to `qwen3.5:9b` are also local-only.
+The auto-fallback to `qwen3.5:9b` is also local-only.
 
 ---
 

@@ -1,4 +1,4 @@
-# 06 — The brain100 regression harness
+# 05 — The brain100 regression harness
 
 Claudette ships a 100-prompt regression harness at
 `tests/brain100_test.sh` that exercises real tool calls across five

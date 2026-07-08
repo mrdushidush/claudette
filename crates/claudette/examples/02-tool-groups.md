@@ -56,25 +56,26 @@ advertisable tool — core plus every optional group with the
 
 ```
 > /tools
-✨ agent tools (core 17 + 12 optional groups)
+✨ agent tools (core 3 + 20 optional groups)
   ⚡ core (always loaded)
-    • get_current_time: Returns the current date, time, weekday, and timezone.
-    • get_capabilities: Show claudette's config, available tools, and limits.
-    • note_create, note_list, note_read, note_delete
-    • todo_add, todo_list, todo_set_status, todo_delete
-    • read_file, write_file, list_dir
-    • web_search, generate_code, spawn_agent
+    ✓ enable_tools: Load an optional tool group (git, ide, search, advanced).
+    ✓ get_current_time: Current date, time, weekday, timezone.
+    ✓ load_workspace_rules: Load CLAUDETTE.md / .claudette/instructions.md from the project ancestor chain
 
-  ⚡ git — 8 tool(s), enable with enable_tools({group: "git"})
-    • git_status, git_diff, git_log, git_add, git_commit, git_branch, git_checkout, git_push
+  ⚡ files — 3 tool(s), enable with enable_tools({group: "files"})
+    ✓ read_file, write_file, list_dir
+
+  ⚡ git — 9 tool(s), enable with enable_tools({group: "git"})
+    ✓ git_status, git_diff, git_log, git_add, git_commit, git_branch, git_checkout, git_push, git_clone
 
   ⚡ facts — 2 tool(s), enable with enable_tools({group: "facts"})
-    • wikipedia, weather
+    ✓ wikipedia, weather
 
-  [… more groups: ide, search, advanced, registry, github,
-     telegram, calendar, schedule, gmail …]
+  [… more groups: notes, todos, meta, ide, search, advanced,
+     registry, github, telegram, calendar, schedule, gmail,
+     recall, quality, semantic, vision, clipboard …]
 
-  core schema: 4711 chars — enabling a group grows this temporarily
+  core schema: 827 chars — enabling a group grows this temporarily
 ```
 
 Output is the **advertisable** surface, not the live registry state
