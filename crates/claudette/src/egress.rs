@@ -85,6 +85,9 @@ pub const NET_TOOLS: &[&str] = &[
     // Keyless facts
     "wikipedia",
     "weather",
+    // Package-registry lookups (reqwest → crates.io / registry.npmjs.org)
+    "crate_info",
+    "npm_info",
     // Google (Gmail + Calendar) + Telegram are integration-only and listed in
     // INTEGRATION_NET_TOOLS below, so this list stays consistent with the
     // coding-only schema (where those tools don't exist).

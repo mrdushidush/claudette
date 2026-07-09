@@ -522,14 +522,17 @@ fn run_web_fetch(input: &str) -> Result<String, String> {
             "web_fetch: only http:// and https:// URLs are allowed, got: {url}"
         ));
     }
+    // Offline mode: block by the URL's host string BEFORE any DNS resolution,
+    // so an `--offline` web_fetch can't leak the hostname to the resolver (a DNS
+    // covert channel). `guard` is a no-op when offline mode is off, so the SSRF
+    // path below is unchanged online. Loopback/backend hosts that `guard` allows
+    // are still rejected by the SSRF check that follows.
+    crate::egress::guard(url)?;
     // SSRF guard: resolve the host ONCE and validate every address it maps to.
     // The validated addresses are pinned into the client (below) so reqwest
     // connects to exactly what we checked — a DNS-rebinding answer can't swap an
     // internal IP in between the check and the TCP connect.
     let target = validate_fetch_target(url)?;
-    // Offline mode: the SSRF guard above already rejects loopback/private
-    // targets, so any URL that reaches here is public — block it.
-    crate::egress::guard(url)?;
 
     let client = web_fetch_client(&target)?;
 
