@@ -126,7 +126,6 @@ Rarely needed; defaults are tuned for local small models. Mostly useful for debu
 | `CLAUDETTE_READ_DEFAULT_LINES` | `400` | Default number of lines `read_file` returns when no explicit range is given. |
 | `CLAUDETTE_READ_LOOP_LIMIT` | `2` | How many identical re-reads of the same file are tolerated before the read-loop breaker intervenes. |
 | `CLAUDETTE_NO_READ_LOOP_BREAKER` | unset | Set to `1` to disable the read-loop breaker entirely. |
-| `CLAUDETTE_WRITE_FILE_CODE_MAX_LINES` | `60` | Max lines `write_file` accepts for a code file in one call (nudges the model toward `edit_file` for large changes). |
 | `CLAUDETTE_NO_SPINNER` | unset | Set to `1` to suppress the REPL/TUI activity spinner (TTY only). |
 | `CLAUDETTE_MODEL_RELOAD_RETRY_MS` | `750` | Backoff (ms) before retrying a request after the backend reports the model was unloaded/reloaded. |
 | `CLAUDETTE_DISABLE_MODEL_RELOAD_RETRY` | unset | Set to `1` to disable the post-reload retry and fail fast instead. |
