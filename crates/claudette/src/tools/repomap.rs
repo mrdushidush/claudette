@@ -48,7 +48,7 @@ const MAX_DISTINCT_NAMES: usize = 200;
 /// sees the real `const X = 3;` ahead of a stale doc saying `2`.
 const SOURCE_EXTENSIONS: &[&str] = &[
     "rs", "py", "js", "mjs", "cjs", "jsx", "ts", "tsx", "go", "java", "c", "cc", "cpp", "cxx", "h",
-    "hpp", "hh", "rb", "php", "sh", "bash", "sql", "kt", "swift", "scala", "cs",
+    "hpp", "hh", "rb", "php", "sh", "bash", "sql", "kt", "kts", "swift", "scala", "cs",
 ];
 
 fn is_source_file(path: &Path) -> bool {
@@ -660,6 +660,33 @@ const LANG_PATTERNS: &[LangSpec] = &[
             ),
         ],
     ),
+    (
+        "Kotlin",
+        &["kt", "kts"],
+        &[
+            // Order matters (first match per line wins): class / interface /
+            // object precede `fun` so `fun interface Foo` (a functional
+            // interface) is captured as an interface, not a function "interface".
+            (
+                "class",
+                r"^\s*(?:(?:public|private|protected|internal|open|final|abstract|sealed|data|inner|enum|annotation|value|expect|actual)\s+)*class\s+([A-Za-z_]\w*)",
+            ),
+            (
+                "interface",
+                r"^\s*(?:(?:public|private|protected|internal|sealed|fun|expect|actual)\s+)*interface\s+([A-Za-z_]\w*)",
+            ),
+            (
+                "object",
+                r"^\s*(?:(?:public|private|protected|internal|expect|actual)\s+)*(?:companion\s+)?object\s+([A-Za-z_]\w*)",
+            ),
+            // Functions last. Skips an optional generic list (`fun <T> …`) and a
+            // simple extension receiver (`fun String.foo` → captures `foo`).
+            (
+                "fun",
+                r"^\s*(?:(?:public|private|protected|internal|open|final|abstract|override|suspend|inline|operator|infix|tailrec|external|expect|actual)\s+)*fun\s+(?:<[^>]*>\s*)?(?:[A-Za-z_][\w.]*\.)?([A-Za-z_]\w*)",
+            ),
+        ],
+    ),
 ];
 
 /// Comma-joined display names of the map languages, for the schema description.
@@ -792,6 +819,105 @@ mod tests {
             "def self.class_method",
             "def valid?",
             "def say_hello",
+        ] {
+            assert!(out.contains(sig), "expected `{sig}` in the outline:\n{out}");
+        }
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn kotlin_patterns_capture_class_interface_object_and_fun() {
+        let pats = patterns_for(Path::new("x.kt")).unwrap();
+        let hit = |line: &str| {
+            pats.iter()
+                .find_map(|(k, re)| re.captures(line).map(|c| (*k, c[1].to_string())))
+        };
+
+        // plain + modified functions
+        assert_eq!(hit("fun main() {"), Some(("fun", "main".to_string())));
+        assert_eq!(
+            hit("    private suspend fun fetch(id: Int): User {"),
+            Some(("fun", "fetch".to_string()))
+        );
+        // generic function — skip <T> and capture the name
+        assert_eq!(
+            hit("fun <T> singletonList(item: T): List<T> {"),
+            Some(("fun", "singletonList".to_string()))
+        );
+        // extension function — receiver stripped, member name captured
+        assert_eq!(
+            hit("fun String.isPalindrome(): Boolean {"),
+            Some(("fun", "isPalindrome".to_string()))
+        );
+
+        // classes with modifiers / kinds
+        assert_eq!(
+            hit("class Greeting(val name: String) {"),
+            Some(("class", "Greeting".to_string()))
+        );
+        assert_eq!(
+            hit("data class Point(val x: Int, val y: Int)"),
+            Some(("class", "Point".to_string()))
+        );
+        assert_eq!(
+            hit("enum class Color { RED, GREEN }"),
+            Some(("class", "Color".to_string()))
+        );
+        assert_eq!(
+            hit("sealed class Shape"),
+            Some(("class", "Shape".to_string()))
+        );
+
+        // interface, incl. the `fun interface` disambiguation
+        assert_eq!(
+            hit("interface Repository {"),
+            Some(("interface", "Repository".to_string()))
+        );
+        assert_eq!(
+            hit("fun interface Runnable {"),
+            Some(("interface", "Runnable".to_string()))
+        );
+
+        // object + companion object
+        assert_eq!(
+            hit("object Singleton {"),
+            Some(("object", "Singleton".to_string()))
+        );
+        assert_eq!(
+            hit("    companion object Factory {"),
+            Some(("object", "Factory".to_string()))
+        );
+    }
+
+    #[test]
+    fn repo_map_kotlin_definitions_extracted_in_map_mode() {
+        let _eg = crate::test_env_lock();
+        let base = super::super::user_home()
+            .join(".claudette")
+            .join("files")
+            .join("claudette-repomap-test-kotlin");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("src")).unwrap();
+        let kotlin_content = "package demo\n\ninterface Greeter {\n    fun greet(name: String): String\n}\n\nclass Greeting(val prefix: String) : Greeter {\n    override fun greet(name: String): String = \"$prefix, $name\"\n}\n\nobject Config {\n    const val VERSION = \"1.0\"\n}\n\nfun main() {\n    println(Greeting(\"Hello\").greet(\"world\"))\n}\n";
+        std::fs::write(base.join("src").join("Greeting.kt"), kotlin_content).unwrap();
+
+        let input = json!({
+            "query": "greeter greeting config main",
+            "path": base.to_str().unwrap()
+        })
+        .to_string();
+        let out = run_repo_map(&input).unwrap().replace('\\', "/");
+
+        assert!(
+            out.contains("src/Greeting.kt"),
+            "Greeting.kt should be found:\n{out}"
+        );
+        for sig in [
+            "interface Greeter",
+            "class Greeting",
+            "object Config",
+            "fun main",
         ] {
             assert!(out.contains(sig), "expected `{sig}` in the outline:\n{out}");
         }
