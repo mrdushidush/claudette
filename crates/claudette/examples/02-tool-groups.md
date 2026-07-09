@@ -1,6 +1,6 @@
 # 02 — Tool groups and `enable_tools`
 
-Claudette ships 70+ tools but only advertises ~17 "core" tools by
+Claudette ships ~80 tools but only advertises 3 "core" tools by
 default. The rest are loaded on demand via a synthetic meta-tool the
 model can call: `enable_tools(group)`. This example walks through the
 mechanic so you can see it happen live.
@@ -8,26 +8,26 @@ mechanic so you can see it happen live.
 ## Why on-demand?
 
 Every tool schema the model sees costs input tokens. Advertising all
-70 tools at once runs ~25 KB of JSON schema on every turn. Core-only
-is ~4.7 KB. For a chatty REPL session that never touches GitHub or
-the web, that 80% reduction is real savings.
+~80 tools at once runs ~34 KB of JSON schema on every turn. Core-only
+is ~0.8 KB. For a chatty REPL session that never touches GitHub or
+the web, that reduction is real savings.
 
 ## Groups at a glance
 
 | Group | Tools | Typical use |
 |-------|-------|-------------|
-| `core` (always on) | 17 | Notes, todos, files, time, web search, code gen |
-| `git` | 8 | status, diff, log, add, commit, branch, checkout, push |
+| `core` (always on) | 3 | enable_tools, current time, load workspace rules |
+| `files` | 3 | read_file, write_file, list_dir |
+| `git` | 9 | status, diff, log, add, commit, branch, checkout, push, clone |
 | `ide` | 3 | Open in editor / file manager / browser |
-| `search` | 3 | Glob, grep, fetch-and-strip-HTML |
-| `advanced` | 3 | Bash, `edit_file`, `spawn_agent` |
-| `facts` | 4 | Wikipedia, Open-Meteo weather |
-| `registry` | 4 | crates.io, npmjs |
-| `github` | 6 | PRs/issues/code search |
-| `telegram` | 3 | Bot send/poll/photo |
-| `calendar` | 5 | Google Calendar CRUD + RSVP |
+| `search` | 5 | repo_map, glob, grep, web_fetch, web_search |
+| `advanced` | 7 | Bash (+background/status/tail), `edit_file`, `apply_diff`, `ask_user` |
+| `facts` | 2 | Wikipedia, Open-Meteo weather |
+| `registry` | 2 | crates.io, npmjs |
+| `github` | 15 | PRs/issues/code search + forge mission tools |
 | `schedule` | 4 | One-shot + recurring reminders |
-| `gmail` | 4 | Read-only Gmail (list/search/read/labels) |
+| `quality` | 3 | run_tests, diagnostics, apply_patch |
+| `gmail` / `calendar` / `telegram` | (integrations) | Only in `--features integrations` builds |
 
 ## Example — triggering a group
 
