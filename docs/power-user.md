@@ -28,11 +28,10 @@ export CLAUDETTE_SKIP_LM_STUDIO_PROBE=1
 
 ```bash
 # Recommended on 16 GB+ VRAM (LM Studio backend):
-export CLAUDETTE_MODEL=qwen3.6-35b-a3b@q4_k_xl   # best brain & coder by a wide margin
-export CLAUDETTE_CODER_MODEL=qwen3.6-35b-a3b@q4_k_xl   # same model, no swap dance
+export CLAUDETTE_MODEL=qwen3.6-35b-a3b@q4_k_xl   # best brain by a wide margin
 
 # Or on 8 GB VRAM (Ollama backend):
-# export CLAUDETTE_MODEL=qwen3-coder:14b         # the brain itself
+# export CLAUDETTE_MODEL=qwen3.5:4b              # the brain itself
 # export CLAUDETTE_FALLBACK_BRAIN_MODEL=qwen3.5:9b   # ignored unless Auto preset
 ```
 
@@ -53,10 +52,10 @@ To skip the Auto-preset dance entirely (no fallback, no stuck-signal escalation)
 ## Forge mode knobs
 
 ```bash
-export CLAUDETTE_MAX_FIX_ROUNDS=4                # default 2, clamped at 10
+export CLAUDETTE_MAX_FIX_ROUNDS=4                # default 3, clamped at 10
 ```
 
-The default of 2 is tuned for local 8b coder models. If you've routed Verifier to a stronger model via `~/.claudettes-forge/models.toml`, raising this often pays off — the Verifier catches subtler defects and the Coder still has room to fix them. Above 6 you're usually fighting a context-budget problem, not a quality problem.
+The default of 3 is tuned for local 8b coder models. If you've routed Verifier to a stronger model via `~/.claudettes-forge/models.toml`, raising this often pays off — the Verifier catches subtler defects and the Coder still has room to fix them. Above 6 you're usually fighting a context-budget problem, not a quality problem.
 
 Per-role model routing lives in `~/.claudettes-forge/models.toml`:
 
@@ -94,7 +93,7 @@ export CLAUDETTE_SOFT_COMPACT_THRESHOLD=12000    # earlier "preserve 12 turns" c
 export CLAUDETTE_MAX_ITERATIONS=80               # per-turn tool-call ceiling
 ```
 
-The default compaction threshold of 1M tokens is effectively "off" — it exists for the 128K+ contexts most local-model setups never reach. Set `CLAUDETTE_COMPACT_THRESHOLD` to roughly two-thirds of your `num_ctx` for predictable behavior on tighter contexts.
+The default compaction threshold is adaptive — half the active brain's `num_ctx` (clamped to `[4000, 1000000]`) — so a real 16K–128K window compacts before it overflows. The `1M` value is only the upper cap for enormous windows. Set `CLAUDETTE_COMPACT_THRESHOLD` explicitly to pin a specific trigger (e.g. two-thirds of your `num_ctx`) instead of the `num_ctx / 2` default.
 
 ---
 
@@ -157,6 +156,6 @@ Common confusions:
 ## Read also
 
 - [`configuration.md`](configuration.md) — every env var, categorized.
-- [`architecture.md`](architecture.md) — module layout, tool-group contract, Codet sidecar contract.
+- [`architecture.md`](architecture.md) — module layout, tool-group contract, forge pipeline.
 - [`forge.md`](forge.md) — Planner/Coder/Verifier pipeline, `models.toml`, mission resumption.
 - [`../PRIVACY.md`](../PRIVACY.md) — every outbound network call, enumerated.

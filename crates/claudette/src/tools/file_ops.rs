@@ -3,13 +3,12 @@
 //! Sandboxing policy (set by the `validate_read_path` / `validate_write_path`
 //! helpers in the parent module):
 //!   - read_file / list_dir: allowed anywhere under the user's $HOME.
-//!   - write_file: allowed ONLY under ~/.claudette/files/ (the scratch dir).
+//!   - write_file: allowed ONLY under ~/.claudette/files/ (the scratch dir),
+//!     the active mission tree, or an explicit `CLAUDETTE_WORKSPACE` project.
 //!
-//! write_file refuses files whose extension looks like source code —
-//! those get routed to `generate_code` so the 30b coder + Codet
-//! validation pipeline kicks in instead of the 4b brain writing tiny
-//! stubs. Config/data formats (json, toml, yaml, md, txt, xml, ini)
-//! stay on write_file because the brain can write those coherently.
+//! write_file writes any text file directly — source code, config, data, or
+//! markup. (Historically it refused code and routed it to a `generate_code`
+//! coder sidecar; that sidecar was retired, so the brain writes code itself.)
 
 use std::fs;
 use std::path::Path;
@@ -41,64 +40,6 @@ fn read_default_line_cap() -> usize {
         .unwrap_or(DEFAULT_READ_LINES)
 }
 
-/// File extensions that `write_file` refuses, redirecting the brain to
-/// `generate_code` instead (Sprint 13.3 — bulletproof code routing).
-///
-/// Strict subset of `REF_EXTENSIONS`: only languages where the brain has no
-/// business writing the file directly. Config/data formats (json, toml, yaml,
-/// md, txt, xml, ini, cfg, conf) stay on `write_file` because the brain CAN
-/// write those coherently and they don't go through Codet validation.
-///
-/// Why refuse: the 4b brain produces tiny stubs for code, bypassing the 30b
-/// coder + Codet validation entirely. Sprint 13.3 v3 task #55 collapsed to a
-/// 747-byte 2-function stub of a 12-function module via this exact path.
-const CODE_EXTENSIONS: &[&str] = &[
-    "py", "rs", "js", "mjs", "cjs", "jsx", "ts", "tsx", "go", "java", "c", "cpp", "cc", "cxx", "h",
-    "hpp", "rb", "php", "sh", "bash", "sql",
-];
-
-fn is_code_extension(filename: &str) -> bool {
-    Path::new(filename)
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| {
-            let lower = e.to_ascii_lowercase();
-            CODE_EXTENSIONS.contains(&lower.as_str())
-        })
-}
-
-/// `CLAUDETTE_WORKSPACE` points at a real project — the coding daily-driver
-/// mode, where the brain is a capable coder model rather than the old 4b
-/// generalist. (Mirrors `run::coding_workspace_active`.)
-fn coding_workspace_active() -> bool {
-    std::env::var("CLAUDETTE_WORKSPACE").is_ok_and(|s| !s.trim().is_empty())
-}
-
-/// Default line ceiling under which `write_file` accepts a code file directly
-/// (in workspace mode) instead of routing it to `generate_code`. Modest on
-/// purpose: substantial modules still go to the coder pipeline, where the
-/// specialised model + reference-file context earn the extra pass and a stub
-/// would hurt most. Override with `CLAUDETTE_WRITE_FILE_CODE_MAX_LINES`.
-const WRITE_FILE_CODE_MAX_LINES: usize = 60;
-const WRITE_FILE_CODE_MAX_BYTES: usize = 2048;
-
-fn write_file_code_max_lines() -> usize {
-    std::env::var("CLAUDETTE_WRITE_FILE_CODE_MAX_LINES")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .filter(|n| *n > 0)
-        .unwrap_or(WRITE_FILE_CODE_MAX_LINES)
-}
-
-/// True for a code file short enough that the workspace coder brain can write
-/// it coherently in one pass (a helper, a small module) — the fast path that
-/// avoids `generate_code`'s second model pass over-thinking a trivial file and
-/// racing the timeout.
-fn code_is_trivial(content: &str) -> bool {
-    content.len() <= WRITE_FILE_CODE_MAX_BYTES
-        && content.lines().count() <= write_file_code_max_lines()
-}
-
 pub(super) fn schemas() -> Vec<Value> {
     vec![
         json!({
@@ -122,7 +63,7 @@ pub(super) fn schemas() -> Vec<Value> {
             "type": "function",
             "function": {
                 "name": "write_file",
-                "description": "Write text/config/data/markup (.txt, .md, .json, .toml, .yaml, .xml, .ini, .html, .htm, .css), and — in a project workspace — a SHORT, simple source file directly (one fast pass). For substantial/complex code or edits to existing code, use generate_code instead; outside a workspace, code files are refused and routed there.",
+                "description": "Write a file — source code, config, data, or markup — to a new path. Writes the content in one pass. To modify an existing file, use edit_file instead of rewriting it whole.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -270,27 +211,6 @@ fn run_write_file(input: &str) -> Result<String, String> {
         .and_then(Value::as_str)
         .ok_or("write_file: missing 'content'")?;
 
-    // Code-file routing. The brain (small, generalist) routinely writes tiny
-    // code stubs that bypass the 30b coder + Codet validation, so by default we
-    // refuse code files and force the call through `generate_code`. EXCEPTION
-    // (daily-driver coding gap): when the user has pointed claudette at a
-    // workspace — where the brain is a capable coder model, not the old 4b —
-    // and the file is SHORT, write it directly and validate it through the
-    // Codet hook below. This kills the `generate_code` over-routing where a 2nd
-    // coder pass over-thinks a trivial helper and races the timeout, while
-    // larger/complex files still take the coder pipeline. Brain reads the
-    // structured error and reroutes on the next turn.
-    if is_code_extension(path_str) && !(coding_workspace_active() && code_is_trivial(content)) {
-        return Err(format!(
-            "write_file refuses code files (extension on '{path_str}'). \
-             First call `enable_tools(\"code\")` if you haven't already, then \
-             use `generate_code` instead — it routes through the specialised \
-             coder model and validates syntax+tests. Pass any existing files \
-             the new code should match in `reference_files` so the coder \
-             reads the real API."
-        ));
-    }
-
     if content.len() > MAX_FILE_BYTES {
         return Err(format!(
             "write_file: content is {} bytes, exceeds {MAX_FILE_BYTES}-byte limit",
@@ -348,39 +268,12 @@ fn run_write_file(input: &str) -> Result<String, String> {
     fs::write(&path, content)
         .map_err(|e| format!("write_file: write {} failed: {e}", path.display()))?;
 
-    let mut result = json!({
+    let result = json!({
         "ok": true,
         "path": path.display().to_string(),
         "file_url": file_url_for(&path),
         "bytes": content.len(),
     });
-
-    // Codet post-write hook: if the file looks like code, validate it.
-    // The validation is synchronous — it may hot-swap models in Ollama
-    // (Claudette ↔ coder) and take 10-30 seconds for the full
-    // parse→test→fix loop. The result is folded into the tool output so
-    // Claudette sees it without any extra context cost.
-    if let Some(validation) = crate::codet::validate_code_file(&path, &[]) {
-        result["validation"] = validation.to_json();
-
-        // Surface a warning directly to the user (stderr) if Codet
-        // couldn't fix something — the user should know even if Claudette
-        // decides not to mention it.
-        if let crate::codet::CodetStatus::CouldNotFix { ref last_error } = validation.status {
-            let short_err: String = last_error.lines().take(3).collect::<Vec<_>>().join(" | ");
-            eprintln!(
-                "{} {}",
-                crate::theme::warn(crate::theme::WARN_GLYPH),
-                crate::theme::warn(&format!(
-                    "codet: {} failed validation after {} attempt(s), {} landed — {}",
-                    path.display(),
-                    validation.attempts_made,
-                    validation.fixes_applied,
-                    short_err,
-                ))
-            );
-        }
-    }
 
     Ok(result.to_string())
 }
@@ -515,75 +408,31 @@ mod tests {
     }
 
     #[test]
-    fn code_is_trivial_thresholds() {
-        assert!(code_is_trivial("def f():\n    return 1\n"));
-        // Over the line cap.
-        let many_lines: String = "x = 1\n".repeat(WRITE_FILE_CODE_MAX_LINES + 5);
-        assert!(!code_is_trivial(&many_lines));
-        // Under the line cap but over the byte cap.
-        let few_long_lines = format!("{}\n{}\n", "a".repeat(1100), "b".repeat(1100));
-        assert!(few_long_lines.lines().count() <= write_file_code_max_lines());
-        assert!(!code_is_trivial(&few_long_lines));
-    }
-
-    #[test]
-    fn write_file_accepts_short_code_in_workspace_mode() {
-        // Daily-driver fast path: with a workspace set, a SHORT code file is
-        // written directly instead of being refused (routed to generate_code).
-        // Use a `.sh` file so validate_code_file is a no-op (no subprocess).
-        //
-        // ALL home-dependent path resolution happens inside the locked
-        // closure — outside it, a parallel with_temp_home test could swap
-        // HOME mid-resolution.
+    fn write_file_accepts_code_directly() {
+        // The generate_code coder sidecar was retired — write_file now writes
+        // source files itself, no size gate and no workspace requirement.
+        // Use a `.sh` file so no external interpreter is involved.
         let input =
-            json!({ "path": "claudette-fastpath-test.sh", "content": "echo hi\n" }).to_string();
-        let out = with_workspace_env(Some("/tmp/claudette-ws-fastpath"), || {
-            let target = files_dir().join("claudette-fastpath-test.sh");
-            let _ = fs::remove_file(&target);
-            let out = run_write_file(&input);
-            let _ = fs::remove_file(&target);
-            out
-        });
-        let out = out.expect("short code file should be accepted in workspace mode");
+            json!({ "path": "claudette-writecode-test.sh", "content": "echo hi\n" }).to_string();
+        let target = files_dir().join("claudette-writecode-test.sh");
+        let _ = fs::remove_file(&target);
+        let out = run_write_file(&input);
+        let _ = fs::remove_file(&target);
+        let out = out.expect("code file should be written directly");
         assert!(out.contains("\"ok\":true"), "got: {out}");
     }
 
     #[test]
-    fn write_file_still_refuses_large_code_in_workspace_mode() {
-        // The fast path is for SHORT files only — a large code file still routes
-        // to generate_code even with a workspace set.
-        let big: String = format!(
-            "{{\"path\":\"big.py\",\"content\":{}}}",
-            serde_json::Value::String("x = 1\n".repeat(WRITE_FILE_CODE_MAX_LINES + 10))
-        );
-        let err = with_workspace_env(Some("/tmp/claudette-ws-fastpath"), || run_write_file(&big))
-            .unwrap_err();
-        assert!(err.contains("refuses code"), "got: {err}");
-    }
-
-    #[test]
-    fn is_code_extension_classifies_correctly() {
-        // Pure code → refuse.
-        for ext in ["py", "rs", "js", "ts", "go", "sh"] {
-            assert!(
-                is_code_extension(&format!("file.{ext}")),
-                "{ext} should be classified as code"
-            );
-        }
-        // Config/data + markup/style → allow. HTML and CSS are markup the
-        // brain writes coherently even at small parameter counts, so they
-        // stay on write_file (vs. real programming languages where small
-        // brains produce stub-quality output that bypasses Codet).
-        for ext in [
-            "json", "toml", "yaml", "md", "txt", "xml", "ini", "html", "htm", "css",
-        ] {
-            assert!(
-                !is_code_extension(&format!("file.{ext}")),
-                "{ext} should NOT be classified as code"
-            );
-        }
-        // No extension → allow.
-        assert!(!is_code_extension("README"));
+    fn write_file_accepts_large_code_directly() {
+        // A large source file is no longer refused/routed anywhere — it writes.
+        let body = "x = 1\n".repeat(200);
+        let input = json!({ "path": "claudette-writecode-big.sh", "content": body }).to_string();
+        let target = files_dir().join("claudette-writecode-big.sh");
+        let _ = fs::remove_file(&target);
+        let out = run_write_file(&input);
+        let _ = fs::remove_file(&target);
+        let out = out.expect("large code file should be written directly");
+        assert!(out.contains("\"ok\":true"), "got: {out}");
     }
 
     #[test]
@@ -592,6 +441,7 @@ mod tests {
         // the paging notice — this is the fix for the large-file read spiral.
         let _guard = crate::test_env_lock(); // home-resolving: serialize vs temp-home swaps
         let target = files_dir().join("claudette-readcap-test.txt");
+        let _ = ensure_dir(&files_dir()); // fresh runner: files_dir may not exist yet
         let _ = fs::remove_file(&target);
         let body = (1..=1000)
             .map(|n| format!("line {n}"))
@@ -624,6 +474,7 @@ mod tests {
     fn read_file_honors_offset_and_limit() {
         let _guard = crate::test_env_lock(); // home-resolving
         let target = files_dir().join("claudette-readwin-test.txt");
+        let _ = ensure_dir(&files_dir()); // fresh runner: files_dir may not exist yet
         let _ = fs::remove_file(&target);
         let body = (1..=100)
             .map(|n| format!("L{n}"))
@@ -650,6 +501,7 @@ mod tests {
     fn read_file_tail_returns_last_lines_and_rejects_offset() {
         let _guard = crate::test_env_lock(); // home-resolving
         let target = files_dir().join("claudette-readtail-test.txt");
+        let _ = ensure_dir(&files_dir()); // fresh runner: files_dir may not exist yet
         let _ = fs::remove_file(&target);
         let body = (1..=100)
             .map(|n| format!("L{n}"))
@@ -698,6 +550,7 @@ mod tests {
     fn read_file_small_file_returns_whole_without_notice() {
         let _guard = crate::test_env_lock(); // home-resolving
         let target = files_dir().join("claudette-readsmall-test.txt");
+        let _ = ensure_dir(&files_dir()); // fresh runner: files_dir may not exist yet
         let _ = fs::remove_file(&target);
         fs::write(&target, "alpha\nbeta\ngamma\n").unwrap();
 
@@ -759,32 +612,31 @@ mod tests {
     }
 
     #[test]
-    fn write_file_refuses_python_extension() {
-        // Secretary mode (no workspace) refuses code → generate_code.
-        let input = json!({ "path": "user.py", "content": "x = 1\n" }).to_string();
-        let err = with_workspace_env(None, || run_write_file(&input)).unwrap_err();
-        assert!(err.contains("refuses code"), "got: {err}");
-        assert!(
-            err.contains("generate_code"),
-            "must mention generate_code: {err}"
-        );
-        // File must NOT have been written.
-        assert!(!files_dir().join("user.py").exists());
+    fn write_file_writes_python_without_workspace() {
+        // No workspace set — code files are written directly now (the old
+        // "refuse code → generate_code" routing was retired with the sidecar).
+        with_workspace_env(None, || {
+            let target = files_dir().join("write_code_user.py");
+            let _ = fs::remove_file(&target);
+            let input = json!({ "path": "write_code_user.py", "content": "x = 1\n" }).to_string();
+            let out = run_write_file(&input).expect(".py should be written directly");
+            assert!(out.contains("\"ok\":true"), "got: {out}");
+            assert!(target.exists(), "file must land in files_dir");
+            let _ = fs::remove_file(&target);
+        });
     }
 
     #[test]
-    fn write_file_refuses_rust_extension() {
-        let input = json!({ "path": "lib.rs", "content": "fn main() {}\n" }).to_string();
-        let err = with_workspace_env(None, || run_write_file(&input)).unwrap_err();
-        assert!(err.contains("refuses code"), "got: {err}");
-    }
-
-    #[test]
-    fn write_file_refuses_uppercase_code_extension() {
-        // Extension matching is case-insensitive.
-        let input = json!({ "path": "user.PY", "content": "x = 1\n" }).to_string();
-        let err = with_workspace_env(None, || run_write_file(&input)).unwrap_err();
-        assert!(err.contains("refuses code"), "got: {err}");
+    fn write_file_writes_rust_without_workspace() {
+        with_workspace_env(None, || {
+            let target = files_dir().join("write_code_lib.rs");
+            let _ = fs::remove_file(&target);
+            let input =
+                json!({ "path": "write_code_lib.rs", "content": "fn main() {}\n" }).to_string();
+            let out = run_write_file(&input).expect(".rs should be written directly");
+            assert!(out.contains("\"ok\":true"), "got: {out}");
+            let _ = fs::remove_file(&target);
+        });
     }
 
     #[test]

@@ -71,7 +71,7 @@ Add `--offline` (or set `CLAUDETTE_OFFLINE=1`) to any of these to **enforce**
 the air-gap — every outbound call except the local model backend + loopback is
 hard-blocked, so the brain and recall keep working but web search, mail, GitHub,
 Telegram, and remote git all refuse. `claudette --offline --doctor` prints the
-exact allow-list. See [Air-gapped by design](../README.md#-air-gapped-by-design).
+exact allow-list. See [Air-gapped, and enforced](../README.md#-air-gapped-and-enforced).
 
 ## The TUI in 60 seconds
 
@@ -226,7 +226,7 @@ claudette --briefing --time 08:30 --days weekdays
 
 - [`configuration.md`](configuration.md) — every env var, token fallbacks, recall settings
 - [`forge.md`](forge.md) — the full Forge pipeline, review gate, build/test gate, role-routing
-- [`hardware.md`](hardware.md) — VRAM per preset, the 30b-on-8GB recipe
+- [`hardware.md`](hardware.md) — VRAM per preset, running a big brain on constrained VRAM
 - [`usage.md`](usage.md) — full CLI flag reference + every slash command
-- [`architecture.md`](architecture.md) — module layout, tool-group contract, Codet sidecar
+- [`architecture.md`](architecture.md) — module layout, tool-group contract, forge pipeline
 - [`comparison.md`](comparison.md) — honest side-by-side vs. other open-source agents

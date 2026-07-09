@@ -90,9 +90,7 @@ if ($SecurityReview) { $env:CLAUDETTE_FORGE_SECURITY_REVIEW = '1' }
 else { Remove-Item Env:\CLAUDETTE_FORGE_SECURITY_REVIEW -ErrorAction SilentlyContinue }
 $env:CLAUDETTE_MAX_FIX_ROUNDS    = "$FixRounds"
 $env:CLAUDETTE_MODEL             = $Model
-$env:CLAUDETTE_CODER_MODEL       = $Model
 $env:CLAUDETTE_NUM_CTX           = "$NumCtx"
-$env:CLAUDETTE_CODER_NUM_CTX     = "$NumCtx"
 $env:CLAUDETTES_FORGE_PLANNER_MODEL  = $Model
 $env:CLAUDETTES_FORGE_CODER_MODEL    = $Model
 $env:CLAUDETTES_FORGE_VERIFIER_MODEL = $Model

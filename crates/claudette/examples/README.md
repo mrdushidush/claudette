@@ -15,8 +15,7 @@ hardware, Ollama version, and model temperature.
 | 02 | [`02-tool-groups.md`](02-tool-groups.md) | Walking the `enable_tools` meta-tool — how capability groups load on demand. |
 | 03 | [`03-telegram-setup.md`](03-telegram-setup.md) | End-to-end setup for the Telegram bot mode, including voice. |
 | 04 | [`04-morning-briefing.md`](04-morning-briefing.md) | The scheduled-briefing demo — `claudette --briefing` from zero. |
-| 05 | [`05-code-generation.md`](05-code-generation.md) | Using the Codet sidecar to generate code with a syntax-check fix loop. |
-| 06 | [`06-brain-regression-harness.md`](06-brain-regression-harness.md) | Running the 100-prompt harness at `tests/brain100_test.sh`. |
+| 05 | [`05-brain-regression-harness.md`](05-brain-regression-harness.md) | Running the 100-prompt harness at `tests/brain100_test.sh`. |
 
 ## Conventions
 

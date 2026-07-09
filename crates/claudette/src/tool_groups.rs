@@ -33,8 +33,6 @@ pub enum ToolGroup {
     Todos,
     /// File ops: read_file, write_file, list_dir.
     Files,
-    /// Code generation via the specialised coder model: generate_code.
-    Code,
     /// Self-introspection: get_capabilities (config, tool inventory, limits).
     Meta,
     /// Git workflow tools: status, diff, log, add, commit, branch, checkout, push.
@@ -90,7 +88,6 @@ impl ToolGroup {
             Self::Notes => "notes",
             Self::Todos => "todos",
             Self::Files => "files",
-            Self::Code => "code",
             Self::Meta => "meta",
             Self::Git => "git",
             Self::Ide => "ide",
@@ -122,7 +119,6 @@ impl ToolGroup {
             Self::Notes => "personal notes: create/list/read/delete. note_create is upsert — pass `id` from note_list to update an existing note.",
             Self::Todos => "todo list: add/list/set_status (done bool)/delete",
             Self::Files => "file ops: read_file, write_file, list_dir (under ~/)",
-            Self::Code => "code generation via specialised coder model + validator",
             Self::Meta => "self-introspection: config, tool inventory, limits",
             Self::Git => "git workflows: status, diff, log, add, commit, branch, checkout, push",
             Self::Ide => "IDE integration: open_in_editor, reveal_in_explorer, open_url",
@@ -145,12 +141,11 @@ impl ToolGroup {
 
     /// All groups in a stable order, for schema generation and tests.
     #[must_use]
-    pub fn all() -> [ToolGroup; 21] {
+    pub fn all() -> [ToolGroup; 20] {
         [
             Self::Notes,
             Self::Todos,
             Self::Files,
-            Self::Code,
             Self::Meta,
             Self::Git,
             Self::Ide,
@@ -196,7 +191,6 @@ impl ToolGroup {
             "notes" | "note" => Some(Self::Notes),
             "todos" | "todo" | "tasks" | "task" => Some(Self::Todos),
             "files" | "file" | "fs" => Some(Self::Files),
-            "code" | "codegen" | "coder" => Some(Self::Code),
             "meta" | "capabilities" | "info" | "status" => Some(Self::Meta),
             "git" => Some(Self::Git),
             "ide" | "editor" => Some(Self::Ide),
@@ -221,7 +215,7 @@ impl ToolGroup {
 
 /// Names of the core tools — always advertised, never gated. Kept tiny by
 /// design so the base payload stays under ~200 tokens. Everything else
-/// (notes, todos, files, codegen, search, etc.) lives in a [`ToolGroup`]
+/// (notes, todos, files, search, etc.) lives in a [`ToolGroup`]
 /// and ships only after the model calls `enable_tools`.
 ///
 /// The synthetic `enable_tools` meta-tool is added by [`ToolRegistry::new`]
@@ -244,7 +238,6 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         // todo_uncomplete pair.
         "todo_add" | "todo_list" | "todo_set_status" | "todo_delete" => Some(ToolGroup::Todos),
         "read_file" | "write_file" | "list_dir" => Some(ToolGroup::Files),
-        "generate_code" => Some(ToolGroup::Code),
         "get_capabilities" => Some(ToolGroup::Meta),
         "git_status" | "git_diff" | "git_log" | "git_add" | "git_commit" | "git_branch"
         | "git_checkout" | "git_push" | "git_clone" => Some(ToolGroup::Git),
@@ -659,7 +652,6 @@ mod tests {
         assert!(core_names.contains(&"load_workspace_rules".to_string()));
         // The previously-core tools must now live in their groups.
         assert!(!core_names.contains(&"read_file".to_string()));
-        assert!(!core_names.contains(&"generate_code".to_string()));
         assert!(!core_names.contains(&"note_create".to_string()));
         assert!(!core_names.contains(&"web_search".to_string()));
     }

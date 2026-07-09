@@ -154,7 +154,6 @@ ENVIRONMENT:
     See README.md for the full env-var reference. Frequently used:
       OLLAMA_HOST              Ollama API endpoint (default localhost:11434).
       CLAUDETTE_MODEL          Override the brain model.
-      CLAUDETTE_CODER_MODEL    Override the Codet coder model.
       CLAUDETTE_SESSION        Override the session-file path.
       CLAUDETTE_OFFLINE        Set to 1 to enforce the air-gap (see --offline).
       TELEGRAM_BOT_TOKEN       Required for --telegram.
@@ -1179,8 +1178,8 @@ mod tests {
         let mut missing: Vec<String> = vars(&code)
             .into_iter()
             // Captures ending in `_` are dynamic prefixes (e.g. the
-            // `CLAUDETTE_CODER_`/`CLAUDETTE_FORGE_` string fragments used to
-            // build var names), not real vars.
+            // `CLAUDETTE_FORGE_` string fragments used to build var names),
+            // not real vars.
             .filter(|v| !v.ends_with('_'))
             .filter(|v| !ALLOW.contains(&v.as_str()))
             .filter(|v| !documented.contains(v))

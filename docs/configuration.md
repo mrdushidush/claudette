@@ -14,8 +14,8 @@ Claudette intentionally does **not** auto-load `.env` from the current working d
 | `CLAUDETTE_MODEL` | `qwen3.5:4b` (Auto preset) | Brain model override. |
 | `CLAUDETTE_NUM_CTX` | `16384` | Brain context window in tokens. |
 | `CLAUDETTE_NUM_PREDICT` | `6144` | Max output tokens per request. |
-| `CLAUDETTE_COMPACT_THRESHOLD` | `1000000` | Auto-compaction trigger (estimated tokens). Default makes auto-compact a no-op for typical 16K–128K context windows; set to `12000` (or a fraction of your `num_ctx`) on tight contexts. |
-| `CLAUDETTE_SOFT_COMPACT_THRESHOLD` | unset | Optional intermediate compaction tier. Fires below the hard threshold and preserves 12 recent messages instead of 4 — useful on long real-world sessions with 35B+ brains where the hard 1M default never triggers but turns pay hundreds of K input tokens. Set e.g. `200000`. |
+| `CLAUDETTE_COMPACT_THRESHOLD` | `num_ctx / 2` (adaptive) | Auto-compaction trigger (estimated tokens). Unset → half the active brain's `num_ctx`, clamped to `[4000, 1000000]`, so a real 16K–128K window compacts *before* it overflows. Pin an exact value like `12000` to override; the `1000000` cap is only the ceiling for enormous windows. |
+| `CLAUDETTE_SOFT_COMPACT_THRESHOLD` | unset | Optional intermediate compaction tier. Fires below the hard threshold and preserves 12 recent messages instead of 4 — useful on long real-world sessions with 35B+ brains where you want gentler compaction before the hard `num_ctx / 2` threshold fires. Set e.g. `200000`. |
 | `CLAUDETTE_MAX_ITERATIONS` | `40` | Per-turn (model → tool → result) loop ceiling. Lower it (e.g. `15`) to fail-fast on small-model spirals; raise it for legitimate long tool chains. |
 | `CLAUDETTE_SESSION` | `~/.claudette/sessions/last.json` | Override the session file path. |
 | `CLAUDETTE_MEMORY` | `~/.claudette/CLAUDETTE.MD` | Override the path Claudette loads user-memory from. |
@@ -60,20 +60,11 @@ Inspect the live allow-list with `claudette --offline --doctor` — the **egress
 
 Two layers enforce it: an HTTP-layer guard in the reqwest path checks the destination host of every in-process request, and a dispatch-layer guard refuses tools that reach the network through a subprocess where the HTTP guard can't see the destination. The host-matching logic lives in [`src/egress.rs`](../crates/claudette/src/egress.rs).
 
-## Codet (code-generation sidecar)
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `CLAUDETTE_CODER_MODEL` | `qwen3-coder:30b` | Coder model. Set to `qwen2.5-coder:14b` on RAM-constrained hosts. |
-| `CLAUDETTE_CODER_NUM_CTX` | `49152` | Coder context window. Drop to `16384` on 32 GB RAM boxes. |
-| `CLAUDETTE_CODER_NUM_PREDICT` | `12288` | Max output tokens the coder can emit in one call. |
-| `CLAUDETTE_VALIDATE_CODE` | `false` | Codet auto-validation after code writes/edits. Off by default; set `true`/`1`/`yes`/`on` to opt in. |
-
 ## Forge mode
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `CLAUDETTE_MAX_FIX_ROUNDS` | `2` | Cap on Coder→Verifier fix-loop rounds in `--forge`. Default 2 is the empirical sweet spot for local 8b coders. Raise to 4–6 if you've pinned a stronger Verifier model and want it to keep pushing back. Clamped at 10. |
+| `CLAUDETTE_MAX_FIX_ROUNDS` | `3` | Cap on Coder→Verifier fix-loop rounds in `--forge`. Default 3 is the empirical sweet spot for local 8b coders. Raise to 4–6 if you've pinned a stronger Verifier model and want it to keep pushing back. Clamped at 10. |
 | `CLAUDETTE_FORGE_ABORT_WINDOW_SECS` | `3` | Grace window (seconds) to Ctrl-C out of a forge run before it starts working. Set `0` to skip the pause in CI / scripted runs. Clamped at 30. |
 
 ## Tokens (per-tool)
@@ -135,7 +126,6 @@ Rarely needed; defaults are tuned for local small models. Mostly useful for debu
 | `CLAUDETTE_READ_DEFAULT_LINES` | `400` | Default number of lines `read_file` returns when no explicit range is given. |
 | `CLAUDETTE_READ_LOOP_LIMIT` | `2` | How many identical re-reads of the same file are tolerated before the read-loop breaker intervenes. |
 | `CLAUDETTE_NO_READ_LOOP_BREAKER` | unset | Set to `1` to disable the read-loop breaker entirely. |
-| `CLAUDETTE_WRITE_FILE_CODE_MAX_LINES` | `60` | Max lines `write_file` accepts for a code file in one call (nudges the model toward `edit_file` for large changes). |
 | `CLAUDETTE_NO_SPINNER` | unset | Set to `1` to suppress the REPL/TUI activity spinner (TTY only). |
 | `CLAUDETTE_MODEL_RELOAD_RETRY_MS` | `750` | Backoff (ms) before retrying a request after the backend reports the model was unloaded/reloaded. |
 | `CLAUDETTE_DISABLE_MODEL_RELOAD_RETRY` | unset | Set to `1` to disable the post-reload retry and fail fast instead. |

@@ -22,10 +22,9 @@ src/
 ├── run.rs            — Runtime builder, REPL loop, autosave, session compaction, forge pipeline
 ├── executor.rs       — SecretaryToolExecutor: enable_tools meta-tool + dispatch
 ├── tools.rs          — Aggregates per-group schemas + routes dispatch_tool() through each sub-module
-├── tools/            — One module per tool cluster (calendar, codegen, facts, file_ops, git, github, gmail, ide, notes, registry, schedule, search, shell, telegram, todos, web_search)
-├── tool_groups.rs    — ToolRegistry + the 21 on-demand tool-group definitions
-├── codet.rs          — Code-generation sidecar (syntax check, surgical fix loop, tests)
-├── test_runner.rs    — Python/Rust/JS/TS syntax + test runners
+├── tools/            — One module per tool cluster (calendar, facts, file_ops, git, github, gmail, ide, notes, registry, schedule, search, shell, telegram, todos, web_search)
+├── tool_groups.rs    — ToolRegistry + the 20 on-demand tool-group definitions
+├── test_runner.rs    — Blocking subprocess runner with timeout + pipe draining
 ├── commands.rs       — Slash-command parsers and handlers
 ├── prompt.rs         — Claudette system prompt builder
 ├── model_config.rs   — Preset + RoleConfig + TOML overlay
@@ -53,7 +52,7 @@ src/
 
 ## Tool groups
 
-21 groups, ~80 tools total as of v0.6.0 (added Quality, Semantic, Vision, Clipboard; collapsed 18 lesser-used tools into polymorphic merges + outright drops). Schema cost: ~840 chars (~210 tokens) on every turn until the model enables a group; the full 21-group surface is ~34 KB if every group is loaded at once. A follow-up will trim back toward the ~26 KB target by dropping the v0.6.0 deprecation-alias arms (still dispatched for one release) and tightening verbose descriptions.
+20 groups, ~80 tools total (added Quality, Semantic, Vision, Clipboard; collapsed 18 lesser-used tools into polymorphic merges + outright drops; retired the Code group with the codet coder sidecar). Schema cost: ~840 chars (~210 tokens) on every turn until the model enables a group; the full 20-group surface is ~34 KB if every group is loaded at once.
 
 The `gmail`, `calendar`, and `telegram` groups are compiled **only** into an `integrations` build (`cargo install claudette --features integrations`); the default coding-only binary omits them entirely — see [Install](../README.md#install).
 
@@ -63,7 +62,6 @@ The `gmail`, `calendar`, and `telegram` groups are compiled **only** into an `in
 | `notes` | 4 | Personal notes — `note_create` (upsert), list, read, delete |
 | `todos` | 4 | Todo list — add, list, set status, delete |
 | `files` | 3 | `read_file`, `write_file`, `list_dir` |
-| `code` | 1 | `generate_code` — routes through the Codet coder + validator pipeline |
 | `meta` | 1 | `get_capabilities` — config, tool inventory, limits |
 | `git` | 9 | status, diff, log, add, commit, branch, checkout, push, clone |
 | `ide` | 3 | Open in editor (`code`), reveal in file manager, open URL in browser |
@@ -82,20 +80,6 @@ The `gmail`, `calendar`, and `telegram` groups are compiled **only** into an `in
 | `vision` | 2 | `screenshot_capture` (PNG to `~/.claudette/files/`), `image_describe` (needs a VLM loaded in LM Studio) |
 | `clipboard` | 2 | `clipboard_read`, `clipboard_write` (text only, 1 MB cap) |
 
-## Codet sidecar contract
-
-Codet is invoked exclusively through the `generate_code` tool. The main conversation never sees Codet's internal fix-loop exchanges — only the one-line summary + file path on disk. This is deliberate: Codet's iteration chatter would otherwise fill 20 KB of context per coding task.
-
-Pipeline:
-
-1. Writes the code with a dedicated coder model (default `qwen3-coder:30b`, fallback `qwen2.5-coder:14b`).
-2. Runs a syntax check (`python -m py_compile`, `rustc --emit=metadata`, `tsc --noEmit` for JS + TS — 4 languages).
-3. On failure, runs a **surgical SEARCH/REPLACE fix loop** (Aider-style patches, ~50 output tokens per attempt) before falling back to full-file regeneration.
-4. Optionally runs associated pytest/cargo-test/jest suites.
-5. Retries up to 3 times, then reports honestly if it can't fix the file.
-
-Codet is hot-swapped into VRAM on demand — the main brain is evicted first on memory-constrained machines, then restored after Codet finishes.
-
 ## Forge-mode pipeline
 
 `run_forge_mission` (in `run.rs`) orchestrates five phases against the active brownfield mission:
@@ -103,7 +87,7 @@ Codet is hot-swapped into VRAM on demand — the main brain is evicted first on 
 1. **Planner** — tool-less brain turn (`Role::Planner` from `~/.claudettes-forge/models.toml`) decomposes the user's request into a 3–5 step numbered plan, prepended to the Coder's input.
 2. **Coder (round 0)** — full forge runtime (`files`, `search`, `git`, `advanced`, `github` groups enabled) with `should_submit=false`. Brain commits its change but the system prompt forbids `mission_submit`/`git_push`.
 3. **Verifier** — tool-less brain turn (`Role::Verifier`) reads `git diff HEAD` and emits one-line JSON: `{"score": <1-10>, "pass": <bool>, "feedback": "<reason>"}`. Resilient to code fences and trailing prose.
-4. **Fix-loop** — if `pass=false` and `round < MAX_FIX_ROUNDS` (2), re-runs the Coder with the Verifier's feedback prepended to the prompt.
+4. **Fix-loop** — if `pass=false` and `round < MAX_FIX_ROUNDS` (3), re-runs the Coder with the Verifier's feedback prepended to the prompt.
 5. **Submitter** — final Coder turn with `should_submit=true` that just calls `mission_submit`. PR opens here, never earlier.
 
 Persona overlay: `personas/codex7.md` is baked into the binary via `include_str!` and parsed at startup. Its `voice` one-liner + backstory prose are appended to the forge-mode system prompt so the brain adopts a consistent style.

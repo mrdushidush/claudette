@@ -1,6 +1,6 @@
 # 02 — Tool groups and `enable_tools`
 
-Claudette ships 70+ tools but only advertises ~17 "core" tools by
+Claudette ships ~80 tools but only advertises 3 "core" tools by
 default. The rest are loaded on demand via a synthetic meta-tool the
 model can call: `enable_tools(group)`. This example walks through the
 mechanic so you can see it happen live.
@@ -8,26 +8,26 @@ mechanic so you can see it happen live.
 ## Why on-demand?
 
 Every tool schema the model sees costs input tokens. Advertising all
-70 tools at once runs ~25 KB of JSON schema on every turn. Core-only
-is ~4.7 KB. For a chatty REPL session that never touches GitHub or
-the web, that 80% reduction is real savings.
+~80 tools at once runs ~34 KB of JSON schema on every turn. Core-only
+is ~0.8 KB. For a chatty REPL session that never touches GitHub or
+the web, that reduction is real savings.
 
 ## Groups at a glance
 
 | Group | Tools | Typical use |
 |-------|-------|-------------|
-| `core` (always on) | 17 | Notes, todos, files, time, web search, code gen |
-| `git` | 8 | status, diff, log, add, commit, branch, checkout, push |
+| `core` (always on) | 3 | enable_tools, current time, load workspace rules |
+| `files` | 3 | read_file, write_file, list_dir |
+| `git` | 9 | status, diff, log, add, commit, branch, checkout, push, clone |
 | `ide` | 3 | Open in editor / file manager / browser |
-| `search` | 3 | Glob, grep, fetch-and-strip-HTML |
-| `advanced` | 3 | Bash, `edit_file`, `spawn_agent` |
-| `facts` | 4 | Wikipedia, Open-Meteo weather |
-| `registry` | 4 | crates.io, npmjs |
-| `github` | 6 | PRs/issues/code search |
-| `telegram` | 3 | Bot send/poll/photo |
-| `calendar` | 5 | Google Calendar CRUD + RSVP |
+| `search` | 5 | repo_map, glob, grep, web_fetch, web_search |
+| `advanced` | 7 | Bash (+background/status/tail), `edit_file`, `apply_diff`, `ask_user` |
+| `facts` | 2 | Wikipedia, Open-Meteo weather |
+| `registry` | 2 | crates.io, npmjs |
+| `github` | 15 | PRs/issues/code search + forge mission tools |
 | `schedule` | 4 | One-shot + recurring reminders |
-| `gmail` | 4 | Read-only Gmail (list/search/read/labels) |
+| `quality` | 3 | run_tests, diagnostics, apply_patch |
+| `gmail` / `calendar` / `telegram` | (integrations) | Only in `--features integrations` builds |
 
 ## Example — triggering a group
 
@@ -56,25 +56,26 @@ advertisable tool — core plus every optional group with the
 
 ```
 > /tools
-✨ agent tools (core 17 + 12 optional groups)
+✨ agent tools (core 3 + 20 optional groups)
   ⚡ core (always loaded)
-    • get_current_time: Returns the current date, time, weekday, and timezone.
-    • get_capabilities: Show claudette's config, available tools, and limits.
-    • note_create, note_list, note_read, note_delete
-    • todo_add, todo_list, todo_set_status, todo_delete
-    • read_file, write_file, list_dir
-    • web_search, generate_code, spawn_agent
+    ✓ enable_tools: Load an optional tool group (git, ide, search, advanced).
+    ✓ get_current_time: Current date, time, weekday, timezone.
+    ✓ load_workspace_rules: Load CLAUDETTE.md / .claudette/instructions.md from the project ancestor chain
 
-  ⚡ git — 8 tool(s), enable with enable_tools({group: "git"})
-    • git_status, git_diff, git_log, git_add, git_commit, git_branch, git_checkout, git_push
+  ⚡ files — 3 tool(s), enable with enable_tools({group: "files"})
+    ✓ read_file, write_file, list_dir
+
+  ⚡ git — 9 tool(s), enable with enable_tools({group: "git"})
+    ✓ git_status, git_diff, git_log, git_add, git_commit, git_branch, git_checkout, git_push, git_clone
 
   ⚡ facts — 2 tool(s), enable with enable_tools({group: "facts"})
-    • wikipedia, weather
+    ✓ wikipedia, weather
 
-  [… more groups: ide, search, advanced, registry, github,
-     telegram, calendar, schedule, gmail …]
+  [… more groups: notes, todos, meta, ide, search, advanced,
+     registry, github, telegram, calendar, schedule, gmail,
+     recall, quality, semantic, vision, clipboard …]
 
-  core schema: 4711 chars — enabling a group grows this temporarily
+  core schema: 827 chars — enabling a group grows this temporarily
 ```
 
 Output is the **advertisable** surface, not the live registry state

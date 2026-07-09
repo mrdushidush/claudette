@@ -447,7 +447,7 @@ fn forge_phase0_preflight(mission: &crate::missions::Mission) -> Result<Option<(
 ///    against the original request. Returns `{score, pass, feedback}`.
 ///    On parse failure, treated as pass (advisory mode).
 /// 4. **Fix-loop** — if Verifier `pass=false` and `round < max_fix_rounds()`,
-///    re-runs Coder with the Verifier's feedback prepended. Default two
+///    re-runs Coder with the Verifier's feedback prepended. Default three
 ///    rounds; override with `CLAUDETTE_MAX_FIX_ROUNDS` (clamped to 10).
 /// 5. **Submitter** — final Coder turn with `should_submit=true` that only
 ///    calls `mission_submit` (PR opens here, not earlier).
@@ -650,7 +650,6 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
             ),
         };
         let mut coder_runtime = build_forge_runtime(session.clone(), &mission, false);
-        crate::tools::set_current_turn_paths(crate::tools::extract_user_prompt_paths(&coder_input));
         crate::transcript::begin_turn();
         let _ = crate::brain_selector::run_turn_with_fallback(
             &mut coder_runtime,
@@ -1036,7 +1035,6 @@ pub fn run_forge_mission(user_input: &str, opts: SessionOptions) -> Result<TurnS
          requested. Call mission_submit with a short PR title summarising the change, and note \
          in the body that automated review found unresolved issues. Do nothing else."
     };
-    crate::tools::set_current_turn_paths(crate::tools::extract_user_prompt_paths(submit_input));
     crate::transcript::begin_turn();
     let submit_summary = crate::brain_selector::run_turn_with_fallback(
         &mut submit_runtime,

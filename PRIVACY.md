@@ -78,8 +78,8 @@ Each outbound connection below is **off by default** until you opt in, and is **
 | `huggingface.co` | First-time voice setup downloading Whisper | The model file fetch (no content). One-time per model. |
 | Microsoft Edge TTS endpoint | `/voice on` in `--telegram` mode | The reply text being spoken aloud. Routed through the `edge-tts` python package, not Claudette directly. |
 | `accounts.google.com`, `*.googleapis.com` | `claudette --auth-google`, then any `calendar_*` / `gmail_*` tool call | OAuth handshake; then calendar/gmail content read or written **by your request**. |
-| `api.open-meteo.com`, `geocoding-api.open-meteo.com` | `weather_forecast` tool call | A place name. No API key required by open-meteo. |
-| `en.wikipedia.org` | `wikipedia_search` tool call | The search query. |
+| `api.open-meteo.com`, `geocoding-api.open-meteo.com` | `weather` tool call | A place name. No API key required by open-meteo. |
+| `en.wikipedia.org` | `wikipedia` tool call | The search query. |
 | `api.search.brave.com` | `web_search` tool, requires `BRAVE_API_KEY` | The search query. |
 | `api.github.com`, `github.com` | `github` tool group, requires `GITHUB_TOKEN` | Whatever the model calls the API for (issues, PRs, etc.) |
 
@@ -101,7 +101,7 @@ The default brain is `qwen3.5:4b` running locally via Ollama. The model's weight
 
 Vision: same story. Pasting a screenshot with <kbd>Alt</kbd>+<kbd>V</kbd> sends image bytes to your local Ollama, not to any cloud vision service.
 
-Codet (the code-gen sidecar) and the auto-fallback to `qwen3.5:9b` are also local-only.
+The auto-fallback to `qwen3.5:9b` is also local-only.
 
 ---
 

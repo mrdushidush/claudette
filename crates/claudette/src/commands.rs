@@ -60,7 +60,6 @@ pub enum SlashCommand {
     Reload,
     Capabilities,
     Exit,
-    Validate(String),
     /// Sprint 14: swap the whole preset bundle (brain + fallback) in one
     /// command. `fast` / `auto` / `smart`.
     PresetSwitch(Preset),
@@ -68,10 +67,7 @@ pub enum SlashCommand {
     /// preset's fallback; any other value pins the brain and disables
     /// auto-fallback. Lives for the process (no persistence).
     Brain(String),
-    /// Sprint 14: pin the coder model. Out of the fallback scope — just
-    /// a convenience wrapper over `CLAUDETTE_CODER_MODEL`.
-    Coder(String),
-    /// Sprint 14: dump the current model config (brain, fallback, coder,
+    /// Sprint 14: dump the current model config (brain, fallback,
     /// last fallback timestamp from `fallback.jsonl`).
     Models,
     /// Cross-session recall: search the embedded memory for past messages
@@ -189,13 +185,6 @@ pub fn parse_slash_command(line: &str) -> Option<SlashCommand> {
         "memory" | "mem" => SlashCommand::Memory,
         "reload" => SlashCommand::Reload,
         "capabilities" | "cap" => SlashCommand::Capabilities,
-        "validate" | "val" => match arg.filter(|s| !s.is_empty()) {
-            Some(path) => SlashCommand::Validate(path),
-            None => SlashCommand::Invalid(
-                "/validate requires a path. Try: /validate ~/.claudette/files/userClass.py"
-                    .to_string(),
-            ),
-        },
         "preset" => match arg.filter(|s| !s.is_empty()) {
             Some(p) => match p.parse::<Preset>() {
                 Ok(preset) => SlashCommand::PresetSwitch(preset),
@@ -206,10 +195,6 @@ pub fn parse_slash_command(line: &str) -> Option<SlashCommand> {
         "brain" => match arg.filter(|s| !s.is_empty()) {
             Some(m) => SlashCommand::Brain(m),
             None => SlashCommand::Invalid("/brain requires a model name or 'auto'".to_string()),
-        },
-        "coder" => match arg.filter(|s| !s.is_empty()) {
-            Some(m) => SlashCommand::Coder(m),
-            None => SlashCommand::Invalid("/coder requires a model name".to_string()),
         },
         "models" => SlashCommand::Models,
         "undo" => {
@@ -383,20 +368,12 @@ where
             handle_capabilities(out);
             SlashOutcome::Continue
         }
-        SlashCommand::Validate(path) => {
-            handle_validate(out, &path);
-            SlashOutcome::Continue
-        }
         SlashCommand::PresetSwitch(preset) => {
             handle_preset(out, runtime, preset, rebuild);
             SlashOutcome::Continue
         }
         SlashCommand::Brain(model) => {
             handle_brain(out, runtime, &model, rebuild);
-            SlashOutcome::Continue
-        }
-        SlashCommand::Coder(model) => {
-            handle_coder(out, &model);
             SlashOutcome::Continue
         }
         SlashCommand::Models => {
@@ -505,10 +482,6 @@ fn print_help(out: &mut impl Write) {
                 ("/tools", "List claudette's tools"),
                 ("/memory (mem)", "Show CLAUDETTE.MD memory in use"),
                 ("/reload", "Re-read CLAUDETTE.MD without losing history"),
-                (
-                    "/validate (val) <path>",
-                    "Run Codet code validator on a file",
-                ),
                 ("/recall <query>", "Search cross-session memory"),
                 (
                     "/recall reprobe",
@@ -537,7 +510,6 @@ fn print_help(out: &mut impl Write) {
                     "/brain <model|auto>",
                     "Pin brain model (or 'auto' to restore preset fallback)",
                 ),
-                ("/coder <model>", "Pin coder model"),
                 ("/models", "Show current model config"),
             ],
         ),
@@ -1352,19 +1324,6 @@ fn handle_brain<C, T, R>(
     );
 }
 
-fn handle_coder(out: &mut impl Write, model: &str) {
-    let cfg = model_config::update_active(|c| c.coder.model = model.to_string());
-    // No runtime rebuild — the coder is a sidecar invoked per-call by
-    // Codet via `coder_model()`, which re-reads `model_config::active()`
-    // on every use.
-    let _ = writeln!(
-        out,
-        "{} {}",
-        theme::ROBOT,
-        theme::ok(&format!("coder pinned → {}", cfg.coder.model))
-    );
-}
-
 fn handle_models(out: &mut impl Write) {
     print_models(out, &model_config::active(), None);
 }
@@ -1629,16 +1588,6 @@ fn print_models(out: &mut impl Write, cfg: &ModelConfig, just_switched: Option<P
             );
         }
     }
-    let _ = writeln!(
-        out,
-        "  {} coder: {} {}",
-        theme::dim("•"),
-        theme::ok(&cfg.coder.model),
-        theme::dim(&format!(
-            "(num_ctx={}, num_predict={})",
-            cfg.coder.num_ctx, cfg.coder.num_predict
-        ))
-    );
     if let Some(ts) = last_fallback_event() {
         let _ = writeln!(
             out,
@@ -1675,111 +1624,6 @@ where
 {
     let session = runtime.session().clone();
     *runtime = rebuild(session);
-}
-
-fn handle_validate(out: &mut impl Write, path_str: &str) {
-    let path = std::path::Path::new(path_str);
-    // Expand tilde for convenience.
-    let resolved = if path_str.starts_with("~/") || path_str.starts_with("~\\") {
-        crate::tools::expand_tilde(path_str)
-    } else {
-        path.to_path_buf()
-    };
-    if !resolved.exists() {
-        let _ = writeln!(
-            out,
-            "{} {}",
-            theme::error(theme::ERR_GLYPH),
-            theme::error(&format!("file not found: {}", resolved.display()))
-        );
-        return;
-    }
-
-    let _ = writeln!(
-        out,
-        "{} {} {}",
-        theme::GEAR,
-        theme::accent("validating"),
-        theme::dim(&resolved.display().to_string())
-    );
-
-    match crate::codet::validate_code_file(&resolved, &[]) {
-        None => {
-            let _ = writeln!(
-                out,
-                "  {}",
-                theme::dim("(not a known code file type — nothing to validate)")
-            );
-        }
-        Some(result) => {
-            let _ = writeln!(
-                out,
-                "  {} syntax: {}",
-                theme::dim("•"),
-                if result.syntax_ok {
-                    theme::ok("ok")
-                } else {
-                    theme::error("failed")
-                }
-            );
-            if result.tests_found {
-                let _ = writeln!(
-                    out,
-                    "  {} tests: {} passed, {} failed, {} errors",
-                    theme::dim("•"),
-                    result.tests_passed,
-                    result.tests_failed,
-                    result.tests_errors
-                );
-            } else {
-                let _ = writeln!(
-                    out,
-                    "  {} tests: {}",
-                    theme::dim("•"),
-                    theme::dim("none found")
-                );
-            }
-            if result.fixes_applied > 0 {
-                let _ = writeln!(
-                    out,
-                    "  {} fixes applied: {} — {}",
-                    theme::dim("•"),
-                    result.fixes_applied,
-                    result.fix_summary
-                );
-            }
-            match &result.status {
-                crate::codet::CodetStatus::AllPassed => {
-                    let _ = writeln!(
-                        out,
-                        "  {} {}",
-                        theme::ok(theme::OK_GLYPH),
-                        theme::ok("all checks passed")
-                    );
-                }
-                crate::codet::CodetStatus::FixedAll => {
-                    let _ = writeln!(
-                        out,
-                        "  {} {}",
-                        theme::ok(theme::OK_GLYPH),
-                        theme::ok("all checks passed (after Codet fixes)")
-                    );
-                }
-                crate::codet::CodetStatus::CouldNotFix { last_error } => {
-                    let short: String = last_error.lines().take(3).collect::<Vec<_>>().join(" | ");
-                    let _ = writeln!(
-                        out,
-                        "  {} {}",
-                        theme::error(theme::ERR_GLYPH),
-                        theme::error(&format!("could not fix: {short}"))
-                    );
-                }
-                crate::codet::CodetStatus::Skipped => {
-                    let _ = writeln!(out, "  {}", theme::dim("(validation skipped)"));
-                }
-            }
-        }
-    }
 }
 
 fn handle_capabilities(out: &mut impl Write) {
@@ -2013,24 +1857,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_validate_with_path() {
-        assert_eq!(
-            parse_slash_command("/validate ~/foo.py"),
-            Some(SlashCommand::Validate("~/foo.py".to_string()))
-        );
-        assert_eq!(
-            parse_slash_command("/val test.py"),
-            Some(SlashCommand::Validate("test.py".to_string()))
-        );
-    }
-
-    #[test]
-    fn parse_validate_without_path_is_invalid() {
-        let parsed = parse_slash_command("/validate");
-        assert!(matches!(parsed, Some(SlashCommand::Invalid(_))));
-    }
-
-    #[test]
     fn parse_preset_variants() {
         assert_eq!(
             parse_slash_command("/preset fast"),
@@ -2076,20 +1902,6 @@ mod tests {
     #[test]
     fn parse_brain_without_arg_is_invalid() {
         let parsed = parse_slash_command("/brain");
-        assert!(matches!(parsed, Some(SlashCommand::Invalid(_))));
-    }
-
-    #[test]
-    fn parse_coder_with_model_name() {
-        assert_eq!(
-            parse_slash_command("/coder qwen3-coder:30b"),
-            Some(SlashCommand::Coder("qwen3-coder:30b".to_string()))
-        );
-    }
-
-    #[test]
-    fn parse_coder_without_arg_is_invalid() {
-        let parsed = parse_slash_command("/coder");
         assert!(matches!(parsed, Some(SlashCommand::Invalid(_))));
     }
 

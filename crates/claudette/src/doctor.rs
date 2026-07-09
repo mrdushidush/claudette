@@ -146,7 +146,6 @@ const TRACKED_VARS: &[&str] = &[
     // Top-level switches
     "CLAUDETTE_MODEL",
     "CLAUDETTE_FALLBACK_BRAIN_MODEL",
-    "CLAUDETTE_CODER_MODEL",
     "CLAUDETTE_NUM_CTX",
     "CLAUDETTE_NUM_PREDICT",
     "CLAUDETTE_MAX_ITERATIONS",
@@ -230,8 +229,8 @@ fn redact_for_display(var: &str, val: &str) -> String {
 
 // ─── Safety overrides ────────────────────────────────────────────────────
 
-/// Capability / guard overrides — the knobs that loosen (or, for
-/// `VALIDATE_CODE`, change) Claudette's safe defaults. Surfaced as their own
+/// Capability / guard overrides — the knobs that loosen Claudette's safe
+/// defaults. Surfaced as their own
 /// section so `claudette --doctor` can answer "why did it auto-approve / bypass
 /// the git guard / read a secret / skip the forge review" at a glance. The flat
 /// env list buried these, so an active override was effectively invisible.
@@ -243,7 +242,6 @@ const SAFETY_VARS: &[&str] = &[
     "CLAUDETTE_ALLOW_DESTRUCTIVE_GIT",
     "CLAUDETTE_ALLOW_SECRET_READS",
     "CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE",
-    "CLAUDETTE_VALIDATE_CODE",
     // Forge gates — each one relaxes a submit-time safety check.
     "CLAUDETTE_FORGE_AUTO_APPROVE",
     "CLAUDETTE_FORGE_SECURITY_OVERRIDE",
@@ -514,9 +512,8 @@ pub(crate) fn model_present(names: &[String], wanted: &str) -> bool {
 // ─── Build toolchains ─────────────────────────────────────────────────────
 //
 // forge runs the project's real build + test suite (cargo check/test, go
-// build/test, pytest, npm test) inside the Verifier, and codet shells out to
-// language compilers for its syntax/test checks. Missing a toolchain is the #1
-// silent reason "forge says it passed but nothing actually compiled". This
+// build/test, pytest, npm test) inside the Verifier. Missing a toolchain is the
+// #1 silent reason "forge says it passed but nothing actually compiled". This
 // section probes each toolchain and, when one is missing, prints a copy-paste
 // install command for the current OS.
 
@@ -557,7 +554,7 @@ const TOOLCHAINS: &[Toolchain] = &[
         key: "python",
         bins: &["python", "python3"],
         version_arg: "--version",
-        why: "codet syntax/test checks + the pytest forge gate",
+        why: "the pytest forge gate",
         required: false,
     },
     Toolchain {
@@ -565,7 +562,7 @@ const TOOLCHAINS: &[Toolchain] = &[
         key: "node",
         bins: &["node"],
         version_arg: "--version",
-        why: "codet JS/TS checks + the npm forge gate",
+        why: "the npm forge gate",
         required: false,
     },
     Toolchain {
@@ -874,7 +871,6 @@ mod tests {
             "CLAUDETTE_ALLOW_DESTRUCTIVE_GIT",
             "CLAUDETTE_ALLOW_SECRET_READS",
             "CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE",
-            "CLAUDETTE_VALIDATE_CODE",
             "CLAUDETTE_FORGE_AUTO_APPROVE",
             "CLAUDETTE_FORGE_SECURITY_OVERRIDE",
             "CLAUDETTE_FORGE_SUBMIT_ON_FAIL",

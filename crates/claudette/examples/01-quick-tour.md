@@ -45,7 +45,6 @@ Here are the files in `D:/dev/claudette/src`:
 - agents.rs
 - api.rs
 - brain_selector.rs
-- codet.rs
 ...
 - voice.rs
 
@@ -89,7 +88,8 @@ Based on the README, here are the slash commands available in Claudette:
 
 ```
 /help                Show this list.
-/agents              List available sub-agent types.
+/diff                Show the last turn's file changes as a diff.
+/undo                Revert the last turn's file changes.
 /status              Session info + token counts.
 ...
 /exit                Leave the REPL.

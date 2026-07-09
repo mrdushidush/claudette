@@ -78,8 +78,7 @@ fn trash_target_for(original: &Path) -> std::io::Result<PathBuf> {
 thread_local! {
     /// The undo ref produced by the most recent trash operation on this
     /// thread. Tools run synchronously on the worker thread, so the
-    /// executor can [`take_pending_undo`] right after dispatch — same
-    /// pattern as `tools::set_current_turn_paths`.
+    /// executor can [`take_pending_undo`] right after dispatch.
     static PENDING_UNDO: RefCell<Option<Value>> = const { RefCell::new(None) };
 }
 
@@ -111,9 +110,8 @@ thread_local! {
 }
 
 /// Open a new turn: mint a fresh turn id so subsequent [`record`] lines are
-/// tagged with it. Called at every turn entry point, alongside
-/// `tools::set_current_turn_paths` (same thread — tools run synchronously on
-/// the worker thread that recorded the turn). The id is
+/// tagged with it. Called at every turn entry point (same thread — tools run
+/// synchronously on the worker thread that recorded the turn). The id is
 /// `<unix_ms>-<pid>-<counter>`, globally unique: the transcript is
 /// append-only and outlives the process, so a bare counter would collide
 /// with another session's turns and make "undo the last turn" ambiguous.

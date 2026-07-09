@@ -28,15 +28,13 @@ binary has no cloud code, so it errors with a one-line reinstall hint instead.
 
 ```
 /help                Show this list.
-/validate <path>     Run Codet on an existing code file.
 /status              Session info + token counts.
 /cost                Lifetime token usage.
 /tools               List all tools grouped by capability.
-/model               Show the active brain and coder models.
-/models              Alias for /model.
+/model               Show the active brain model.
+/models              Show the current model config.
 /preset fast|auto|smart  Switch model preset.
 /brain <model>       Pin the brain model (or "auto" to re-enable fallback).
-/coder <model>       Pin the coder model.
 /memory              Show CLAUDETTE.MD contents.
 /reload              Re-read CLAUDETTE.MD into the system prompt.
 /sessions, /ls       List saved sessions.
@@ -69,7 +67,7 @@ Three additional commands are **Telegram-only** (they have no effect in the REPL
 | Tier | Behaviour | Example tools |
 |------|-----------|---------------|
 | **ReadOnly** | Auto-allowed | time, note_list, file reads, git status, all external APIs |
-| **WorkspaceWrite** | Auto-allowed | note_create, note_update, todo_add, web_search, generate_code, github comment |
+| **WorkspaceWrite** | Auto-allowed | note_create, todo_add, web_search, github comment |
 | **DangerFullAccess** | Prompts `[y/N]` every time | bash, edit_file, git add/commit/push/checkout, cross-org PRs |
 
 The REPL prompter is interactive. The TUI shows a confirmation modal over the chat — `y` allows; `n`, `Esc`, or `Enter` denies (deny is the default); long inputs scroll with `↑`/`↓` and are never truncated. Telegram bot denies DangerFullAccess by default (no TTY to confirm with).
@@ -79,5 +77,5 @@ The REPL prompter is interactive. The TUI shows a confirmation modal over the ch
 - **Autosave** after every REPL turn to `~/.claudette/sessions/last.json`.
 - **Resume** with `--resume` or `-r`.
 - **Named sessions** via `/save <name>` and `/load <name>` (stored at `~/.claudette/sessions/<name>.json`).
-- **Auto-compaction** is effectively off by default (1 M estimated tokens) — opt in for tight context windows via `CLAUDETTE_COMPACT_THRESHOLD=12000`. When it does fire, it summarises old turns, keeps recent ones verbatim, and preserves tool-result anchoring.
+- **Auto-compaction** triggers adaptively at half the active brain's `num_ctx` by default (clamped to `[4000, 1000000]` estimated tokens), so a real 16K–128K window compacts before it overflows — pin an exact trigger via `CLAUDETTE_COMPACT_THRESHOLD=12000`. When it fires, it summarises old turns, keeps recent ones verbatim, and preserves tool-result anchoring.
 - **Sliding-window truncator** acts as a safety net inside the API client.

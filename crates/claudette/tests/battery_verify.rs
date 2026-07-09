@@ -14,13 +14,12 @@
 //! hiding behind a model-eviction flake. It runs under the existing
 //! `cargo test --tests` job — no workflow change.
 //!
-//! Determinism: codet post-edit validation is disabled
-//! (`CLAUDETTE_VALIDATE_CODE=false`) so no language toolchain is shelled out,
-//! and assertions are pure file-content checks (the equivalent of the battery's
-//! source-level verifiers — e.g. `verify/E1.sh` already greps the source rather
-//! than compiling). Fixtures are copied into a throwaway workspace under
-//! `CARGO_TARGET_TMPDIR`, and `CLAUDETTE_WORKSPACE` points there so the edit
-//! tools' path sandbox permits the writes.
+//! Determinism: no language toolchain is shelled out, and assertions are pure
+//! file-content checks (the equivalent of the battery's source-level verifiers
+//! — e.g. `verify/E1.sh` already greps the source rather than compiling).
+//! Fixtures are copied into a throwaway workspace under `CARGO_TARGET_TMPDIR`,
+//! and `CLAUDETTE_WORKSPACE` points there so the edit tools' path sandbox
+//! permits the writes.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -45,11 +44,10 @@ fn battery_dir() -> PathBuf {
 }
 
 /// One-time setup: a throwaway workspace root the edit-tool path sandbox
-/// accepts, with codet validation disabled for determinism. Returns the root
-/// every task copies its fixture under. `OnceLock` makes the two `set_var`
-/// calls happen exactly once and complete before any test reads the
-/// environment, avoiding a set/read race across this binary's parallel test
-/// threads (every test calls this before it dispatches a tool).
+/// accepts. Returns the root every task copies its fixture under. `OnceLock`
+/// makes the `set_var` call happen exactly once and complete before any test
+/// reads the environment, avoiding a set/read race across this binary's
+/// parallel test threads (every test calls this before it dispatches a tool).
 fn workspace_root() -> &'static Path {
     static ROOT: OnceLock<PathBuf> = OnceLock::new();
     ROOT.get_or_init(|| {
@@ -57,7 +55,6 @@ fn workspace_root() -> &'static Path {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).expect("create battery_verify workspace root");
         std::env::set_var("CLAUDETTE_WORKSPACE", &root);
-        std::env::set_var("CLAUDETTE_VALIDATE_CODE", "false");
         root
     })
 }

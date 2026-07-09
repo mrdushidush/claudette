@@ -34,8 +34,7 @@ pub(crate) fn home_dir() -> PathBuf {
 /// interprets its value, so call sites can't disagree (some used a bare
 /// `== "1"`, some `var_os().is_some()` which was *fail-open*, some the truthy
 /// set). Case-insensitivity makes it a strict superset of the strictest prior
-/// parser (`codet::validation_enabled`), so folding a knob in never *narrows*
-/// what it accepted.
+/// boolean parsers, so folding a knob in never *narrows* what it accepted.
 pub(crate) fn is_truthy(value: &str) -> bool {
     matches!(
         value.to_ascii_lowercase().as_str(),
