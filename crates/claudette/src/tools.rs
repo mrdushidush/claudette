@@ -682,6 +682,29 @@ fn parse_workspace_env() -> Vec<PathBuf> {
         .collect()
 }
 
+/// The deepest `CLAUDETTE_WORKSPACE` root that contains (or equals) `start`,
+/// or `None` when the env var is unset/empty or `start` is not under any
+/// declared root.
+///
+/// Used to bound the upward marker-file walk in `run_tests` / `diagnostics`
+/// so auto-detect can never ascend above the workspace the user pointed
+/// Claudette at and end up testing an *enclosing* project (issue #176).
+/// "Deepest" so nested workspace roots pick the innermost boundary. Paths are
+/// normalised (`.` / `..` collapsed) but not canonicalised — the same lexical
+/// envelope the read/write validators use.
+///
+/// Returning `None` when `start` is outside every declared root deliberately
+/// leaves the walk unbounded there, matching pre-#176 behavior (the var-unset
+/// and var-set-but-cwd-elsewhere cases are out of scope for the fix).
+pub(super) fn workspace_boundary_for(start: &Path) -> Option<PathBuf> {
+    let start = normalize_path(start);
+    parse_workspace_env()
+        .into_iter()
+        .map(|root| normalize_path(&root))
+        .filter(|root| start.starts_with(root))
+        .max_by_key(|root| root.components().count())
+}
+
 /// Top-level convenience for `main`: build `WorkspaceRoots::from_env()`
 /// and return its [`WorkspaceRoots::startup_diagnostics`] output. Exposed
 /// at the crate root so the binary can print warnings before the runtime

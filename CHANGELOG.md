@@ -10,6 +10,17 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`run_tests` / `diagnostics` no longer escape the workspace root.** When
+  `CLAUDETTE_WORKSPACE` is set, framework/diagnostics auto-detect stops walking
+  up at the workspace boundary instead of ascending into an enclosing project.
+  Previously a markerless folder (e.g. a plain `test.js` with no `package.json`)
+  sitting inside a larger repo would silently detect and run the *ancestor*
+  project's suite. When nothing is detected within the workspace, the existing
+  "could not auto-detect … pass `framework` explicitly" error is returned.
+  (#176)
+
 ## [0.16.0] - 2026-07-09
 
 ### Added
