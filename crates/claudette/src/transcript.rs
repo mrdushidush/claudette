@@ -228,6 +228,20 @@ fn is_recoverable(entry: &Value, undone: &[String]) -> bool {
         .is_some_and(|t| !undone.iter().any(|u| u == t))
 }
 
+/// The single definition of "the last turn", shared by `/undo` and `/diff`
+/// (issue #175): the turn id carried by the most recent turn-tagged entry —
+/// recoverable or not. Both commands select on this so `/diff` always previews
+/// exactly the turn `/undo` would act on (`/undo` becomes a true no-op when the
+/// last turn changed nothing recoverable, instead of silently reaching back to
+/// an earlier turn the user never previewed). `None` when no entry is
+/// turn-tagged at all (legacy actions recorded outside `begin_turn`).
+fn last_turn_id(entries: &[Value]) -> Option<String> {
+    entries
+        .iter()
+        .rev()
+        .find_map(|e| e.get("turn").and_then(Value::as_str).map(str::to_string))
+}
+
 /// Undo the most recent transcript entry that (a) carries an undo ref and
 /// (b) hasn't already been undone — the `/undo one` behavior. Restores the
 /// trashed/pre-image file back to its original location (the trash copy is
@@ -246,34 +260,54 @@ pub fn undo_last() -> Result<String, String> {
 }
 
 /// Undo every recoverable action of the **last turn** as one step (the
-/// default `/undo`). The last turn is the turn id carried by the most recent
-/// recoverable, not-yet-undone entry; a turn's entries are contiguous in the
-/// append-only log, so we revert that entry and every sibling sharing its
-/// turn id, **newest-first** (correct when a file was edited twice in the
-/// turn — the last restore lands the turn's original pre-image). A `null`
-/// turn id (recorded outside `begin_turn`) groups only with itself, degrading
-/// gracefully to single-entry behavior.
+/// default `/undo`). "The last turn" is [`last_turn_id`] — the turn id of the
+/// most recent turn-tagged entry, **whether or not it is recoverable** — so
+/// `/undo` and `/diff` always agree on which turn they act on (issue #175). A
+/// turn's entries are contiguous in the append-only log, so we revert every
+/// entry sharing that turn id, **newest-first** (correct when a file was edited
+/// twice in the turn — the last restore lands the turn's original pre-image).
+///
+/// When the last turn changed nothing recoverable (only `todo_add`/git ops, or
+/// edits a prior `/undo` already reverted), this is a **true no-op**: it does
+/// NOT reach back to an earlier turn (that would revert files the user never
+/// previewed via `/diff`). If an earlier turn still has something recoverable,
+/// the error points the user at `/undo one`. A `null` turn id (recorded outside
+/// `begin_turn`) has no turn to group by, so we degrade to single-entry behavior.
 pub fn undo_last_turn() -> Result<String, String> {
     let entries = read_entries()?;
     let undone = undone_trash_set(&entries);
 
-    let Some(last) = entries.iter().rev().find(|e| is_recoverable(e, &undone)) else {
-        return Err(
-            "nothing to undo (no recorded action carries a recoverable pre-image)".to_string(),
-        );
-    };
-    let turn = last.get("turn").and_then(Value::as_str).map(str::to_string);
-
-    // Newest-first group of this turn's still-recoverable entries.
-    let group: Vec<&Value> = match &turn {
+    // Newest-first group of the last turn's still-recoverable entries.
+    let group: Vec<&Value> = match last_turn_id(&entries) {
         Some(id) => entries
             .iter()
             .rev()
             .filter(|e| e.get("turn").and_then(Value::as_str) == Some(id.as_str()))
             .filter(|e| is_recoverable(e, &undone))
             .collect(),
-        None => vec![last],
+        // No turn-tagged actions at all (legacy / outside begin_turn): degrade
+        // to the single most-recent recoverable entry.
+        None => entries
+            .iter()
+            .rev()
+            .find(|e| is_recoverable(e, &undone))
+            .into_iter()
+            .collect(),
     };
+
+    if group.is_empty() {
+        // The last turn changed nothing recoverable. Distinguish "an earlier
+        // turn still has something to undo" (steer to /undo one) from "nothing
+        // recoverable anywhere".
+        let earlier_recoverable = entries.iter().any(|e| is_recoverable(e, &undone));
+        return Err(if earlier_recoverable {
+            "nothing to undo in the last turn; the most recent recoverable change is in an \
+             earlier turn — use `/undo one` to revert it"
+                .to_string()
+        } else {
+            "nothing to undo (no recorded action carries a recoverable pre-image)".to_string()
+        });
+    }
 
     let path = transcript_path();
     let mut summaries = Vec::new();
@@ -450,11 +484,9 @@ pub fn diff_last_turn() -> Result<String, String> {
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
         .collect::<Vec<_>>();
 
-    // Last turn = the turn id on the most recent entry that carries one.
-    let turn = entries
-        .iter()
-        .rev()
-        .find_map(|e| e.get("turn").and_then(Value::as_str).map(str::to_string))
+    // "The last turn" is the shared [`last_turn_id`] selection — identical to
+    // `/undo`, so the preview always matches what `/undo` acts on (issue #175).
+    let turn = last_turn_id(&entries)
         .ok_or_else(|| "no turn-tagged actions recorded yet — nothing to diff".to_string())?;
 
     // That turn's pre-image-bearing entries, in reading (oldest-first) order.
@@ -829,9 +861,64 @@ mod tests {
             assert!(b.exists(), "last turn's file restored: {msg}");
             assert!(!a.exists(), "the earlier turn must stay untouched: {msg}");
 
-            // A second whole-turn undo reaches back to the prior turn.
-            let msg2 = undo_last_turn().expect("undo prior turn");
-            assert!(a.exists(), "prior turn now restored: {msg2}");
+            // Option 1 (issue #175): once the last turn has nothing recoverable
+            // left, a second whole-turn `/undo` is a no-op — it does NOT reach
+            // back to the prior turn (that turn was never previewed by `/diff`).
+            // The user is steered to `/undo one` to walk further back.
+            let err = undo_last_turn().unwrap_err();
+            assert!(
+                err.contains("nothing to undo in the last turn") && err.contains("/undo one"),
+                "second /undo should be a no-op that points at /undo one: {err}"
+            );
+            assert!(
+                !a.exists(),
+                "the prior turn is NOT auto-reached by /undo: {err}"
+            );
+
+            // `/undo one` is the way to walk further back to the earlier turn.
+            let msg2 = undo_last().expect("undo one reaches the prior turn");
+            assert!(a.exists(), "prior turn restored via /undo one: {msg2}");
+        });
+    }
+
+    #[test]
+    fn diff_and_undo_agree_when_last_turn_has_nothing_recoverable() {
+        // The issue #175 divergence scenario: the genuine last turn recorded
+        // only non-recoverable mutations (todo_add + a git op), while an earlier
+        // turn overwrote file F. `/diff` and `/undo` must now AGREE that the
+        // last turn changed nothing recoverable — `/undo` must not silently
+        // revert F.
+        with_temp_home(|home| {
+            // Earlier turn: overwrite F (recoverable pre-image snapshotted).
+            begin_turn();
+            let f = write_tmp(home, "F.txt", "ORIG\n");
+            let _ = snapshot_to_trash(&f).unwrap();
+            record("write_file", "F.txt", take_pending_undo());
+            fs::write(&f, "CHANGED\n").unwrap();
+
+            // Genuine last turn: only non-recoverable actions (undo: null).
+            begin_turn();
+            record("todo_add", "ship it", None);
+            record("git_commit", "wip", None);
+
+            // /diff: the last turn changed no recoverable files.
+            let derr = diff_last_turn().unwrap_err();
+            assert!(
+                derr.contains("no files"),
+                "/diff should say no files: {derr}"
+            );
+
+            // /undo: a true no-op that agrees with /diff — F must be untouched.
+            let uerr = undo_last_turn().unwrap_err();
+            assert!(
+                uerr.contains("nothing to undo in the last turn") && uerr.contains("/undo one"),
+                "/undo should be a no-op with a hint: {uerr}"
+            );
+            assert_eq!(
+                fs::read_to_string(&f).unwrap(),
+                "CHANGED\n",
+                "the earlier turn's file F must NOT be silently reverted"
+            );
         });
     }
 

@@ -29,6 +29,15 @@ bumps are non-breaking bugfixes only.
   project's suite. When nothing is detected within the workspace, the existing
   "could not auto-detect … pass `framework` explicitly" error is returned.
   (#176)
+- **`/diff` and `/undo` now agree on "the last turn."** Both commands select
+  the same turn — the most recent turn-tagged entry — via one shared helper.
+  Previously `/undo` reverted the most recent *recoverable* turn while `/diff`
+  previewed the most recent turn-tagged entry, so when the genuine last turn
+  recorded only non-recoverable actions (e.g. `todo_add` + a git commit, or
+  edits a prior `/undo` already reverted) `/undo` silently reached back and
+  reverted an *earlier* turn the user never previewed. `/undo` is now a true
+  no-op on a nothing-recoverable last turn and points at `/undo one` to walk
+  further back. (#175)
 
 ## [0.16.0] - 2026-07-09
 
