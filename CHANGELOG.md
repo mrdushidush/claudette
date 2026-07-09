@@ -12,9 +12,6 @@ bumps are non-breaking bugfixes only.
 
 ## [0.16.0] - 2026-07-09
 
-<!-- Release-prep prepared ahead of the tag; the Fable review session confirms
-     the final date at tag time. -->
-
 ### Added
 
 - **Turn-scoped `/undo` and a new `/diff`.** `/undo` now reverts the whole last
@@ -2287,7 +2284,8 @@ Initial public release of Claudette as a standalone repository.
 
 ---
 
-[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/mrdushidush/claudette/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/mrdushidush/claudette/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/mrdushidush/claudette/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/mrdushidush/claudette/compare/v0.13.0...v0.13.1
