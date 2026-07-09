@@ -14,7 +14,7 @@
 //! per-framework using cheap line-level regexes. Raw stdout/stderr is
 //! also returned for unrecognised cases.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
@@ -102,12 +102,39 @@ impl Framework {
     }
 }
 
+/// The directories to probe for a project marker: `start` and its ancestors,
+/// walking up toward the filesystem root but **never ascending above the
+/// `CLAUDETTE_WORKSPACE` boundary** that contains `start` (issue #176). When
+/// no workspace root contains `start` (the var is unset, or the cwd sits
+/// outside the declared workspace) the walk is unbounded — preserving the
+/// pre-#176 behavior that is explicitly out of scope for the fix.
+///
+/// Shared by both `detect_framework` and `detect_diag_tool` so the boundary
+/// rule lives in exactly one place.
+fn marker_search_dirs(start: &Path) -> Vec<PathBuf> {
+    let start = super::normalize_path(start);
+    let boundary = super::workspace_boundary_for(&start);
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let mut current: Option<&Path> = Some(&start);
+    while let Some(dir) = current {
+        dirs.push(dir.to_path_buf());
+        // Stop once we have probed the workspace root itself: the user
+        // pointed Claudette here, so an ancestor project above it is not ours
+        // to test.
+        if boundary.as_deref() == Some(dir) {
+            break;
+        }
+        current = dir.parent();
+    }
+    dirs
+}
+
 /// Walk up from `start` looking for the marker file that identifies a
 /// framework. Returns the first match (closest to the leaf) so monorepos
-/// with sub-projects pick the right one based on cwd.
+/// with sub-projects pick the right one based on cwd. Bounded at the
+/// workspace root — see [`marker_search_dirs`].
 fn detect_framework(start: &Path) -> Option<Framework> {
-    let mut current: Option<&Path> = Some(start);
-    while let Some(dir) = current {
+    for dir in marker_search_dirs(start) {
         if dir.join("Cargo.toml").exists() {
             return Some(Framework::Cargo);
         }
@@ -120,7 +147,6 @@ fn detect_framework(start: &Path) -> Option<Framework> {
         if dir.join("go.mod").exists() {
             return Some(Framework::Go);
         }
-        current = dir.parent();
     }
     None
 }
@@ -555,9 +581,9 @@ impl DiagTool {
 /// Preference order on Python is ruff > mypy because ruff is faster
 /// and increasingly the project standard; Rust prefers cargo-check
 /// because clippy needs an explicit opt-in (it's slower and noisier).
+/// Bounded at the workspace root — see [`marker_search_dirs`].
 fn detect_diag_tool(start: &Path) -> Option<DiagTool> {
-    let mut current: Option<&Path> = Some(start);
-    while let Some(dir) = current {
+    for dir in marker_search_dirs(start) {
         if dir.join("Cargo.toml").exists() {
             return Some(DiagTool::CargoCheck);
         }
@@ -570,7 +596,6 @@ fn detect_diag_tool(start: &Path) -> Option<DiagTool> {
         if dir.join("mypy.ini").exists() {
             return Some(DiagTool::Mypy);
         }
-        current = dir.parent();
     }
     None
 }
@@ -1247,6 +1272,148 @@ not json at all
         // "doesn't panic and returns *something*".
         let _ = detect_framework(&root);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // ─── #176: workspace-boundary on the marker walk ──────────────────
+    //
+    // These build an isolated `above/ws/sub/leaf` tree and set
+    // `CLAUDETTE_WORKSPACE=<ws>` so the walk must stop at `ws` and never
+    // reach a marker planted in `above`. `detect_framework` /
+    // `detect_diag_tool` read the env at call time (via
+    // `workspace_boundary_for`), so each detector is exercised inside the
+    // env lock and the env is restored before we assert (no lock poisoning
+    // on a failing assert).
+
+    /// Unique isolated tree root for a boundary test.
+    fn boundary_tmp(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "claudette-ws176-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ))
+    }
+
+    /// Run `detect_framework(start)` with `CLAUDETTE_WORKSPACE` set to `ws`
+    /// (or unset when `None`), restoring the prior value before returning so
+    /// the assertion runs outside the env lock.
+    fn framework_with_ws(ws: Option<&Path>, start: &Path) -> Option<Framework> {
+        let _guard = crate::test_env_lock();
+        let prev = std::env::var("CLAUDETTE_WORKSPACE").ok();
+        match ws {
+            Some(p) => std::env::set_var("CLAUDETTE_WORKSPACE", p),
+            None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+        }
+        let result = detect_framework(start);
+        match prev {
+            Some(v) => std::env::set_var("CLAUDETTE_WORKSPACE", v),
+            None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+        }
+        result
+    }
+
+    #[test]
+    fn detect_framework_ignores_marker_above_workspace_root() {
+        // above/ (Cargo.toml) / ws / sub / leaf — workspace is `ws`, so the
+        // Cargo.toml above it must NOT be found (issue #176 core case).
+        let root = boundary_tmp("above");
+        let ws = root.join("ws");
+        let leaf = ws.join("sub").join("leaf");
+        std::fs::create_dir_all(&leaf).expect("mkdir");
+        std::fs::write(root.join("Cargo.toml"), "[package]\nname=\"x\"\n").expect("write toml");
+
+        let f = framework_with_ws(Some(&ws), &leaf);
+
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(f, None, "marker above the workspace root must be ignored");
+    }
+
+    #[test]
+    fn detect_framework_finds_marker_at_workspace_root() {
+        // A marker at the workspace root itself is still found from a subdir.
+        let root = boundary_tmp("atroot");
+        let ws = root.join("ws");
+        let leaf = ws.join("sub").join("leaf");
+        std::fs::create_dir_all(&leaf).expect("mkdir");
+        std::fs::write(ws.join("package.json"), "{}\n").expect("write package.json");
+
+        let f = framework_with_ws(Some(&ws), &leaf);
+
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(
+            f,
+            Some(Framework::Npm),
+            "marker at the workspace root is found"
+        );
+    }
+
+    #[test]
+    fn detect_framework_none_when_no_marker_inside_workspace() {
+        // The C3 fixture shape: workspace == cwd, a plain JS folder with no
+        // package.json, sitting inside a larger project. Auto-detect must
+        // return None (→ the "could not auto-detect" error) rather than the
+        // enclosing project's framework.
+        let root = boundary_tmp("nomarker");
+        let ws = root.join("ws");
+        std::fs::create_dir_all(&ws).expect("mkdir");
+        // Enclosing project marker above the workspace — must be ignored.
+        std::fs::write(root.join("Cargo.toml"), "[package]\nname=\"x\"\n").expect("write toml");
+        std::fs::write(ws.join("test.js"), "// no framework marker\n").expect("write test.js");
+
+        let f = framework_with_ws(Some(&ws), &ws);
+
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(f, None, "no marker inside the workspace must yield None");
+    }
+
+    #[test]
+    fn detect_framework_unbounded_when_workspace_unset() {
+        // Behavior unchanged when CLAUDETTE_WORKSPACE is unset: the walk still
+        // ascends past the leaf to find an ancestor marker (out of scope for
+        // #176, verified here so the fix can't silently over-reach).
+        let root = boundary_tmp("unset");
+        let proj = root.join("proj");
+        let leaf = proj.join("sub").join("leaf");
+        std::fs::create_dir_all(&leaf).expect("mkdir");
+        std::fs::write(proj.join("go.mod"), "module x\n").expect("write go.mod");
+
+        let f = framework_with_ws(None, &leaf);
+
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(
+            f,
+            Some(Framework::Go),
+            "unset workspace keeps the unbounded walk"
+        );
+    }
+
+    #[test]
+    fn detect_diag_tool_stops_at_workspace_root() {
+        // Same boundary rule for the diagnostics detector: a Cargo.toml above
+        // the workspace is ignored; a tsconfig.json at the root is found.
+        let root = boundary_tmp("diag");
+        let ws = root.join("ws");
+        let leaf = ws.join("sub").join("leaf");
+        std::fs::create_dir_all(&leaf).expect("mkdir");
+        std::fs::write(root.join("Cargo.toml"), "[package]\nname=\"x\"\n").expect("write toml");
+        std::fs::write(ws.join("tsconfig.json"), "{}\n").expect("write tsconfig");
+
+        let guard = crate::test_env_lock();
+        let prev = std::env::var("CLAUDETTE_WORKSPACE").ok();
+        std::env::set_var("CLAUDETTE_WORKSPACE", &ws);
+        let t = detect_diag_tool(&leaf);
+        match prev {
+            Some(v) => std::env::set_var("CLAUDETTE_WORKSPACE", v),
+            None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+        }
+        drop(guard);
+
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(
+            t,
+            Some(DiagTool::Tsc),
+            "diag detector stops at ws root (tsconfig), ignores Cargo.toml above"
+        );
     }
 
     // Placate the type-check on the cwd type used by run_tests under the
