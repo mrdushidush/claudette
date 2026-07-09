@@ -10,6 +10,15 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **`repo_map` now extracts Kotlin definitions** (`.kt` / `.kts`): top-level
+  and member `fun`, `class` (incl. `data` / `enum` / `sealed` / `annotation` /
+  `value`), `interface` (incl. `fun interface`), and `object` / `companion
+  object`. Kotlin joins the model-visible `(Languages: …)` list. Contributed as
+  a worked template for issue #138 — Swift and Scala are still up for grabs.
+  (#138)
+
 ### Fixed
 
 - **`run_tests` / `diagnostics` no longer escape the workspace root.** When
