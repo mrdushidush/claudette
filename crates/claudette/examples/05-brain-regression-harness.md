@@ -15,7 +15,7 @@ model, before a release, or after tuning any prompt.
 | 2 | 21-40 | Parameter passing (correct args to multi-param tools, path handling) |
 | 3 | 41-60 | Multi-step reasoning (read-then-summarise, search-then-act) |
 | 4 | 61-80 | Edge cases (ambiguous prompts, error recovery, odd units) |
-| 5 | 81-100 | Complex scenarios (spawn_agent delegation, long chains) |
+| 5 | 81-100 | Complex scenarios (multi-step tool chains, long reasoning) |
 
 Each prompt has an expected regex pattern and an expected tool name.
 Pass = (exit 0) AND (non-empty output) AND (output matches pattern).
