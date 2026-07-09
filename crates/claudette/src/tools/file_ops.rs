@@ -441,6 +441,7 @@ mod tests {
         // the paging notice — this is the fix for the large-file read spiral.
         let _guard = crate::test_env_lock(); // home-resolving: serialize vs temp-home swaps
         let target = files_dir().join("claudette-readcap-test.txt");
+        let _ = ensure_dir(&files_dir()); // fresh runner: files_dir may not exist yet
         let _ = fs::remove_file(&target);
         let body = (1..=1000)
             .map(|n| format!("line {n}"))
@@ -473,6 +474,7 @@ mod tests {
     fn read_file_honors_offset_and_limit() {
         let _guard = crate::test_env_lock(); // home-resolving
         let target = files_dir().join("claudette-readwin-test.txt");
+        let _ = ensure_dir(&files_dir()); // fresh runner: files_dir may not exist yet
         let _ = fs::remove_file(&target);
         let body = (1..=100)
             .map(|n| format!("L{n}"))
@@ -499,6 +501,7 @@ mod tests {
     fn read_file_tail_returns_last_lines_and_rejects_offset() {
         let _guard = crate::test_env_lock(); // home-resolving
         let target = files_dir().join("claudette-readtail-test.txt");
+        let _ = ensure_dir(&files_dir()); // fresh runner: files_dir may not exist yet
         let _ = fs::remove_file(&target);
         let body = (1..=100)
             .map(|n| format!("L{n}"))
@@ -547,6 +550,7 @@ mod tests {
     fn read_file_small_file_returns_whole_without_notice() {
         let _guard = crate::test_env_lock(); // home-resolving
         let target = files_dir().join("claudette-readsmall-test.txt");
+        let _ = ensure_dir(&files_dir()); // fresh runner: files_dir may not exist yet
         let _ = fs::remove_file(&target);
         fs::write(&target, "alpha\nbeta\ngamma\n").unwrap();
 
