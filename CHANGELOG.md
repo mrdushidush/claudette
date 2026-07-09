@@ -10,6 +10,20 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-07-09
+
+<!-- Release-prep prepared ahead of the tag; the Fable review session confirms
+     the final date at tag time. -->
+
+### Added
+
+- **Turn-scoped `/undo` and a new `/diff`.** `/undo` now reverts the whole last
+  turn (all of its file writes, newest-first); `/undo one` keeps the old
+  single-entry behavior. `/diff` renders the last turn's cumulative file changes
+  as a colored unified diff. Transcript entries carry a globally-unique turn id
+  so "last turn" is unambiguous across sessions. (Brand-new file creates have no
+  pre-image, so `/diff` covers overwrites + deletes.)
+
 ### Changed
 
 - **Claudette now introduces itself as a coding agent, not a "personal
@@ -20,15 +34,63 @@ bumps are non-breaking bugfixes only.
   began. (The internal system prompt is unchanged — a coding-agent system
   prompt measurably regressed the small `qwen3.5-4b` brain on git-inspection
   tasks, so it was deliberately left alone.)
+- **The `--tui` mode is now labeled experimental / demo-only** in `--help`, the
+  README, and docs — the REPL is the supported daily-driver surface. No renderer
+  changes; the daily-driver ambition is parked until there's real demand.
+
+### Removed
+
+- **BREAKING: the codet coder subsystem is retired in full** (≈ −3.8k LOC). The
+  brain now writes code directly; there is no second "coder" model and no
+  post-write validation pass. Specifically gone:
+  - the **`generate_code` tool** and the **`code` tool group** (the meta-tool
+    surface shrank from 21 to 20 optional groups);
+  - the **`/validate` slash command**;
+  - the coder-model configuration — **`CLAUDETTE_CODER_MODEL`**,
+    `CLAUDETTE_CODER_NUM_CTX`, `CLAUDETTE_CODER_NUM_PREDICT`, the `/coder`
+    session pin, and the `[coder]` model-config;
+  - the opt-in validation loop — **`CLAUDETTE_VALIDATE_CODE`** and its
+    syntax-check + SEARCH/REPLACE auto-fix machinery;
+  - **`CLAUDETTE_WRITE_FILE_CODE_MAX_LINES`** — `write_file` no longer caps or
+    refuses large code files (it is now the code-writing path, so the old
+    "nudge toward edit_file" cap is gone).
+
+  "One model, one binary" is now literal. (Until 1.0, minor bumps may break —
+  per the changelog policy above.) The forge Coder/Verifier subsystem
+  (`CLAUDETTES_FORGE_*`) is unaffected — it is a different, retained feature.
 
 ### Fixed
 
+- **The denied-call retry spiral is broken.** When a tool call is denied
+  (e.g. `bash` asking to escalate past the workspace-write sandbox in a
+  non-interactive run), an exact repeat now returns an actionable error instead
+  of being re-executed — and the deny message itself names the way out (use a
+  tool that doesn't need escalation, e.g. `enable_tools git` →
+  `git_log`/`git_diff`). Previously a small brain could repeat the identical
+  denied call ~40× and land the turn with empty output. The iteration-cap
+  landing now also synthesizes an honest "hit the limit; last obstacle was …"
+  reply instead of printing nothing.
 - **The read-only git inspectors (`git_status`/`git_diff`/`git_log`) are now
   loop-broken like the other navigation tools.** Previously they were a blind
   spot: an exact-repeat call was re-executed and re-bloated the context. They
   now dedup identical repeats and count toward the search budget, while a real
   mutation (`git_add`/`git_commit`/`git_checkout`) still clears the dedup set so
   a legitimate re-check after a change is kept.
+
+### Security
+
+- **The release workflow gate is hardened.** `release.yml` now runs `cargo audit`
+  + `cargo deny` and an `--all-features` clippy/test pass, and the publish job
+  (the only `id-token: write` / OIDC job) pins `dtolnay/rust-toolchain` by SHA.
+  Publishing is blocked if the tree grew a RustSec advisory or a deny-policy
+  violation since the last main CI run.
+- **`crossbeam-epoch` bumped 0.9.18 → 0.9.20** (RUSTSEC-2026-0204).
+- **Enforced-offline air-gap holes closed.** `crate_info` / `npm_info` (crates.io
+  / npm registry lookups) were unguarded and opened real sockets under
+  `--offline`; they are now on the `NET_TOOLS` allow-list, guarded at the handler
+  head, and covered by the `tests/offline_egress.rs` proof. Separately, `web_fetch`
+  now runs the offline host-check *before* DNS resolution, so an offline fetch
+  can't leak the target hostname to the resolver.
 
 ## [0.15.0] - 2026-06-21
 
