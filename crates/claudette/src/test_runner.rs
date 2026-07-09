@@ -27,9 +27,9 @@ pub struct CommandResult {
 /// `child.try_wait()` every 100 ms and kills the process if the timeout
 /// is exceeded. Returns a `CommandResult` in all cases — never panics.
 ///
-/// `cwd` overrides the subprocess working directory — needed by
-/// `run_python_unittest` which must `cd` into the file's parent so
-/// Python can import it by module name.
+/// `cwd` overrides the subprocess working directory — callers that must run
+/// the command from a specific directory (e.g. a project root so the test
+/// framework resolves its config) pass it here.
 ///
 /// **Pipe draining:** stdout and stderr are read concurrently on dedicated
 /// reader threads. Reading lazily (only after `try_wait` returns `Some`)
