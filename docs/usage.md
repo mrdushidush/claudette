@@ -77,5 +77,5 @@ The REPL prompter is interactive. The TUI shows a confirmation modal over the ch
 - **Autosave** after every REPL turn to `~/.claudette/sessions/last.json`.
 - **Resume** with `--resume` or `-r`.
 - **Named sessions** via `/save <name>` and `/load <name>` (stored at `~/.claudette/sessions/<name>.json`).
-- **Auto-compaction** is effectively off by default (1 M estimated tokens) — opt in for tight context windows via `CLAUDETTE_COMPACT_THRESHOLD=12000`. When it does fire, it summarises old turns, keeps recent ones verbatim, and preserves tool-result anchoring.
+- **Auto-compaction** triggers adaptively at half the active brain's `num_ctx` by default (clamped to `[4000, 1000000]` estimated tokens), so a real 16K–128K window compacts before it overflows — pin an exact trigger via `CLAUDETTE_COMPACT_THRESHOLD=12000`. When it fires, it summarises old turns, keeps recent ones verbatim, and preserves tool-result anchoring.
 - **Sliding-window truncator** acts as a safety net inside the API client.

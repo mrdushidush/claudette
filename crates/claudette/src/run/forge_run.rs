@@ -447,7 +447,7 @@ fn forge_phase0_preflight(mission: &crate::missions::Mission) -> Result<Option<(
 ///    against the original request. Returns `{score, pass, feedback}`.
 ///    On parse failure, treated as pass (advisory mode).
 /// 4. **Fix-loop** — if Verifier `pass=false` and `round < max_fix_rounds()`,
-///    re-runs Coder with the Verifier's feedback prepended. Default two
+///    re-runs Coder with the Verifier's feedback prepended. Default three
 ///    rounds; override with `CLAUDETTE_MAX_FIX_ROUNDS` (clamped to 10).
 /// 5. **Submitter** — final Coder turn with `should_submit=true` that only
 ///    calls `mission_submit` (PR opens here, not earlier).

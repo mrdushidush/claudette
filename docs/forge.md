@@ -153,25 +153,28 @@ Forge phases can dispatch different roles to different models. The
 overlay lives at `~/.claudettes-forge/models.toml`:
 
 ```toml
-[Planner]
+[planner]
 model = "qwen3.5:9b"
 
-[Coder]
+[coder]
 model = "qwen3-coder:30b"
 
-[Verifier]
+[verifier]
 model = "qwen3.5:9b"
-
-[Submitter]
-model = "qwen3.5:4b"
 ```
+
+The section headers are **lowercase** (`[planner]`, `[coder]`,
+`[verifier]`) — the loader matches them case-sensitively and silently
+ignores unknown keys, so a capitalized `[Planner]` routes nothing.
 
 | Role | Phase | Default fallback |
 |------|-------|------------------|
-| `Planner` | Planner turn | claudette's active brain |
-| `Coder` | Coder + fix-loop turns | claudette's active brain |
-| `Verifier` | Verifier turn | claudette's active brain |
-| `Submitter` | Final `mission_submit` turn | claudette's active brain |
+| `planner` | Planner turn | claudette's active brain |
+| `coder` | Coder + fix-loop turns | claudette's active brain |
+| `verifier` | Verifier turn | claudette's active brain |
+
+The **Submitter** phase is not separately routable — it runs as the
+final Coder turn, so it uses whatever the `coder` role resolves to.
 
 Missing roles silently fall back to claudette's currently-active brain
 (the one `current_model()` resolves at runtime — i.e. `CLAUDETTE_MODEL`
@@ -184,7 +187,6 @@ Env-var overrides also exist:
 - `CLAUDETTES_FORGE_PLANNER_MODEL`
 - `CLAUDETTES_FORGE_CODER_MODEL`
 - `CLAUDETTES_FORGE_VERIFIER_MODEL`
-- `CLAUDETTES_FORGE_SUBMITTER_MODEL`
 
 Env vars take precedence over `models.toml` when both are set.
 

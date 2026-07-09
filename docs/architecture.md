@@ -87,7 +87,7 @@ The `gmail`, `calendar`, and `telegram` groups are compiled **only** into an `in
 1. **Planner** — tool-less brain turn (`Role::Planner` from `~/.claudettes-forge/models.toml`) decomposes the user's request into a 3–5 step numbered plan, prepended to the Coder's input.
 2. **Coder (round 0)** — full forge runtime (`files`, `search`, `git`, `advanced`, `github` groups enabled) with `should_submit=false`. Brain commits its change but the system prompt forbids `mission_submit`/`git_push`.
 3. **Verifier** — tool-less brain turn (`Role::Verifier`) reads `git diff HEAD` and emits one-line JSON: `{"score": <1-10>, "pass": <bool>, "feedback": "<reason>"}`. Resilient to code fences and trailing prose.
-4. **Fix-loop** — if `pass=false` and `round < MAX_FIX_ROUNDS` (2), re-runs the Coder with the Verifier's feedback prepended to the prompt.
+4. **Fix-loop** — if `pass=false` and `round < MAX_FIX_ROUNDS` (3), re-runs the Coder with the Verifier's feedback prepended to the prompt.
 5. **Submitter** — final Coder turn with `should_submit=true` that just calls `mission_submit`. PR opens here, never earlier.
 
 Persona overlay: `personas/codex7.md` is baked into the binary via `include_str!` and parsed at startup. Its `voice` one-liner + backstory prose are appended to the forge-mode system prompt so the brain adopts a consistent style.

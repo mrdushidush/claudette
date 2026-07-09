@@ -14,8 +14,8 @@ Claudette intentionally does **not** auto-load `.env` from the current working d
 | `CLAUDETTE_MODEL` | `qwen3.5:4b` (Auto preset) | Brain model override. |
 | `CLAUDETTE_NUM_CTX` | `16384` | Brain context window in tokens. |
 | `CLAUDETTE_NUM_PREDICT` | `6144` | Max output tokens per request. |
-| `CLAUDETTE_COMPACT_THRESHOLD` | `1000000` | Auto-compaction trigger (estimated tokens). Default makes auto-compact a no-op for typical 16K–128K context windows; set to `12000` (or a fraction of your `num_ctx`) on tight contexts. |
-| `CLAUDETTE_SOFT_COMPACT_THRESHOLD` | unset | Optional intermediate compaction tier. Fires below the hard threshold and preserves 12 recent messages instead of 4 — useful on long real-world sessions with 35B+ brains where the hard 1M default never triggers but turns pay hundreds of K input tokens. Set e.g. `200000`. |
+| `CLAUDETTE_COMPACT_THRESHOLD` | `num_ctx / 2` (adaptive) | Auto-compaction trigger (estimated tokens). Unset → half the active brain's `num_ctx`, clamped to `[4000, 1000000]`, so a real 16K–128K window compacts *before* it overflows. Pin an exact value like `12000` to override; the `1000000` cap is only the ceiling for enormous windows. |
+| `CLAUDETTE_SOFT_COMPACT_THRESHOLD` | unset | Optional intermediate compaction tier. Fires below the hard threshold and preserves 12 recent messages instead of 4 — useful on long real-world sessions with 35B+ brains where you want gentler compaction before the hard `num_ctx / 2` threshold fires. Set e.g. `200000`. |
 | `CLAUDETTE_MAX_ITERATIONS` | `40` | Per-turn (model → tool → result) loop ceiling. Lower it (e.g. `15`) to fail-fast on small-model spirals; raise it for legitimate long tool chains. |
 | `CLAUDETTE_SESSION` | `~/.claudette/sessions/last.json` | Override the session file path. |
 | `CLAUDETTE_MEMORY` | `~/.claudette/CLAUDETTE.MD` | Override the path Claudette loads user-memory from. |
@@ -64,7 +64,7 @@ Two layers enforce it: an HTTP-layer guard in the reqwest path checks the destin
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `CLAUDETTE_MAX_FIX_ROUNDS` | `2` | Cap on Coder→Verifier fix-loop rounds in `--forge`. Default 2 is the empirical sweet spot for local 8b coders. Raise to 4–6 if you've pinned a stronger Verifier model and want it to keep pushing back. Clamped at 10. |
+| `CLAUDETTE_MAX_FIX_ROUNDS` | `3` | Cap on Coder→Verifier fix-loop rounds in `--forge`. Default 3 is the empirical sweet spot for local 8b coders. Raise to 4–6 if you've pinned a stronger Verifier model and want it to keep pushing back. Clamped at 10. |
 | `CLAUDETTE_FORGE_ABORT_WINDOW_SECS` | `3` | Grace window (seconds) to Ctrl-C out of a forge run before it starts working. Set `0` to skip the pause in CI / scripted runs. Clamped at 30. |
 
 ## Tokens (per-tool)
