@@ -94,6 +94,14 @@ Claudette is first and foremost a coding agent. It writes and edits code directl
 
 `--forge` runs a Planner → Coder → Verifier loop autonomously, opens a PR when it converges, and re-tries with feedback up to a configurable round limit. See [`forge.md`](forge.md).
 
+### A worked example: understanding unfamiliar code
+
+A real interaction, not a polished demo. Opened Claudette in a checkout of a mid-sized Rust project and asked:
+
+> *"Where in this codebase is the decision made about when to compact the conversation, and what's the default threshold?"*
+
+Claudette ran `repo_map` to find the concept, read `run.rs` and `run/compaction_policy.rs`, and answered in one pass: the per-turn gate is `maybe_compact_session()` in `run.rs`, and the default threshold is adaptive — half the model's context window (`num_ctx / 2`), floored at 4,000 and capped at 1,000,000 tokens, overridable with `CLAUDETTE_COMPACT_THRESHOLD`. Four tool-assisted steps, no wrong turns — the kind of "explain how X works across these files" question that saves you an afternoon of grepping.
+
 ---
 
 ## Briefings, schedules, reminders
