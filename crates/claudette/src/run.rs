@@ -312,7 +312,8 @@ pub(crate) fn run_turn_with_retry(
 /// counter that grows monotonically.
 ///
 /// **Tiered behaviour (P3, 2026-05-04 queue):**
-/// - At/above [`compact_threshold`] (1M default): hard compact, preserves
+/// - At/above [`compact_threshold`] (adaptive: `num_ctx`/2, capped at 1M —
+///   see `run/compaction_policy.rs`): hard compact, preserves
 ///   `HARD_COMPACT_PRESERVE` recent messages.
 /// - At/above [`soft_compact_threshold`] but below the hard threshold:
 ///   soft compact, preserves `SOFT_COMPACT_PRESERVE` recent messages.
