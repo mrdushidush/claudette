@@ -65,6 +65,11 @@ pub(super) fn dispatch(name: &str, input: &str) -> Option<Result<String, String>
 }
 
 fn run_crate_info(input: &str) -> Result<String, String> {
+    // Air-gap guard: refuse before opening a socket under --offline (crates.io
+    // is not on the allow-list). At the top so the refusal precedes even input
+    // parsing — mirrors the facts.rs pattern.
+    crate::egress::guard("https://crates.io")?;
+
     let v = parse_json_input(input, "crate_info")?;
     let name = extract_str(&v, "name", "crate_info")?;
     let url = format!("https://crates.io/api/v1/crates/{name}");
@@ -108,6 +113,11 @@ fn run_crate_info(input: &str) -> Result<String, String> {
 }
 
 fn run_npm_info(input: &str) -> Result<String, String> {
+    // Air-gap guard: refuse before opening a socket under --offline (the npm
+    // registry is not on the allow-list). At the top so the refusal precedes
+    // even input parsing — mirrors the facts.rs pattern.
+    crate::egress::guard("https://registry.npmjs.org")?;
+
     let v = parse_json_input(input, "npm_info")?;
     let name = extract_str(&v, "name", "npm_info")?;
 
@@ -115,6 +125,7 @@ fn run_npm_info(input: &str) -> Result<String, String> {
 
     // Full package document — big, but the shape is stable.
     let url = format!("https://registry.npmjs.org/{name}");
+
     let resp = client
         .get(&url)
         .send()

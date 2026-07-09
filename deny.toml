@@ -45,11 +45,11 @@ confidence-threshold = 0.9
 [bans]
 # Duplicate versions of the same crate bloat the binary and widen the audit
 # surface. Today the tree carries a handful of unavoidable transitive dupes
-# (getrandom, hashbrown, windows-sys, winnow, rand, foldhash, r-efi) pinned by
-# upstreams we don't control; they're skipped below so a *new* dupe we
+# (hashbrown, windows-sys, winnow, and the windows_* import-lib family) pinned
+# by upstreams we don't control; they're skipped below so a *new* dupe we
 # introduce fails CI while the known ones don't block merges. Re-audit the
 # skip list when dependencies are bumped — `cargo tree -d` shows the current
-# set.
+# set, and `cargo deny check bans` flags any skip that is no longer needed.
 multiple-versions = "deny"
 wildcards = "deny"
 # Crates allowed to appear at multiple versions (known, upstream-driven). Most
@@ -57,7 +57,6 @@ wildcards = "deny"
 # windows-targets → windows_* import-lib family; the rest are common transitive
 # pins. Keep in sync with `cargo tree -d`.
 skip = [
-    { crate = "getrandom" },
     { crate = "hashbrown" },
     { crate = "winnow" },
     { crate = "windows-sys" },
@@ -70,7 +69,6 @@ skip = [
     { crate = "windows_x86_64_gnu" },
     { crate = "windows_x86_64_gnullvm" },
     { crate = "windows_x86_64_msvc" },
-    { crate = "wit-bindgen" },
 ]
 
 [sources]
