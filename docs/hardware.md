@@ -9,7 +9,7 @@
 | Disk | ~3 GB (brain only) — or ~8 GB with the lightweight 7b coder | ~27 GB (3.5 brain + fallback + 30b coder) / ~24 GB (single qwen3.6-35b-a3b serving both roles) | NVMe SSD |
 | OS | Windows 10+, Linux, macOS | Windows 11 / Ubuntu 24.04 / macOS 14+ | Windows 11 Pro |
 
-> **Which model should I pick?** See [Recommended models](../README.md#recommended-models) in the README for the per-tier hierarchy. TL;DR: `qwen3.5:4b` for the smallest setup; **`qwen3.6-35b-a3b` (via LM Studio) for the best brain by a wide margin** when you have 16 GB+ VRAM or 32 GB RAM with CPU-MoE offload.
+> **Which model should I pick?** See [Which model should I run?](../README.md#-which-model-should-i-run) in the README for the per-tier hierarchy. TL;DR: `qwen3.5:4b` for the smallest setup; **`qwen3.6-35b-a3b` (via LM Studio) for the best brain by a wide margin** when you have 16 GB+ VRAM or 32 GB RAM with CPU-MoE offload.
 
 ## Model footprint
 

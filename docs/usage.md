@@ -32,7 +32,7 @@ binary has no cloud code, so it errors with a one-line reinstall hint instead.
 /cost                Lifetime token usage.
 /tools               List all tools grouped by capability.
 /model               Show the active brain model.
-/models              Alias for /model.
+/models              Show the current model config.
 /preset fast|auto|smart  Switch model preset.
 /brain <model>       Pin the brain model (or "auto" to re-enable fallback).
 /memory              Show CLAUDETTE.MD contents.
@@ -67,7 +67,7 @@ Three additional commands are **Telegram-only** (they have no effect in the REPL
 | Tier | Behaviour | Example tools |
 |------|-----------|---------------|
 | **ReadOnly** | Auto-allowed | time, note_list, file reads, git status, all external APIs |
-| **WorkspaceWrite** | Auto-allowed | note_create, note_update, todo_add, web_search, github comment |
+| **WorkspaceWrite** | Auto-allowed | note_create, todo_add, web_search, github comment |
 | **DangerFullAccess** | Prompts `[y/N]` every time | bash, edit_file, git add/commit/push/checkout, cross-org PRs |
 
 The REPL prompter is interactive. The TUI shows a confirmation modal over the chat — `y` allows; `n`, `Esc`, or `Enter` denies (deny is the default); long inputs scroll with `↑`/`↓` and are never truncated. Telegram bot denies DangerFullAccess by default (no TTY to confirm with).
