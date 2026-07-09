@@ -110,9 +110,8 @@ thread_local! {
 }
 
 /// Open a new turn: mint a fresh turn id so subsequent [`record`] lines are
-/// tagged with it. Called at every turn entry point, alongside
-/// `tools::set_current_turn_paths` (same thread — tools run synchronously on
-/// the worker thread that recorded the turn). The id is
+/// tagged with it. Called at every turn entry point (same thread — tools run
+/// synchronously on the worker thread that recorded the turn). The id is
 /// `<unix_ms>-<pid>-<counter>`, globally unique: the transcript is
 /// append-only and outlives the process, so a bare counter would collide
 /// with another session's turns and make "undo the last turn" ambiguous.
