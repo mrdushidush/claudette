@@ -54,13 +54,25 @@ echo "[driver] reasoning capture -> $CAP"
 CAPPID=$!
 sleep 1
 
-# ---- full battery ----
+# ---- full battery (frozen core-50) ----
 BATTERY_TAG="$ID" bash "$BAT/run_battery.sh" "$FILTER"
 EC=$?
+
+# ---- section K (new-features ext pass) — only on a full run ----
+# Scored separately as "$ID-ext" against manifest-ext.tsv so the core-50 stays
+# frozen. Same loaded model + live capture; skipped when a task FILTER is given.
+if [ -z "$FILTER" ] && [ -f "$BAT/manifest-ext.tsv" ]; then
+  echo "[driver] section K ext pass -> tag=$ID-ext"
+  BATTERY_TAG="$ID-ext" BATTERY_MANIFEST="$BAT/manifest-ext.tsv" bash "$BAT/run_battery.sh"
+fi
 
 kill "$CAPPID" 2>/dev/null || true
 
 echo "================================================================"
 echo "[driver] ANALYZE $ID"
 bash "$BAT/analyze.sh" "$BAT/SCORES-$ID.tsv"
+if [ -f "$BAT/SCORES-$ID-ext.tsv" ]; then
+  kp=$(grep -cP '\tPASS\t' "$BAT/SCORES-$ID-ext.tsv"); kt=$(wc -l < "$BAT/SCORES-$ID-ext.tsv")
+  echo "[driver] section K: $kp/$kt PASS  (SCORES-$ID-ext.tsv)"
+fi
 echo "[driver] DONE $ID (battery ec=$EC, capture=$CAP)"

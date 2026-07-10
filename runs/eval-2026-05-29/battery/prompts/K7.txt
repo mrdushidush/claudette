@@ -1,0 +1,1 @@
+In `analytics.js`, rename every occurrence of the name `trackEvent` to `recordEvent`. Leave no `trackEvent` anywhere in the file (the function definition, all call sites, and the export).

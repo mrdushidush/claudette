@@ -1,0 +1,1 @@
+Users report that converting Celsius to Fahrenheit gives wrong results in this C++ project. The correct formula is F = C * 9 / 5 + 32. Find the buggy function and fix it. Don't rename anything or change the function signature.

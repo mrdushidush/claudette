@@ -1,0 +1,8 @@
+K1	java	locate	K1	120
+K2	cpp	bugfix	K2	150
+K3	csharp	locate	K3	120
+K4	php	bugfix	K4	150
+K5	kotlin	locate	K5	120
+K6	ruby	bugfix	K6	150
+K7	js	replace-all	K7	150
+K8	ts	scoped-grep	K8	130

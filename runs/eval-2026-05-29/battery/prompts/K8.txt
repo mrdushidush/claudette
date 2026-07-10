@@ -1,0 +1,1 @@
+Searching only the TypeScript files (the `.ts` files), what value is `API_TIMEOUT_MS` set to, and which file sets it? Ignore the JavaScript (`.js`) files.

@@ -25,13 +25,17 @@ export CLAUDETTE_SKIP_OLLAMA_PROBE=1
 export CLAUDETTE_AUTO_APPROVE=1
 # BATTERY_TAG suffixes the scores file + logs dir so models don't clobber each other.
 TAG="${BATTERY_TAG:-}"
+# BATTERY_MANIFEST selects which task list to run (default the frozen core-50).
+# The new-features "section K" lives in manifest-ext.tsv and is run as a separate
+# pass (tag <id>-ext) so a bare full run stays PASS/50. Keep it OUT of manifest.tsv.
+MANIFEST="${BATTERY_MANIFEST:-$BAT/manifest.tsv}"
 
 filter="${1:-}"
 SCORES="$BAT/SCORES${TAG:+-$TAG}.tsv"
 LOGDIR="$BAT/logs${TAG:+-$TAG}"
 mkdir -p "$LOGDIR"
 [ -z "$filter" ] && : > "$SCORES"   # full run resets; filtered run appends
-echo "[battery] model=$CLAUDETTE_MODEL  ctx=$CLAUDETTE_NUM_CTX  tag='${TAG:-<none>}'  scores=$(basename "$SCORES")"
+echo "[battery] model=$CLAUDETTE_MODEL  ctx=$CLAUDETTE_NUM_CTX  tag='${TAG:-<none>}'  manifest=$(basename "$MANIFEST")  scores=$(basename "$SCORES")"
 
 # The "bigrepo" fixture (I1-I8) is a copy of claudette's own src+docs — the
 # large-repo-with-conflicting-docs stressor. It's gitignored (it's a dup of the
@@ -101,7 +105,7 @@ while IFS=$'\t' read -r id lang type fixture timeout; do
   printf '%s\t%s\t%s\t%s\t%ds\tEC=%s\trecall=%s\t%s\n' \
     "$id" "$lang" "$type" "$status" "$elapsed" "$ec" "${recall:-na}" "$reason" >> "$SCORES"
   echo "[$id] $status  (${elapsed}s, ec=$ec)  ${recall:+recall=$recall}  ${reason}"
-done < "$BAT/manifest.tsv"
+done < "$MANIFEST"
 
 echo "================ SUMMARY ================"
 p=$(grep -cP '\tPASS\t' "$SCORES"); f=$(grep -cP '\tFAIL' "$SCORES"); t=$(wc -l < "$SCORES")

@@ -1,0 +1,1 @@
+In this Ruby project, a student who scores exactly 60 is wrongly marked as failing — a score of 60 should count as passing. Find and fix the bug.

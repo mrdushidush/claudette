@@ -1,0 +1,1 @@
+A bug in this PHP project makes `isEven()` return the wrong answer for every number. Find the function and fix it.
