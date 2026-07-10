@@ -80,7 +80,11 @@ while IFS=$'\t' read -r id lang type fixture timeout; do
   attempt=0
   while : ; do
     start=$(date +%s)
-    ( cd "$work" && CLAUDETTE_WORKSPACE="$wswin" timeout "$timeout" "$BIN" "$prompt" ) >> "$log" 2>&1
+    # stdin MUST be /dev/null: this loop reads the manifest on the shell's stdin,
+    # and claudette inherits that fd. A model that spirals into a stdin-reading
+    # path (seen with qwen3-coder-30b @ iter=20) would otherwise swallow the
+    # remaining manifest lines and silently truncate the battery mid-run.
+    ( cd "$work" && CLAUDETTE_WORKSPACE="$wswin" timeout "$timeout" "$BIN" "$prompt" ) < /dev/null >> "$log" 2>&1
     ec=$?
     elapsed=$(($(date +%s)-start))
     { [ "$ec" -ne 124 ] || [ "$attempt" -ge "$retries" ]; } && break
