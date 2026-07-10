@@ -409,41 +409,36 @@ mod tests {
 
     #[test]
     fn load_chat_ids_empty_when_no_file() {
-        // With no file present, should return empty vec.
-        let ids = load_chat_ids();
-        // We can't assert empty because previous tests may have written the file.
-        // Just ensure it doesn't panic.
-        assert!(ids.len() < 1000);
+        // Isolate HOME so no sibling test's chat-id file can leak in; with a
+        // fresh home there is genuinely no file, so we can assert emptiness
+        // outright instead of the old "doesn't panic" hedge.
+        crate::with_temp_home(|_home| {
+            assert!(load_chat_ids().is_empty());
+        });
     }
 
     #[test]
     fn save_and_load_chat_id_roundtrip() {
-        let path = chat_id_path();
-        let _ = std::fs::create_dir_all(path.parent().unwrap());
+        // Run against an isolated temp HOME (holds `test_env_lock` for the whole
+        // closure), so a concurrent test can't overwrite the shared chat-id file
+        // between our save and load. This is what previously flaked: a sibling's
+        // `write(&path, "")` landing mid-roundtrip made `load_chat_ids()` return
+        // `[]`. No backup/restore dance needed — the temp home is torn down for us.
+        crate::with_temp_home(|_home| {
+            save_chat_id(9999999);
+            assert!(
+                load_chat_ids().contains(&9999999),
+                "got: {:?}",
+                load_chat_ids()
+            );
 
-        // Backup existing file.
-        let backup = std::fs::read_to_string(&path).ok();
-
-        // Write a test ID.
-        let _ = std::fs::write(&path, "");
-        save_chat_id(9999999);
-        let ids = load_chat_ids();
-        assert!(ids.contains(&9999999), "got: {ids:?}");
-
-        // Duplicate should not add another line.
-        save_chat_id(9999999);
-        let ids2 = load_chat_ids();
-        assert_eq!(
-            ids2.iter().filter(|&&id| id == 9999999).count(),
-            1,
-            "duplicate ID should not be saved twice"
-        );
-
-        // Restore backup.
-        if let Some(b) = backup {
-            let _ = std::fs::write(&path, b);
-        } else {
-            let _ = std::fs::remove_file(&path);
-        }
+            // Duplicate should not add another line.
+            save_chat_id(9999999);
+            assert_eq!(
+                load_chat_ids().iter().filter(|&&id| id == 9999999).count(),
+                1,
+                "duplicate ID should not be saved twice"
+            );
+        });
     }
 }
