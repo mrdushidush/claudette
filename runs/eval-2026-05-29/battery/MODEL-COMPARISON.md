@@ -53,6 +53,12 @@ fixture regenerated from the live tree; all I-verifiers re-validated (zero chang
 separate new-features pass (Java/C++/C#/PHP/Kotlin/Ruby/JS/TS locate+bugfix+rename+
 scoped-grep) scored as `K n/8`, never blended into PASS/50.
 
+> **Sweep closed 2026-07-10** — 7 of 10 designated models scored. Three are **out of
+> scope by decision** (not run): `glm-4.7-flash` full battery (it *earned* one — screened
+> 8/10 — and can be run later), `nemotron-3-nano-omni` and the `gemma-4` family (both
+> heavy RAM-spill, impractical on this 16 GB box). The GPU was reclaimed mid-Phase-3; the
+> sweep was finalized on what ran rather than forcing the impractical ones through.
+
 ### Tier R — known ≥86%, straight to full battery + K
 
 | Model | key | PASS/50 | % | K | wall | notes |
@@ -67,11 +73,11 @@ scoped-grep) scored as `K n/8`, never blended into PASS/50.
 | Model | key | SCREEN-10 | gate | PASS/50 | K | notes |
 |---|---|---|---|---|---|---|
 | **qwen3-coder-30b** | `qwen3-coder-30b-a3b-instruct` | **9/10** | PASS | **40/50 (80%)** | 6/8 | **Template now WORKS** — was `SKIPPED (broken template)` in v0.8.1; the current runtime renders it. Strong on code edits (bugfix 6/6, add-feature 5/5, create-file 4/4, js 7/7) but **weak git-workflow 1/4** (does the action, doesn't report / skips multi-step git) and **locate/report** (D2/I3/I5, K3/K8). A capable coder, a tier below champion/4b. |
-| glm-4.7-flash | `zai-org/glm-4.7-flash` | **8/10** | PASS | **deferred** | — | **Tool calls now WORK** — was `narrates prose, no tool calls` in v0.8.1. Earned the full battery, but **slow** (40–183 s/task, A1 alone 119 s; I8 failed 2 s = empty response). **Full run deferred** (needed the PC back). Re-run when time allows. |
+| glm-4.7-flash | `zai-org/glm-4.7-flash` | **8/10** | PASS | **out of scope** | — | **Tool calls now WORK** — was `narrates prose, no tool calls` in v0.8.1. Earned the full battery, but **slow** (40–183 s/task, A1 alone 119 s; I8 failed 2 s = empty response). **Full run not taken** — GPU reclaimed; sweep closed. Screener verdict (8/10, passes the gate) stands as this model's v0.16.0 result; re-run the full 50 later if a number is wanted. |
 | gemma-4-12b-coder-fable5 | `gemma-4-12b-coder-fable5-composer2.5-v1` | **1/10** | REJECT | — | — | **Agentic-incompatible**: prints code in a markdown fence and stops at `iter=1` — never calls the write tool (C4 proof) + intermittent empty-first-turn. A chat model, not an agent. Not a coding-ability result. |
 | qwen3.6-35b-a3b *(official)* | `qwen/qwen3.6-35b-a3b` | *(partial)* | — | — | — | **Impractical on 16 GB**: the 22 GB Q4 quant spills ~6 GB to RAM → **84–157 s/task**, timeout-stamped PASSes, run killed twice under memory pressure. Partial screen quality was fine (5 PASS + 2 slow-PASS, 1 FAIL) but it's **dominated by the champion @q3_k_xl** (same model, fits VRAM, 3× faster, 94%). Use q3_k_xl. |
-| nemotron-3-nano-omni | `nvidia/nemotron-3-nano-omni` | *(not run)* | — | — | — | 26 GB → heavy RAM-spill (same class as the official q4 above and the historical omni-reasoning). **Deferred** — impractical to bench here. |
-| gemma-4 family | `google/gemma-4-e2b` … | *(not run)* | — | — | — | **Deferred** (PC reclaimed before the e2b template probe). |
+| nemotron-3-nano-omni | `nvidia/nemotron-3-nano-omni` | *(not run)* | — | — | — | **Out of scope** — 26 GB → heavy RAM-spill (same class as the official q4 above and the historical omni-reasoning); impractical to bench on this 16 GB box. |
+| gemma-4 family | `google/gemma-4-e2b` … | *(not run)* | — | — | — | **Out of scope** — GPU reclaimed before the e2b template probe; sweep closed. |
 
 ### v0.16.0 findings
 
