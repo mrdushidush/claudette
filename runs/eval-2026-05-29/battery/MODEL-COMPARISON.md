@@ -33,6 +33,68 @@ Reproduce one model:
 bash runs/eval-2026-05-29/battery/run_model_eval.sh <model-key> <identifier> 24576
 ```
 
+> The intro above describes the original **v0.8.1** sweep. The **v0.16.0 sweep**
+> (2026-07-10) below re-runs on the current binary + a freshly-regenerated bigrepo
+> fixture, adds **section K** (8 new-feature tasks, scored separately so the core-50
+> stays frozen and comparable), and gates new/unknown models through the **SCREEN-10**
+> screener (`SCREENER.md`). The historical v0.8.1 tables are kept unchanged below it.
+
+---
+
+## v0.16.0 sweep (2026-07-10)
+
+**Harness:** claudette **v0.16.0** (`~/.cargo/bin/claudette`, rebuilt from `main` —
+includes #176 run_tests workspace-boundary fix and the clarified adaptive-compaction
+doc). **LM Studio runtime cuda12-avx2 2.24.0.** Same held constants: **ctx = 24 576**,
+**`--parallel 1`**, `CLAUDETTE_AUTO_APPROVE=1`, per-task `CLAUDETTE_WORKSPACE`. Bigrepo
+fixture regenerated from the live tree; all I-verifiers re-validated (zero changes).
+
+**Core-50 stays frozen** (comparable across all 7 historical runs). **Section K** is a
+separate new-features pass (Java/C++/C#/PHP/Kotlin/Ruby/JS/TS locate+bugfix+rename+
+scoped-grep) scored as `K n/8`, never blended into PASS/50.
+
+### Tier R — known ≥86%, straight to full battery + K
+
+| Model | key | PASS/50 | % | K | wall | notes |
+|---|---|---|---|---|---|---|
+| **q3-35b** *(champion)* | `qwen3.6-35b-a3b@q3_k_xl` | **47/50** | **94.0%** | **8/8** | 32.2 min | Matches the historical v0.16.0 mark. Only genuine miss **I8** (spiraled to 201 s timeout, partial answer). **C3 now PASS** (was a fail — #176 word-boundary verifier fix) and **I6 7/7** recovered on the fresh fixture. Section K perfect across all 8 new-feature langs. **Default pick.** |
+| qwen3.5-4b | `qwen3.5-4b` | **45/50** | **90.0%** | **8/8** | 12.8 min | **Exactly matches its historical 90%** → confirms the fresh fixture + #176 binary is comparable to prior runs. Misses C3 (no standalone "5"), H4 (SQL column), I3/I5/I6 (large-repo locate+enumerate — I6 bailed 3 s at 0/7). K 8/8 even on a 7.3 GB model. **Best-value / universal-access pick.** |
+| gpt-oss-20b | `openai/gpt-oss-20b` | **41/50** | **82.0%** | **7/8** | 6.1 min | Fastest full run. **Signature weak spot = multi-site refactor/rename 1/4** (A4/E2/F4 + K7 all the same: does the first edit, leaves the rest). Everything else clean (create-file 4/4, run-tests 4/4, bigrepo 7/8). 4 pts under its historical 86% — within this hasty-single-pass model's variance. **Fastest / lowest-overhead pick.** |
+| qwen3.5-9b | `qwen/qwen3.5-9b` | ⚠️ **template-degraded** | — | — | — | **Regression on runtime 2.24.0**: emits an **empty first turn** when tools are in the system prompt (`assistant stream produced no content`); claudette's enable-tools retry only sometimes recovers → a flaky, artifact 44%. **Both the `qwen/` and `unsloth/` builds fail identically** (A1 probe). Not a claudette regression (champion + 4b + gpt-oss are fine) and not a real quality score. Its historical **88%** stands as a *prior-runtime* note. |
+
+### Tier S — screener-gated new/unknown models
+
+| Model | key | SCREEN-10 | gate | PASS/50 | K | notes |
+|---|---|---|---|---|---|---|
+| **qwen3-coder-30b** | `qwen3-coder-30b-a3b-instruct` | **9/10** | PASS | **40/50 (80%)** | 6/8 | **Template now WORKS** — was `SKIPPED (broken template)` in v0.8.1; the current runtime renders it. Strong on code edits (bugfix 6/6, add-feature 5/5, create-file 4/4, js 7/7) but **weak git-workflow 1/4** (does the action, doesn't report / skips multi-step git) and **locate/report** (D2/I3/I5, K3/K8). A capable coder, a tier below champion/4b. |
+| glm-4.7-flash | `zai-org/glm-4.7-flash` | **8/10** | PASS | **deferred** | — | **Tool calls now WORK** — was `narrates prose, no tool calls` in v0.8.1. Earned the full battery, but **slow** (40–183 s/task, A1 alone 119 s; I8 failed 2 s = empty response). **Full run deferred** (needed the PC back). Re-run when time allows. |
+| gemma-4-12b-coder-fable5 | `gemma-4-12b-coder-fable5-composer2.5-v1` | **1/10** | REJECT | — | — | **Agentic-incompatible**: prints code in a markdown fence and stops at `iter=1` — never calls the write tool (C4 proof) + intermittent empty-first-turn. A chat model, not an agent. Not a coding-ability result. |
+| qwen3.6-35b-a3b *(official)* | `qwen/qwen3.6-35b-a3b` | *(partial)* | — | — | — | **Impractical on 16 GB**: the 22 GB Q4 quant spills ~6 GB to RAM → **84–157 s/task**, timeout-stamped PASSes, run killed twice under memory pressure. Partial screen quality was fine (5 PASS + 2 slow-PASS, 1 FAIL) but it's **dominated by the champion @q3_k_xl** (same model, fits VRAM, 3× faster, 94%). Use q3_k_xl. |
+| nemotron-3-nano-omni | `nvidia/nemotron-3-nano-omni` | *(not run)* | — | — | — | 26 GB → heavy RAM-spill (same class as the official q4 above and the historical omni-reasoning). **Deferred** — impractical to bench here. |
+| gemma-4 family | `google/gemma-4-e2b` … | *(not run)* | — | — | — | **Deferred** (PC reclaimed before the e2b template probe). |
+
+### v0.16.0 findings
+
+**Runtime template compatibility shifted vs v0.8.1 — in both directions.** The current
+LM Studio runtime (cuda12-avx2 2.24.0) *fixed* two models the old sweep had to gate out:
+`qwen3-coder-30b-a3b-instruct` (was `Unknown StringValue filter: safe`) and
+`glm-4.7-flash` (was prose-only) both drive the tool loop now (screened 9/10 and 8/10).
+But it *broke* `qwen3.5-9b`, which scored 88% historically and now emits an empty first
+turn on both builds. **Template/tool-emission health is runtime-version-dependent and
+must be re-checked every sweep** — it is not a fixed property of the model.
+
+**Harness robustness fix (committed `3f7aa42`).** `run_battery.sh` reads the manifest on
+the shell's stdin, and the claudette child inherited that fd. `qwen3-coder-30b` spiraled
+into a stdin-reading path at `iter=20` and **silently swallowed the remaining manifest
+lines, truncating the run after task 10 of 50 with a clean exit 0**. Fixed by redirecting
+the child's stdin from `/dev/null`; the same model then completed all 50. The four Tier R
+reasoning models had already finished full 50s (they never hit the stdin path), so their
+scores are unaffected.
+
+**RAM-spill remains the throughput ceiling on 16 GB.** Anything that lands >~19 GB
+resident (official 22 GB Q4, nemotron-omni 26 GB) runs 3–5× slower and gets killed under
+memory pressure. The champion `@q3_k_xl` (18.6 GB, fits) is the practical top of this box.
+
 ---
 
 ## Lineup (from `lms ls`)
