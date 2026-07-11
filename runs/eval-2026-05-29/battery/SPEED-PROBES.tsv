@@ -1,3 +1,4 @@
 date	label	model	base_url	code_emit	explain	refactor	median_tps	ttft_med_s	server_tps	vram_used_mib
 2026-07-11	champ-q3kxl-lms	champ-q3kxl-probe	http://localhost:1234	33.71	33.89	33.83	33.83	2.24	na	14990
 2026-07-11	champ-iq4xs-lms	champ-iq4xs-lms	http://localhost:1234	28.16	27.79	27.77	27.79	2.25	na	13855
+2026-07-11	champ-q4kxl-lms	champ-q4kxl-lms	http://localhost:1234	35.99	36.22	36.04	36.04	2.25	na	14922

@@ -1,0 +1,50 @@
+A1	rust	bugfix	PASS	42s	EC=0	recall=na	PASS — cargo test succeeded (test_average fixed)
+A2	rust	add-feature	PASS	31s	EC=0	recall=na	PASS — cargo test succeeded (median added)
+A3	rust	run-tests	PASS	8s	EC=0	recall=na	PASS — transcript reports 4 tests passed
+A4	rust	refactor	PASS	36s	EC=0	recall=na	PASS — add renamed to sum2 throughout; tests pass
+A5	rust	multi-file	PASS	28s	EC=0	recall=na	PASS — MAX_RETRIES raised to 5; retry test passes
+A6	rust	explain	PASS	29s	EC=0	recall=na	PASS — explanation covers dedup of consecutive/adjacent duplicates
+A7	rust	debug-error	PASS	21s	EC=0	recall=na	PASS — cargo build succeeded (type error fixed)
+B1	python	bugfix	PASS	40s	EC=0	recall=na	PASS — test_stats passes (mean fixed): OK
+B2	python	add-feature	PASS	24s	EC=0	recall=na	PASS — variance added, test passes: OK
+B3	python	multi-file	PASS	49s	EC=0	recall=na	PASS — tests pass and circle.py PI updated to 3.14159
+B4	python	create-file	PASS	48s	EC=0	recall=na	PASS — utils.py created and clamp test passes: OK
+B5	python	debug-error	PASS	28s	EC=0	recall=na	PASS — app.py runs and counts 'l' as 2: {'h': 1, 'e': 1, 'l': 2, 'o': 1}
+B7	python	run-tests	PASS	26s	EC=0	recall=na	PASS — transcript reports 3 tests passing
+B8	python	answer-codebase	PASS	22s	EC=0	recall=na	PASS — transcript identifies the real retry count as 2 (MAX_ATTEMPTS)
+C1	js	bugfix	PASS	27s	EC=0	recall=na	PASS — test.js passes (cartTotal fixed)
+C2	js	add-feature	PASS	41s	EC=0	recall=na	PASS — test.js passes (applyDiscount added)
+C3	js	run-tests	PASS	21s	EC=0	recall=na	PASS — tests green and agent reported 5 passed
+C4	js	create-file	PASS	34s	EC=0	recall=na	PASS — slug.js created and test.js passes
+C5	js	multi-file	PASS	34s	EC=0	recall=na	PASS — tax rate updated to 0.08 and test.js passes
+C6	js	explain	PASS	20s	EC=0	recall=na	PASS — explanation covers grouping, object return, and collection-valued buckets
+C7	js	debug-error	PASS	22s	EC=0	recall=na	PASS — report.js runs and prints member names (incl. Ada)
+D1	ts	bugfix	PASS	36s	EC=0	recall=na	PASS — node test.ts passed — emails without @ are now rejected
+D2	ts	locate	PASS	8s	EC=0	recall=na	PASS — located refreshToken in src/auth/session.ts (full path given)
+D4	ts	multi-file	PASS	35s	EC=0	recall=na	PASS — User.role added and label() returns 'name (role)'; node test.ts passed
+D6	ts	run-tests	PASS	29s	EC=0	recall=na	PASS — tests green and agent reported 6 passed
+E1	go	bugfix	PASS	24s	EC=0	recall=na	PASS — calc.go Max fixed to return the larger value (buggy line removed)
+E2	go	refactor	PASS	32s	EC=0	recall=na	PASS — GetUserName renamed to DisplayName everywhere (defn in user.go + 2 call sites; 3 total)
+E3	go	locate	PASS	8s	EC=0	recall=na	PASS — transcript identifies handlers/checkout.go as defining handleCheckout
+E4	go	explain	PASS	24s	EC=0	recall=na	PASS — explanation covers both deduplication and sorting
+F1	shell	bugfix	PASS	20s	EC=0	recall=na	PASS — greet.sh prints 'Hello, Ada!' and 'Hello, Grace!'
+F2	shell	create-file	PASS	108s	EC=0	recall=na	PASS — count.sh prints 5 for the 5-line data.txt
+F3	shell	explain	PASS	18s	EC=0	recall=na	PASS — explanation conveys 3/3 concepts incl. counting unique occurrences
+F4	shell	refactor	FAIL	33s	EC=0	recall=na	FAIL — old name 'process_file' still present:\n./run.sh:7:process_file "run.sh"
+G1	html	add-feature	PASS	16s	EC=0	recall=na	PASS — Contact->contact.html added inside nav/ul; Home+About intact (3 nav links)
+G4	css	refactor	PASS	40s	EC=1	recall=na	PASS — btn-primary -> button-main renamed in styles.css rule + 2 html usages (3 total); styles intact
+H2	sql	add-feature	PASS	33s	EC=0	recall=na	PASS — top_customer.sql returns exactly one row: Ada
+H3	sql	create-file	PASS	15s	EC=0	recall=na	PASS — products table created with id/name/price and 2 seeded rows
+H4	sql	debug-error	PASS	67s	EC=0	recall=na	PASS — report.sql runs cleanly; Ada=150, Bob=50 (150.0 BOB=50.0 ROWS=3)
+I1	bigrepo	enumerate	PASS	106s	EC=0	recall=6/6	PASS — enumerated 6/6 CLAUDETTE_FORGE_ vars
+I2	bigrepo	enumerate	PASS	47s	EC=0	recall=8/8	PASS — enumerated 8/8 forge roles
+I3	bigrepo	locate	PASS	24s	EC=0	recall=na	PASS — identified source value 3 + location (resisted stale-doc value 2)
+I4	bigrepo	answer-codebase	PASS	47s	EC=0	recall=na	PASS — named qwen3-coder default + source location
+I5	bigrepo	locate	FAIL	28s	EC=0	recall=na	FAIL — did not name conversation.rs
+I6	bigrepo	enumerate	PASS	78s	EC=0	recall=7/7	PASS — enumerated 7/7 CLI modes
+I7	bigrepo	answer-codebase	PASS	38s	EC=0	recall=na	PASS — correctly states no telemetry / local-first
+I8	bigrepo	answer-codebase	PASS	122s	EC=0	recall=na	PASS — described threshold+summarize mechanism
+J1	git	git-workflow	PASS	12s	EC=0	recall=na	PASS — named the modified file notes.txt
+J2	git	git-workflow	PASS	22s	EC=0	recall=na	PASS — committed greet.py with subject: Add greeting script
+J3	git	git-workflow	PASS	8s	EC=0	recall=na	PASS — reported the latest commit subject (null pointer in handler)
+J4	git	git-workflow	PASS	11s	EC=0	recall=na	PASS — branch feature/login exists

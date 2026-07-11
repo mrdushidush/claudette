@@ -131,8 +131,8 @@ KV q8_0 + FA ON (recorded per row). Speed probe = `probe_speed.sh` 3-prompt medi
 |---|---|---|---|---|---|---|
 | 0 | `champ-q3kxl-lms` | UD-Q3_K_XL 16.8 | LMS | 47/50 + K8/8 (reused) | probe pending | **BASELINE** |
 | 1 | `champ-iq4xs-lms` | UD-IQ4_XS 17.7 | LMS | **50/50 + K 8/8 — PERFECT** | 27.79 tok/s | **DONE 2026-07-11** |
-| 2 | `champ-q4kxl-lms` | UD-Q4_K_XL 22.4 | LMS | full + K | yes | on disk |
-| 3 | `champ-q4ks-lms` | UD-Q4_K_S 20.9 | LMS | only if #2 thrashes | yes | contingent |
+| 2 | `champ-q4kxl-lms` | UD-Q4_K_XL 22.4 | LMS | **48/50 + K 8/8** (F4, I5) | **36.04 tok/s** | **DONE 2026-07-11** |
+| 3 | `champ-q4ks-lms` | UD-Q4_K_S 20.9 | LMS | SKIPPED — no thrash occurred; can't beat 50/50 on quality | — | closed |
 | 4 | `champ-mtp-q4kxl-lms` | MTP UD-Q4_K_XL 22.9 | LMS+MTP toggle | SCREEN-10 + K (lineage = unsloth, base quant battery-cleared via #2) | yes | on disk (C:\models — needs LMS import) |
 | 5 | `champ-mtp-<win>-lms` | MTP twin of Phase-3 winner | LMS+MTP | SCREEN-10 + K | yes | contingent |
 | 6 | `champ-bs-mtpgpu2-lms` | byteshape MTP-GPU-2 13.6 | LMS+MTP | **FULL + K** (new lineage) | yes | pending download |
@@ -162,6 +162,16 @@ moving parts · template health.
   0.45 vs 0.4), ttft 2.25 s, VRAM 13,855 MiB. Wall-clock UNCHANGED vs incumbent (~32 min) —
   agentic wall is prompt-processing-bound, not gen-bound. First-ever perfect core-50.
   Settings: KV q8_0 K+V, no-mmap, expert-CPU 0.45, par 1, ctx 24576, runtime 2.24.0.
+- 2026-07-11 **`champ-q4kxl-lms` CHECKPOINT — 48/50 (96%) + K 8/8**, wall **28.7 min**
+  (fastest wall yet), misses **F4** (rename left `run.sh` call site) + **I5** (deep-locate;
+  passed on IQ4_XS — variance or quant-specific). I8 PASSED @ 122 s. A1 smoke 63 s. NO
+  memory-pressure thrash (the official-quant timeout didn't reproduce on unsloth UD).
+  Speed probe **36.04 tok/s — fastest NTP config** (ttft 2.25 s, VRAM 14,922 MiB,
+  expert-CPU 0.5). **Kernel insight: IQ-family lookup-table dequant is slow on the
+  CPU-offload path; Q4_K kernels are cheap** → biggest file ≠ slowest. Q4_K_S skipped:
+  no thrash to fall back from, and it can't beat 50/50 on quality.
+  **Phase 3 verdict: UD-IQ4_XS = presumptive weights** (quality first per goal); its gen-speed
+  gap (27.8 vs 36.0) is exactly what the MTP twin should patch in Phase 4.
 
 ## 8. LoRA feasibility report (Phase 5 deliverable — RESEARCH ONLY, no execution)
 
