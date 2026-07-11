@@ -11,12 +11,14 @@
 #   PASTE_LARGE   — paste handler regression
 #
 # Usage: bash tests/claudette100_test.sh [model] [output_dir]
-#   Defaults: model=$CLAUDETTE_MODEL or qwen3.6-35b-a3b@q4_k_xl
+#   Defaults: model=$CLAUDETTE_MODEL or qwen3.6-35b-a3b-mtp
+#   (byteshape champion; expects LM Studio loaded per
+#    runs/eval-2026-05-29/battery/champion-launch.md)
 #             output_dir=tests/results_claudette100
 
 set -uo pipefail
 
-MODEL="${1:-${CLAUDETTE_MODEL:-qwen3.6-35b-a3b@q4_k_xl}}"
+MODEL="${1:-${CLAUDETTE_MODEL:-qwen3.6-35b-a3b-mtp}}"
 OUTDIR="${2:-tests/results_claudette100}"
 BINARY="D:/dev/claudette/target/release/claudette.exe"
 PROMPTS_FILE="${CLAUDETTE100_PROMPTS:-D:/dev/claudette/crates/claudette/tests/claudette100_prompts.txt}"
