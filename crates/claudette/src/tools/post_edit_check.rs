@@ -7,8 +7,6 @@
 //! toolchains execute arbitrary project code (same rule as `run_tests`; roast
 //! 2026-06-30 H1).
 
-#![allow(dead_code)] // wired into the executor in the follow-up PR (W4b)
-
 use std::path::{Path, PathBuf};
 
 /// Environment variable that enables post-edit checks.
@@ -19,6 +17,9 @@ pub(crate) const CMD_ENV: &str = "CLAUDETTE_CHECK_CMD";
 
 /// Environment variable for the timeout in seconds (clamped to 1..=120).
 pub(crate) const TIMEOUT_ENV: &str = "CLAUDETTE_CHECK_TIMEOUT_SECS";
+
+/// Environment variable for the max fix rounds per file per turn (clamped to 1..=10).
+pub(crate) const MAX_ROUNDS_ENV: &str = "CLAUDETTE_CHECK_MAX_ROUNDS";
 
 /// Maximum number of output lines to retain.
 pub(crate) const MAX_OUTPUT_LINES: usize = 30;
@@ -53,6 +54,29 @@ pub(crate) fn timeout_secs() -> u64 {
         .and_then(|v| v.trim().parse::<u64>().ok())
         .unwrap_or(10)
         .clamp(1, 120)
+}
+
+/// Per-file per-turn cap on appended check-failure output.
+///
+/// Parses `MAX_ROUNDS_ENV`, clamps to `1..=10`, defaults to `2` when unset or
+/// unparseable. A stubborn error can't feed an edit↔check spiral beyond this
+/// count (design 2026-07-11, W4).
+pub(crate) fn max_rounds() -> u32 {
+    std::env::var(MAX_ROUNDS_ENV)
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(2)
+        .clamp(1, 10)
+}
+
+/// Suppressed-notice body when the per-file round cap is exceeded.
+///
+/// Returned verbatim — no trailing newline (the caller appends its own).
+pub(crate) fn suppressed_notice(path: &str) -> String {
+    format!(
+        "\n\n[post_edit_check] {path} still fails its check \
+         (output suppressed after repeated rounds this turn — run run_tests or diagnostics for the full picture)"
+    )
 }
 
 /// Parse a raw command string into a `CheckCmd`.
@@ -457,5 +481,37 @@ mod tests {
 
         unset_env(CHECK_ENV);
         std::env::remove_var(crate::egress::OFFLINE_ENV);
+    }
+
+    #[test]
+    fn max_rounds_defaults_and_clamps() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        // Unset → 2.
+        unset_env(MAX_ROUNDS_ENV);
+        assert_eq!(max_rounds(), 2);
+
+        set_env(MAX_ROUNDS_ENV, "1");
+        assert_eq!(max_rounds(), 1);
+
+        set_env(MAX_ROUNDS_ENV, "0");
+        assert_eq!(max_rounds(), 1); // clamped to min.
+
+        set_env(MAX_ROUNDS_ENV, "99");
+        assert_eq!(max_rounds(), 10); // clamped to max.
+
+        set_env(MAX_ROUNDS_ENV, "garbage");
+        assert_eq!(max_rounds(), 2); // fallback default.
+
+        unset_env(MAX_ROUNDS_ENV);
+    }
+
+    #[test]
+    fn suppressed_notice_names_the_file() {
+        let path = "src/main.rs";
+        let notice = suppressed_notice(path);
+        assert!(notice.contains("[post_edit_check]"));
+        assert!(notice.contains("still fails its check"));
+        assert!(notice.contains("output suppressed after repeated rounds this turn — run run_tests or diagnostics for the full picture"));
+        assert!(notice.contains("src/main.rs"));
     }
 }

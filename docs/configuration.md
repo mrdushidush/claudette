@@ -146,3 +146,29 @@ Rarely needed; defaults are tuned for local small models. Mostly useful for debu
 | `CLAUDETTE_NO_SPINNER` | unset | Set to `1` to suppress the REPL/TUI activity spinner (TTY only). |
 | `CLAUDETTE_MODEL_RELOAD_RETRY_MS` | `750` | Backoff (ms) before retrying a request after the backend reports the model was unloaded/reloaded. |
 | `CLAUDETTE_DISABLE_MODEL_RELOAD_RETRY` | unset | Set to `1` to disable the post-reload retry and fail fast instead. |
+
+### Post-edit checks (opt-in)
+
+Opt-in syntax/type check that runs after a successful `write_file`, `edit_file`, or `apply_diff`. With `CLAUDETTE_POST_EDIT_CHECK=1` the module auto-detects a fast check command for `.rs`, `.py`, `.go`, and `.js`/`.mjs`/`.cjs` files; non-zero output is appended to the same tool result so the brain fixes breakage immediately.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CLAUDETTE_POST_EDIT_CHECK` | unset (off) | Set to `1`, `true`, `yes`, or `on` (case-insensitive) to enable post-edit checks. The feature does nothing unless explicitly enabled — the default is OFF, so every byte of behaviour is unchanged when unset. |
+| `CLAUDETTE_CHECK_CMD` | auto-detected | Custom check command string. Tokens are split on whitespace; the first token is the program, the rest are arguments. Any argument containing `{file}` gets replaced by the edited file's path. If no token contained `{file}`, the file path is appended as one extra final argument. Set to an empty string to force auto-detection even when the variable exists. |
+| `CLAUDETTE_CHECK_TIMEOUT_SECS` | `10` | Timeout in seconds for the check command. Clamped to `[1, 120]`. A timed-out check is silently skipped (treated as success). |
+| `CLAUDETTE_CHECK_MAX_ROUNDS` | `2` | Per-file per-turn cap on appended check-failure output. Clamped to `[1, 10]`. When the cap is exceeded for a file in a single turn, further failures are summarized with a one-line notice instead of repeating the full output. |
+
+**Auto-detection (when `CLAUDETTE_CHECK_CMD` is unset or empty):**
+
+| Extension | Command | Notes |
+|-----------|---------|-------|
+| `.rs` | `cargo check --message-format=short` | Runs in workspace root. |
+| `.py` | `ruff check <file>` | Falls back to `python -m py_compile <file>` when `ruff` is not on PATH. |
+| `.go` | `go vet .` | Runs in the file's parent directory (workspace root if the file is at the root). |
+| `.js`, `.mjs`, `.cjs` | `node --check <file>` | Runs in workspace root. |
+
+**Notes:**
+
+- Success (exit 0) appends nothing to the tool result — only failures surface output.
+- The whole feature is a no-op under `--offline` / `CLAUDETTE_OFFLINE=1`.
+- `apply_patch` is excluded from v1 because it touches multiple files; only single-file writes (`write_file`, `edit_file`, `apply_diff`) trigger checks.
