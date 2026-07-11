@@ -27,15 +27,19 @@ export CLAUDETTE_SKIP_LM_STUDIO_PROBE=1
 ## Pinning a brain (no preset gymnastics)
 
 ```bash
-# Recommended on 16 GB+ VRAM (LM Studio backend):
-export CLAUDETTE_MODEL=qwen3.6-35b-a3b@q4_k_xl   # best brain by a wide margin
+# Recommended on a 16 GB GPU (LM Studio backend) — 50/50 on the battery, ~70–76 tok/s,
+# fully VRAM-resident (measured 2026-07-11, see docs/hardware.md for the load command):
+export CLAUDETTE_MODEL=byteshape/qwen3.6-35b-a3b-mtp
+
+# Known-good rollback (previous 16 GB default — 47/50, 33.8 tok/s):
+# export CLAUDETTE_MODEL=qwen3.6-35b-a3b@q3_k_xl
 
 # Or on 8 GB VRAM (Ollama backend):
 # export CLAUDETTE_MODEL=qwen3.5:4b              # the brain itself
 # export CLAUDETTE_FALLBACK_BRAIN_MODEL=qwen3.5:9b   # ignored unless Auto preset
 ```
 
-> The `@q4_k_xl` suffix is needed only when multiple quants of the same model are on disk — LM Studio picks the smallest match otherwise. With a single quant downloaded, bare `qwen3.6-35b-a3b` works.
+> An `@<quant>` suffix (e.g. `@q3_k_xl`) is needed only when multiple quants of the same model are on disk — LM Studio picks the smallest match otherwise. With a single quant downloaded, the bare id works. Load the byteshape champion with its MTP flags for full speed — command in [`hardware.md`](hardware.md#loading-the-16-gb-champion-lm-studio).
 
 Or in `~/.claudette/.env` for persistence across sessions.
 
@@ -60,15 +64,15 @@ The default of 3 is tuned for local 8b coder models. If you've routed Verifier t
 Per-role model routing lives in `~/.claudettes-forge/models.toml`:
 
 ```toml
-# Recommended (16 GB+ VRAM): single model for every role — no swap dance.
+# Recommended (16 GB GPU, LM Studio): single model for every role — no swap dance.
 [planner]
-model = "qwen3.6-35b-a3b"
+model = "byteshape/qwen3.6-35b-a3b-mtp"
 
 [coder]
-model = "qwen3.6-35b-a3b"
+model = "byteshape/qwen3.6-35b-a3b-mtp"
 
 [verifier]
-model = "qwen3.6-35b-a3b"
+model = "byteshape/qwen3.6-35b-a3b-mtp"
 
 # Or the legacy mixed setup (works on 8 GB VRAM):
 # [planner]

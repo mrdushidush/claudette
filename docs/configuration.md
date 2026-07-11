@@ -11,7 +11,7 @@ Claudette intentionally does **not** auto-load `.env` from the current working d
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama API endpoint. Honoured exactly like Ollama itself. |
 | `CLAUDETTE_ALLOW_REMOTE_OLLAMA` | unset | Set to `1` to silence the startup warning when `OLLAMA_HOST` is non-loopback. Default posture is local-only. |
 | `CLAUDETTE_OFFLINE` | unset | Set to `1` (or pass `--offline`) to **enforce the air-gap**: hard-block every outbound network call except the local model backend + loopback. See [Enforced offline mode](#enforced-offline-mode---offline) below. |
-| `CLAUDETTE_MODEL` | `qwen3.5:4b` (Auto preset) | Brain model override. |
+| `CLAUDETTE_MODEL` | `qwen3.5:4b` (Auto preset) | Brain model override. See [Recommended brain](#recommended-brain-measured-2026-07-11) below for the measured per-GPU picks. |
 | `CLAUDETTE_NUM_CTX` | `16384` | Brain context window in tokens. |
 | `CLAUDETTE_NUM_PREDICT` | `6144` | Max output tokens per request. |
 | `CLAUDETTE_COMPACT_THRESHOLD` | `num_ctx / 2` (adaptive) | Auto-compaction trigger (estimated tokens). Unset → half the active brain's `num_ctx`, clamped to `[4000, 1000000]`, so a real 16K–128K window compacts *before* it overflows. Pin an exact value like `12000` to override; the `1000000` cap is only the ceiling for enormous windows. |
@@ -25,9 +25,26 @@ Claudette intentionally does **not** auto-load `.env` from the current working d
 | `CLAUDETTE_FALLBACK_BRAIN_MODEL` | `qwen3.5:9b` (Auto preset) | Brain to fall back to on stuck signals. |
 | `CLAUDETTE_WORKSPACE` | unset | Extra read roots outside `$HOME`, colon-separated on Unix, semicolon-separated on Windows. Example: `D:\dev\claudette` for developing Claudette itself. Reads under `$HOME` and under a `$HOME`-rooted CWD are always allowed regardless. |
 
+### Recommended brain (measured 2026-07-11)
+
+The shipping default stays `qwen3.5:4b` — it runs anywhere (8 GB GPU or plain CPU)
+and scored 45/50 (90%) on the 50-task battery. On a **16 GB GPU with LM Studio**, the
+measured best is the byteshape MTP quant of qwen3.6-35b (50/50 on the same battery,
+~70–76 tok/s, fully VRAM-resident):
+
+```bash
+export CLAUDETTE_OPENAI_COMPAT=1
+export OLLAMA_HOST=http://localhost:1234
+export CLAUDETTE_MODEL=byteshape/qwen3.6-35b-a3b-mtp
+```
+
+Rollback if it misbehaves: `CLAUDETTE_MODEL=qwen3.6-35b-a3b@q3_k_xl` (the previous
+16 GB default — 47/50, known-good). Load commands, per-tier table, and
+choosing-a-model guidance: [`hardware.md`](hardware.md#which-model-for-which-gpu-measured).
+
 ### Backend quirks: LM Studio variant suffix
 
-LM Studio exposes models with a `@<quant>` suffix in `/v1/models` — for example `qwen3.6-35b-a3b@q4_k_xl` rather than the bare `qwen3.6-35b-a3b`. If you set `CLAUDETTE_MODEL=qwen3.6-35b-a3b` (bare id) against LM Studio, the server treats it as an unknown id, attempts a JIT-load for a different variant, and (when VRAM is tight) returns HTTP 400 `{"error":"Model is unloaded."}`. **Use the exact id from `lms ps` or `/v1/models`** when targeting LM Studio — e.g. `CLAUDETTE_MODEL=qwen3.6-35b-a3b@q4_k_xl`. llama.cpp's `llama-server` (and the MTP fork) ignores the `model` field entirely since it only has one loaded, so the bare id works there.
+LM Studio exposes models with a `@<quant>` suffix in `/v1/models` — for example `qwen3.6-35b-a3b@q3_k_xl` rather than the bare `qwen3.6-35b-a3b`. If you set `CLAUDETTE_MODEL=qwen3.6-35b-a3b` (bare id) against LM Studio, the server treats it as an unknown id, attempts a JIT-load for a different variant, and (when VRAM is tight) returns HTTP 400 `{"error":"Model is unloaded."}`. **Use the exact id from `lms ps` or `/v1/models`** when targeting LM Studio — e.g. `CLAUDETTE_MODEL=qwen3.6-35b-a3b@q3_k_xl`. llama.cpp's `llama-server` (and the MTP fork) ignores the `model` field entirely since it only has one loaded, so the bare id works there.
 
 ### Backend quirks: streaming on the OpenAI-compat path
 
