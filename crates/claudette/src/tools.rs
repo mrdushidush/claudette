@@ -64,6 +64,7 @@ mod mission;
 mod near_miss;
 mod notes;
 mod patch;
+mod post_edit_check;
 pub(crate) mod quality;
 mod recall;
 mod registry;

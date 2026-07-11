@@ -1160,6 +1160,12 @@ mod tests {
             "CLAUDETTE_ZZZ_TEST_NONEXISTENT_ABC_TOKEN", // secrets.rs test sentinel
             "CLAUDETTE_FORGE_X",                        // sample code in a repomap test fixture
             "CLAUDETTE_FORGE_Y",                        // ditto
+            // Post-edit-check knobs: read by the not-yet-wired module
+            // (tools/post_edit_check.rs). Documented in configuration.md when
+            // the executor wiring lands (W4b) and they take effect.
+            "CLAUDETTE_POST_EDIT_CHECK",
+            "CLAUDETTE_CHECK_CMD",
+            "CLAUDETTE_CHECK_TIMEOUT_SECS",
         ];
 
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
