@@ -1,0 +1,18 @@
+C1	js	bugfix	PASS	114s	EC=0	recall=na	PASS — test.js passes (cartTotal fixed)
+A1	rust	bugfix	PASS	113s	EC=0	recall=na	PASS — cargo test succeeded (test_average fixed)
+C4	js	create-file	PASS(TIMEOUT)	150s	EC=124	recall=na	PASS — slug.js created and test.js passes
+A7	rust	debug-error	PASS	149s	EC=0	recall=na	PASS — cargo build succeeded (type error fixed)
+C1	js	bugfix	PASS	117s	EC=0	recall=na	PASS — test.js passes (cartTotal fixed)
+D1	ts	bugfix	PASS(TIMEOUT)	151s	EC=124	recall=na	PASS — node test.ts passed — emails without @ are now rejected
+C4	js	create-file	PASS(TIMEOUT)	150s	EC=124	recall=na	PASS — slug.js created and test.js passes
+F1	shell	bugfix	PASS	95s	EC=0	recall=na	PASS — greet.sh prints 'Hello, Ada!' and 'Hello, Grace!'
+H2	sql	add-feature	PASS	109s	EC=0	recall=na	PASS — top_customer.sql returns exactly one row: Ada
+D1	ts	bugfix	PASS(TIMEOUT)	150s	EC=124	recall=na	PASS — node test.ts passed — emails without @ are now rejected
+F1	shell	bugfix	PASS	84s	EC=0	recall=na	PASS — greet.sh prints 'Hello, Ada!' and 'Hello, Grace!'
+H2	sql	add-feature	PASS	88s	EC=0	recall=na	PASS — top_customer.sql returns exactly one row: Ada
+H4	sql	debug-error	FAIL(TIMEOUT)	180s	EC=124	recall=na	FAIL — schema.sql missing
+H4	sql	debug-error	FAIL	157s	EC=0	recall=na	FAIL — schema.sql missing
+I6	bigrepo	enumerate	FAIL	51s	EC=1	recall=0/7	FAIL — only 0/7 CLI modes (need >=6; enumeration weak spot)
+I6	bigrepo	enumerate	FAIL	215s	EC=1	recall=0/7	FAIL — only 0/7 CLI modes (need >=6; enumeration weak spot)
+I8	bigrepo	answer-codebase	FAIL	3s	EC=1	recall=na	FAIL — missing threshold(0) or mechanism(1)
+I8	bigrepo	answer-codebase	FAIL	2s	EC=1	recall=na	FAIL — missing threshold(0) or mechanism(1)

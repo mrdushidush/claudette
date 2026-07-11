@@ -1,0 +1,10 @@
+A1	rust	bugfix	PASS	119s	EC=0	recall=na	PASS — cargo test succeeded (test_average fixed)
+A7	rust	debug-error	PASS	41s	EC=0	recall=na	PASS — cargo build succeeded (type error fixed)
+C1	js	bugfix	PASS	64s	EC=0	recall=na	PASS — test.js passes (cartTotal fixed)
+C4	js	create-file	PASS	67s	EC=0	recall=na	PASS — slug.js created and test.js passes
+D1	ts	bugfix	PASS	81s	EC=0	recall=na	PASS — node test.ts passed — emails without @ are now rejected
+F1	shell	bugfix	PASS	71s	EC=0	recall=na	PASS — greet.sh prints 'Hello, Ada!' and 'Hello, Grace!'
+H2	sql	add-feature	PASS	45s	EC=0	recall=na	PASS — top_customer.sql returns exactly one row: Ada
+H4	sql	debug-error	PASS	55s	EC=0	recall=na	PASS — report.sql runs cleanly; Ada=150, Bob=50 (150.0 BOB=50.0 ROWS=2)
+I6	bigrepo	enumerate	FAIL	183s	EC=1	recall=0/7	FAIL — only 0/7 CLI modes (need >=6; enumeration weak spot)
+I8	bigrepo	answer-codebase	FAIL	2s	EC=1	recall=na	FAIL — missing threshold(0) or mechanism(1)

@@ -1,0 +1,8 @@
+K1	java	locate	PASS	8s	EC=0	recall=na	PASS — located computeTax in TaxCalculator.java
+K2	cpp	bugfix	FAIL	12s	EC=1	recall=na	FAIL — conversion still subtracts 32 — bug not fixed
+K3	csharp	locate	PASS	10s	EC=0	recall=na	PASS — located ValidateOrder in OrderValidator.cs
+K4	php	bugfix	FAIL	12s	EC=1	recall=na	FAIL — isEven still uses the inverted test (% 2 == 1)
+K5	kotlin	locate	PASS	8s	EC=0	recall=na	PASS — located data class Invoice in Invoice.kt
+K6	ruby	bugfix	FAIL	15s	EC=1	recall=na	FAIL — passing? still uses > 60 — a score of 60 is wrongly excluded
+K7	js	replace-all	PASS	34s	EC=1	recall=old=0 new=30/30	PASS — renamed all 30 occurrences trackEvent->recordEvent (0 left)
+K8	ts	scoped-grep	PASS	10s	EC=0	recall=na	PASS — found API_TIMEOUT_MS=8000 in settings.ts (.ts scope honored)

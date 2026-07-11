@@ -1,0 +1,10 @@
+A1	rust	bugfix	PASS	32s	EC=0	recall=na	PASS — cargo test succeeded (test_average fixed)
+A7	rust	debug-error	FAIL	9s	EC=0	recall=na	FAIL — cargo build still failing:\nerror[E0600]: cannot apply unary operator `-` to type `u32`
+C1	js	bugfix	PASS	24s	EC=0	recall=na	PASS — test.js passes (cartTotal fixed)
+C4	js	create-file	PASS	19s	EC=0	recall=na	PASS — slug.js created and test.js passes
+D1	ts	bugfix	PASS	52s	EC=0	recall=na	PASS — node test.ts passed — emails without @ are now rejected
+F1	shell	bugfix	PASS	20s	EC=0	recall=na	PASS — greet.sh prints 'Hello, Ada!' and 'Hello, Grace!'
+H2	sql	add-feature	PASS	15s	EC=0	recall=na	PASS — top_customer.sql returns exactly one row: Ada
+H4	sql	debug-error	PASS	21s	EC=0	recall=na	PASS — report.sql runs cleanly; Ada=150, Bob=50 (150.0 BOB=50.0 ROWS=2)
+I6	bigrepo	enumerate	PASS	87s	EC=0	recall=7/7	PASS — enumerated 7/7 CLI modes
+I8	bigrepo	answer-codebase	PASS	103s	EC=0	recall=na	PASS — described threshold+summarize mechanism
