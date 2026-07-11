@@ -6,22 +6,92 @@
 |-----------|---------|-------------|-----------|
 | GPU | 6 GB VRAM (CUDA or Metal) | 8 GB VRAM (qwen3.5 path) — or 16 GB+ for the qwen3.6 path | RTX 3060 Ti 8 GB / RTX 5060 Ti 16 GB |
 | RAM | 16 GB | 32 GB | 32 GB DDR4 |
-| Disk | ~3 GB (brain only) — or ~8 GB with the lightweight 7b coder | ~27 GB (3.5 brain + fallback + 30b coder) / ~24 GB (single qwen3.6-35b-a3b serving both roles) | NVMe SSD |
+| Disk | ~3 GB (brain only) — or ~8 GB with the lightweight 7b coder | ~27 GB (3.5 brain + fallback + 30b coder) / ~14 GB (single byteshape qwen3.6-35b MTP quant serving all roles) | NVMe SSD |
 | OS | Windows 10+, Linux, macOS | Windows 11 / Ubuntu 24.04 / macOS 14+ | Windows 11 Pro |
 
-> **Which model should I pick?** See [Which model should I run?](../README.md#-which-model-should-i-run) in the README for the per-tier hierarchy. TL;DR: `qwen3.5:4b` for the smallest setup; **`qwen3.6-35b-a3b` (via LM Studio) for the best brain by a wide margin** when you have 16 GB+ VRAM or 32 GB RAM with CPU-MoE offload.
+> **Which model should I pick?** Short answer: the tier table in the README's
+> [Which model should I run?](../README.md#-which-model-should-i-run). TL;DR:
+> `qwen3.5:4b` for the smallest setup (8 GB GPU or plain CPU); on a 16 GB GPU the
+> measured best is **`byteshape/qwen3.6-35b-a3b-mtp`** via LM Studio — 50/50 on the
+> battery at ~70–76 tok/s, fully VRAM-resident. The rest of this page covers how to
+> choose and how to load it right.
+
+## Which model for which GPU (measured)
+
+All numbers measured 2026-07-11 on claudette v0.16.0, LM Studio 0.4.19 (runtime
+cuda12-avx2 2.24.0), RTX 5060 Ti 16 GB, on the 50-task battery ("K" is a separate
+8-task new-language section). Full tables and methodology:
+[MODEL-COMPARISON.md](../runs/eval-2026-05-29/battery/MODEL-COMPARISON.md); per-config
+checkpoints, decision matrix, and launch crib sheet:
+[CHAMPION-DOSSIER.md](../runs/eval-2026-05-29/battery/CHAMPION-DOSSIER.md).
+
+| Your GPU | Pick | Battery | Speed | Notes |
+|----------|------|---------|-------|-------|
+| **16 GB (best)** | `byteshape/qwen3.6-35b-a3b-mtp` (ShapeLearn 3.06 bpw, 13.6 GB) | **50/50 + K 8/8** @24k ctx · 49/50 + K 8/8 @64k | ~70–76 tok/s gen, full battery in 10.1 min | Fully VRAM-resident (~15.4 GiB @64k ctx), zero RAM spill. Community quantizer (not unsloth/official); bundles an MTP draft head — load flags below. The one 64k miss was one-task variance, not a pattern |
+| 16 GB, official-lineage alt | `qwen3.6-35b-a3b@iq4_xs` (unsloth UD-IQ4_XS, 17.7 GB) | **50/50 + K 8/8** | 27.8 tok/s | First-ever perfect core-50; equal quality from the unsloth line, but spills to RAM and IQ-family kernels dequant slowly on the CPU-expert path |
+| 16 GB, previous default | `qwen3.6-35b-a3b@q3_k_xl` (unsloth UD-Q3_K_XL, 16.8 GB) | 47/50 + K 8/8 | 33.8 tok/s | Known-good rollback: `lms load "qwen3.6-35b-a3b@q3_k_xl" -c 65536 --parallel 1 -y` |
+| **8 GB or plain CPU** | `qwen3.5:4b` | 45/50 (90%) + K 8/8 | full battery in 12.8 min | Best value; the battery ran the 7.3 GB LM Studio build — the Ollama `qwen3.5:4b` pull is ~3.4 GB |
+| Fastest / lowest overhead | `gpt-oss-20b` (~13 GB) | 41/50 (82%) + K 7/8 | full battery in 6.1 min | Quickest full run; signature weakness is multi-site refactor/rename (does the first edit, leaves the rest) |
+| 24 GB+ | untested on our rig | — | — | We only have a 16 GB card. Likely paths: unsloth UD-Q4_K_XL and up for quality, higher-bpw byteshape MTP tiers for speed — a benchmark report is the most useful contribution |
+
+## Choosing a model — what actually matters
+
+1. **VRAM residency beats parameter count and bits-per-weight.** The 13.6 GB
+   3.06 bpw quant that fits entirely in VRAM beats every bigger, higher-bpw quant of
+   the *same model* on speed (2–3×) at equal-or-better battery quality. Before
+   chasing a bigger quant, check it actually fits your card.
+2. **KV cache `q8_0` and `--parallel 1`, always.** Quantised KV halves cache memory
+   with no measured quality loss on the battery. `--parallel 1` is essential:
+   with N>1 slots, llama.cpp/LM Studio splits the context window N ways, silently
+   starving long-context tasks.
+3. **MTP (multi-token prediction / speculative decoding) only pays when the quant is
+   fully VRAM-resident** — at least in LM Studio. On a spilled quant, draft acceptance
+   stays high (90%+) but the verify batch pays the PCIe tax twice, netting ~zero.
+4. **If a quant must spill to RAM, prefer Q_K-family over IQ-family** — IQ quants
+   dequant slowly on the CPU-expert path. Resident IQ is fine.
+5. **Template health flips with runtime versions — in both directions.** LM Studio
+   runtime cuda12-avx2 2.24.0 fixed two models the previous sweep had to gate out and
+   *broke* `qwen3.5:9b` (emits an empty first turn when tools are in the system
+   prompt — both the `qwen/` and `unsloth/` builds; don't pick 9b on that runtime).
+   After any runtime upgrade, smoke-test your model with one tool-using prompt
+   before trusting it.
+
+## Loading the 16 GB champion (LM Studio)
+
+```sh
+lms load "byteshape/qwen3.6-35b-a3b-mtp" -c 65536 --parallel 1 \
+    --speculative-draft-mtp --speculative-draft-max-tokens 2 -y
+```
+
+- `--speculative-draft-max-tokens 2` is the measured peak (3 and 4 both lose ~4%).
+- Per-model settings that should be pinned (LM Studio per-model defaults or the load
+  command): **ctx 65536 · KV cache q8_0 (K and V) · no-mmap · 0 CPU experts ·
+  `--parallel 1`**.
+- Forgot the MTP flags, or claudette JIT-loaded the model? Still fine — MTP in
+  LM Studio adds only ~2–13% on this resident quant; residency is the real win.
+- Claudette side: `CLAUDETTE_MODEL=byteshape/qwen3.6-35b-a3b-mtp` with
+  `CLAUDETTE_OPENAI_COMPAT=1` — see [`configuration.md`](configuration.md).
+
+## Spilled quants: the llama-server fit-target path
+
+If you run a quant that *can't* fit VRAM (e.g. unsloth Q4_K_XL on a 16 GB card), LM
+Studio's MTP won't help (point 3 above) — but a llama.cpp `llama-server` build with
+`--fit-target 2304` + the MTP draft head reached **43.1 tok/s** on the MTP Q4_K_XL,
+the fastest spilled-quant config we measured. Pass `--jinja` or tool-calling silently
+degrades. Setup notes: [MODEL-COMPARISON.md](../runs/eval-2026-05-29/battery/MODEL-COMPARISON.md)
+(champion-tuning section).
 
 ## Model footprint
 
 | Model | Role | VRAM | Throughput |
 |-------|------|------|------------|
 | `qwen3.5:4b` | Brain (default) | ~3.4 GB | ~55 t/s on 3060 Ti |
-| `qwen3.5:9b` | Fallback brain | ~5.5 GB | ~30 t/s on 3060 Ti |
-| **`qwen3.6-35b-a3b`** (Q4_K_XL) | **Brain (recommended)** | ~24 GB total — MoE, ~3 GB active in VRAM + RAM for inactive experts via `--cpu-moe` | ~24 t/s on RTX 5060 Ti, ~43 t/s with MTP speculative decoding |
+| `qwen3.5:9b` | Fallback brain | ~5.5 GB | ~30 t/s on 3060 Ti — ⚠ template-broken on LM Studio runtime 2.24.0 (see above); Ollama path untested on that regression |
+| **`byteshape/qwen3.6-35b-a3b-mtp`** | **Brain (recommended, 16 GB)** | 13.6 GB on disk, ~15.4 GiB resident @64k ctx | ~70–76 tok/s on RTX 5060 Ti 16 GB |
 
 The 4b brain alone is viable as a standalone setup — it handles coding, tool-calling, note-taking, calendar, and conversation perfectly fine on its own. Add the 9b (or move to the 35b) only when you want better multi-step reasoning.
 
-For the **qwen3.6 path** (recommended on 16 GB+ VRAM), a single model serves everything — no fallback pull needed. Currently distributed via LM Studio (Unsloth GGUF). See [`power-user.md`](power-user.md#lm-studio-or-any-openai-compatible-server) for backend setup. (In `--forge` mode you can still route the Coder/Verifier roles to different models via `~/.claudettes-forge/models.toml` — see [`forge.md`](forge.md).)
+For the **qwen3.6 path** (recommended on 16 GB+ VRAM), a single model serves everything — no fallback pull needed. Currently distributed via LM Studio (byteshape or Unsloth GGUF). See [`power-user.md`](power-user.md#lm-studio-or-any-openai-compatible-server) for backend setup. (In `--forge` mode you can still route the Coder/Verifier roles to different models via `~/.claudettes-forge/models.toml` — see [`forge.md`](forge.md).)
 
 ## Running a large brain on 8 GB VRAM / 32 GB RAM
 

@@ -56,8 +56,10 @@ Distribution simplicity: Claudette ≈ opencode >> Aider > Cline / Continue > Op
 - **Raw coding benchmark performance**: OpenHands at 53%+ SWE-bench Verified is the current king.
   Claudette deliberately doesn't publish a SWE-bench number. Its in-repo harnesses measure a
   *different, easier* thing — **tool-loop reliability** (does the model drive the tools to a
-  verifier-confirmed build/test/ground-truth result on short, mostly single-file tasks): ~90% on
-  the 50-task battery, 94% on the 100-prompt Brain100 set. That is not task resolution on real
+  verifier-confirmed build/test/ground-truth result on short, mostly single-file tasks): 82–100%
+  on the 50-task battery depending on the local model (measured 2026-07-11 — see
+  [MODEL-COMPARISON.md](../runs/eval-2026-05-29/battery/MODEL-COMPARISON.md)), 94% on the
+  100-prompt Brain100 set. That is not task resolution on real
   multi-file repo issues and is **not comparable** to a SWE-bench score — treat it as a regression
   signal across models, not a coding-skill ranking.
 - **IDE integration**: Cline + Continue are inside VS Code. Claudette doesn't ship an editor

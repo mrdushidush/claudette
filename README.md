@@ -70,15 +70,27 @@ Claudette is developed *with* Claudette. She runs her own Forge pipeline against
 
 Every candidate runs the same objective 50-task battery - 11 languages × 12 task types - through Claudette's real tool loop, then an automated verifier checks the result (build/test passes, file is correct, ground-truth tokens appear). No model grades itself. `claudette --doctor` reads your VRAM and names the model that fits your GPU, with the load command.
 
-| Model | VRAM | Pass @ 50 | Best for |
-|-------|------|-----------|----------|
-| **`qwen3.5:4b`** | **8 GB** | 90% | **The default** - what `install` pulls; best value, runs on an 8 GB GPU or plain CPU |
-| `qwen3.6-35b-a3b` (q3_k_xl) | 16 GB | **92%** | Best accuracy - LM Studio only (not packaged on Ollama) |
-| `gpt-oss-20b` | 13 GB | 86% | Fastest |
+*Measured 2026-07-11 · claudette v0.16.0 · LM Studio 0.4.19 (runtime cuda12-avx2 2.24.0) · RTX 5060 Ti 16 GB. "K" is a separate 8-task new-language section, scored apart from the frozen core 50.*
 
-**What "Pass @ 50" is — and isn't.** It's a *tool-loop reliability* score: did the model drive Claudette's real tools to a verifier-confirmed result (build/test passes, ground-truth tokens present) across 50 short, mostly single-file tasks. It is **not** a SWE-bench-style task-resolution number and is **not comparable** to one - SWE-bench resolves multi-file issues in large real repos, a much harder bar. Read it as "how reliably does this model fly the tools," not "how good a coder is it."
+| Your GPU | Pick | Battery | Speed | Why |
+|----------|------|---------|-------|-----|
+| **16 GB (best)** | `byteshape/qwen3.6-35b-a3b-mtp` (3.06 bpw, 13.6 GB) | **50/50 + K 8/8** @24k ctx · 49/50 + K 8/8 @64k | ~70–76 tok/s | Fully VRAM-resident, zero RAM spill - 2× the speed of every spilled 35B quant at equal-or-better quality. Community quant (ShapeLearn) with a bundled MTP draft head; LM Studio only. Load command below |
+| 16 GB, official-lineage alt | `qwen3.6-35b-a3b@iq4_xs` (unsloth UD-IQ4_XS, 17.7 GB) | **50/50 + K 8/8** | 27.8 tok/s | Same perfect score from the unsloth line; spills to RAM, so much slower. LM Studio only |
+| 16 GB, previous default | `qwen3.6-35b-a3b@q3_k_xl` (16.8 GB) | 47/50 + K 8/8 | 33.8 tok/s | Known-good rollback if the byteshape quant misbehaves. LM Studio only |
+| **8 GB or plain CPU** | **`qwen3.5:4b`** | 45/50 (90%) + K 8/8 | full battery in 12.8 min | **The default** - what `install` pulls (~3.4 GB); best value, runs anywhere |
+| Fastest / lowest overhead | `gpt-oss-20b` (13 GB) | 41/50 (82%) + K 7/8 | full battery in 6.1 min | Quickest full run; weak spot is multi-site refactor/rename |
+| 24 GB+ | untested on our rig | — | — | Honest gap: likely paths are unsloth UD-Q4_K_XL+ tiers for quality or higher-bpw byteshape MTP tiers for speed. Benching one is the most useful way to contribute |
 
-Full table, methodology, and the reusable harness → [MODEL-COMPARISON.md](runs/eval-2026-05-29/battery/MODEL-COMPARISON.md). Benching a model we haven't covered is the single most useful way to contribute - no Rust required.
+16 GB champion load command (LM Studio; the MTP flags are what buy the speed):
+
+```sh
+lms load "byteshape/qwen3.6-35b-a3b-mtp" -c 65536 --parallel 1 \
+    --speculative-draft-mtp --speculative-draft-max-tokens 2 -y
+```
+
+**What "50/50" is — and isn't.** It's a *tool-loop reliability* score: did the model drive Claudette's real tools to a verifier-confirmed result (build/test passes, ground-truth tokens present) across 50 short, mostly single-file tasks. It is **not** a SWE-bench-style task-resolution number and is **not comparable** to one - SWE-bench resolves multi-file issues in large real repos, a much harder bar. Read it as "how reliably does this model fly the tools," not "how good a coder is it." The perfect scores above are measured on *our* battery, reproducible via `run_model_eval.sh` - not a general coding-ability claim.
+
+Full tables, methodology, per-config checkpoints, and the reusable harness → [MODEL-COMPARISON.md](runs/eval-2026-05-29/battery/MODEL-COMPARISON.md) + [CHAMPION-DOSSIER.md](runs/eval-2026-05-29/battery/CHAMPION-DOSSIER.md). How to choose for your hardware (VRAM residency, KV-cache settings, MTP, runtime pitfalls) → [docs/hardware.md](docs/hardware.md). Benching a model we haven't covered is the single most useful way to contribute - no Rust required.
 
 Runs on 8 GB VRAM or plain CPU; 16 GB for the 35B brain. Footprint details → [docs/hardware.md](docs/hardware.md).
 

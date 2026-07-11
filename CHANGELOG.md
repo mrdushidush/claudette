@@ -10,6 +10,21 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Docs
+
+- **Model recommendations refreshed from the 2026-07 champion-tuning battery**
+  (measured 2026-07-11, claudette v0.16.0, LM Studio 0.4.19 runtime 2.24.0,
+  RTX 5060 Ti 16 GB). README gains a per-GPU tier table: new 16 GB pick
+  `byteshape/qwen3.6-35b-a3b-mtp` (50/50 + K 8/8, ~70–76 tok/s, VRAM-resident),
+  unsloth UD-IQ4_XS documented as the official-lineage 50/50 alternative,
+  `@q3_k_xl` kept as the known-good rollback (47/50 — previously listed as 92%),
+  `gpt-oss-20b` corrected 86% → 82%, `qwen3.5:4b` unchanged at 90%.
+  `docs/hardware.md` gains the full tier table plus choosing-a-model guidance
+  (VRAM residency, KV q8_0 + `--parallel 1`, when MTP pays, llama-server
+  fit-target path for spilled quants, runtime-version smoke-testing);
+  `docs/configuration.md` and `docs/power-user.md` updated to the new
+  recommended pin + rollback.
+
 ### Added
 
 - **`repo_map` now extracts Kotlin definitions** (`.kt` / `.kts`): top-level
