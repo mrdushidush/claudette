@@ -155,6 +155,49 @@ moving parts · template health.
   parallel 1, FA=runtime default (no explicit key). Config JSONs live at
   `~/.lmstudio/.internal/user-concrete-model-default-config/unsloth/Qwen3.6-35B-A3B-GGUF/`.
 
+## 8. LoRA feasibility report (Phase 5 deliverable — RESEARCH ONLY, no execution)
+
+### Recommendation: NO-GO for this campaign; revisit only if a measurable weakness survives the tuning campaign AND a held-out eval exists.
+
+Not a cost problem — compute is pocket change ($30–80 all-in). Four structural blockers:
+
+1. **Eval integrity (the killer).** The natural training data (battery transcripts, eval
+   captures) is battery-adjacent; training on it turns core-50 from an eval into a target.
+   A credible tune needs a held-out task suite we don't have — and building one collides
+   with the frozen-core-50 discipline that makes 14 months of rows comparable.
+2. **Sequence ceiling vs agentic shape.** bf16 LoRA of 35B-A3B ≈ 74 GB VRAM → single
+   80 GB card caps backward pass at **seq 2048**. Claudette transcripts are 8k–32k
+   multi-turn tool chains; truncating to 2048 amputates exactly the long-horizon behavior
+   (I3/I5 deep-locate, I8 endurance) we'd be trying to teach. Fix = 2×H100 NVLink or
+   H200-141G (cost ×2–3, unsloth multi-GPU MoE support immature) or per-turn windowing
+   (teaches tool-call syntax, not trajectories — syntax isn't the weakness).
+3. **MTP-head drift.** LoRA targets attention/experts; the merge leaves the MTP head
+   predicting the OLD policy → draft acceptance (84–88% measured) degrades → some of the
+   1.77× speed win evaporates. Head-inclusive training is unsupported in unsloth today.
+4. **Thin toolchain.** unsloth: MoE **QLoRA not recommended** at 35B-A3B (bf16 LoRA only);
+   router must stay frozen (best practice); merge → GGUF re-quant → re-run the whole
+   quant-selection question this campaign is currently answering.
+
+### Cheapest credible path (if David overrides)
+
+| item | plan | cost |
+|---|---|---|
+| hardware | RunPod A100-80G on-demand $1.39–1.49/h (spot $0.79; Vast $0.67 w/ reliability lottery) | — |
+| method | unsloth bf16 LoRA, attention-only r=16–32, router+experts frozen, seq 2048 | — |
+| data | 2–5k examples from `~/claudette-eval-captures/*.stream.log` + dogfood transcripts, split per-turn; **hold out I-series + J-series entirely** | the real work: ~2–4 sessions of curation |
+| train | ~20M tokens (2 epochs), ~2–4 h/iteration × 3–5 iterations | ~10–20 GPU-h ≈ **$15–30** |
+| merge+quant | merge on the pod, convert w/ MTP-aware converter (PR #22673 path), requant UD-style locally | +$5–10 pod time |
+| validation | SCREEN-10 + K on a held-out suite (must be built first) + MTP acceptance-rate check | GPU session local |
+
+Air-gap note: the *artifact* (a GGUF trained in the cloud, carried home) is air-gap-compatible;
+the decision to send our transcripts to a cloud pod is David's — they contain repo content.
+
+### Trigger conditions to reopen
+- A quant/server config wins the campaign but a *specific, reproducible* failure class
+  persists (e.g. I8 timeouts survive even at 115+ tok/s — then it's ability, not speed).
+- unsloth ships supported MoE-35B QLoRA or MTP-head-inclusive training.
+- A held-out eval suite exists (e.g. a future core-50 v2 rotation frees v1 for training).
+
 ## Sources (Phase 1 census)
 
 - unsloth NTP + MTP GGUF trees: huggingface.co/unsloth/Qwen3.6-35B-A3B-GGUF · /Qwen3.6-35B-A3B-MTP-GGUF
