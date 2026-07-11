@@ -20,7 +20,10 @@ BIN="${CLAUDETTE_BIN:-$(command -v claudette)}"
 : "${CLAUDETTE_CODER_NUM_CTX:=$CLAUDETTE_NUM_CTX}"
 export CLAUDETTE_MODEL CLAUDETTE_CODER_MODEL CLAUDETTE_NUM_CTX CLAUDETTE_CODER_NUM_CTX
 export CLAUDETTE_OPENAI_COMPAT=1
-export OLLAMA_HOST=http://localhost:1234
+# Server-agnostic (harness v2.1): BATTERY_BASE_URL points claudette at any
+# OpenAI-compat server (external llama-server, LMS on another port). Default
+# preserves the historical LM Studio :1234 path byte-identically.
+export OLLAMA_HOST="${BATTERY_BASE_URL:-http://localhost:1234}"
 export CLAUDETTE_SKIP_OLLAMA_PROBE=1
 export CLAUDETTE_AUTO_APPROVE=1
 # BATTERY_TAG suffixes the scores file + logs dir so models don't clobber each other.
@@ -35,7 +38,7 @@ SCORES="$BAT/SCORES${TAG:+-$TAG}.tsv"
 LOGDIR="$BAT/logs${TAG:+-$TAG}"
 mkdir -p "$LOGDIR"
 [ -z "$filter" ] && : > "$SCORES"   # full run resets; filtered run appends
-echo "[battery] model=$CLAUDETTE_MODEL  ctx=$CLAUDETTE_NUM_CTX  tag='${TAG:-<none>}'  manifest=$(basename "$MANIFEST")  scores=$(basename "$SCORES")"
+echo "[battery] model=$CLAUDETTE_MODEL  ctx=$CLAUDETTE_NUM_CTX  tag='${TAG:-<none>}'  manifest=$(basename "$MANIFEST")  scores=$(basename "$SCORES")  base=$OLLAMA_HOST"
 
 # The "bigrepo" fixture (I1-I8) is a copy of claudette's own src+docs — the
 # large-repo-with-conflicting-docs stressor. It's gitignored (it's a dup of the

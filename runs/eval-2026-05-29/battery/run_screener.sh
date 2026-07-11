@@ -24,13 +24,20 @@ echo "================================================================"
 echo "[screener] model-key=$KEY  id=$ID  ctx=$CTX  parallel=1  tasks=[$SCREEN_TASKS]"
 echo "================================================================"
 
-"$LMS" unload --all >/dev/null 2>&1
-echo "[screener] loading $KEY @ ${CTX} (parallel 1) ..."
-if ! "$LMS" load "$KEY" -c "$CTX" --parallel 1 --identifier "$ID" -y 2>&1 | tail -1; then
-  echo "[screener] LOAD FAILED for $KEY"; exit 5
+# Harness v2.1: BATTERY_SKIP_LMS=1 bypasses lms for an external OpenAI-compat
+# server at BATTERY_BASE_URL (see run_model_eval.sh for the contract).
+SKIP_LMS="${BATTERY_SKIP_LMS:-0}"
+if [ "$SKIP_LMS" = "1" ]; then
+  echo "[screener] BATTERY_SKIP_LMS=1 — external server at ${BATTERY_BASE_URL:-http://localhost:1234}; '$ID' must already be served"
+else
+  "$LMS" unload --all >/dev/null 2>&1
+  echo "[screener] loading $KEY @ ${CTX} (parallel 1) ..."
+  if ! "$LMS" load "$KEY" -c "$CTX" --parallel 1 --identifier "$ID" -y 2>&1 | tail -1; then
+    echo "[screener] LOAD FAILED for $KEY"; exit 5
+  fi
+  # Confirm CONTEXT / PARALLEL actually took (parallel>1 starves bigrepo tasks).
+  "$LMS" ps 2>&1 | grep -iE "IDENTIFIER|$ID|CONTEXT|PARALLEL" || true
 fi
-# Confirm CONTEXT / PARALLEL actually took (parallel>1 starves bigrepo tasks).
-"$LMS" ps 2>&1 | grep -iE "IDENTIFIER|$ID|CONTEXT|PARALLEL" || true
 
 export CLAUDETTE_MODEL="$ID" CLAUDETTE_CODER_MODEL="$ID"
 export CLAUDETTE_NUM_CTX="$CTX" CLAUDETTE_CODER_NUM_CTX="$CTX"
@@ -40,10 +47,15 @@ SCORES="$BAT/SCORES-screen-$ID.tsv"
 rm -f "$SCORES"
 
 # Optional reasoning capture (cheap; helps diagnose a template/spiral failure).
-CAP="$CAPDIR/${ID}.screen.stream.log"
-"$LMS" log stream --source model --stats > "$CAP" 2>&1 &
-CAPPID=$!
-sleep 1
+# LMS-only — external servers log to their own console.
+CAPPID=""
+CAP="<none — external server>"
+if [ "$SKIP_LMS" != "1" ]; then
+  CAP="$CAPDIR/${ID}.screen.stream.log"
+  "$LMS" log stream --source model --stats > "$CAP" 2>&1 &
+  CAPPID=$!
+  sleep 1
+fi
 
 # ---- run the 10 tasks (each a single-task filtered run, appending) ----
 first=1

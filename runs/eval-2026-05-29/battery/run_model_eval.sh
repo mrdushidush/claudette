@@ -20,13 +20,22 @@ echo "================================================================"
 echo "[driver] model-key=$KEY  id=$ID  ctx=$CTX  parallel=1  $(date '+%F %T')"
 echo "================================================================"
 
-"$LMS" unload --all >/dev/null 2>&1
-echo "[driver] loading $KEY @ ${CTX} (parallel 1) ..."
-if ! "$LMS" load "$KEY" -c "$CTX" --parallel 1 --identifier "$ID" -y 2>&1 | tail -1; then
-  echo "[driver] LOAD FAILED for $KEY"; exit 5
+# Harness v2.1: BATTERY_SKIP_LMS=1 bypasses lms load/unload/ps for an EXTERNAL
+# OpenAI-compat server (llama-server) already up at BATTERY_BASE_URL. The model
+# named by <identifier> must already be served there; ctx/parallel are the
+# server operator's responsibility (-c / -np on llama-server) — verify them.
+SKIP_LMS="${BATTERY_SKIP_LMS:-0}"
+if [ "$SKIP_LMS" = "1" ]; then
+  echo "[driver] BATTERY_SKIP_LMS=1 — external server at ${BATTERY_BASE_URL:-http://localhost:1234}; '$ID' must already be served (ctx=$CTX -np 1 NOT enforced here)"
+else
+  "$LMS" unload --all >/dev/null 2>&1
+  echo "[driver] loading $KEY @ ${CTX} (parallel 1) ..."
+  if ! "$LMS" load "$KEY" -c "$CTX" --parallel 1 --identifier "$ID" -y 2>&1 | tail -1; then
+    echo "[driver] LOAD FAILED for $KEY"; exit 5
+  fi
+  # show what actually loaded (CONTEXT + PARALLEL columns must read $CTX / 1)
+  "$LMS" ps 2>&1 | grep -iE "IDENTIFIER|$ID" || true
 fi
-# show what actually loaded (CONTEXT + PARALLEL columns must read $CTX / 1)
-"$LMS" ps 2>&1 | grep -iE "IDENTIFIER|$ID" || true
 
 # Constant per-run env: export once so child run_battery.sh inherits it.
 export CLAUDETTE_MODEL="$ID" CLAUDETTE_CODER_MODEL="$ID"
@@ -47,12 +56,16 @@ fi
 SS=$(awk -F'\t' 'NR==1{print $4" "$5}' "$BAT/SCORES-smoke-$ID.tsv" 2>/dev/null)
 echo "[driver] smoke A1 = ${SS:-<no result>}  -> proceeding to full battery"
 
-# ---- reasoning capture ----
-CAP="$CAPDIR/${ID}.stream.log"
-echo "[driver] reasoning capture -> $CAP"
-"$LMS" log stream --source model --stats > "$CAP" 2>&1 &
-CAPPID=$!
-sleep 1
+# ---- reasoning capture (LMS-only; external servers log to their own console) ----
+CAPPID=""
+CAP="<none — external server>"
+if [ "$SKIP_LMS" != "1" ]; then
+  CAP="$CAPDIR/${ID}.stream.log"
+  echo "[driver] reasoning capture -> $CAP"
+  "$LMS" log stream --source model --stats > "$CAP" 2>&1 &
+  CAPPID=$!
+  sleep 1
+fi
 
 # ---- full battery (frozen core-50) ----
 BATTERY_TAG="$ID" bash "$BAT/run_battery.sh" "$FILTER"
@@ -66,7 +79,7 @@ if [ -z "$FILTER" ] && [ -f "$BAT/manifest-ext.tsv" ]; then
   BATTERY_TAG="$ID-ext" BATTERY_MANIFEST="$BAT/manifest-ext.tsv" bash "$BAT/run_battery.sh"
 fi
 
-kill "$CAPPID" 2>/dev/null || true
+[ -n "$CAPPID" ] && kill "$CAPPID" 2>/dev/null || true
 
 echo "================================================================"
 echo "[driver] ANALYZE $ID"

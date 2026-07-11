@@ -1,0 +1,2 @@
+date	label	model	base_url	code_emit	explain	refactor	median_tps	ttft_med_s	server_tps	vram_used_mib
+2026-07-11	champ-q3kxl-lms	champ-q3kxl-probe	http://localhost:1234	33.71	33.89	33.83	33.83	2.24	na	14990
