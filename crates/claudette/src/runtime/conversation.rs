@@ -384,6 +384,10 @@ where
             read_loop_limit_from(std::env::var(READ_LOOP_LIMIT_ENV_VAR).ok().as_deref());
         let mut read_seen: std::collections::HashMap<String, (u64, usize)> =
             std::collections::HashMap::new();
+        // Per-file per-turn round counter for the post-edit-check above.
+        // Resets at the top of each turn (same scope as `read_seen`).
+        let mut check_fails: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
         // No-progress breaker: tool calls since the last SUCCESSFUL mutation,
         // plus a once-per-turn flag for the steering line.
         let mut iters_since_mutation = 0usize;
@@ -582,6 +586,47 @@ where
                                 if reads >= read_loop_limit {
                                     output = unchanged_read_notice(&path, reads);
                                     is_error = true;
+                                }
+                            }
+
+                            // Post-edit check (opt-in, CLAUDETTE_POST_EDIT_CHECK): after a
+                            // successful single-file write, run a fast syntax/type check and
+                            // surface failures in the same tool result so the brain fixes
+                            // breakage now, not at run_tests time. apply_patch is excluded in
+                            // v1 (multi-file). Capped per file per turn so a stubborn error
+                            // can't feed an edit↔check spiral (design 2026-07-11, W4).
+                            if !is_error
+                                && matches!(
+                                    tool_name.as_str(),
+                                    "write_file" | "edit_file" | "apply_diff"
+                                )
+                                && crate::tools::post_edit_check::enabled()
+                            {
+                                let path = read_file_path(&input);
+                                if !path.is_empty() {
+                                    let workspace = crate::missions::active_cwd();
+                                    if let Some(check) =
+                                        crate::tools::post_edit_check::run_post_edit_check(
+                                            std::path::Path::new(&path),
+                                            &workspace,
+                                        )
+                                    {
+                                        let rounds = {
+                                            let n = check_fails.entry(path.clone()).or_insert(0);
+                                            *n += 1;
+                                            *n
+                                        };
+                                        if rounds <= crate::tools::post_edit_check::max_rounds() {
+                                            use std::fmt::Write as _;
+                                            let _ = write!(output, "\n\n[post_edit_check] the edited file fails its check:\n{check}\nFix this before moving on.");
+                                        } else {
+                                            output.push_str(
+                                                &crate::tools::post_edit_check::suppressed_notice(
+                                                    &path,
+                                                ),
+                                            );
+                                        }
+                                    }
                                 }
                             }
 
