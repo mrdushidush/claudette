@@ -133,10 +133,10 @@ KV q8_0 + FA ON (recorded per row). Speed probe = `probe_speed.sh` 3-prompt medi
 | 1 | `champ-iq4xs-lms` | UD-IQ4_XS 17.7 | LMS | **50/50 + K 8/8 — PERFECT** | 27.79 tok/s | **DONE 2026-07-11** |
 | 2 | `champ-q4kxl-lms` | UD-Q4_K_XL 22.4 | LMS | **48/50 + K 8/8** (F4, I5) | **36.04 tok/s** | **DONE 2026-07-11** |
 | 3 | `champ-q4ks-lms` | UD-Q4_K_S 20.9 | LMS | SKIPPED — no thrash occurred; can't beat 50/50 on quality | — | closed |
-| 4 | `champ-mtp-q4kxl-lms` | MTP UD-Q4_K_XL 22.9 | LMS+MTP toggle | SCREEN-10 + K (lineage = unsloth, base quant battery-cleared via #2) | yes | on disk (C:\models — needs LMS import) |
-| 5 | `champ-mtp-<win>-lms` | MTP twin of Phase-3 winner | LMS+MTP | SCREEN-10 + K | yes | contingent |
-| 6 | `champ-bs-mtpgpu2-lms` | byteshape MTP-GPU-2 13.6 | LMS+MTP | **FULL + K** (new lineage) | yes | pending download |
-| 7 | `champ-mtp-q4kxl-llsrv` | MTP UD-Q4_K_XL 22.9 | llama-server `2dff7ff` fit-2304 | SCREEN-10 + K parity | yes (have May #s) | build ready |
+| 4 | `champ-mtp-q4kxl-lms` | MTP UD-Q4_K_XL 22.9 | LMS+MTP toggle | probes only — **LMS-MTP on spilled quants = WASH** | 34.43 (d2) / 34.38 (d3) | **DONE** — MTP verified active (90% accept, 108/120) yet ≈ NTP 36.04; verify-batch overhead eats gains under expert-CPU offload |
+| 5 | `champ-mtp-iq4xs-llsrv` | MTP UD-IQ4_XS 18.2 | llama-server fit-target | SCREEN-10 + K + probe | pending | download queued — the "quality king at speed" hope |
+| 6 | `champ-bs-mtpgpu2-lms` | byteshape MTP-GPU-2 13.6 | LMS+MTP d2 | **50/50 + K 8/8 — PERFECT, wall 10.1 min (3.2× faster)** | **76.31 tok/s (2.26× incumbent)**; battery-wide MTP accept **95.3%** | **DONE — PRESUMPTIVE CROWN**, pending 64k validation |
+| 7 | `champ-mtp-q4kxl-llsrv` | MTP UD-Q4_K_XL 22.9 | llama-server `2dff7ff` fit-2304 d2 | **SCREEN-10 10/10 + K 7/8** (K7 bulk-rename miss, real output) | **43.13** (server_tps 43.24 — reproduces May) | **DONE** — template/tool-call parity PROVEN via --jinja |
 | 8 | `champ-q2kxl-lms` | UD-Q2_K_XL 12.3 | LMS | SCREEN-10 only (floor probe) | optional | time-permitting |
 
 Decision cols (final matrix in §6 when rows land): PASS/50 · K/8 · wall · gen tok/s · spill GB ·
@@ -172,6 +172,30 @@ moving parts · template health.
   no thrash to fall back from, and it can't beat 50/50 on quality.
   **Phase 3 verdict: UD-IQ4_XS = presumptive weights** (quality first per goal); its gen-speed
   gap (27.8 vs 36.0) is exactly what the MTP twin should patch in Phase 4.
+- 2026-07-11 **Phase 4 speed axis, first results**:
+  - `champ-mtp-q4kxl-lms` (LMS native MTP, d2/d3): **34.4 tok/s — NO speedup** vs NTP 36.0,
+    despite MTP verified ACTIVE (90% draft acceptance, 108/120 in runtime log). Conclusion:
+    **LMS-MTP is a wash on expert-CPU-offloaded quants** — the verify batch pays the PCIe
+    tax twice; llama-server's `--fit-target` hot-expert packing is what made May's 1.77×.
+  - `champ-mtp-q4kxl-llsrv` (May build `2dff7ff`, fit-2304, d2, --jinja, ctx 24576):
+    **43.13 tok/s** (server_tps 43.24 — May's 43–45.7 reproduced). **SCREEN-10 = 10/10**,
+    **K = 7/8** (K7 bulk-rename 0/30 @ 144 s — real miss, one-task; NTP Q4_K_XL on LMS
+    went K 8/8; adjudicate via winner's 64k full battery if llsrv hosts the crown).
+    Template/tool-call parity through claudette PROVEN (Devstral gate passed).
+  - `champ-bs-mtpgpu2-lms` (byteshape 3.06 bpw, FULLY RESIDENT, LMS MTP d2): probe
+    **76.31 tok/s = 2.26× incumbent / 2.75× IQ4_XS**, ttft 2.19 s, VRAM 14,750 MiB
+    (KV q8, no-mmap, 0 CPU experts), A1 smoke **14 s (record)**. LMS-MTP works at full
+    strength when nothing is offloaded. Full battery + K in flight — 3.06 bpw foreign-lineage
+    quality is THE open question (our "3-bit damage" precedent says skeptical).
+- 2026-07-11 **`champ-bs-mtpgpu2-lms` CHECKPOINT — PERFECT 50/50 + K 8/8, wall 604 s
+  (10.1 min = 3.2× faster than incumbent's 32 min)**. Slowest task A4 @ 46 s — I8 a
+  non-event at this speed. Battery-wide MTP acceptance **95.3%** (25,702/26,971 — agentic
+  output is spec-decoding's best case). Post-battery probe 73.89 tok/s (consistent).
+  The "3-bit damage" precedent does NOT apply to ShapeLearn's learned per-tensor datatypes:
+  byteshape's 0.960-acc claim held on OUR battery. **PRESUMPTIVE CROWN** — quality tied-best
+  (with 4.1 GB LESS than IQ4_XS), speed 2.26×, wall 3.2×, zero RAM spill, LMS-native (one
+  moving part). Remaining gate: full battery @ ctx 65536 (KV q8 may push past residency —
+  fit + retune to be checked). Q2_K_XL floor probe now MOOT (3.06 bpw @ 100% answers it).
 
 ## 8. LoRA feasibility report (Phase 5 deliverable — RESEARCH ONLY, no execution)
 

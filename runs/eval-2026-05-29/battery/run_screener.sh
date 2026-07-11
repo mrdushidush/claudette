@@ -94,3 +94,4 @@ echo "================================================================"
 # Show the failed task ids to make a 6-re-run trivial.
 fails=$(awk -F'\t' '$4!="PASS"{printf "%s ",$1}' "$SCORES")
 [ -n "$fails" ] && echo "[screener] non-PASS tasks: $fails"
+exit 0   # a clean 10/10 must not exit 1 via the && above
