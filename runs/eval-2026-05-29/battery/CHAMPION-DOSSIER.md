@@ -130,7 +130,7 @@ KV q8_0 + FA ON (recorded per row). Speed probe = `probe_speed.sh` 3-prompt medi
 | # | tag | quant (GB) | server | battery | speed probe | status |
 |---|---|---|---|---|---|---|
 | 0 | `champ-q3kxl-lms` | UD-Q3_K_XL 16.8 | LMS | 47/50 + K8/8 (reused) | probe pending | **BASELINE** |
-| 1 | `champ-iq4xs-lms` | UD-IQ4_XS 17.7 | LMS | full + K | yes | pending download |
+| 1 | `champ-iq4xs-lms` | UD-IQ4_XS 17.7 | LMS | **50/50 + K 8/8 — PERFECT** | 27.79 tok/s | **DONE 2026-07-11** |
 | 2 | `champ-q4kxl-lms` | UD-Q4_K_XL 22.4 | LMS | full + K | yes | on disk |
 | 3 | `champ-q4ks-lms` | UD-Q4_K_S 20.9 | LMS | only if #2 thrashes | yes | contingent |
 | 4 | `champ-mtp-q4kxl-lms` | MTP UD-Q4_K_XL 22.9 | LMS+MTP toggle | SCREEN-10 + K (lineage = unsloth, base quant battery-cleared via #2) | yes | on disk (C:\models — needs LMS import) |
@@ -154,6 +154,14 @@ moving parts · template health.
   LMS config the 47/50 ran with: KV q8_0 K+V, **no-mmap, expert-CPU-ratio 0.4**,
   parallel 1, FA=runtime default (no explicit key). Config JSONs live at
   `~/.lmstudio/.internal/user-concrete-model-default-config/unsloth/Qwen3.6-35B-A3B-GGUF/`.
+- 2026-07-11 **`champ-iq4xs-lms` CHECKPOINT — PERFECT 50/50 (100%) + K 8/8**, wall 32.2 min
+  (1933 s), slowest I8 @ 142 s **PASSED** (incumbent's sole miss). A1 smoke 40 s clean.
+  **All four historically model-bound tasks passed (I1/I3/I5/I8)** — consistent with the
+  "3-bit quant damage" hypothesis: the 4-bit jump buys back deep-locate + endurance.
+  Speed probe **27.79 tok/s** (−18% vs incumbent 33.83; +0.9 GB weights → expert-CPU-ratio
+  0.45 vs 0.4), ttft 2.25 s, VRAM 13,855 MiB. Wall-clock UNCHANGED vs incumbent (~32 min) —
+  agentic wall is prompt-processing-bound, not gen-bound. First-ever perfect core-50.
+  Settings: KV q8_0 K+V, no-mmap, expert-CPU 0.45, par 1, ctx 24576, runtime 2.24.0.
 
 ## 8. LoRA feasibility report (Phase 5 deliverable — RESEARCH ONLY, no execution)
 
