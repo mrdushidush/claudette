@@ -1,0 +1,10 @@
+A1	rust	bugfix	FAIL	21s	EC=1	recall=na	FAIL — cargo test failed:\n
+A7	rust	debug-error	FAIL	18s	EC=0	recall=na	FAIL — cargo build still failing:\nerror[E0600]: cannot apply unary operator `-` to type `u32`
+C1	js	bugfix	FAIL	21s	EC=0	recall=na	FAIL — node test.js exited 1:   throw new Error(`cartTotal expected ${want} but got ${got}`);
+C4	js	create-file	FAIL	14s	EC=0	recall=na	FAIL — slug.js was not created
+D1	ts	bugfix	FAIL	34s	EC=0	recall=na	FAIL — node test.ts exited 1: SyntaxError: The requested module './validate.ts' does not provide an export named 'isValidEmail'
+F1	shell	bugfix	FAIL	21s	EC=0	recall=na	FAIL — missing line 'Hello, Ada!' (got: Hello, Ada
+H2	sql	add-feature	FAIL	9s	EC=0	recall=na	FAIL — top_customer.sql did not produce a usable result: ERR: query returned no rows 
+H4	sql	debug-error	FAIL	11s	EC=0	recall=na	FAIL — report.sql still broken or wrong totals: ERR: OperationalError: no such column: o.total 
+I6	bigrepo	enumerate	FAIL	30s	EC=0	recall=0/7	FAIL — only 0/7 CLI modes (need >=6; enumeration weak spot)
+I8	bigrepo	answer-codebase	PASS	45s	EC=0	recall=na	PASS — described threshold+summarize mechanism

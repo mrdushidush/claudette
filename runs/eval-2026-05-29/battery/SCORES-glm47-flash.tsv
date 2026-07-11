@@ -1,0 +1,50 @@
+A1	rust	bugfix	FAIL	53s	EC=1	recall=na	FAIL — cargo test failed:\n
+A2	rust	add-feature	FAIL	1s	EC=1	recall=na	FAIL — cargo test failed:\nerror[E0432]: unresolved import `calc::median`
+A3	rust	run-tests	PASS	1s	EC=1	recall=na	PASS — transcript reports 4 tests passed
+A4	rust	refactor	FAIL	0s	EC=1	recall=na	FAIL — old definition 'fn add(' still present in src/lib.rs
+A5	rust	multi-file	FAIL	1s	EC=1	recall=na	FAIL — MAX_RETRIES: u32 = 5 not found in src/config.rs
+A6	rust	explain	FAIL	1s	EC=1	recall=na	FAIL — explanation omits that only consecutive/adjacent duplicates are removed
+A7	rust	debug-error	FAIL	0s	EC=1	recall=na	FAIL — cargo build still failing:\nerror[E0600]: cannot apply unary operator `-` to type `u32`
+B1	python	bugfix	FAIL	1s	EC=1	recall=na	FAIL — test_stats still failing (rc=1): Ran 1 test in 0.001s  FAILED (failures=1) 
+B2	python	add-feature	FAIL	0s	EC=1	recall=na	FAIL — variance test failing (rc=1): Ran 1 test in 0.000s  FAILED (errors=1) 
+B3	python	multi-file	FAIL	0s	EC=1	recall=na	FAIL — geometry tests failing (rc=1): Ran 3 tests in 0.001s  FAILED (failures=3) 
+B4	python	create-file	FAIL	1s	EC=1	recall=na	FAIL — utils.py was not created
+B5	python	debug-error	FAIL	0s	EC=1	recall=na	FAIL — app.py still crashing (rc=1):     counts[c] += 1     ~~~~~~^^^ KeyError: 'h' 
+B7	python	run-tests	FAIL	0s	EC=1	recall=na	FAIL — transcript missing '3' and/or passed/ok
+B8	python	answer-codebase	FAIL	1s	EC=1	recall=na	FAIL — transcript never mentions the real value 2
+C1	js	bugfix	FAIL	0s	EC=1	recall=na	FAIL — node test.js exited 1:   throw new Error(`cartTotal expected ${want} but got ${got}`);
+C2	js	add-feature	FAIL	0s	EC=1	recall=na	FAIL — node test.js exited 1: TypeError: applyDiscount is not a function
+C3	js	run-tests	FAIL	1s	EC=1	recall=na	FAIL — transcript does not mention 5 (the number that passed)
+C4	js	create-file	FAIL	0s	EC=1	recall=na	FAIL — slug.js was not created
+C5	js	multi-file	FAIL	0s	EC=1	recall=na	FAIL — node test.js exited 1:   throw new Error(`withTax(100) expected ${want} but got ${got}`);
+C6	js	explain	FAIL	1s	EC=1	recall=na	FAIL — did not describe the object/map/dictionary return value
+C7	js	debug-error	FAIL	1s	EC=1	recall=na	FAIL — node report.js exited 1: TypeError: Cannot read properties of undefined (reading 'map')
+D1	ts	bugfix	FAIL	0s	EC=1	recall=na	FAIL — node test.ts exited 1: FAIL: foo.com has no @ and should be invalid
+D2	ts	locate	FAIL	1s	EC=1	recall=na	FAIL — transcript does not identify session.ts as the definition site
+D4	ts	multi-file	FAIL	1s	EC=1	recall=na	FAIL — src/types.ts does not declare a 'role' field on User
+D6	ts	run-tests	PASS	0s	EC=1	recall=na	PASS — tests green and agent reported 6 passed
+E1	go	bugfix	FAIL	1s	EC=1	recall=na	FAIL — buggy line still present: 'if a < b { return a' (returns the smaller value)
+E2	go	refactor	FAIL	1s	EC=1	recall=na	FAIL — old name 'GetUserName' still present:\n/d/dev/claudette/runs/eval-2026-05-29/battery/work/E2/main.go:9:	fmt.Println(GetUserName(alice))
+E3	go	locate	FAIL	1s	EC=1	recall=na	FAIL — transcript does not name checkout.go as the defining file
+E4	go	explain	PASS	0s	EC=1	recall=na	PASS — explanation covers both deduplication and sorting
+F1	shell	bugfix	FAIL	0s	EC=1	recall=na	FAIL — missing line 'Hello, Ada!' (got: Hello, Ada
+F2	shell	create-file	FAIL	1s	EC=1	recall=na	FAIL — count.sh was not created in workdir
+F3	shell	explain	FAIL	1s	EC=1	recall=na	FAIL — explanation does not convey counting unique occurrences
+F4	shell	refactor	FAIL	0s	EC=1	recall=na	FAIL — old name 'process_file' still present:\n./lib.sh:4:process_file() {
+G1	html	add-feature	PASS	41s	EC=0	recall=na	PASS — Contact->contact.html added inside nav/ul; Home+About intact (3 nav links)
+G4	css	refactor	PASS	30s	EC=0	recall=na	PASS — btn-primary -> button-main renamed in styles.css rule + 2 html usages (3 total); styles intact
+H2	sql	add-feature	FAIL	26s	EC=0	recall=na	FAIL — top_customer.sql did not produce a usable result: ERR: query returned no rows 
+H3	sql	create-file	PASS	23s	EC=0	recall=na	PASS — products table created with id/name/price and 2 seeded rows
+H4	sql	debug-error	FAIL	23s	EC=0	recall=na	FAIL — report.sql still broken or wrong totals: ERR: OperationalError: no such column: o.order_amount 
+I1	bigrepo	enumerate	FAIL	10s	EC=0	recall=2/6	FAIL — only 2/6 CLAUDETTE_FORGE_ vars (need >=5; enumeration weak spot)
+I2	bigrepo	enumerate	PASS	31s	EC=0	recall=8/8	PASS — enumerated 8/8 forge roles
+I3	bigrepo	locate	FAIL	25s	EC=0	recall=na	FAIL — did not land on source value 3 w/ location (deep-localization weak spot; likely trusted docs=2)
+I4	bigrepo	answer-codebase	PASS	31s	EC=0	recall=na	PASS — named qwen3-coder default + source location
+I5	bigrepo	locate	PASS	17s	EC=0	recall=na	PASS — named conversation.rs
+I6	bigrepo	enumerate	PASS	60s	EC=0	recall=7/7	PASS — enumerated 7/7 CLI modes
+I7	bigrepo	answer-codebase	PASS	17s	EC=0	recall=na	PASS — correctly states no telemetry / local-first
+I8	bigrepo	answer-codebase	FAIL	28s	EC=0	recall=na	FAIL — missing threshold(0) or mechanism(1)
+J1	git	git-workflow	PASS	15s	EC=0	recall=na	PASS — named the modified file notes.txt
+J2	git	git-workflow	PASS	15s	EC=0	recall=na	PASS — committed greet.py with subject: Add greeting script
+J3	git	git-workflow	PASS	25s	EC=0	recall=na	PASS — reported the latest commit subject (null pointer in handler)
+J4	git	git-workflow	PASS	23s	EC=0	recall=na	PASS — branch feature/login exists
