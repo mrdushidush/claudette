@@ -82,16 +82,16 @@ pub struct BrainRec {
 
 /// Map (VRAM GiB, backend) → the certified brain for that tier.
 ///
-/// Seeded from the README "Claudette Certified" table (50-task battery,
-/// 2026-05-30 run) and **backend-honest**: the 92% flagship
-/// `qwen3.6-35b-a3b` is distributed via LM Studio (Unsloth GGUF), NOT
-/// packaged on Ollama — recommending `ollama pull qwen3.6-35b-a3b` would
-/// fail, so on an Ollama backend with ≥16 GB we recommend the best
-/// pullable brain and point at the backend switch. Under 16 GB,
-/// `qwen3.5:4b` scores **90%** in 8 min on ~3.4 GB — it outscores both
-/// `qwen3.5:9b` (88%) and `gpt-oss-20b` (86%), so it is the honest pick
-/// for the whole tier, not just the floor. Advisory only — runtime model
-/// selection stays with `brain_selector`.
+/// Seeded from the README tier table (50-task battery: v0.16.0 sweep
+/// 2026-07-10 + champion-tuning campaign 2026-07-11) and **backend-honest**:
+/// the 50/50 champion `byteshape/qwen3.6-35b-a3b-mtp` is distributed via
+/// LM Studio, NOT packaged on Ollama — recommending it for `ollama pull`
+/// would fail, so on an Ollama backend we recommend the best pullable
+/// brain and point at the backend switch. `qwen3.5:4b` (45/50 + K 8/8 on
+/// ~3.4 GB) is that pick for BOTH Ollama tiers: the previous 9b pick
+/// mis-renders its chat template on current runtimes (empty turns) and
+/// gpt-oss-20b trails at 41/50. Advisory only — runtime model selection
+/// stays with `brain_selector`.
 /// The flagship tier line. A card *marketed* as 16 GB reports ~15.5–16.0
 /// **GiB** through nvidia-smi (the benchmark RTX 5060 Ti 16 GB reports
 /// 15.9) — a `>= 16.0` check would exclude the exact GPU the flagship was
@@ -104,19 +104,26 @@ pub fn recommend_brain(vram_gb: f64, openai_compat: bool) -> BrainRec {
     if vram_gb >= FLAGSHIP_TIER_GIB {
         if openai_compat {
             BrainRec {
-                model: "qwen3.6-35b-a3b@q3_k_xl",
-                why: "92% on the 50-task battery — best accuracy. Pin q3_k_xl: it fits \
-                      16 GB; q4_k_xl spills to RAM and loses tasks to timeouts",
-                alternatives: "",
+                model: "byteshape/qwen3.6-35b-a3b-mtp",
+                why: "50/50 + K 8/8 on the 50-task battery (49/50 at 64k ctx) at \
+                      ~70-76 tok/s — fully VRAM-resident in 13.6 GB, zero RAM spill. \
+                      Load with the README's champion command (ctx 65536 + MTP flags)",
+                alternatives: "same-score official-lineage qwen3.6-35b-a3b@iq4_xs \
+                               (50/50, spills to RAM, 27.8 tok/s); known-good rollback \
+                               qwen3.6-35b-a3b@q3_k_xl (47/50, 33.8 tok/s)",
             }
         } else {
             BrainRec {
-                model: "qwen3.5:9b",
-                why: "88% on the 50-task battery — the best brain packaged on Ollama",
-                alternatives: "the 92% flagship qwen3.6-35b-a3b is LM Studio-only: set \
-                               CLAUDETTE_OPENAI_COMPAT=1 + OLLAMA_HOST=http://localhost:1234 + \
-                               CLAUDETTE_MODEL=qwen3.6-35b-a3b@q3_k_xl (full setup: \
-                               docs/power-user.md; worth the switch on 16 GB)",
+                model: "qwen3.5:4b",
+                why: "45/50 (90%) + K 8/8 on the 50-task battery — the best brain \
+                      packaged on Ollama; the previous 9b pick mis-renders its chat \
+                      template on current runtimes (empty turns) and is no longer \
+                      certified",
+                alternatives: "the 50/50 champion byteshape/qwen3.6-35b-a3b-mtp is \
+                               LM Studio-only: set CLAUDETTE_OPENAI_COMPAT=1 + \
+                               OLLAMA_HOST=http://localhost:1234 + \
+                               CLAUDETTE_MODEL=byteshape/qwen3.6-35b-a3b-mtp (full \
+                               setup: docs/power-user.md; worth the switch on 16 GB)",
             }
         }
     } else {
@@ -126,9 +133,9 @@ pub fn recommend_brain(vram_gb: f64, openai_compat: bool) -> BrainRec {
             } else {
                 "qwen3.5:4b"
             },
-            why: "90% on the 50-task battery in 8 min on ~3.4 GB — best value; runs on an \
-                  8 GB GPU or plain CPU",
-            alternatives: "qwen3.5:9b (88%, 11 GB) or gpt-oss-20b (86%, 13 GB, fastest) \
+            why: "45/50 (90%) + K 8/8 on the 50-task battery from a ~3.4 GB pull — \
+                  best value; runs on an 8 GB GPU or plain CPU",
+            alternatives: "gpt-oss-20b (41/50, ~13 GB, fastest full-battery run) \
                            if you have the headroom",
         }
     }
@@ -161,17 +168,26 @@ mod tests {
 
     #[test]
     fn recommend_boundaries_match_the_certified_table() {
-        // Flagship tier + LM Studio → the 35b, quant pinned. 15.9 is what a
+        // Flagship tier + LM Studio → the byteshape champion. 15.9 is what a
         // real "16 GB" card (the benchmark RTX 5060 Ti) reports via
         // nvidia-smi — it MUST land in the flagship tier (caught live: a
         // >=16.0 check excluded the exact GPU the flagship was certified on).
-        assert_eq!(recommend_brain(15.9, true).model, "qwen3.6-35b-a3b@q3_k_xl");
-        assert_eq!(recommend_brain(16.0, true).model, "qwen3.6-35b-a3b@q3_k_xl");
-        assert_eq!(recommend_brain(24.0, true).model, "qwen3.6-35b-a3b@q3_k_xl");
+        assert_eq!(
+            recommend_brain(15.9, true).model,
+            "byteshape/qwen3.6-35b-a3b-mtp"
+        );
+        assert_eq!(
+            recommend_brain(16.0, true).model,
+            "byteshape/qwen3.6-35b-a3b-mtp"
+        );
+        assert_eq!(
+            recommend_brain(24.0, true).model,
+            "byteshape/qwen3.6-35b-a3b-mtp"
+        );
         // Flagship tier + Ollama → the flagship is NOT on Ollama; best
         // pullable brain instead, with the backend switch in the alternatives.
         let ollama16 = recommend_brain(16.0, false);
-        assert_eq!(ollama16.model, "qwen3.5:9b");
+        assert_eq!(ollama16.model, "qwen3.5:4b");
         assert!(ollama16.alternatives.contains("CLAUDETTE_OPENAI_COMPAT=1"));
         // Below the line → the 4b value pick, not the 9b (4b outscores it).
         // 14.9 covers the biggest sub-16 marketing tier (a "12 GB" card
