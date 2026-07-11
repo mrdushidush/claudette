@@ -7,3 +7,8 @@ date	label	model	base_url	code_emit	explain	refactor	median_tps	ttft_med_s	serve
 2026-07-11	champ-mtp-q4kxl-llsrv-d2	qwen3.6-35b-a3b-mtp	http://localhost:1235	43.13	42.91	43.88	43.13	2.80	43.24	14579
 2026-07-11	champ-bs-mtpgpu2-lms-d2	champ-bs-mtpgpu2-lms	http://localhost:1234	76.31	71.54	78.88	76.31	2.19	na	14750
 2026-07-11	champ-bs-mtpgpu2-lms-d2-post	champ-bs-mtpgpu2-lms	http://localhost:1234	74.64	67.13	73.89	73.89	2.14	na	14775
+2026-07-11	champ-bs-mtpgpu2-64k-d2	champ-bs-mtpgpu2-64k	http://localhost:1234	69.77	64.96	72.01	69.77	2.21	na	15415
+2026-07-11	champ-bs-mtpgpu2-64k-d3	bs64k-d3	http://localhost:1234	63.16	66.60	74.57	66.60	2.31	na	15481
+2026-07-11	champ-bs-mtpgpu2-64k-d4	bs64k-d4	http://localhost:1234	67.08	65.88	74.30	67.08	2.30	na	15552
+2026-07-11	champ-bs-mtpgpu2-64k-ntp	bs64k-ntp	http://localhost:1234	68.71	66.04	73.70	68.71	2.29	na	15387
+2026-07-11	champ-bs-mtpgpu2-24k-ntp	bs24k-ntp	http://localhost:1234	67.34	65.84	74.22	67.34	2.29	na	14731

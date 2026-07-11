@@ -1,0 +1,8 @@
+K1	java	locate	PASS	5s	EC=0	recall=na	PASS — located computeTax in TaxCalculator.java
+K2	cpp	bugfix	PASS	14s	EC=0	recall=na	PASS — celsiusToFahrenheit now adds 32 (bug fixed)
+K3	csharp	locate	PASS	5s	EC=0	recall=na	PASS — located ValidateOrder in OrderValidator.cs
+K4	php	bugfix	PASS	10s	EC=0	recall=na	PASS — isEven now tests evenness correctly
+K5	kotlin	locate	PASS	3s	EC=0	recall=na	PASS — located data class Invoice in Invoice.kt
+K6	ruby	bugfix	PASS	9s	EC=0	recall=na	PASS — passing? now includes exactly 60 (inclusive >= 60)
+K7	js	replace-all	PASS	16s	EC=0	recall=old=0 new=30/30	PASS — renamed all 30 occurrences trackEvent->recordEvent (0 left)
+K8	ts	scoped-grep	PASS	5s	EC=0	recall=na	PASS — found API_TIMEOUT_MS=8000 in settings.ts (.ts scope honored)

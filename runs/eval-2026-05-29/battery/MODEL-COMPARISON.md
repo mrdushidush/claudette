@@ -103,6 +103,32 @@ memory pressure. The champion `@q3_k_xl` (18.6 GB, fits) is the practical top of
 
 ---
 
+## Champion tuning 2026-07 (single-model campaign, 2026-07-11)
+
+Deep-tune of the champion **qwen3.6-35b-a3b** only: quant ladder × server × MTP ×
+speed knobs. Full census, per-config checkpoints, decision matrix, launch crib sheet
+and LoRA feasibility report: **`CHAMPION-DOSSIER.md`** (same directory).
+
+| config | quant / server | PASS/50 | K/8 | wall | gen tok/s | verdict |
+|---|---|---|---|---|---|---|
+| `champ-q3kxl-lms` *(incumbent)* | unsloth UD-Q3_K_XL 16.8 GB / LMS | 47/50 | 8/8 | 32.2 min | 33.8 | previous champion config |
+| `champ-iq4xs-lms` | unsloth UD-IQ4_XS 17.7 GB / LMS | **50/50** | **8/8** | 32.2 min | 27.8 | first-ever perfect core-50; slowest gen (IQ CPU-dequant cost) |
+| `champ-q4kxl-lms` | unsloth UD-Q4_K_XL 22.4 GB / LMS | 48/50 | 8/8 | 28.7 min | 36.0 | fastest NTP-unsloth; F4+I5 misses |
+| `champ-mtp-q4kxl-llsrv` | unsloth MTP Q4_K_XL / llama-server fit-2304 | SCREEN 10/10 | 7/8 | — | 43.1 | May 1.77× reproduced; llsrv = speed king for *spilled* quants |
+| **`champ-bs-mtpgpu2-lms`** ★ | **byteshape 3.06 bpw (ShapeLearn, MTP) / LMS** | **50/50** | **8/8** | **10.1 min** | **76.3** | **NEW DAILY DRIVER** — fully VRAM-resident, 95.3% MTP acceptance |
+| — 64k validation | same @ ctx 65536, KV q8 | **49/50** | **8/8** | 14.6 min | 69.8 | crown gate passed (≥47/50); sole miss B4 = one-task variance |
+
+**Crowned: `byteshape/qwen3.6-35b-a3b-mtp` (IQ3_S-3.06bpw, 13.6 GB) @ LM Studio,
+ctx 65536, KV q8_0, no-mmap, parallel 1, MTP draft-max 2.** Same brain, ~2× generation
+speed and 3× battery wall-clock vs the incumbent, zero RAM spill, perfect quality at 24k
+and 49/50 at 64k. Key mechanics: **VRAM residency is ~90% of the speedup; MTP adds
++2–13% in LMS** (LMS spec-decode overhead swallows most of raw llama.cpp's +40%), and
+**LMS-MTP is a complete wash on CPU-offloaded quants** (verified active at 90% acceptance,
+zero net gain). The launch command and rollback path: `champion-launch.md`.
+The incumbent `@q3_k_xl` stays installed as rollback per campaign policy.
+
+---
+
 ## Lineup (from `lms ls`)
 
 | # | Model (identifier) | LM Studio key | Params | Arch | Size | Status |

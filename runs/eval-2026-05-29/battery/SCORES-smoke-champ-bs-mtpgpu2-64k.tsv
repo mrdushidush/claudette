@@ -1,0 +1,1 @@
+A1	rust	bugfix	PASS	14s	EC=0	recall=na	PASS — cargo test succeeded (test_average fixed)

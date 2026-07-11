@@ -142,7 +142,26 @@ KV q8_0 + FA ON (recorded per row). Speed probe = `probe_speed.sh` 3-prompt medi
 Decision cols (final matrix in §6 when rows land): PASS/50 · K/8 · wall · gen tok/s · spill GB ·
 moving parts · template health.
 
-## 6. Decision matrix — TBD (filled at crown time)
+## 6. Decision matrix (crown time, 2026-07-11)
+
+| config | PASS/50 | K/8 | wall | gen tok/s | spill | moving parts | template |
+|---|---|---|---|---|---|---|---|
+| `champ-q3kxl-lms` (incumbent) | 47 | 8 | 32.2 m | 33.8 | ~5 GB experts→RAM | LMS | ✓ |
+| `champ-iq4xs-lms` | **50** | **8** | 32.2 m | 27.8 | ~6 GB experts→RAM | LMS | ✓ |
+| `champ-q4kxl-lms` | 48 | 8 | 28.7 m | 36.0 | ~9 GB experts→RAM | LMS | ✓ |
+| `champ-mtp-q4kxl-lms` | (probe only) | — | — | 34.4 | ~9 GB | LMS | ✓ |
+| `champ-mtp-q4kxl-llsrv` | screen 10/10 | 7 | — | 43.1 | fit-2304 | **hand-run server** | ✓ (--jinja) |
+| **`champ-bs-mtpgpu2-lms`** ★ | **50** | **8** | **10.1 m** | **76.3** | **ZERO — resident** | **LMS (one part)** | ✓ |
+| ★ @ 64k validation | 49 | 8 | 14.6 m | 69.8 | zero (15.4/16.3 GiB) | LMS | ✓ |
+
+**CROWNED: `champ-bs-mtpgpu2-lms` — byteshape IQ3_S-3.06bpw @ LM Studio, ctx 65536,
+KV q8_0, no-mmap, parallel 1, MTP draft-max 2.** Quality first: tied-best 50/50 + K 8/8
+(and 49/50 at the 64k daily window, ≥ the 47/50 gate). Speed: not a tiebreak — a rout
+(2.26× gen, 3.2× wall). Simplicity: LMS-native, survives JIT loads via the per-model
+default config. Launch + rollback: `champion-launch.md`.
+
+Runner-up (unsloth lineage backup): `champ-iq4xs-lms` UD-IQ4_XS — the other perfect
+50/50; keep on disk as the same-lineage fallback if anything byteshape-specific surfaces.
 
 ## 7. Results log (checkpoint per config)
 
@@ -196,6 +215,22 @@ moving parts · template health.
   (with 4.1 GB LESS than IQ4_XS), speed 2.26×, wall 3.2×, zero RAM spill, LMS-native (one
   moving part). Remaining gate: full battery @ ctx 65536 (KV q8 may push past residency —
   fit + retune to be checked). Q2_K_XL floor probe now MOOT (3.06 bpw @ 100% answers it).
+- 2026-07-11 **`champ-bs-mtpgpu2-64k` — 64k CROWN GATE PASSED: 49/50 (98%) + K 8/8**,
+  wall 14.6 min, still fully resident (15,413 MiB, ~0.9 GiB headroom), probe 69.77 tok/s
+  (−8% vs 24k). Sole miss **B4** (32 s, full output): model clobbered the fixture's
+  test_utils.py with its own tests → "0 tests ran"; one empty-first-turn retry logged.
+  Real one-task variance, not infra/template; B4 passed at 24k. 49 ≥ 47 gate → **CROWNED**.
+- 2026-07-11 draft-n sweep @ 64k: d2 **69.77** (peak) / d3 66.60 / d4 67.08 — d2 confirmed,
+  matches May's llama-server curve.
+- 2026-07-11 **speed decomposition** (single-rep probes): 24k NTP 67.34 vs MTP-d2 76.31
+  (+13%); 64k NTP 68.71 vs MTP-d2 69.77 (+1.5%). **Residency is ~90% of the win; MTP in
+  LMS is a small bonus** (raw llama.cpp gets more — LMS spec-decode overhead). JIT loads
+  without MTP flags still deliver ~68 tok/s via the per-model default config.
+- 2026-07-11 config #5 (`champ-mtp-iq4xs-llsrv`) **mooted** — byteshape dominates it on
+  every axis before it ran; the 18.2 GB download is on disk, untested (cleanup candidate).
+- 2026-07-11 **campaign wrap**: MODEL-COMPARISON.md section added, `champion-launch.md`
+  crib sheet written, per-model default config pinned to ctx 65536. Incumbent kept as
+  rollback (nothing deleted; David decides cleanup per file).
 
 ## 8. LoRA feasibility report (Phase 5 deliverable — RESEARCH ONLY, no execution)
 
