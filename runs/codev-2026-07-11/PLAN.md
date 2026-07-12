@@ -203,6 +203,58 @@ Grounding verified 2026-07-11: main = `77a8883`, clean tree, 0 open PRs, issues
     boot would fully close the empty-turn confound if David wants
     belt-and-braces). Evidence comment on #187; merge recommended.
 
+## Friction log (co-dev dogfood findings — first-class deliverables)
+
+1. **champion-launch.md load command fails verbatim** (W0): `lms load
+   "byteshape/qwen3.6-35b-a3b-mtp"` → not found; local model key is bare
+   `qwen3.6-35b-a3b-mtp`. Crib-sheet correction is a runs/ edit — David's call.
+2. **`lms load` failure exits 0 through a pipe** (W0): `lms load ... | tail`
+   masked the failure. Always confirm with `lms ps` after loads.
+3. **models.toml stale-id trap** (W0): forge role-routing predated the crown and
+   pointed at an ambiguous id; nothing in `--doctor` checks forge role-routing
+   health. Doctor-check candidate.
+4. **Card-vs-pipeline mismatch** (W1): the D1a house-style card ends "Open the PR;
+   STOP" — correct for REPL co-dev, but under forge the COD ER obeyed it (gates +
+   commit + `gh` PR itself), so the Submitter found a clean tree and closed the
+   mission on the "ephemeral/local mission — no GitHub PR target" path even though
+   PR #183 was open. Harmless here, but forge cards should say "STOP after the
+   gate; the pipeline submits" — OR forge should detect an already-open PR.
+   → W4/W5 cards will drop the "open the PR" line.
+5. **Verifier hallucinated a defect while passing** (W1): score 8 + "diff omits
+   the `-a3b` segment" (false — string complete). Human/Claude review still
+   earns its keep.
+6. **Same-account approval refused** (W1 review): GitHub rejects `gh pr review
+   --approve` on a PR authored by the same account the forge pushes with —
+   co-dev reviews must be `--comment`.
+7. **Forge telemetry line reads `iter=0 in=0 out=0`** (W1): token/iteration
+   counters didn't record. Metering bug candidate.
+8. *(supersedes the #4 interpretation)* **Ephemeral missions never self-submit:**
+   auto-bootstrapped forge missions ("NO active brownfield mission") have no
+   GitHub PR target BY DESIGN — `mission_submit`'s push+PR path needs a
+   configured mission. W1's PR happened only because the card told the Coder to
+   open it. Adopted protocol from W2 on: card says commit-but-don't-push;
+   **Claude pushes the mission branch + opens the PR** (same account either way).
+9. **The Verifier reads only COMMITTED diffs** (W2 round 0): the card's
+   "don't commit — the pipeline does it" instruction (per the old Submitter
+   contract) left the Verifier with no diff → score 0 fail → the Coder burned
+   fix-round 1 committing to recover (then 10/10). Cards must instruct the
+   Coder to COMMIT (not push). W4a/W5a cards corrected. Pipeline-design note:
+   Verifier could diff the working tree instead — improvement candidate.
+10. **`cargo test` litters the tree when CLAUDETTE_WORKSPACE points at it**
+   (W2 attempt 1): the W1 mission's gate run left
+   `crates/claudette/claudette-writecode-{test,big}.sh` untracked in the forge
+   clone → the W2 mission died on the dirty-tree guard (not a model failure;
+   attempt counter NOT consumed). Root cause = the write_file test env leak
+   that David's dormant branch `fix/write-file-test-env-leak` (2 commits,
+   never PR'd) pins. Every forge mission re-litters the clone until fixed —
+   Claude cleans between missions this run. **Recommend: PR that branch.**
+11. **Branch-committed `runs/` evidence vanishes from the worktree on checkout
+    main** (wrap phase): committing excluded runs/ files on a side branch makes
+    them tracked THERE; switching back to main (where they're untracked)
+    deletes them from the working tree until the PR merges. Recover with
+    `git restore --source=<branch> --worktree -- <path>`. Same mechanics
+    briefly hid the #184 SCORES between commit and merge.
+
 ## WRAP PACKET (2026-07-12, session ended at David's request — machine needed)
 
 ### 1. PRs
@@ -274,49 +326,3 @@ Grounding verified 2026-07-11: main = `77a8883`, clean tree, 0 open PRs, issues
 - `claudette --doctor` was verified green post-repoint, but the champion sat
   unloaded overnight (TTL) — JIT reload works, still worth knowing.
 - Background-task kill of 4b run 1: cause never identified (not reproduced).
-
-## Friction log (co-dev dogfood findings — first-class deliverables)
-
-1. **champion-launch.md load command fails verbatim** (W0): `lms load
-   "byteshape/qwen3.6-35b-a3b-mtp"` → not found; local model key is bare
-   `qwen3.6-35b-a3b-mtp`. Crib-sheet correction is a runs/ edit — David's call.
-2. **`lms load` failure exits 0 through a pipe** (W0): `lms load ... | tail`
-   masked the failure. Always confirm with `lms ps` after loads.
-3. **models.toml stale-id trap** (W0): forge role-routing predated the crown and
-   pointed at an ambiguous id; nothing in `--doctor` checks forge role-routing
-   health. Doctor-check candidate.
-4. **Card-vs-pipeline mismatch** (W1): the D1a house-style card ends "Open the PR;
-   STOP" — correct for REPL co-dev, but under forge the COD ER obeyed it (gates +
-   commit + `gh` PR itself), so the Submitter found a clean tree and closed the
-   mission on the "ephemeral/local mission — no GitHub PR target" path even though
-   PR #183 was open. Harmless here, but forge cards should say "STOP after the
-   gate; the pipeline submits" — OR forge should detect an already-open PR.
-   → W4/W5 cards will drop the "open the PR" line.
-5. **Verifier hallucinated a defect while passing** (W1): score 8 + "diff omits
-   the `-a3b` segment" (false — string complete). Human/Claude review still
-   earns its keep.
-6. **Same-account approval refused** (W1 review): GitHub rejects `gh pr review
-   --approve` on a PR authored by the same account the forge pushes with —
-   co-dev reviews must be `--comment`.
-7. **Forge telemetry line reads `iter=0 in=0 out=0`** (W1): token/iteration
-   counters didn't record. Metering bug candidate.
-8. *(supersedes the #4 interpretation)* **Ephemeral missions never self-submit:**
-   auto-bootstrapped forge missions ("NO active brownfield mission") have no
-   GitHub PR target BY DESIGN — `mission_submit`'s push+PR path needs a
-   configured mission. W1's PR happened only because the card told the Coder to
-   open it. Adopted protocol from W2 on: card says commit-but-don't-push;
-   **Claude pushes the mission branch + opens the PR** (same account either way).
-9. **The Verifier reads only COMMITTED diffs** (W2 round 0): the card's
-   "don't commit — the pipeline does it" instruction (per the old Submitter
-   contract) left the Verifier with no diff → score 0 fail → the Coder burned
-   fix-round 1 committing to recover (then 10/10). Cards must instruct the
-   Coder to COMMIT (not push). W4a/W5a cards corrected. Pipeline-design note:
-   Verifier could diff the working tree instead — improvement candidate.
-10. **`cargo test` litters the tree when CLAUDETTE_WORKSPACE points at it**
-   (W2 attempt 1): the W1 mission's gate run left
-   `crates/claudette/claudette-writecode-{test,big}.sh` untracked in the forge
-   clone → the W2 mission died on the dirty-tree guard (not a model failure;
-   attempt counter NOT consumed). Root cause = the write_file test env leak
-   that David's dormant branch `fix/write-file-test-env-leak` (2 commits,
-   never PR'd) pins. Every forge mission re-litters the clone until fixed —
-   Claude cleans between missions this run. **Recommend: PR that branch.**
