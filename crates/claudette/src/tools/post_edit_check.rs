@@ -267,14 +267,17 @@ pub(crate) fn run_post_edit_check(file: &Path, workspace: &Path) -> Option<Strin
     Some(truncate_output(&output))
 }
 
+/// Serializes every test that mutates the post-edit-check env knobs — the
+/// module tests below AND the integration tests in `runtime/conversation.rs`
+/// run in the same test binary, so they must share one lock. Each holder
+/// restores/removes the vars before dropping the guard.
+#[cfg(test)]
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
-
-    /// Every test that touches env vars must hold this lock and restore/remove
-    /// the vars before dropping the guard.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn set_env(key: &str, val: &str) {
         std::env::set_var(key, val);
