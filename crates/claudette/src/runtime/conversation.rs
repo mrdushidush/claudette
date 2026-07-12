@@ -2899,4 +2899,160 @@ mod tests {
         // string during refactors.
         assert!(VISION_DISCIPLINE_HINT.to_lowercase().contains("image"));
     }
+
+    // ─── Post-edit check wiring (W4, 2026-07-11) ────────────────────────────
+    //
+    // These drive a real turn through the loop with a stub write_file executor
+    // and a CLAUDETTE_CHECK_CMD override (`git <bogus-subcommand>` — portable,
+    // fast, guaranteed non-zero). They share post_edit_check's crate-wide
+    // ENV_LOCK because both test modules mutate the same env vars inside one
+    // parallel test binary.
+
+    /// Scripted client: one assistant message carrying `write_file` ToolUse
+    /// blocks for each given path, then a plain closing message.
+    struct WriteFileScript {
+        paths: Vec<&'static str>,
+        call_count: usize,
+    }
+
+    impl ApiClient for WriteFileScript {
+        fn stream(
+            &mut self,
+            _request: &ApiRequest<'_>,
+        ) -> Result<Vec<AssistantEvent>, RuntimeError> {
+            self.call_count += 1;
+            match self.call_count {
+                1 => {
+                    let mut events = vec![AssistantEvent::TextDelta("Writing.".to_string())];
+                    for (i, path) in self.paths.iter().enumerate() {
+                        events.push(AssistantEvent::ToolUse {
+                            id: format!("tool-{i}"),
+                            name: "write_file".to_string(),
+                            input: format!("{{\"path\":\"{path}\",\"content\":\"x\"}}"),
+                        });
+                    }
+                    events.push(AssistantEvent::MessageStop);
+                    Ok(events)
+                }
+                2 => Ok(vec![
+                    AssistantEvent::TextDelta("Done.".to_string()),
+                    AssistantEvent::MessageStop,
+                ]),
+                _ => Err(RuntimeError::new("unexpected extra API call")),
+            }
+        }
+    }
+
+    /// Build a runtime whose `write_file` stub always succeeds with `"ok"`,
+    /// allowed without prompting, and run one scripted turn.
+    fn run_write_file_turn(paths: Vec<&'static str>) -> super::TurnSummary {
+        let api_client = WriteFileScript {
+            paths,
+            call_count: 0,
+        };
+        let tool_executor =
+            StaticToolExecutor::new().register("write_file", |_input| Ok("ok".to_string()));
+        let permission_policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("write_file", PermissionMode::WorkspaceWrite);
+        let system_prompt = SystemPromptBuilder::new()
+            .with_project_context(ProjectContext {
+                cwd: PathBuf::from("/tmp/project"),
+                current_date: "2026-07-11".to_string(),
+                git_status: None,
+                git_diff: None,
+                instruction_files: Vec::new(),
+            })
+            .with_os("linux", "6.8")
+            .build();
+        let mut runtime = ConversationRuntime::new(
+            Session::new(),
+            api_client,
+            tool_executor,
+            permission_policy,
+            system_prompt,
+        );
+        runtime
+            .run_turn("write the file", None)
+            .expect("turn should succeed")
+    }
+
+    fn tool_result_output(summary: &super::TurnSummary, index: usize) -> String {
+        match &summary.tool_results[index].blocks[0] {
+            ContentBlock::ToolResult { output, .. } => output.clone(),
+            other => panic!("expected ToolResult, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn post_edit_check_off_leaves_tool_result_untouched() {
+        let _lock = crate::tools::post_edit_check::ENV_LOCK.lock().unwrap();
+        std::env::remove_var(crate::tools::post_edit_check::CHECK_ENV);
+        // A command that WOULD fail if the feature ran while disabled.
+        std::env::set_var(
+            crate::tools::post_edit_check::CMD_ENV,
+            "git definitely-not-a-subcommand {file}",
+        );
+
+        let summary = run_write_file_turn(vec!["a.rs"]);
+        let output = tool_result_output(&summary, 0);
+        assert_eq!(
+            output, "ok",
+            "knob off must leave the result byte-identical"
+        );
+
+        std::env::remove_var(crate::tools::post_edit_check::CMD_ENV);
+    }
+
+    #[test]
+    fn post_edit_check_appends_failure_output() {
+        let _lock = crate::tools::post_edit_check::ENV_LOCK.lock().unwrap();
+        std::env::set_var(crate::tools::post_edit_check::CHECK_ENV, "1");
+        std::env::set_var(
+            crate::tools::post_edit_check::CMD_ENV,
+            "git definitely-not-a-subcommand {file}",
+        );
+
+        let summary = run_write_file_turn(vec!["a.rs"]);
+        let output = tool_result_output(&summary, 0);
+        assert!(
+            output.starts_with("ok"),
+            "the tool's own output stays first: {output}"
+        );
+        assert!(
+            output.contains("[post_edit_check] the edited file fails its check:"),
+            "check failure must be appended: {output}"
+        );
+
+        std::env::remove_var(crate::tools::post_edit_check::CHECK_ENV);
+        std::env::remove_var(crate::tools::post_edit_check::CMD_ENV);
+    }
+
+    #[test]
+    fn post_edit_check_caps_rounds_per_file() {
+        let _lock = crate::tools::post_edit_check::ENV_LOCK.lock().unwrap();
+        std::env::set_var(crate::tools::post_edit_check::CHECK_ENV, "1");
+        std::env::set_var(
+            crate::tools::post_edit_check::CMD_ENV,
+            "git definitely-not-a-subcommand {file}",
+        );
+        std::env::set_var(crate::tools::post_edit_check::MAX_ROUNDS_ENV, "1");
+
+        // Two writes to the SAME path in one turn: round 1 gets the full
+        // check output, round 2 the one-line suppression notice.
+        let summary = run_write_file_turn(vec!["a.rs", "a.rs"]);
+        let first = tool_result_output(&summary, 0);
+        let second = tool_result_output(&summary, 1);
+        assert!(
+            first.contains("[post_edit_check] the edited file fails its check:"),
+            "round 1 gets full output: {first}"
+        );
+        assert!(
+            second.contains("still fails its check (output suppressed"),
+            "round 2 gets the suppression notice: {second}"
+        );
+
+        std::env::remove_var(crate::tools::post_edit_check::CHECK_ENV);
+        std::env::remove_var(crate::tools::post_edit_check::CMD_ENV);
+        std::env::remove_var(crate::tools::post_edit_check::MAX_ROUNDS_ENV);
+    }
 }
