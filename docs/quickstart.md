@@ -1,34 +1,54 @@
 # Quickstart
 
-Zero to a working agent in **under five minutes**, then a 60-second tour of the
-TUI and the Forge code-change pipeline.
+Zero to a working agent in **under five minutes**. Work the checklist top to
+bottom — every step says what success looks like, and where to look if you
+don't see it:
 
-## 1. Install (2 min)
+> ☐ installed → ☐ `--doctor` all green → ☐ first conversation → ☐ first
+> coding one-shot → ☐ Forge on a repo → ☐ *(optional)* Telegram
+
+## ☐ 1. Install (2 min)
+
+The fastest path is the prebuilt binary — SHA256-verified, no Rust toolchain
+needed (that's also what the [README](../README.md#get-started-in-2-minutes)
+leads with):
 
 ```bash
-# a. Install Ollama from https://ollama.com (one-time).
-ollama serve &
-
-# b. Pull the default brain (~3.4 GB on disk, ~3.4 GB VRAM).
-ollama pull qwen3.5:4b
-
-# c. Install Claudette.
-cargo install claudette
+curl -fsSL https://raw.githubusercontent.com/mrdushidush/claudette/main/install.sh | sh   # Linux / macOS
+iwr -useb https://raw.githubusercontent.com/mrdushidush/claudette/main/install.ps1 | iex  # Windows (PowerShell)
 ```
+
+Have a Rust toolchain and prefer it? `cargo install claudette` builds the same
+lean binary.
+
+Then the model server and the default brain:
+
+```bash
+# Install Ollama from https://ollama.com (one-time), then:
+ollama serve &
+ollama pull qwen3.5:4b     # ~3.4 GB on disk, ~3.4 GB VRAM — runs on plain CPU too
+```
+
+**You should see:** the installer end with `installed vX.Y.Z (lean) → …` and a
+`next: claudette --doctor` hint; `ollama pull` reach 100%.
+**If `claudette` isn't found in a new terminal:**
+[troubleshooting → command not found](troubleshooting.md#claudette-command-not-found-after-install).
 
 The `qwen3.5:4b` brain handles every tool-using flow on its own. Prefer LM
 Studio or a bigger model? See [configuration.md](configuration.md) and
 [hardware.md](hardware.md).
 
-> **Integrations are opt-in at build time.** The default install is a lean,
-> air-gapped coding agent with **no cloud code**. The Telegram bot, Gmail,
-> Google Calendar, and the voice / morning-briefing helpers live behind the
-> `integrations` feature — install with `cargo install claudette --features
-> integrations` if you want them. The `--telegram`, `--auth-google`, and
-> `--briefing` flows below all need that build; without it they print a
-> one-line "reinstall with `--features integrations`" notice.
+> **Integrations are opt-in.** The default install is a lean, air-gapped
+> coding agent with **no cloud code**. The Telegram bot, Gmail, Google
+> Calendar, and the voice / morning-briefing helpers ship in the **full**
+> flavor — grab it prebuilt with
+> `CLAUDETTE_FLAVOR=full curl -fsSL …/install.sh | sh`
+> (Windows: `$env:CLAUDETTE_FLAVOR='full'; iwr -useb …/install.ps1 | iex`),
+> or build it with `cargo install claudette --features integrations`. The
+> `--telegram`, `--auth-google`, and `--briefing` flows below all need it; the
+> lean build prints those exact install commands if you try one.
 
-## 2. Verify (30 sec)
+## ☐ 2. `--doctor` all green (30 sec)
 
 ```bash
 claudette --doctor
@@ -37,8 +57,8 @@ claudette --doctor
 `--doctor` probes every dependency and prints a green/red report with a
 **copy-paste `↳ fix:` command** under anything that's broken — model server not
 running, brain not pulled, a missing build toolchain (`git` / `cargo` /
-`python` / `node` / `go`), or absent voice deps. Green "local brain" and "build
-toolchains" rows mean you're ready. Run it any time something misbehaves.
+`python` / `node` / `go`), or absent voice deps. Run it any time something
+misbehaves.
 
 It also **recommends a Claudette-Certified model for your GPU**: the "pick a
 brain" section detects VRAM via `nvidia-smi` (falling back to
@@ -49,11 +69,55 @@ And if the first interactive run finds the brain missing, claudette **offers
 to pull it on the spot** (`[Y/n]` → `ollama pull …` with live progress) instead
 of dead-ending. Piped/CI/`--offline` runs keep the old print-and-exit behaviour.
 
-## 3. First conversation (30 sec)
+**You should see:** green "local brain" and "build toolchains" rows.
+**If a row is red:** run the `↳ fix:` command printed right under it, then
+re-run `--doctor`. Still stuck →
+[troubleshooting.md](troubleshooting.md).
+
+## ☐ 3. First conversation (30 sec)
 
 ```bash
 claudette "what time is it?"
 ```
+
+**You should see:** a correct answer within a few seconds — except the very
+first prompt after a model load, which can hang 1–3 minutes while the model
+loads into memory. That's normal:
+[troubleshooting → first-prompt hang](troubleshooting.md#the-first-prompt-hangs-for-13-minutes-then-answers).
+
+## ☐ 4. First coding one-shot (1 min)
+
+```bash
+cd ~/code/any-project
+claudette "map this repo and explain the module layout in five bullets"
+```
+
+**You should see:** tool calls stream past (`repo_map`, `read_file`, …), then a
+grounded summary of *your actual code* — not generic filler. That's the coding
+core (files, search, tests) working; it's pre-enabled in any repo.
+
+## ☐ 5. Forge on a repo (5–10 min)
+
+Forge is the autonomous Planner → Coder → Verifier pipeline — the build/test
+gate means a diff that doesn't compile or breaks a test can't pass. Follow the
+copy-paste recipe in
+[first-success.md#coding](first-success.md#coding), or the full walkthrough
+[below](#forge-hands-off-code-changes-with-a-review-gate).
+
+**You should see:** phases stream (`forge: planner` → `coder` → `build + test`
+→ `verifier … pass=true`), ending in a verified commit on an isolated
+`claudette-mission/*` branch (local repo) or a `[y/N]` review gate before a PR
+(GitHub repo).
+
+## ☐ 6. *(Optional)* Telegram from your phone
+
+Needs the **full** flavor from step 1's integrations note. Three commands:
+[first-success.md#assistant](first-success.md#assistant).
+
+**You should see:** your bot reply to a text from your phone, and transcribe a
+voice note.
+
+---
 
 Four entry points, one runtime, one session format — switching is just a
 different command:
@@ -224,6 +288,7 @@ claudette --briefing --time 08:30 --days weekdays
 
 ## Where to go next
 
+- [`first-success.md`](first-success.md) — guided copy-paste recipes to a first real win (coding / air-gap / assistant)
 - [`configuration.md`](configuration.md) — every env var, token fallbacks, recall settings
 - [`forge.md`](forge.md) — the full Forge pipeline, review gate, build/test gate, role-routing
 - [`hardware.md`](hardware.md) — VRAM per preset, running a big brain on constrained VRAM
