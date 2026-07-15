@@ -8,11 +8,17 @@
 #   CLAUDETTE_VERSION         Pin a version (e.g. 0.5.2). Default: latest.
 #   CLAUDETTE_INSTALL_DIR     Install location. Default: $HOME/.local/bin.
 #   CLAUDETTE_NO_MODIFY_PATH  Set to anything to suppress PATH hints.
+#   CLAUDETTE_FLAVOR          "lean" (default) or "full". The full flavor
+#                             bundles the opt-in cloud integrations (Telegram,
+#                             Gmail, Calendar, voice, briefing) — same as a
+#                             `--features integrations` source build, no Rust
+#                             toolchain needed.
 #
 # What this script does, in order:
 #   1. Detects OS + arch and maps to the Rust target triple we ship.
 #   2. Resolves the requested tag (latest by default) from the GitHub API.
-#   3. Downloads claudette-<tag>-<target>.tar.gz + .sha256 sidecar.
+#   3. Downloads claudette-<tag>-<target>.tar.gz + .sha256 sidecar
+#      (claudette-full-<tag>-<target>.tar.gz for the full flavor).
 #   4. Verifies the SHA256 (refuses to install on mismatch).
 #   5. Drops the `claudette` binary into the install dir.
 #   6. Prints a PATH update hint if the install dir isn't on PATH.
@@ -52,6 +58,13 @@ esac
 
 TARGET="${ARCH}-${OS}"
 
+FLAVOR="${CLAUDETTE_FLAVOR:-lean}"
+case "$FLAVOR" in
+  lean) STEM_PREFIX="claudette" ;;
+  full) STEM_PREFIX="claudette-full" ;;
+  *)    err "unknown CLAUDETTE_FLAVOR: '$FLAVOR' (use 'lean' or 'full')" ;;
+esac
+
 VERSION="${CLAUDETTE_VERSION:-}"
 if [ -z "$VERSION" ]; then
   info "resolving latest release tag..."
@@ -62,7 +75,7 @@ else
   TAG="v${VERSION#v}"
 fi
 
-STEM="claudette-${TAG}-${TARGET}"
+STEM="${STEM_PREFIX}-${TAG}-${TARGET}"
 ARCHIVE="${STEM}.tar.gz"
 URL="https://github.com/${REPO}/releases/download/${TAG}/${ARCHIVE}"
 SHA_URL="${URL}.sha256"
@@ -70,9 +83,15 @@ SHA_URL="${URL}.sha256"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT INT TERM
 
+if [ "$FLAVOR" = "full" ]; then
+  DL_HINT="does this release ship a full-flavor archive? Older releases are lean-only — use 'cargo install claudette --features integrations' there"
+else
+  DL_HINT="does this release exist?"
+fi
+
 info "downloading ${ARCHIVE}"
 curl -fsSL "$URL"     -o "${TMP}/${ARCHIVE}" \
-  || err "download failed: ${URL} (does this release exist?)"
+  || err "download failed: ${URL} (${DL_HINT})"
 curl -fsSL "$SHA_URL" -o "${TMP}/${ARCHIVE}.sha256" \
   || err "checksum download failed: ${SHA_URL}"
 
@@ -95,7 +114,7 @@ mkdir -p "$INSTALL_DIR"
 mv "${TMP}/claudette" "${INSTALL_DIR}/claudette"
 chmod +x "${INSTALL_DIR}/claudette"
 
-info "installed ${TAG} → ${INSTALL_DIR}/claudette"
+info "installed ${TAG} (${FLAVOR}) → ${INSTALL_DIR}/claudette"
 
 case ":$PATH:" in
   *:"$INSTALL_DIR":*)

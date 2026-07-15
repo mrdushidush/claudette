@@ -17,7 +17,13 @@ name: Release
 #   4. `publish`          — `cargo publish` to crates.io via OIDC (no stored
 #                           token); idempotent (already-published = success).
 #                           `build-binaries` matrix produces prebuilt archives
-#                           for win/linux/macos in parallel.
+#                           for win/linux/macos in parallel, in TWO flavors per
+#                           target: lean (claudette-…, the coding-only default)
+#                           and full (claudette-full-…, `--features
+#                           integrations`) so binary-install users can get
+#                           Telegram/Gmail/Calendar/voice without a Rust
+#                           toolchain (`CLAUDETTE_FLAVOR=full` in the install
+#                           scripts).
 #   5. `release`          — once every matrix leg is green (independent of the
 #                           crates.io publish), attach all binary archives +
 #                           their SHA256 sidecars to a GitHub Release with
@@ -203,8 +209,9 @@ jobs:
   build-binaries:
     name: build ${{ matrix.target }}
     needs: [verify, tag-version-match, audit, deny]
-    # Five archives total: win-x64, linux-x64, linux-arm64, macos-x64,
-    # macos-arm64. linux-arm64 uses GitHub's free arm64 runner. macOS x64
+    # Five targets, two flavors each (lean + full/integrations) = ten archives
+    # total: win-x64, linux-x64, linux-arm64, macos-x64, macos-arm64.
+    # linux-arm64 uses GitHub's free arm64 runner. macOS x64
     # cross-compiles from macos-latest (Apple Silicon) via the universal
     # Xcode SDK — the macos-13 (Intel) free-tier runner pool starves for
     # hours at a time and was the cause of the v0.5.3 release being cut
@@ -228,52 +235,44 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2.9.1
         with:
           key: release-${{ matrix.target }}
-      - name: cargo build --release --locked
+      - name: cargo build --release --locked (lean)
         run: cargo build --release --locked -p claudette --target ${{ matrix.target }}
-      - name: Package archive + SHA256
+      - name: Package lean archive + SHA256
         id: pkg
         shell: bash
-        # Run under bash on every runner. Windows runners ship Git Bash
-        # which provides `tar` and `7z` but only `sha256sum` (no `shasum`);
-        # macOS ships `shasum` (perl-based) but no `sha256sum`; Linux ships
-        # both. Try `shasum` first, fall back to `sha256sum` — output
-        # format ("<hash>  <filename>") is identical between the two.
-        run: |
-          set -euo pipefail
-          # On tag push: GITHUB_REF=refs/tags/v0.5.4 -> version=0.5.4.
-          # On workflow_dispatch: no tag, so use a `dev-<short-sha>` stamp
-          # so the archive name stays slash-free and the dry-run is
-          # distinguishable from a real release.
-          if [ "${GITHUB_REF#refs/tags/v}" != "${GITHUB_REF}" ]; then
-            version="${GITHUB_REF#refs/tags/v}"
-          else
-            version="dev-${GITHUB_SHA:0:7}"
-          fi
-          stem="claudette-v${version}-${{ matrix.target }}"
-          mkdir -p dist staging
-          if [ "${{ matrix.ext }}" = "zip" ]; then
-            cp "target/${{ matrix.target }}/release/claudette.exe" staging/
-            (cd staging && 7z a "../dist/${stem}.zip" claudette.exe >/dev/null)
-          else
-            cp "target/${{ matrix.target }}/release/claudette" staging/
-            chmod +x "staging/claudette"
-            tar -C staging -czf "dist/${stem}.tar.gz" claudette
-          fi
-          archive="${stem}.${{ matrix.ext }}"
-          cd dist
-          if command -v shasum >/dev/null 2>&1; then
-            shasum -a 256 "$archive" > "$archive.sha256"
-          else
-            sha256sum "$archive" > "$archive.sha256"
-          fi
-          echo "stem=${stem}" >> "$GITHUB_OUTPUT"
-      - name: Upload archive artifact
+        env:
+          FLAVOR: lean
+          TARGET: ${{ matrix.target }}
+          EXT: ${{ matrix.ext }}
+        run: bash .github/scripts/package-archive.sh
+      # Full flavor: the opt-in cloud integrations (Telegram, Gmail, Calendar,
+      # voice, briefing) prebuilt for users without a Rust toolchain —
+      # otherwise the in-binary "reinstall with `--features integrations`"
+      # notice is a dead end for binary installs. Built AFTER the lean package
+      # step because both builds emit target/<target>/release/claudette and
+      # this one overwrites it.
+      - name: cargo build --release --locked (full — integrations)
+        run: cargo build --release --locked -p claudette --features integrations --target ${{ matrix.target }}
+      - name: Package full archive + SHA256
+        id: pkgfull
+        shell: bash
+        env:
+          FLAVOR: full
+          TARGET: ${{ matrix.target }}
+          EXT: ${{ matrix.ext }}
+        run: bash .github/scripts/package-archive.sh
+      # One artifact per matrix leg carrying both flavors; named after the
+      # lean stem (artifact names only need to be unique per leg — `release`
+      # downloads with merge-multiple and globs the files back apart).
+      - name: Upload archive artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: ${{ steps.pkg.outputs.stem }}
           path: |
             dist/${{ steps.pkg.outputs.stem }}.${{ matrix.ext }}
             dist/${{ steps.pkg.outputs.stem }}.${{ matrix.ext }}.sha256
+            dist/${{ steps.pkgfull.outputs.stem }}.${{ matrix.ext }}
+            dist/${{ steps.pkgfull.outputs.stem }}.${{ matrix.ext }}.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -304,11 +303,18 @@ jobs:
       - name: Create GitHub Release with binaries attached
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b  # v3.0.1
         with:
+          # Two globs per extension: `claudette-v*` (lean) does not match the
+          # full flavor's `claudette-full-v*` stems, and unmatched-file
+          # enforcement below means a missing flavor fails the release loudly.
           files: |
             dist/claudette-v*.tar.gz
             dist/claudette-v*.tar.gz.sha256
             dist/claudette-v*.zip
             dist/claudette-v*.zip.sha256
+            dist/claudette-full-v*.tar.gz
+            dist/claudette-full-v*.tar.gz.sha256
+            dist/claudette-full-v*.zip
+            dist/claudette-full-v*.zip.sha256
           generate_release_notes: true
           make_latest: true
           fail_on_unmatched_files: true
