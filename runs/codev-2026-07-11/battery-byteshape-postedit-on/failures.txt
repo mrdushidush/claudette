@@ -1,0 +1,90 @@
+=== FAILED PROMPTS ===
+
+NUM: 29
+PROMPT: Run the bash command: echo CLAUDETTE_BENCH_OK
+EXPECTED_PATTERN: CLAUDETTE_BENCH_OK
+EXIT_CODE: 0
+OUTPUT_PREVIEW: The `bash` tool requires escalation from workspace-write to danger-full-access, which needs interactive approval. Since this session is non-interactive, I can't get that approval myself.
+
+Enabling "advanced" made bash available in my toolkit, but repeating the exact same call gets suppressed (the sandbox sees it as a duplicate denied request).
+---
+
+NUM: 30
+PROMPT: What is 1234 + 5678?
+EXPECTED_PATTERN: 6912
+EXIT_CODE: 0
+OUTPUT_PREVIEW: It's 6,912.
+
+⚡ iter=1 in=4843 out=380
+---
+
+NUM: 32
+PROMPT: What timezone am I in based on the current time?
+EXPECTED_PATTERN: timezone|UTC|GMT|\\+|\\-|hours
+EXIT_CODE: 0
+OUTPUT_PREVIEW: You're on **+03:00** — that's either Israel Standard Time (IST), Moscow Standard Time (MSK), or a few others in that band. Want me to pin down which one?
+
+⚡ iter=2 in=9838 out=132
+---
+
+NUM: 33
+PROMPT: Fetch https://httpbin.org/get and tell me what IP it reports
+EXPECTED_PATTERN: IP|address|origin|\\d+\\.\\d+
+EXIT_CODE: 0
+OUTPUT_PREVIEW: I can't do this right now — both `web_fetch` and `bash` require escalation to `danger-full-access`, but since there's no human present in this session, I can't get approval. The request is blocked until someone's available to approve it.
+
+⚡ iter=5 in=25430 out=588
+---
+
+NUM: 44
+PROMPT: Search for 'AgentType' in the claudette source and tell me what variants it has.
+EXPECTED_PATTERN: researcher|gitops
+EXIT_CODE: 0
+OUTPUT_PREVIEW: [auto-compacted 10 older message(s) — hard tier @ 30720 tokens]
+There's no `AgentType` anywhere in the claudette source code — not an enum, struct, or type alias. The only hit is in a test file (`brain100_prompts.txt`) where "Search for 'AgentType'" appears as a search query string inside a test prompt.
+---
+
+NUM: 65
+PROMPT: Read a file that does not exist: D:/dev/claudette/nonexistent.txt
+EXPECTED_PATTERN: not exist|not found|error|cannot
+EXIT_CODE: 0
+OUTPUT_PREVIEW: That file doesn't exist — `D:\dev\claudette\nonexistent.txt` isn't there. Want me to:
+
+- **Create it** (empty or with content)?
+---
+
+NUM: 67
+PROMPT: List a directory that doesn't exist: D:/dev/claudette/fake_folder
+EXPECTED_PATTERN: not exist|not found|error|cannot
+EXIT_CODE: 0
+OUTPUT_PREVIEW: As expected — `D:\dev\claudette\fake_folder` doesn't exist. Nothing to list there.
+
+⚡ iter=2 in=9773 out=100
+---
+
+NUM: 75
+PROMPT: How many tools does Claudette have? Count from the tools list.
+EXPECTED_PATTERN: [0-9]+ tools|17 tools|tool count
+EXIT_CODE: 0
+OUTPUT_PREVIEW: Claudette has **20** tool groups.
+
+⚡ iter=1 in=4843 out=1003
+---
+
+NUM: 80
+PROMPT: Try to delete a todo with the impossible id 'fake-id-9999'.
+EXPECTED_PATTERN: not found|cannot|error|no such|missing|invalid|fail
+EXIT_CODE: 0
+OUTPUT_PREVIEW: נסיון למחוק טודו עם ה-ID הלא קיים `fake-id-9999` נכשל — כצפוי, אין טודו כזה. המערכת החזירה הודעת שגיאה ברורה: "no todo with id 'fake-id-9999'".
+
+⚡ iter=3 in=15510 out=303
+---
+
+NUM: 91
+PROMPT: Search for 'fn ' in D:/dev/claudette/src/agents.rs
+EXPECTED_PATTERN: spawn|parse|config|fn
+EXIT_CODE: 0
+OUTPUT_PREVIEW: There is no `agents.rs` file in this project — neither at `D:/dev/claudette/src/agents.rs` nor anywhere under `crates/claudette/src`. The source directory has 45 files, but none named `agents.rs`.
+
+Did you mean a different filename or path?
+---

@@ -1,0 +1,85 @@
+=== FAILED PROMPTS ===
+
+NUM: 25
+PROMPT: Search for the word 'PermissionMode' in D:/dev/claudette/src
+EXPECTED_PATTERN: run|permission|policy
+EXIT_CODE: 1
+OUTPUT_PREVIEW:   ▸ empty response — retrying with enable_tools hint...
+❌ secretary turn failed: assistant stream produced no content
+---
+
+NUM: 44
+PROMPT: Search for 'AgentType' in the claudette source and tell me what variants it has.
+EXPECTED_PATTERN: researcher|gitops
+EXIT_CODE: 0
+OUTPUT_PREVIEW:   ▸ empty response — retrying with enable_tools hint...
+Based on my search of the claudette source code, **there is no `AgentType` enum** defined anywhere in the project.
+---
+
+NUM: 45
+PROMPT: Read D:/dev/claudette/src/agents.rs and explain what spawn_agent does.
+EXPECTED_PATTERN: spawn|agent|delegate|task
+EXIT_CODE: 1
+OUTPUT_PREVIEW:   ▸ empty response — retrying with enable_tools hint...
+❌ secretary turn failed: assistant stream produced no content
+---
+
+NUM: 46
+PROMPT: Read the note titled 'tier1-test' and tell me what its body says.
+EXPECTED_PATTERN: hello from the test suite|hello|test suite
+EXIT_CODE: 0
+OUTPUT_PREVIEW:   ▸ empty response — retrying with enable_tools hint...
+No note titled 'tier1-test' exists in your notes. The search returned zero matches.
+---
+
+NUM: 47
+PROMPT: Search for all functions named 'run_' in D:/dev/claudette/src/tools.rs
+EXPECTED_PATTERN: run_|tool|function
+EXIT_CODE: 1
+OUTPUT_PREVIEW:   ▸ empty response — retrying with enable_tools hint...
+❌ secretary turn failed: assistant stream produced no content
+---
+
+NUM: 65
+PROMPT: Read a file that does not exist: D:/dev/claudette/nonexistent.txt
+EXPECTED_PATTERN: not exist|not found|error|cannot
+EXIT_CODE: 0
+OUTPUT_PREVIEW: The file `D:/dev/claudette/nonexistent.txt` doesn't exist on your system. 
+
+Would you like me to:
+---
+
+NUM: 67
+PROMPT: List a directory that doesn't exist: D:/dev/claudette/fake_folder
+EXPECTED_PATTERN: not exist|not found|error|cannot
+EXIT_CODE: 0
+OUTPUT_PREVIEW: That folder doesn't exist on your system. Would you like me to create it instead?
+
+⚡ iter=2 in=9782 out=140
+---
+
+NUM: 75
+PROMPT: How many tools does Claudette have? Count from the tools list.
+EXPECTED_PATTERN: [0-9]+ tools|17 tools|tool count
+EXIT_CODE: 0
+OUTPUT_PREVIEW: Claudette has **20 tool groups**:
+
+1. notes
+---
+
+NUM: 80
+PROMPT: Try to delete a todo with the impossible id 'fake-id-9999'.
+EXPECTED_PATTERN: not found|cannot|error|no such|missing|invalid|fail
+EXIT_CODE: 0
+OUTPUT_PREVIEW: Got it — that `fake-id-9999` doesn't exist in your todo list, so nothing got deleted (as expected).
+
+⚡ iter=3 in=15525 out=225
+---
+
+NUM: 91
+PROMPT: Search for 'fn ' in D:/dev/claudette/src/agents.rs
+EXPECTED_PATTERN: spawn|parse|config|fn
+EXIT_CODE: 0
+OUTPUT_PREVIEW:   ▸ empty response — retrying with enable_tools hint...
+No `agents.rs` file found in the workspace. The Rust source is organized under `crates/claudette/src/`. 
+---
