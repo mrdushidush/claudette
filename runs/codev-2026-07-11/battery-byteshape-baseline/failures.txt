@@ -1,0 +1,88 @@
+=== FAILED PROMPTS ===
+
+NUM: 13
+PROMPT: What files are in D:/dev/claudette/src?
+EXPECTED_PATTERN: agents|tools|run
+EXIT_CODE: 0
+OUTPUT_PREVIEW: No `src` folder at the root — this project uses a Cargo workspace layout under `crates/`. Want me to list that instead?
+
+⚡ iter=3 in=15203 out=228
+---
+
+NUM: 29
+PROMPT: Run the bash command: echo CLAUDETTE_BENCH_OK
+EXPECTED_PATTERN: CLAUDETTE_BENCH_OK
+EXIT_CODE: 0
+OUTPUT_PREVIEW: `bash` is blocked here — this session is **non-interactive**, so there's no way to get your approval for the escalation from workspace-write → danger-full-access that `bash` requires. The tool rejects repeated calls with "duplicate denied call suppressed."
+
+If you need shell access, you'd have to run it yourself or switch to an interactive context. Otherwise I can still help with everything else (file ops, git via the dedicated tools, etc.).
+---
+
+NUM: 33
+PROMPT: Fetch https://httpbin.org/get and tell me what IP it reports
+EXPECTED_PATTERN: IP|address|origin|\\d+\\.\\d+
+EXIT_CODE: 0
+OUTPUT_PREVIEW: I can't reach out to external URLs right now — both `web_fetch` and shell access require approval that a non-interactive session can't provide. You'd need an interactive session (or me running with `advanced`/`search` groups enabled interactively) to fetch that URL.
+
+If you want, I can try again in an interactive context — just say the word.
+---
+
+NUM: 44
+PROMPT: Search for 'AgentType' in the claudette source and tell me what variants it has.
+EXPECTED_PATTERN: researcher|gitops
+EXIT_CODE: 0
+OUTPUT_PREVIEW: There is no `AgentType` enum (or struct, type alias) defined anywhere in the claudette source code. The only occurrence of that string is in a test prompt file:
+
+- **`D:\dev\claudette\crates\claudette\tests\brain100_prompts.txt`, line 57** — it's just a test case asking an AI to search for `AgentType`. It has nothing to do with actual source code.
+---
+
+NUM: 65
+PROMPT: Read a file that does not exist: D:/dev/claudette/nonexistent.txt
+EXPECTED_PATTERN: not exist|not found|error|cannot
+EXIT_CODE: 0
+OUTPUT_PREVIEW: That file doesn't exist. There's nothing to read there.
+
+⚡ iter=2 in=9794 out=165
+---
+
+NUM: 67
+PROMPT: List a directory that doesn't exist: D:/dev/claudette/fake_folder
+EXPECTED_PATTERN: not exist|not found|error|cannot
+EXIT_CODE: 0
+OUTPUT_PREVIEW:   ▸ empty response — retrying with enable_tools hint...
+That folder doesn't exist — `fake_folder` isn't in `D:\dev\claudette`.
+---
+
+NUM: 75
+PROMPT: How many tools does Claudette have? Count from the tools list.
+EXPECTED_PATTERN: [0-9]+ tools|17 tools|tool count
+EXIT_CODE: 0
+OUTPUT_PREVIEW: Claudette has **20** tool groups:
+
+1. notes
+---
+
+NUM: 80
+PROMPT: Try to delete a todo with the impossible id 'fake-id-9999'.
+EXPECTED_PATTERN: not found|cannot|error|no such|missing|invalid|fail
+EXIT_CODE: 0
+OUTPUT_PREVIEW:   ▸ empty response — retrying with enable_tools hint...
+The deletion attempt behaved as expected — it reported `no todo with id 'fake-id-9999'`. No crash, no side effects, just a clean "doesn't exist" response.
+---
+
+NUM: 87
+PROMPT: Show the git log for the last 5 commits
+EXPECTED_PATTERN: refactor|feat|fix
+EXIT_CODE: 0
+OUTPUT_PREVIEW:   ▸ git: using "C:\\Program Files\\Git\\mingw64\\bin\\git.exe", args=["log", "-5", "--format=%H %an (%ar)%n  %s%n%b", "--stat"], cwd=D:\dev\claudette
+  ▸ empty response — retrying with enable_tools hint...
+Here are the last 5 commits:
+---
+
+NUM: 91
+PROMPT: Search for 'fn ' in D:/dev/claudette/src/agents.rs
+EXPECTED_PATTERN: spawn|parse|config|fn
+EXIT_CODE: 0
+OUTPUT_PREVIEW:   ▸ empty response — retrying with enable_tools hint...
+There's no `agents.rs` in this project — I searched the entire workspace and came up empty. The source files live under `D:\dev\claudette\crates\claudette\src`, and none of them are named `agents.rs`.
+---
