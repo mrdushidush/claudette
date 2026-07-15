@@ -589,16 +589,33 @@ fn dispatch_google_auth(scope: Option<&str>, revoke: bool) -> ExitCode {
     }
 }
 
+/// Builds the "this flag needs the full build" notice for the coding-only
+/// binary. Points at the prebuilt full-flavor archive first (binary-install
+/// users have no Rust toolchain, so "reinstall with `--features integrations`"
+/// alone is a dead end) and the cargo path second.
+#[cfg(not(feature = "integrations"))]
+fn integrations_notice(flag: &str, missing: &str) -> String {
+    format!(
+        "{flag} needs the `integrations` feature — this is a coding-only build (the default), so \
+         {missing}.\n\
+         Get the prebuilt full binary (no Rust toolchain needed):\n\
+           Linux/macOS: CLAUDETTE_FLAVOR=full curl -fsSL \
+         https://raw.githubusercontent.com/mrdushidush/claudette/main/install.sh | sh\n\
+           Windows:     $env:CLAUDETTE_FLAVOR='full'; iwr -useb \
+         https://raw.githubusercontent.com/mrdushidush/claudette/main/install.ps1 | iex\n\
+         Or with a Rust toolchain: cargo install claudette --features integrations"
+    )
+}
+
 #[cfg(not(feature = "integrations"))]
 fn dispatch_google_auth(_scope: Option<&str>, _revoke: bool) -> ExitCode {
     eprintln!(
         "{} {}",
         theme::error(theme::ERR_GLYPH),
-        theme::error(
-            "--auth-google needs the `integrations` feature — this is a coding-only build (the \
-             default), so there is no Google code in it. Reinstall with `--features integrations` \
-             to use Gmail/Calendar."
-        )
+        theme::error(&integrations_notice(
+            "--auth-google",
+            "there is no Google code in it"
+        ))
     );
     ExitCode::FAILURE
 }
@@ -648,11 +665,10 @@ fn dispatch_telegram(_chat_ids: Vec<i64>, _allow_any_chat: bool, _resume: bool) 
     eprintln!(
         "{} {}",
         theme::error(theme::ERR_GLYPH),
-        theme::error(
-            "--telegram needs the `integrations` feature — this is a coding-only build (the \
-             default), so the Telegram bridge isn't in it. Reinstall with `--features \
-             integrations` to run the bot."
-        )
+        theme::error(&integrations_notice(
+            "--telegram",
+            "the Telegram bridge isn't in it"
+        ))
     );
     ExitCode::FAILURE
 }
@@ -787,11 +803,10 @@ fn run_briefing_setup(_time: Option<&str>, _days: Option<&str>) -> ExitCode {
     eprintln!(
         "{} {}",
         theme::error(theme::ERR_GLYPH),
-        theme::error(
-            "--briefing needs the `integrations` feature — this is a coding-only build, so the \
-             morning-briefing helper isn't in it. Reinstall with `--features integrations` to \
-             schedule briefings."
-        )
+        theme::error(&integrations_notice(
+            "--briefing",
+            "the morning-briefing helper isn't in it"
+        ))
     );
     ExitCode::FAILURE
 }
