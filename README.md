@@ -1,15 +1,35 @@
 # Claudette
 
-**An air-gapped AI coding agent that runs entirely on your own hardware.** One Rust binary, one local model through [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai/), no cloud. Run it with `--offline` and it physically can't reach the network - your code and your prompts can't leave the machine. (It's a capable personal assistant too - notes, calendar, Telegram voice - but the headline is a coding agent you can run on a no-cloud box.)
+**An air-gapped AI coding agent in one Rust binary — run it `--offline` and your code physically cannot leave the machine.** It drives a model *you* run locally through [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai/); there is no cloud-brain code in the binary at all.
 
 [![Crates.io](https://img.shields.io/crates/v/claudette.svg)](https://crates.io/crates/claudette)
 [![CI](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml/badge.svg)](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Air-gap: enforced](https://img.shields.io/badge/air--gap-enforced-success.svg)](#-air-gapped-and-enforced)
 
+<!-- TODO(onboarding 1.3): swap for docs/images/forge-demo.gif once recorded — scripts/record-demo.md has the shot list. -->
 ![Claudette editing her own repo, clearing the cargo gate, and opening a real pull request - all on a local model, offline](docs/images/claudette-ships-pr.png)
 
 *Claudette in her own repo on a local 35B model - editing the code, clearing the full `cargo fmt` / `clippy` / `cargo test` gate, then opening a genuine pull request. No cloud; nothing leaves the machine.*
+
+## Get started in 2 minutes
+
+```sh
+# 1. Install (prebuilt binary, SHA256-verified)
+curl -fsSL https://raw.githubusercontent.com/mrdushidush/claudette/main/install.sh | sh   # Linux / macOS
+iwr -useb https://raw.githubusercontent.com/mrdushidush/claudette/main/install.ps1 | iex  # Windows (PowerShell)
+
+# 2. Pull the default local brain (3.4 GB, one-time — install Ollama from ollama.com first)
+ollama pull qwen3.5:4b
+
+# 3. Check the setup: green rows = ready (it also names the best model for YOUR GPU)
+claudette --doctor
+
+# 4. Talk to it
+claudette "hello — what can you do?"
+```
+
+**Pick your path:** 🛠️ **Local coding agent** → [first-success.md#coding](docs/first-success.md#coding) · 🏠 **Private assistant + Telegram** → [first-success.md#assistant](docs/first-success.md#assistant) · 🔒 **Maximum privacy (`--offline`)** → [first-success.md#airgap](docs/first-success.md#airgap)
 
 ---
 
@@ -23,18 +43,20 @@ There's no cloud-brain code in the binary to begin with, so there's no "private 
 
 ## Install
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/mrdushidush/claudette/main/install.sh | sh   # Linux / macOS
-iwr -useb https://raw.githubusercontent.com/mrdushidush/claudette/main/install.ps1 | iex  # Windows
-cargo install claudette                                                                    # Rust
-```
+The one-liners above grab the latest prebuilt binary and verify its SHA256. Prefer cargo?
 
 ```sh
-ollama pull qwen3.5:4b        # 3.4 GB model, one-time download
-claudette "what time is it?"
+cargo install claudette        # needs a Rust toolchain
 ```
 
-**Want the cloud integrations** (Telegram bot, Gmail, Google Calendar, voice in/out, morning briefing)? They reach third-party services, so they are **not** in the default coding-only build — install with `cargo install claudette --features integrations` (or add `--features integrations` to a `cargo build`). Without it, `--telegram`, `--auth-google`, and `--briefing` print a one-line "reinstall with `--features integrations`" notice instead of running.
+**Want the cloud integrations** (Telegram bot, Gmail, Google Calendar, voice in/out, morning briefing)? They reach third-party services, so they are **not** in the default coding-only build. No Rust toolchain? Grab the prebuilt **full** flavor:
+
+```sh
+CLAUDETTE_FLAVOR=full curl -fsSL https://raw.githubusercontent.com/mrdushidush/claudette/main/install.sh | sh   # Linux / macOS
+$env:CLAUDETTE_FLAVOR='full'; iwr -useb https://raw.githubusercontent.com/mrdushidush/claudette/main/install.ps1 | iex  # Windows
+```
+
+With a toolchain, `cargo install claudette --features integrations` builds the same thing. In the lean build, `--telegram`, `--auth-google`, and `--briefing` print these install commands instead of running.
 
 Prefer not to pipe curl into a shell? Grab a [prebuilt release](https://github.com/mrdushidush/claudette/releases/latest) - each ships a SHA256. No GPU? The 4B model runs on plain CPU. Full setup and first flows → [docs/quickstart.md](docs/quickstart.md).
 
@@ -98,7 +120,8 @@ Runs on 8 GB VRAM or plain CPU; 16 GB for the 35B brain. Footprint details → [
 
 ## Docs
 
-- [docs/show-me.md](docs/show-me.md) - **start here:** plain-English example prompts
+- [docs/first-success.md](docs/first-success.md) - **start here:** copy-paste recipes to a first real win (coding, air-gap, assistant)
+- [docs/show-me.md](docs/show-me.md) - plain-English example prompts
 - [docs/quickstart.md](docs/quickstart.md) - full setup, common flows, tokens
 - [docs/configuration.md](docs/configuration.md) - every env var and token fallback
 - [docs/power-user.md](docs/power-user.md) - LM Studio recipe, brain pinning, forge knobs

@@ -6,10 +6,16 @@
 # Env overrides:
 #   $env:CLAUDETTE_VERSION       Pin a version (e.g. 0.5.2). Default: latest.
 #   $env:CLAUDETTE_INSTALL_DIR   Install location. Default: %LOCALAPPDATA%\Programs\claudette.
+#   $env:CLAUDETTE_FLAVOR        'lean' (default) or 'full'. The full flavor
+#                                bundles the opt-in cloud integrations
+#                                (Telegram, Gmail, Calendar, voice, briefing)
+#                                — same as a `--features integrations` source
+#                                build, no Rust toolchain needed.
 #
 # What this script does, in order:
 #   1. Resolves the requested tag (latest by default) from the GitHub API.
-#   2. Downloads claudette-<tag>-x86_64-pc-windows-msvc.zip + .sha256 sidecar.
+#   2. Downloads claudette-<tag>-x86_64-pc-windows-msvc.zip + .sha256 sidecar
+#      (claudette-full-<tag>-… for the full flavor).
 #   3. Verifies the SHA256 (refuses to install on mismatch).
 #   4. Extracts claudette.exe into the install dir.
 #   5. Prints a PATH update command if the install dir isn't on User PATH.
@@ -45,6 +51,13 @@ if ($arch -ne 'AMD64') {
 }
 $Target = 'x86_64-pc-windows-msvc'
 
+$Flavor = if ($env:CLAUDETTE_FLAVOR) { $env:CLAUDETTE_FLAVOR.ToLower() } else { 'lean' }
+switch ($Flavor) {
+    'lean' { $StemPrefix = 'claudette' }
+    'full' { $StemPrefix = 'claudette-full' }
+    default { Fail "unknown CLAUDETTE_FLAVOR: '$Flavor' (use 'lean' or 'full')" }
+}
+
 if ($env:CLAUDETTE_VERSION) {
     $Tag = 'v' + ($env:CLAUDETTE_VERSION -replace '^v','')
 } else {
@@ -58,7 +71,7 @@ if ($env:CLAUDETTE_VERSION) {
     if (-not $Tag) { Fail 'GitHub API returned an empty tag_name' }
 }
 
-$Stem    = "claudette-$Tag-$Target"
+$Stem    = "$StemPrefix-$Tag-$Target"
 $Archive = "$Stem.zip"
 $Url     = "https://github.com/$Repo/releases/download/$Tag/$Archive"
 $ShaUrl  = "$Url.sha256"
@@ -70,7 +83,11 @@ try {
         Invoke-WebRequest -Uri $Url    -OutFile (Join-Path $tmp $Archive)         -UseBasicParsing
         Invoke-WebRequest -Uri $ShaUrl -OutFile (Join-Path $tmp "$Archive.sha256") -UseBasicParsing
     } catch {
-        Fail "download failed: $($_.Exception.Message) (does this release exist?)"
+        if ($Flavor -eq 'full') {
+            Fail "download failed: $($_.Exception.Message) (does this release ship a full-flavor archive? Older releases are lean-only - use 'cargo install claudette --features integrations' there)"
+        } else {
+            Fail "download failed: $($_.Exception.Message) (does this release exist?)"
+        }
     }
 
     Info 'verifying SHA256'
@@ -88,7 +105,7 @@ try {
     }
     Copy-Item -Path (Join-Path $tmp 'claudette.exe') -Destination (Join-Path $InstallDir 'claudette.exe') -Force
 
-    Info "installed $Tag -> $(Join-Path $InstallDir 'claudette.exe')"
+    Info "installed $Tag ($Flavor) -> $(Join-Path $InstallDir 'claudette.exe')"
 } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }

@@ -4,6 +4,17 @@ All variables are optional; defaults are shown. Set them in your shell environme
 
 Claudette intentionally does **not** auto-load `.env` from the current working directory or its parents — that would let a shared project smuggle `OLLAMA_HOST`, `GITHUB_TOKEN`, etc. into the agent without the user noticing. For per-project overrides, use `direnv` or `source path/to/.env` before invoking.
 
+## Installer (`install.sh` / `install.ps1`)
+
+These are read by the one-line install scripts, not by the binary itself:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CLAUDETTE_FLAVOR` | `lean` | `full` downloads the prebuilt `--features integrations` binary (Telegram, Gmail, Calendar, voice, morning briefing) instead of the lean coding-only one — no Rust toolchain needed. |
+| `CLAUDETTE_VERSION` | latest | Pin a release version, e.g. `0.16.0`. |
+| `CLAUDETTE_INSTALL_DIR` | `~/.local/bin` (Unix) / `%LOCALAPPDATA%\Programs\claudette` (Windows) | Install location. |
+| `CLAUDETTE_NO_MODIFY_PATH` | unset | (Unix only) Set to anything to suppress the PATH hint. |
+
 ## Core
 
 | Variable | Default | Purpose |
