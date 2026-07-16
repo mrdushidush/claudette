@@ -184,9 +184,9 @@ Opt-in syntax/type check that runs after a successful `write_file`, `edit_file`,
 - The whole feature is a no-op under `--offline` / `CLAUDETTE_OFFLINE=1`.
 - `apply_patch` is excluded from v1 because it touches multiple files; only single-file writes (`write_file`, `edit_file`, `apply_diff`) trigger checks.
 
-### Context eviction (opt-in — not yet active)
+### Context eviction (opt-in)
 
-Opt-in wire-level pass that, under context pressure, replaces the bodies of *stale* tool results (older than the current turn and outside the 8 most-recent results) with a short recovery stub in the outgoing request — persisted session data is never modified. **The pass is not wired into the send path yet**; the knob parses but has no effect until the follow-up PR lands. Documented now so the knob's contract is fixed.
+Opt-in wire-level pass that, under context pressure, replaces the bodies of *stale* tool results (older than the current turn and outside the 8 most-recent results) with a short recovery stub in the outgoing request. The pass runs on the outgoing request at send time; persisted session data (history, undo, transcript) is never modified.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|

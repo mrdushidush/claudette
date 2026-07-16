@@ -434,7 +434,11 @@ where
             }
             let request = ApiRequest {
                 system_prompt,
-                messages: Cow::Borrowed(&self.session.messages),
+                messages: apply_context_eviction(
+                    &self.session.messages,
+                    crate::api::current_num_ctx() as usize,
+                    crate::context_evict::trigger_percent(),
+                ),
             };
             let events = self.api_client.stream(&request)?;
             let (assistant_message, usage) = build_assistant_message(events)?;
@@ -743,7 +747,11 @@ where
         system_prompt.push(ITERATION_CAP_LANDING_PROMPT.to_string());
         let request = ApiRequest {
             system_prompt,
-            messages: Cow::Borrowed(&self.session.messages),
+            messages: apply_context_eviction(
+                &self.session.messages,
+                crate::api::current_num_ctx() as usize,
+                crate::context_evict::trigger_percent(),
+            ),
         };
         let events = self
             .api_client
@@ -1037,6 +1045,31 @@ fn duplicate_denied_body(tool_name: &str) -> String {
     )
 }
 
+/// Apply the knob-gated stale-tool-output eviction pass to the outgoing
+/// message history, returning a `Cow` that borrows the session slice
+/// unchanged when the feature is OFF or no eviction fired, and owns a
+/// stubbed copy only when the pass actually replaced something.
+///
+/// Pure: the knob (`trigger`) and `num_ctx` are resolved by the caller so
+/// this stays a total function over its inputs. Keeping it free (rather than
+/// a `&self` method) scopes the borrow to `messages` alone, which is what
+/// lets the caller still take `&mut self.api_client` for `stream()`.
+fn apply_context_eviction(
+    messages: &[ConversationMessage],
+    num_ctx: usize,
+    trigger: Option<usize>,
+) -> Cow<'_, [ConversationMessage]> {
+    match trigger {
+        Some(percent) => {
+            match crate::context_evict::evict_stale_tool_outputs(messages, num_ctx, percent) {
+                Some(evicted) => Cow::Owned(evicted),
+                None => Cow::Borrowed(messages),
+            }
+        }
+        None => Cow::Borrowed(messages),
+    }
+}
+
 /// The most recent error tool_result in `messages` — the obstacle that most
 /// likely stalled the turn. Used to make a synthesized iteration-cap reply
 /// concrete ("last obstacle: …") instead of a bare "task incomplete". Scans
@@ -1211,9 +1244,10 @@ impl ToolExecutor for StaticToolExecutor {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_turn_system_prompt, parse_auto_compaction_threshold, ApiClient, ApiRequest,
-        AssistantEvent, AutoCompactionEvent, ConversationRuntime, RuntimeError, StaticToolExecutor,
-        DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD, VISION_DISCIPLINE_HINT,
+        apply_context_eviction, build_turn_system_prompt, parse_auto_compaction_threshold,
+        ApiClient, ApiRequest, AssistantEvent, AutoCompactionEvent, ConversationRuntime,
+        RuntimeError, StaticToolExecutor, DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD,
+        VISION_DISCIPLINE_HINT,
     };
     use crate::compact::CompactionConfig;
     use crate::config::{RuntimeFeatureConfig, RuntimeHookConfig};
@@ -1224,6 +1258,7 @@ mod tests {
     use crate::prompt_runtime::{ProjectContext, SystemPromptBuilder};
     use crate::session::{ContentBlock, MessageRole, Session};
     use crate::usage::TokenUsage;
+    use std::borrow::Cow;
     use std::path::PathBuf;
 
     struct ScriptedApiClient {
@@ -3054,5 +3089,89 @@ mod tests {
         std::env::remove_var(crate::tools::post_edit_check::CHECK_ENV);
         std::env::remove_var(crate::tools::post_edit_check::CMD_ENV);
         std::env::remove_var(crate::tools::post_edit_check::MAX_ROUNDS_ENV);
+    }
+
+    // ── W5b: apply_context_eviction Cow wrapper ─────────────────────────────
+
+    #[test]
+    fn eviction_off_returns_borrowed_unchanged() {
+        // Knob OFF (trigger = None): borrow the history untouched regardless of
+        // pressure — the byte-identical-wire guarantee.
+        let msgs = vec![
+            crate::session::ConversationMessage::user_text("start"),
+            crate::session::ConversationMessage::assistant(vec![ContentBlock::ToolUse {
+                id: "t1".into(),
+                name: "read_file".into(),
+                input: "{}".into(),
+            }]),
+            crate::session::ConversationMessage::tool_result(
+                "t1",
+                "read_file",
+                "x".repeat(4096),
+                false,
+            ),
+        ];
+        let out = apply_context_eviction(&msgs, 100, None);
+        assert!(matches!(out, Cow::Borrowed(_)));
+        assert_eq!(out.as_ref(), msgs.as_slice());
+    }
+
+    #[test]
+    fn eviction_on_under_threshold_returns_borrowed() {
+        // Knob ON, but the payload is far under 60% of the window → the pass
+        // returns None and nothing is cloned.
+        let msgs = vec![crate::session::ConversationMessage::user_text("hello")];
+        let out = apply_context_eviction(&msgs, 100_000, Some(60));
+        assert!(matches!(out, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn eviction_on_over_threshold_owns_and_shrinks() {
+        // user → 9 (assistant tool_use, tool_result) pairs → trailing user.
+        // The trailing user makes all 9 results stale; the last 8 are
+        // recency-immune, so the oldest is the lone evictable candidate.
+        let mut msgs = vec![crate::session::ConversationMessage::user_text("start")];
+        for i in 0..9 {
+            let tu_id = format!("tu_{i}");
+            msgs.push(crate::session::ConversationMessage::assistant(vec![
+                ContentBlock::ToolUse {
+                    id: tu_id.clone(),
+                    name: "tool".into(),
+                    input: "{}".into(),
+                },
+            ]));
+            msgs.push(crate::session::ConversationMessage::tool_result(
+                &tu_id,
+                "tool",
+                "A".repeat(600),
+                false,
+            ));
+        }
+        msgs.push(crate::session::ConversationMessage::user_text("next"));
+
+        let before_blocks: usize = msgs.iter().map(|m| m.blocks.len()).sum();
+        let before_est: usize = msgs
+            .iter()
+            .map(crate::compact::estimate_message_tokens)
+            .sum();
+
+        // Over threshold (estimate ≈ 1390 tokens vs 60% of 2000 = 1200).
+        let out = apply_context_eviction(&msgs, 2000, Some(60));
+        assert!(
+            matches!(out, Cow::Owned(_)),
+            "over-threshold eviction must own"
+        );
+
+        // Same message and per-message block counts — only a body string changed.
+        assert_eq!(out.len(), msgs.len());
+        let after_blocks: usize = out.iter().map(|m| m.blocks.len()).sum();
+        assert_eq!(after_blocks, before_blocks);
+
+        // A stale body was actually stubbed → strictly lower estimate.
+        let after_est: usize = out
+            .iter()
+            .map(crate::compact::estimate_message_tokens)
+            .sum();
+        assert!(after_est < before_est, "eviction must shrink the estimate");
     }
 }
