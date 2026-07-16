@@ -92,7 +92,12 @@ pub(crate) fn evict_stale_tool_outputs(
     }
 
     // Current-turn boundary: index of the LAST User message.
-    let last_user_idx = messages.iter().enumerate().rev().find(|(_, m)| m.role == MessageRole::User).map(|(i, _)| i);
+    let last_user_idx = messages
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, m)| m.role == MessageRole::User)
+        .map(|(i, _)| i);
 
     // No user message at all → nothing is safely stale.
     let boundary = last_user_idx?;
@@ -137,39 +142,25 @@ pub(crate) fn evict_stale_tool_outputs(
     // Evict oldest-first.
     let mut result: Vec<ConversationMessage> = messages.to_vec();
     let mut current_estimate = estimate;
+    let mut evicted_any = false;
 
     for &(mi, bi) in &evictable {
         if current_estimate < threshold {
             break;
         }
-        let stub = match &result[mi].blocks[bi] {
-            ContentBlock::ToolResult {
-                tool_name, output, ..
-            } => stub_body(tool_name, output.len()),
-            _ => continue, // safety: should always be ToolResult
-        };
-        let stub_len = stub.len();
-        if let ContentBlock::ToolResult { output, .. } = &result[mi].blocks[bi] {
-            current_estimate -= (output.len() - stub_len) / 4;
+        if let ContentBlock::ToolResult {
+            tool_name, output, ..
+        } = &mut result[mi].blocks[bi]
+        {
+            let stub = stub_body(tool_name, output.len());
+            current_estimate =
+                current_estimate.saturating_sub(output.len().saturating_sub(stub.len()) / 4);
+            *output = stub;
+            evicted_any = true;
         }
-        result[mi].blocks[bi] = ContentBlock::ToolResult {
-            tool_use_id: match &result[mi].blocks[bi] {
-                ContentBlock::ToolResult { tool_use_id, .. } => tool_use_id.clone(),
-                _ => continue,
-            },
-            tool_name: match &result[mi].blocks[bi] {
-                ContentBlock::ToolResult { tool_name, .. } => tool_name.clone(),
-                _ => continue,
-            },
-            output: stub,
-            is_error: match &result[mi].blocks[bi] {
-                ContentBlock::ToolResult { is_error, .. } => *is_error,
-                _ => continue,
-            },
-        };
     }
 
-    if current_estimate < threshold {
+    if evicted_any {
         Some(result)
     } else {
         None
@@ -179,10 +170,9 @@ pub(crate) fn evict_stale_tool_outputs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::{ConversationMessage};
     use std::sync::Mutex;
 
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     // ── trigger_percent_parses ────────────────────────────────────────────
 
@@ -243,41 +233,42 @@ mod tests {
 
     #[test]
     fn no_user_message_is_none() {
-        let msgs = vec![ConversationMessage::assistant(vec![])];
-        assert!(evict_stale_tool_outputs(&msgs, 100_000, 60).is_none());
+        // Big enough to be over the threshold — the None must come from the
+        // missing-user-message check, not the pressure check.
+        let msgs = vec![ConversationMessage::assistant(vec![ContentBlock::Text {
+            text: "x".repeat(4000),
+        }])];
+        assert!(evict_stale_tool_outputs(&msgs, 1000, 60).is_none());
     }
 
     // ── current_turn_results_are_immune ─────────────────────────────────────
 
     #[test]
     fn current_turn_results_are_immune() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        std::env::set_var(EVICT_ENV, "1");
-
-        // Build: user msg → assistant with tool_use → huge stale-shaped result
-        // placed AFTER the last user message. The boundary is the user index;
-        // everything at or after it is immune.
+        // user → assistant tool_use → huge stale-shaped result. Everything at
+        // or after the last user message is the current turn and immune, even
+        // though the estimate is over the threshold.
         let msgs = vec![
+            ConversationMessage::user_text("start"),
             ConversationMessage::assistant(vec![ContentBlock::ToolUse {
                 id: "t1".into(),
                 name: "read_file".into(),
                 input: "{}".into(),
             }]),
-            ConversationMessage::tool_result("t1", "read_file", "x".repeat(2048), false),
+            ConversationMessage::tool_result("t1", "read_file", "x".repeat(4096), false),
         ];
 
-        // The tool result is at index 1, boundary (last user) doesn't exist → None.
-        assert!(evict_stale_tool_outputs(&msgs, 100_000, 60).is_none());
+        // estimate ≈ 1030 tokens, threshold = 600 → over, but nothing evictable.
+        assert!(evict_stale_tool_outputs(&msgs, 1000, 60).is_none());
     }
 
     // ── last_k_tool_results_are_immune ──────────────────────────────────────
 
     #[test]
     fn last_k_tool_results_are_immune() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        std::env::set_var(EVICT_ENV, "1");
-
-        // Build: user → assistant → 9 old tool results (each >512 chars)
+        // user → 9 (assistant tool_use, tool_result) pairs → user. The
+        // trailing user message makes all 9 results stale; the last 8 are
+        // recency-immune, so only the oldest (message index 2) is evictable.
         let mut msgs = vec![ConversationMessage::user_text("start")];
         for i in 0..9 {
             let tu_id = format!("tu_{i}");
@@ -295,33 +286,31 @@ mod tests {
                 false,
             ));
         }
+        msgs.push(ConversationMessage::user_text("next"));
 
-        // 9 tool results → last 8 are immune. Only the oldest (index 0) is evictable.
-        let result = evict_stale_tool_outputs(&msgs, 100_000, 60);
-        assert!(result.is_some());
-        let result = result.unwrap();
+        // estimate ≈ 1390 tokens, threshold = 1200 → over. Evicting the one
+        // candidate is not enough to get back under the threshold, but partial
+        // relief still returns Some (evicted at least one → Some).
+        let result = evict_stale_tool_outputs(&msgs, 2000, 60).expect("one eviction expected");
 
-        // Check that only the first tool result was stubbed (index 8 in messages).
-        // The last 8 should still have their original output.
-        for i in 1..9 {
-            let msg_idx = 2 * i; // user at 0, then assistant+tool pairs
-            if let ContentBlock::ToolResult { output, .. } = &result[msg_idx].blocks[0] {
-                assert!(
-                    output.len() > MIN_EVICTABLE_CHARS,
-                    "msg {} should not be stubbed",
-                    msg_idx
-                );
+        // Tool results sit at message indices 2, 4, …, 18. Only the oldest
+        // (index 2) may be stubbed.
+        for mi in (2..=18).step_by(2) {
+            if let ContentBlock::ToolResult { output, .. } = &result[mi].blocks[0] {
+                if mi == 2 {
+                    assert!(
+                        output.starts_with(STUB_MARKER),
+                        "oldest result must be stubbed"
+                    );
+                } else {
+                    assert!(
+                        !output.starts_with(STUB_MARKER),
+                        "msg {mi} must keep its body"
+                    );
+                }
+            } else {
+                panic!("expected ToolResult at message {mi}");
             }
-        }
-
-        // The first tool result (index 2) should be stubbed.
-        if let ContentBlock::ToolResult { output, .. } = &result[2].blocks[0] {
-            assert!(
-                output.starts_with(STUB_MARKER),
-                "first tool result should be stubbed"
-            );
-        } else {
-            panic!("expected ToolResult at index 2");
         }
     }
 
@@ -329,42 +318,59 @@ mod tests {
 
     #[test]
     fn evicts_oldest_first_and_stops_at_threshold() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        std::env::set_var(EVICT_ENV, "1");
-
-        // Two big stale results. Evicting the first should be enough to drop below threshold.
-        let msgs = vec![
+        // Two big stale results (both candidates: 10 results total, the 8
+        // small fillers absorb the recency immunity), then a fresh user
+        // message. Evicting the first big result is enough to drop below the
+        // threshold, so the second keeps its body.
+        let mut msgs = vec![
             ConversationMessage::user_text("start"),
             ConversationMessage::assistant(vec![ContentBlock::ToolUse {
                 id: "t1".into(),
                 name: "tool_a".into(),
                 input: "{}".into(),
             }]),
-            ConversationMessage::tool_result("t1", "tool_a", "B".repeat(2048), false),
+            ConversationMessage::tool_result("t1", "tool_a", "B".repeat(4096), false),
             ConversationMessage::assistant(vec![ContentBlock::ToolUse {
                 id: "t2".into(),
                 name: "tool_b".into(),
                 input: "{}".into(),
             }]),
-            ConversationMessage::tool_result("t2", "tool_b", "C".repeat(2048), false),
+            ConversationMessage::tool_result("t2", "tool_b", "C".repeat(4096), false),
         ];
+        for i in 0..8 {
+            let tu_id = format!("f_{i}");
+            msgs.push(ConversationMessage::assistant(vec![
+                ContentBlock::ToolUse {
+                    id: tu_id.clone(),
+                    name: "tool".into(),
+                    input: "{}".into(),
+                },
+            ]));
+            msgs.push(ConversationMessage::tool_result(
+                &tu_id,
+                "tool",
+                "x".repeat(100),
+                false,
+            ));
+        }
+        msgs.push(ConversationMessage::user_text("next"));
 
-        let result = evict_stale_tool_outputs(&msgs, 100_000, 60);
-        assert!(result.is_some());
-        let result = result.unwrap();
+        // estimate ≈ 2290 tokens, threshold = 1500; evicting tool_a frees
+        // ~950 → ~1340 < 1500 → stop before tool_b.
+        let result = evict_stale_tool_outputs(&msgs, 2500, 60).expect("eviction expected");
 
-        // First tool result should be stubbed.
         if let ContentBlock::ToolResult { output, .. } = &result[2].blocks[0] {
-            assert!(output.starts_with(STUB_MARKER));
+            assert!(
+                output.starts_with(STUB_MARKER),
+                "oldest big result must be stubbed"
+            );
         } else {
             panic!("expected ToolResult at index 2");
         }
-
-        // Second tool result should NOT be stubbed (eviction stopped after first).
         if let ContentBlock::ToolResult { output, .. } = &result[4].blocks[0] {
             assert!(
                 !output.starts_with(STUB_MARKER),
-                "second tool result should not be stubbed"
+                "second big result must keep its body"
             );
         } else {
             panic!("expected ToolResult at index 4");
@@ -375,7 +381,9 @@ mod tests {
 
     #[test]
     fn small_results_are_skipped() {
-        let msgs = vec![
+        // The only non-immune candidate is under MIN_EVICTABLE_CHARS, so
+        // nothing is evicted even though the estimate is over the threshold.
+        let mut msgs = vec![
             ConversationMessage::user_text("start"),
             ConversationMessage::assistant(vec![ContentBlock::ToolUse {
                 id: "t1".into(),
@@ -385,38 +393,67 @@ mod tests {
             // Only 200 chars — below MIN_EVICTABLE_CHARS (512).
             ConversationMessage::tool_result("t1", "tool", "x".repeat(200), false),
         ];
+        for i in 0..8 {
+            let tu_id = format!("f_{i}");
+            msgs.push(ConversationMessage::assistant(vec![
+                ContentBlock::ToolUse {
+                    id: tu_id.clone(),
+                    name: "tool".into(),
+                    input: "{}".into(),
+                },
+            ]));
+            msgs.push(ConversationMessage::tool_result(
+                &tu_id,
+                "tool",
+                "x".repeat(600),
+                false,
+            ));
+        }
+        msgs.push(ConversationMessage::user_text("next"));
 
-        assert!(evict_stale_tool_outputs(&msgs, 100_000, 60).is_none());
+        // estimate ≈ 1290 tokens, threshold = 1200 → over, but no eviction.
+        assert!(evict_stale_tool_outputs(&msgs, 2000, 60).is_none());
     }
 
     // ── already_stubbed_results_are_skipped ──────────────────────────────────
 
     #[test]
     fn already_stubbed_results_are_skipped() {
-        let msgs = vec![
+        // A previously-evicted result, padded past the size floor so only the
+        // marker check can skip it — it must not be re-evicted (idempotence).
+        let mut stubbed = stub_body("tool", 2048);
+        stubbed.push_str(&"x".repeat(600));
+
+        let mut msgs = vec![
             ConversationMessage::user_text("start"),
             ConversationMessage::assistant(vec![ContentBlock::ToolUse {
                 id: "t1".into(),
                 name: "tool".into(),
                 input: "{}".into(),
             }]),
-            // Already stubbed — starts with STUB_MARKER.
-            ConversationMessage::tool_result("t1", "tool", "x".repeat(2048), false),
+            ConversationMessage::tool_result("t1", "tool", stubbed, false),
         ];
-
-        // Replace the output with a stub to simulate prior eviction.
-        let mut msgs = msgs;
-        if let ContentBlock::ToolResult { .. } = &msgs[2].blocks[0] {
-            msgs[2].blocks[0] = ContentBlock::ToolResult {
-                tool_use_id: "t1".into(),
-                tool_name: "tool".into(),
-                output: stub_body("tool", 2048),
-                is_error: false,
-            };
+        for i in 0..8 {
+            let tu_id = format!("f_{i}");
+            msgs.push(ConversationMessage::assistant(vec![
+                ContentBlock::ToolUse {
+                    id: tu_id.clone(),
+                    name: "tool".into(),
+                    input: "{}".into(),
+                },
+            ]));
+            msgs.push(ConversationMessage::tool_result(
+                &tu_id,
+                "tool",
+                "x".repeat(600),
+                false,
+            ));
         }
+        msgs.push(ConversationMessage::user_text("next"));
 
-        // The stubbed result should not be re-evicted.
-        assert!(evict_stale_tool_outputs(&msgs, 100_000, 60).is_none());
+        // estimate ≈ 1460 tokens, threshold = 1200 → over, but the only
+        // candidate already starts with STUB_MARKER → None.
+        assert!(evict_stale_tool_outputs(&msgs, 2000, 60).is_none());
     }
 
     // ── stub_body_is_valid_json_and_discourages_refetch ─────────────────────
@@ -453,11 +490,10 @@ mod tests {
 
     #[test]
     fn eviction_preserves_message_and_block_counts() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        std::env::set_var(EVICT_ENV, "1");
-
+        // Same 9-pairs-plus-trailing-user shape as the recency test — one
+        // eviction fires, and the message/block structure must be unchanged.
         let mut msgs = vec![ConversationMessage::user_text("start")];
-        for i in 0..3 {
+        for i in 0..9 {
             let tu_id = format!("tu_{i}");
             msgs.push(ConversationMessage::assistant(vec![
                 ContentBlock::ToolUse {
@@ -473,13 +509,12 @@ mod tests {
                 false,
             ));
         }
+        msgs.push(ConversationMessage::user_text("next"));
 
         let original_msg_count = msgs.len();
         let original_block_count: usize = msgs.iter().map(|m| m.blocks.len()).sum();
 
-        let result = evict_stale_tool_outputs(&msgs, 100_000, 60);
-        assert!(result.is_some());
-        let result = result.unwrap();
+        let result = evict_stale_tool_outputs(&msgs, 2000, 60).expect("one eviction expected");
 
         assert_eq!(result.len(), original_msg_count);
         let new_block_count: usize = result.iter().map(|m| m.blocks.len()).sum();

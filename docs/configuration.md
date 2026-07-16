@@ -172,3 +172,11 @@ Opt-in syntax/type check that runs after a successful `write_file`, `edit_file`,
 - Success (exit 0) appends nothing to the tool result — only failures surface output.
 - The whole feature is a no-op under `--offline` / `CLAUDETTE_OFFLINE=1`.
 - `apply_patch` is excluded from v1 because it touches multiple files; only single-file writes (`write_file`, `edit_file`, `apply_diff`) trigger checks.
+
+### Context eviction (opt-in — not yet active)
+
+Opt-in wire-level pass that, under context pressure, replaces the bodies of *stale* tool results (older than the current turn and outside the 8 most-recent results) with a short recovery stub in the outgoing request — persisted session data is never modified. **The pass is not wired into the send path yet**; the knob parses but has no effect until the follow-up PR lands. Documented now so the knob's contract is fixed.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CLAUDETTE_EVICT_TOOL_OUTPUT` | unset (off) | Set to `1`, `true`, `yes`, or `on` (case-insensitive) to evict stale tool-result bodies once the estimated prompt exceeds 60% of `num_ctx`, or set an integer `10`–`90` to pick the trigger percentage directly. Anything else is treated as OFF (fail-closed). Results under 512 chars and already-evicted stubs are never touched. |
