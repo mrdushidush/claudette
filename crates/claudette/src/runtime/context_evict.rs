@@ -13,8 +13,6 @@
 //! wasting tokens on redundant work that was already reflected in downstream
 //! reasoning.
 
-#![allow(dead_code)] // wired into the send path in the follow-up PR (W5b)
-
 use crate::compact::estimate_message_tokens;
 use crate::session::{ContentBlock, ConversationMessage, MessageRole};
 
