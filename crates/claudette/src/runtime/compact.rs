@@ -429,7 +429,8 @@ fn truncate_summary(content: &str, max_chars: usize) -> String {
     truncated
 }
 
-fn estimate_message_tokens(message: &ConversationMessage) -> usize {
+#[must_use]
+pub(crate) fn estimate_message_tokens(message: &ConversationMessage) -> usize {
     message
         .blocks
         .iter()
