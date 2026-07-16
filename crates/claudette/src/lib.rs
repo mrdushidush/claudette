@@ -26,6 +26,8 @@
 pub mod compact;
 #[path = "runtime/config.rs"]
 pub mod config;
+#[path = "runtime/context_evict.rs"]
+pub mod context_evict;
 #[path = "runtime/conversation.rs"]
 pub mod conversation;
 #[path = "runtime/hooks.rs"]
