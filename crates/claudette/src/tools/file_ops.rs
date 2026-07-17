@@ -412,27 +412,44 @@ mod tests {
         // The generate_code coder sidecar was retired — write_file now writes
         // source files itself, no size gate and no workspace requirement.
         // Use a `.sh` file so no external interpreter is involved.
-        let input =
-            json!({ "path": "claudette-writecode-test.sh", "content": "echo hi\n" }).to_string();
-        let target = files_dir().join("claudette-writecode-test.sh");
-        let _ = fs::remove_file(&target);
-        let out = run_write_file(&input);
-        let _ = fs::remove_file(&target);
-        let out = out.expect("code file should be written directly");
-        assert!(out.contains("\"ok\":true"), "got: {out}");
+        with_workspace_env(None, || {
+            let input = json!({ "path": "claudette-writecode-test.sh", "content": "echo hi\n" })
+                .to_string();
+            let target = files_dir().join("claudette-writecode-test.sh");
+            let _ = fs::remove_file(&target);
+            let out = run_write_file(&input);
+            let landed = target.exists();
+            let _ = fs::remove_file(&target);
+            let out = out.expect("code file should be written directly");
+            assert!(out.contains("\"ok\":true"), "got: {out}");
+            assert!(
+                landed,
+                "file must land in files_dir, got nothing at {}",
+                target.display()
+            );
+        });
     }
 
     #[test]
     fn write_file_accepts_large_code_directly() {
         // A large source file is no longer refused/routed anywhere — it writes.
-        let body = "x = 1\n".repeat(200);
-        let input = json!({ "path": "claudette-writecode-big.sh", "content": body }).to_string();
-        let target = files_dir().join("claudette-writecode-big.sh");
-        let _ = fs::remove_file(&target);
-        let out = run_write_file(&input);
-        let _ = fs::remove_file(&target);
-        let out = out.expect("large code file should be written directly");
-        assert!(out.contains("\"ok\":true"), "got: {out}");
+        with_workspace_env(None, || {
+            let body = "x = 1\n".repeat(200);
+            let input =
+                json!({ "path": "claudette-writecode-big.sh", "content": body }).to_string();
+            let target = files_dir().join("claudette-writecode-big.sh");
+            let _ = fs::remove_file(&target);
+            let out = run_write_file(&input);
+            let landed = target.exists();
+            let _ = fs::remove_file(&target);
+            let out = out.expect("large code file should be written directly");
+            assert!(out.contains("\"ok\":true"), "got: {out}");
+            assert!(
+                landed,
+                "file must land in files_dir, got nothing at {}",
+                target.display()
+            );
+        });
     }
 
     #[test]
