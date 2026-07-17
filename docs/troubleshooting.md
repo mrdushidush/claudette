@@ -10,6 +10,56 @@ the resolved brain model, toolchains, and (if `--offline`) the egress guard.
 
 ---
 
+## Day one: the five things that usually bite first
+
+New install, something already wrong? It is almost certainly one of these.
+Each links to the full entry below.
+
+| Symptom | Likely cause | Jump to |
+|---------|--------------|---------|
+| `claudette: command not found` right after install | the install dir isn't on your `PATH` | [command not found](#claudette-command-not-found-after-install) |
+| Everything errors: "connection refused" / backend unreachable | Ollama (or LM Studio) isn't running | [backend not running](#the-backend-isnt-running) |
+| The very first prompt hangs 1–3 minutes, then answers | cold model load — normal, not a hang | [first-prompt hang](#the-first-prompt-hangs-for-13-minutes-then-answers) |
+| `/recall` warns about `/v1/embeddings HTTP 501` | no embedding model loaded; recall is optional | [recall 501](#recall-returns-v1embeddings-http-501-or-400) |
+| `--telegram` / `--auth-google` / `--briefing` just print install commands | you have the lean build; those need the full flavor | [lean build](#telegram--google--briefing-print-an-install-command-instead-of-running) |
+
+---
+
+## The backend isn't running
+
+**Cause:** Claudette drives a model server you run yourself. If Ollama or LM
+Studio isn't up, every turn fails at the first request — there is no cloud
+fallback to quietly paper over it.
+
+**Fixes:**
+- **Ollama:** start it with `ollama serve` (it also starts on demand on most
+  desktop installs), then confirm the brain is present with `ollama list`.
+- **LM Studio:** open **Developer → Local Server**, hit **Start**, and load a
+  model. Claudette needs `OLLAMA_HOST=http://localhost:1234` and
+  `CLAUDETTE_OPENAI_COMPAT=1` to talk to it — see
+  [configuration.md](configuration.md).
+- Either way, `claudette --doctor` names which backend it probed and at what
+  URL; the red row carries a copy-paste `↳ fix:` command.
+
+---
+
+## Telegram / Google / briefing print an install command instead of running
+
+**Cause:** you're on the **lean** build. The cloud integrations (Telegram,
+Gmail, Google Calendar, voice, morning briefing) reach third-party services, so
+they are deliberately not compiled into the default coding-only binary. Nothing
+is broken — the flag is telling you what to install.
+
+**Fixes:**
+- Grab the prebuilt **full** flavor:
+  `CLAUDETTE_FLAVOR=full curl -fsSL …/install.sh | sh`
+  (Windows: `$env:CLAUDETTE_FLAVOR='full'; iwr -useb …/install.ps1 | iex`).
+- With a Rust toolchain: `cargo install claudette --features integrations`.
+- Staying lean is a valid choice — the coding agent and the air-gap are all in
+  the default build.
+
+---
+
 ## The first prompt hangs for 1–3 minutes, then answers
 
 **Cause:** the backend evicted the model (idle TTL) or never loaded it, so
