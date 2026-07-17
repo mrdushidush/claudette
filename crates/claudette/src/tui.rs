@@ -47,6 +47,15 @@ const TAB_COUNT: u8 = 5;
 const PAGE_LINES: u16 = 8;
 /// Cursor blink interval.
 const BLINK_MS: u64 = 400;
+
+/// Shown in the input row the moment the TUI opens, so the experimental
+/// status is visible where the user actually is. It rides `paste_notice`
+/// rather than a pre-launch `eprintln!` because the alternate screen
+/// swallows anything printed before `run_tui`; it clears on the first
+/// keypress like any other notice.
+const TUI_EXPERIMENTAL_NOTICE: &str =
+    "⚠ the TUI is experimental (demo-only) — the REPL is the daily driver";
+
 /// How often to re-scan the notes directory.
 const NOTES_CACHE_SECS: u64 = 2;
 
@@ -726,7 +735,10 @@ fn run_loop(
     tui_rx: &Receiver<TuiEvent>,
     user_tx: &Sender<UserInput>,
 ) -> Result<()> {
-    let mut app = App::default();
+    let mut app = App {
+        paste_notice: Some(TUI_EXPERIMENTAL_NOTICE.to_string()),
+        ..App::default()
+    };
 
     loop {
         // Drain worker events.

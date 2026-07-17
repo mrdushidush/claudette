@@ -70,6 +70,7 @@ Prefer not to pipe curl into a shell? Grab a [prebuilt release](https://github.c
 | **One-shot** | `claudette "..."` | Print a reply and exit; pipe-friendly |
 | **TUI** _(experimental)_ | `claudette --tui` | Demo-only fullscreen UI, 5 tabs; known rendering rough edges — the REPL is the daily driver |
 | **Telegram** | `claudette --telegram` | Voice-capable chat from your phone |
+| **VS Code** | [`editor/vscode/`](editor/vscode/README.md) | Send a selection or the open file to Claudette without leaving the editor |
 
 - **80+ tools across 20 opt-in groups.** The model turns a group on (`enable_tools("git")`) only when it needs it, so the base schema stays ~200 tokens however many tools exist. Point Claudette at a repo and the coding core - files, search, tests - is pre-enabled.
 - **Forge - an autonomous code pipeline.** `claudette --forge "<task>"` runs Planner → Coder → Verifier → fix-loop → Submitter. The Verifier actually builds and runs the tests each round (`cargo`, `go`, `pytest`, `npm`), so a diff that doesn't compile or breaks a test can't pass - and no PR opens until you approve the plan and the full diff. → [docs/forge.md](docs/forge.md)
