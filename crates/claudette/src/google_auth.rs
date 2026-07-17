@@ -935,6 +935,12 @@ mod tests {
 
     #[test]
     fn access_token_errors_without_tokens() {
+        // Serialize against env-mutating tests: `tokens_path` resolves through
+        // `env_config::home_dir()`, so a concurrent test that temporarily
+        // overrides the home env vars can flip the resolved path between the
+        // skip-guard below and the `access_token` call — the guard then misses
+        // a real token file and the assertion sees the wrong error variant.
+        let _guard = crate::test_env_lock();
         // If the user happens to have a real token file, skip.
         if tokens_path(AuthContext::Calendar).exists() {
             return;
