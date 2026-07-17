@@ -77,6 +77,7 @@ pub mod run;
 pub mod scheduler;
 pub mod secrets;
 pub mod security_review;
+pub mod setup;
 pub mod status;
 #[cfg(feature = "integrations")]
 pub mod telegram_mode;

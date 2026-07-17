@@ -163,6 +163,25 @@ impl StatusController {
         self.transition(Phase::Idle, true);
     }
 
+    /// Erase the transient spinner line (if any) and print `line` dimmed to
+    /// stderr — for one-off notices (e.g. the cold-start heads-up) that must
+    /// not collide with an in-flight spinner. The phase is left unchanged,
+    /// so an active spinner simply redraws below the note on its next tick.
+    /// No-op when the indicator is disabled, which keeps every non-REPL
+    /// surface (one-shot, forge, TUI, tests) byte-for-byte unchanged.
+    pub fn print_note(&self, line: &str) {
+        if !self.enabled.load(Ordering::Relaxed) {
+            return;
+        }
+        let mut g = self.lock();
+        self.erase(&mut g);
+        // Still holding the inner lock, so the render thread can't redraw
+        // between the erase and this print.
+        let mut err = std::io::stderr().lock();
+        let _ = writeln!(err, "{}", theme::dim(line));
+        let _ = err.flush();
+    }
+
     fn transition(&self, phase: Phase, erase: bool) {
         if !self.enabled.load(Ordering::Relaxed) {
             return;
@@ -301,5 +320,7 @@ mod tests {
         c.on_tool_end();
         c.on_prompt();
         c.on_turn_end();
+        // Disabled → print_note writes nothing (non-REPL surfaces unchanged).
+        c.print_note("cold-start note");
     }
 }

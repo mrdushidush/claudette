@@ -123,7 +123,7 @@ foreach ($p in ($userPath -split ';')) {
 }
 
 if ($onPath) {
-    Info 'next: claudette --doctor'
+    Info 'next: claudette --setup'
 } else {
     Write-Host ''
     Warn "$InstallDir is not on your User PATH."
@@ -131,5 +131,5 @@ if ($onPath) {
     Write-Host ''
     Write-Host "    [System.Environment]::SetEnvironmentVariable('Path', '$InstallDir;' + [System.Environment]::GetEnvironmentVariable('Path','User'), 'User')"
     Write-Host ''
-    Write-Host '  Then run: claudette --doctor'
+    Write-Host '  Then run: claudette --setup'
 }

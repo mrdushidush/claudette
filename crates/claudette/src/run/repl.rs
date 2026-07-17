@@ -232,6 +232,13 @@ pub fn run_agent_repl(opts: SessionOptions) -> Result<()> {
                     );
                 }
 
+                // One-time "what's next?" menu after the first successful
+                // turn of a brand-new install (~/.claudette/.onboarded
+                // sentinel). REPL-only call site keeps one-shot / forge /
+                // TUI output untouched; the fn TTY-gates itself (the REPL
+                // can be piped) and self-disarms after a single print.
+                crate::firstrun::maybe_print_first_success_nudge();
+
                 // Cross-session recall: enqueue the user input + the
                 // assistant text from this turn for the async indexer
                 // thread (see [`index_turn_for_recall`] / [`recall_index_sender`]).

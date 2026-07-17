@@ -118,7 +118,7 @@ info "installed ${TAG} (${FLAVOR}) → ${INSTALL_DIR}/claudette"
 
 case ":$PATH:" in
   *:"$INSTALL_DIR":*)
-    info "next: claudette --doctor"
+    info "next: claudette --setup"
     ;;
   *)
     if [ -z "${CLAUDETTE_NO_MODIFY_PATH:-}" ]; then
@@ -126,7 +126,7 @@ case ":$PATH:" in
       warn "${INSTALL_DIR} is not on your PATH."
       printf '  Add this to your shell profile (~/.bashrc, ~/.zshrc, ~/.profile):\n\n'
       printf '    export PATH="%s:$PATH"\n\n' "$INSTALL_DIR"
-      printf '  Then run: claudette --doctor\n'
+      printf '  Then run: claudette --setup\n'
     fi
     ;;
 esac

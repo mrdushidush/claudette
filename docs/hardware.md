@@ -105,36 +105,42 @@ OLLAMA_KV_CACHE_TYPE=q8_0     # quantised KV cache
 
 ## No GPU? CPU-only mode
 
-You don't need a discrete GPU to run Claudette. Ollama happily runs the smaller Qwen models on plain CPU — at lower throughput, but enough to be useful for short-turn assistant work (notes, calendar, weather, brief Q&A). The larger MoE models are not realistic on CPU; everything else is.
+You don't need a discrete GPU to run Claudette. Ollama happily runs the default brain on plain CPU — at lower throughput, but enough to be useful for assistant work (notes, calendar, weather, brief Q&A) and short coding turns. The larger MoE models are not realistic on CPU; everything else is.
 
-What to expect:
+One command, same default the installer suggests:
 
-| Hardware | Brain that fits | Realistic throughput |
-|----------|-----------------|----------------------|
-| MacBook Air M1/M2 (8 GB unified) | `qwen2.5:3b` (~2 GB) | ~12–18 t/s — perfectly conversational |
-| Intel laptop with 16 GB RAM, no GPU | `qwen2.5:1.5b` or `qwen2.5:3b` | ~5–10 t/s — usable, not snappy |
-| Raspberry Pi 5 (8 GB) | `qwen2.5:0.5b` or `1.5b` | ~3–6 t/s — best for the Telegram-bot use case |
-| Old desktop, 8 GB RAM, no GPU | `qwen2.5:0.5b` | ~4–8 t/s — works for short prompts |
+```sh
+ollama pull qwen3.5:4b     # ~3.4 GB
+```
 
-Pick a smaller brain and pin it. From inside Claudette:
+`qwen3.5:4b` scores **45/50 (90%) + K 8/8** on the battery. That score was measured on the GPU rig above — the model gives the same answers on CPU, just slower. We have **not** measured CPU tok/s on the battery yet, so the table below gives honest qualitative expectations, not numbers; a CPU-only benchmark report is one of the most useful contributions you can make.
+
+| Hardware | Brain that fits | Expectation (unmeasured) |
+|----------|-----------------|--------------------------|
+| MacBook Air M1/M2 (8 GB unified) | `qwen3.5:4b` | conversational — fine as a daily assistant |
+| Intel laptop with 16 GB RAM, no GPU | `qwen3.5:4b` | usable, not snappy |
+| Raspberry Pi 5 (8 GB) | `qwen2.5:1.5b` | short prompts / Telegram-bot duty |
+| Old desktop, 8 GB RAM, no GPU | `qwen2.5:0.5b`–`1.5b` | short prompts only |
+
+If you drop below the 4b, pin the smaller brain from inside Claudette:
 
 ```
-/brain qwen2.5:3b
+/brain qwen2.5:1.5b
 ```
 
 …or set it permanently in `~/.claudette/.env`:
 
 ```
-CLAUDETTE_MODEL=qwen2.5:3b
+CLAUDETTE_MODEL=qwen2.5:1.5b
 ```
 
-Pull the model once with `ollama pull qwen2.5:3b` (or whichever size matches your machine). Ollama auto-detects no-GPU and uses CPU; no configuration required on its side.
+Pull the model once with `ollama pull <model>`. Ollama auto-detects no-GPU and uses CPU; no configuration required on its side.
 
 **Trade-offs you should know:**
 
 - The 0.5b and 1.5b brains will hallucinate tool-call shapes more often than the 4b. The auto-fix loops catch most of it but you'll occasionally see retries in the TUI's Tools tab.
 - `--forge` mode is realistic on CPU only with a small brain and a lot of patience — the autonomous plan→code→verify→fix loop runs many turns. Prefer it on a GPU box.
-- First-token latency is the noticeable cost — model load time. Keep the same brain hot between turns; the 4-5 second warmup is per-cold-start, not per-turn.
+- First-token latency is the noticeable cost — model load time. Keep the same brain hot between turns; the load-time warmup is per-cold-start, not per-turn. The REPL prints a one-time heads-up on the first request of a session so a cold load never reads as a silent hang.
 
 If your machine is too small even for the 0.5b brain, Claudette is the wrong tool — at that point you want a hosted service (ChatGPT, Claude.ai). The whole *point* of Claudette is local inference; there is no cloud fallback.
 
