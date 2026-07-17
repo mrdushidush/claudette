@@ -4,7 +4,7 @@ Zero to a working agent in **under five minutes**. Work the checklist top to
 bottom — every step says what success looks like, and where to look if you
 don't see it:
 
-> ☐ installed → ☐ `--doctor` all green → ☐ first conversation → ☐ first
+> ☐ installed → ☐ `--setup` all green → ☐ first conversation → ☐ first
 > coding one-shot → ☐ Forge on a repo → ☐ *(optional)* Telegram
 
 ## ☐ 1. Install (2 min)
@@ -30,7 +30,7 @@ ollama pull qwen3.5:4b     # ~3.4 GB on disk, ~3.4 GB VRAM — runs on plain CPU
 ```
 
 **You should see:** the installer end with `installed vX.Y.Z (lean) → …` and a
-`next: claudette --doctor` hint; `ollama pull` reach 100%.
+`next: claudette --setup` hint; `ollama pull` reach 100%.
 **If `claudette` isn't found in a new terminal:**
 [troubleshooting → command not found](troubleshooting.md#claudette-command-not-found-after-install).
 
@@ -48,7 +48,19 @@ Studio or a bigger model? See [configuration.md](configuration.md) and
 > `--telegram`, `--auth-google`, and `--briefing` flows below all need it; the
 > lean build prints those exact install commands if you try one.
 
-## ☐ 2. `--doctor` all green (30 sec)
+## ☐ 2. Guided setup → all green (1 min)
+
+```bash
+claudette --setup
+```
+
+`--setup` is the one-time wizard: it detects your backend (Ollama / LM Studio)
+and GPU VRAM, offers to pull the brain that fits your card, points at the
+integrations setup, and finishes by running the full `--doctor` report. It
+needs a real terminal, and it refuses under `--offline`.
+
+Already set up, or just want the check? `claudette --doctor` runs the report on
+its own, any time something misbehaves:
 
 ```bash
 claudette --doctor
