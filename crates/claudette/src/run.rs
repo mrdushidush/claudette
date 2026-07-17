@@ -67,6 +67,10 @@ mod forge_run;
 pub(crate) use forge_run::forge_auto_approve_enabled;
 pub use forge_run::run_forge_mission;
 
+/// Deep-research mode pure core (manifest / batches / finding parser /
+/// progress stores). Driven by the CLI flag added in the follow-up PR.
+mod research;
+
 /// Resolve the model name the runtime is currently using. Sprint 14: this
 /// now delegates to `model_config::active().brain.model`, so once a
 /// `/preset` or `/brain` slash command mutates the active config, every
