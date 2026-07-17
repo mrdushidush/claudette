@@ -748,6 +748,12 @@ impl OllamaApiClient {
             tools
         };
         let history_budget = self.history_budget_chars_for_tools(request, &tools);
+        // A per-request override (the empty-turn retry doubles it) wins over the
+        // client's configured ceiling for the body's `max_tokens`/`num_predict`.
+        // The history budget above is deliberately left on the base `num_predict`
+        // so the retry sends the exact same context — only the generation ceiling
+        // rises, giving a reasoning-heavy turn room to finish and emit an answer.
+        let max_output = request.max_output_tokens.unwrap_or(self.num_predict);
         if self.openai_compat {
             // OpenAI Chat Completions shape. `temperature` and `max_tokens`
             // are top-level (not nested in `options`). `num_ctx` has no
@@ -775,7 +781,7 @@ impl OllamaApiClient {
                 "stream": true,
                 "stream_options": { "include_usage": true },
                 "temperature": 0.0,
-                "max_tokens": self.num_predict,
+                "max_tokens": max_output,
             });
         }
         let messages = build_messages(request, history_budget);
@@ -793,7 +799,7 @@ impl OllamaApiClient {
             "options": {
                 "temperature": 0.0,
                 "num_ctx": self.num_ctx,
-                "num_predict": self.num_predict
+                "num_predict": max_output
             }
         })
     }
@@ -2133,6 +2139,7 @@ mod tests {
         let request = ApiRequest {
             messages: vec![user_text("this is the only thing the user said")].into(),
             system_prompt: vec!["you are an assistant".to_string()],
+            max_output_tokens: None,
         };
         let result = build_messages(&request, 0);
         assert_eq!(result.len(), 2, "expected system + newest, got {result:?}");
@@ -2151,6 +2158,7 @@ mod tests {
             ]
             .into(),
             system_prompt: vec!["sys".to_string()],
+            max_output_tokens: None,
         };
         // Budget large enough only for the last message (~6 chars).
         let result = build_messages(&request, 20);
@@ -2172,10 +2180,12 @@ mod tests {
         let small_sys = ApiRequest {
             messages: Vec::new().into(),
             system_prompt: vec!["short".to_string()],
+            max_output_tokens: None,
         };
         let big_sys = ApiRequest {
             messages: Vec::new().into(),
             system_prompt: vec!["x".repeat(500)],
+            max_output_tokens: None,
         };
         let small_budget = client.history_budget_chars(&small_sys);
         let big_budget = client.history_budget_chars(&big_sys);
@@ -2635,6 +2645,7 @@ mod tests {
         let request = ApiRequest {
             messages: Vec::new().into(),
             system_prompt: vec!["sys".to_string()],
+            max_output_tokens: None,
         };
         // Use a large enough num_ctx that even the full 27-tool schema
         // (~12 K chars) doesn't saturate the budget to zero. With 4096 the
@@ -2725,6 +2736,7 @@ mod tests {
         let req = ApiRequest {
             messages: vec![user_text("hi")].into(),
             system_prompt: vec!["sys".to_string()],
+            max_output_tokens: None,
         };
         let body = client.build_chat_body(&req);
         // Compat path now streams (SSE) so the flagship model shows tokens as
@@ -2745,6 +2757,37 @@ mod tests {
     }
 
     #[test]
+    fn build_chat_body_honors_max_output_override() {
+        // Empty-turn retry path: a per-request `max_output_tokens` override wins
+        // over the client's configured `num_predict` for the body ceiling, on
+        // both the compat (`max_tokens`) and ollama (`options.num_predict`) shapes.
+        let mut compat =
+            OllamaApiClient::new("openai/gpt-oss-20b", json!([])).with_openai_compat(true);
+        compat.num_predict = 1000;
+        let base = compat.build_chat_body(&ApiRequest {
+            messages: vec![user_text("hi")].into(),
+            system_prompt: vec!["sys".to_string()],
+            max_output_tokens: None,
+        });
+        assert_eq!(base["max_tokens"], json!(1000), "base uses num_predict");
+        let overridden = compat.build_chat_body(&ApiRequest {
+            messages: vec![user_text("hi")].into(),
+            system_prompt: vec!["sys".to_string()],
+            max_output_tokens: Some(2000),
+        });
+        assert_eq!(overridden["max_tokens"], json!(2000), "override wins");
+
+        let mut ollama = OllamaApiClient::new("qwen3.5:4b", json!([])).with_openai_compat(false);
+        ollama.num_predict = 1000;
+        let ollama_override = ollama.build_chat_body(&ApiRequest {
+            messages: vec![user_text("hi")].into(),
+            system_prompt: vec!["sys".to_string()],
+            max_output_tokens: Some(2000),
+        });
+        assert_eq!(ollama_override["options"]["num_predict"], json!(2000));
+    }
+
+    #[test]
     fn build_chat_body_default_stays_ollama_shape() {
         // Pin compat off — ambient CLAUDETTE_OPENAI_COMPAT must not flip the
         // ollama body shape this test asserts.
@@ -2752,6 +2795,7 @@ mod tests {
         let req = ApiRequest {
             messages: vec![user_text("hi")].into(),
             system_prompt: vec!["sys".to_string()],
+            max_output_tokens: None,
         };
         let body = client.build_chat_body(&req);
         assert_eq!(body["stream"], json!(true));
@@ -3170,6 +3214,7 @@ mod tests {
             ]
             .into(),
             system_prompt: vec!["sys".to_string()],
+            max_output_tokens: None,
         };
         let body = client.build_chat_body(&req);
         let msgs = body["messages"].as_array().expect("messages array");
@@ -3224,6 +3269,7 @@ mod tests {
         let request = ApiRequest {
             messages: Vec::new().into(),
             system_prompt: vec!["sys".to_string()],
+            max_output_tokens: None,
         };
 
         let before = client.history_budget_chars(&request);
