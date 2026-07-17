@@ -104,6 +104,11 @@ fn build_turn_system_prompt(base: &[String], has_images: bool) -> Vec<String> {
 pub struct ApiRequest<'a> {
     pub system_prompt: Vec<String>,
     pub messages: Cow<'a, [ConversationMessage]>,
+    /// Per-request override for the completion token ceiling (`max_tokens` /
+    /// `num_predict`). `None` uses the client's configured `num_predict`. Set
+    /// on the empty-turn retry to grant a reasoning-heavy turn more room to
+    /// finish thinking and still emit an answer — see the retry in `run_turn`.
+    pub max_output_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -432,15 +437,37 @@ where
                     system_prompt.push(iteration_budget_nudge(remaining));
                 }
             }
+            let num_ctx = crate::api::current_num_ctx() as usize;
+            let evict_trigger = crate::context_evict::trigger_percent();
             let request = ApiRequest {
                 system_prompt,
-                messages: apply_context_eviction(
-                    &self.session.messages,
-                    crate::api::current_num_ctx() as usize,
-                    crate::context_evict::trigger_percent(),
-                ),
+                messages: apply_context_eviction(&self.session.messages, num_ctx, evict_trigger),
+                max_output_tokens: None,
             };
-            let events = self.api_client.stream(&request)?;
+            let mut events = self.api_client.stream(&request)?;
+            // Empty-turn recovery ("empty-stream flake"): this brain streams its
+            // chain-of-thought in a separate `reasoning_content` channel the SSE
+            // parser does not surface. When it spends the whole `num_predict`
+            // budget reasoning and never emits a `content` token, the turn carries
+            // no visible text and no tool call, and `build_assistant_message`
+            // rejects it as "produced no content", aborting the run. The overrun is
+            // deterministic per-logits but intermittent run-to-run (MTP/CUDA jitter
+            // shifts the reasoning length across the budget boundary). Retry once
+            // with double the token ceiling so the reasoning has room to finish and
+            // still emit an answer — the surgical alternative to permanently raising
+            // `num_predict`, which is reserved out of every turn's context budget.
+            if turn_produced_no_content(&events) {
+                let retry_request = ApiRequest {
+                    system_prompt: request.system_prompt.clone(),
+                    messages: apply_context_eviction(
+                        &self.session.messages,
+                        num_ctx,
+                        evict_trigger,
+                    ),
+                    max_output_tokens: Some(crate::api::current_num_predict().saturating_mul(2)),
+                };
+                events = self.api_client.stream(&retry_request)?;
+            }
             let (assistant_message, usage) = build_assistant_message(events)?;
             if let Some(usage) = usage {
                 self.usage_tracker.record(usage);
@@ -752,6 +779,7 @@ where
                 crate::api::current_num_ctx() as usize,
                 crate::context_evict::trigger_percent(),
             ),
+            max_output_tokens: None,
         };
         let events = self
             .api_client
@@ -873,6 +901,22 @@ fn parse_auto_compaction_threshold(value: Option<&str>) -> u32 {
         .and_then(|raw| raw.trim().parse::<u32>().ok())
         .filter(|threshold| *threshold > 0)
         .unwrap_or(DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD)
+}
+
+/// True when a streamed turn carried no user-visible text and no tool call —
+/// only bookkeeping events (usage / message-stop). With this brain's
+/// `reasoning_content` split that happens when it spends the entire
+/// `num_predict` budget reasoning and emits no `content`; the turn would then
+/// be rejected by [`build_assistant_message`] as "produced no content". The
+/// `run_turn` loop uses this to retry once (with a doubled token ceiling)
+/// before aborting the run — the "empty-stream flake" recovery.
+fn turn_produced_no_content(events: &[AssistantEvent]) -> bool {
+    !events.iter().any(|event| {
+        matches!(
+            event,
+            AssistantEvent::TextDelta(_) | AssistantEvent::ToolUse { .. }
+        )
+    })
 }
 
 fn build_assistant_message(
@@ -1375,6 +1419,105 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// Serves a queued script of turn responses (one per `stream` call) and
+    /// records the `max_output_tokens` each request carried. Drives the
+    /// empty-stream-flake recovery tests.
+    struct QueuedApi {
+        responses: std::collections::VecDeque<Vec<AssistantEvent>>,
+        seen_output_caps: Vec<Option<u32>>,
+    }
+
+    impl QueuedApi {
+        fn new(responses: Vec<Vec<AssistantEvent>>) -> Self {
+            Self {
+                responses: responses.into(),
+                seen_output_caps: Vec::new(),
+            }
+        }
+    }
+
+    impl ApiClient for QueuedApi {
+        fn stream(
+            &mut self,
+            request: &ApiRequest<'_>,
+        ) -> Result<Vec<AssistantEvent>, RuntimeError> {
+            self.seen_output_caps.push(request.max_output_tokens);
+            self.responses
+                .pop_front()
+                .ok_or_else(|| RuntimeError::new("QueuedApi: no scripted response left"))
+        }
+    }
+
+    fn queued_runtime(api: QueuedApi) -> ConversationRuntime<QueuedApi, StaticToolExecutor> {
+        ConversationRuntime::new(
+            Session::new(),
+            api,
+            StaticToolExecutor::new(),
+            PermissionPolicy::new(PermissionMode::WorkspaceWrite),
+            vec!["test system prompt".to_string()],
+        )
+    }
+
+    #[test]
+    fn empty_turn_recovers_via_one_retry_with_doubled_budget() {
+        // First turn is content-less (all budget spent in the parser-ignored
+        // reasoning channel); the retry lands a real answer. The run must
+        // recover, and the retry must carry double the base num_predict.
+        let answer = vec![
+            AssistantEvent::TextDelta("The answer is 42.".to_string()),
+            AssistantEvent::MessageStop,
+        ];
+        let api = QueuedApi::new(vec![vec![AssistantEvent::MessageStop], answer]);
+        let mut runtime = queued_runtime(api);
+
+        let summary = runtime
+            .run_turn("what is the answer?", None)
+            .expect("empty turn must recover via one retry");
+
+        assert_eq!(summary.iterations, 1, "recovery is one logical iteration");
+        let last_text = summary
+            .assistant_messages
+            .last()
+            .and_then(|m| {
+                m.blocks.iter().find_map(|b| match b {
+                    ContentBlock::Text { text } => Some(text.clone()),
+                    _ => None,
+                })
+            })
+            .expect("recovered turn must carry text");
+        assert!(last_text.contains("42"));
+        let expected_retry_cap = crate::api::current_num_predict().saturating_mul(2);
+        assert_eq!(
+            runtime.api_client.seen_output_caps,
+            vec![None, Some(expected_retry_cap)],
+            "base call uncapped, retry doubles the budget",
+        );
+    }
+
+    #[test]
+    fn empty_turn_twice_aborts_with_no_content_error() {
+        // Both the base call and the single retry come back empty: no infinite
+        // retry loop — the run aborts with the honest "no content" error.
+        let api = QueuedApi::new(vec![
+            vec![AssistantEvent::MessageStop],
+            vec![AssistantEvent::MessageStop],
+        ]);
+        let mut runtime = queued_runtime(api);
+
+        let err = runtime
+            .run_turn("what is the answer?", None)
+            .expect_err("two empty turns must abort");
+        assert!(
+            err.to_string().contains("produced no content"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(
+            runtime.api_client.seen_output_caps.len(),
+            2,
+            "exactly one retry, no more",
+        );
     }
 
     /// Api client that calls the `step` tool forever — until it sees the
