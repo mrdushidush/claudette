@@ -22,8 +22,8 @@ iwr -useb https://raw.githubusercontent.com/mrdushidush/claudette/main/install.p
 # 2. Pull the default local brain (3.4 GB, one-time — install Ollama from ollama.com first)
 ollama pull qwen3.5:4b
 
-# 3. Check the setup: green rows = ready (it also names the best model for YOUR GPU)
-claudette --doctor
+# 3. Guided setup: detects your GPU, offers the right brain, ends in a green check
+claudette --setup
 
 # 4. Talk to it
 claudette "hello — what can you do?"
@@ -119,6 +119,8 @@ Runs on 8 GB VRAM or plain CPU; 16 GB for the 35B brain. Footprint details → [
 ---
 
 ## Docs
+
+**New here?** [quickstart.md](docs/quickstart.md) → [first-success.md](docs/first-success.md) → then [forge.md](docs/forge.md) (autonomous coding) or [google_setup.md](docs/google_setup.md) + Telegram (private assistant). Full index: [docs/README.md](docs/README.md).
 
 - [docs/first-success.md](docs/first-success.md) - **start here:** copy-paste recipes to a first real win (coding, air-gap, assistant)
 - [docs/show-me.md](docs/show-me.md) - plain-English example prompts
