@@ -1,0 +1,99 @@
+name: Model benchmark result
+description: Report a local model's score on the Claudette battery — the most useful contribution that needs no Rust
+title: "[bench] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for benching a model! Results here feed the README's
+        "Which model should I run?" table and `--doctor`'s recommendation,
+        so other people get a better default for their GPU.
+
+        Run the battery with `run_model_eval.sh` — the harness and method are
+        documented in
+        [MODEL-COMPARISON.md](https://github.com/mrdushidush/claudette/blob/main/runs/eval-2026-05-29/battery/MODEL-COMPARISON.md).
+        Partial results are welcome: fill in what you measured and leave the
+        rest blank. Please don't estimate numbers you didn't run.
+
+  - type: input
+    id: model
+    attributes:
+      label: Model + quant
+      description: The exact model id, including the quant and its publisher.
+      placeholder: byteshape/qwen3.6-35b-a3b-mtp (3.06 bpw, 13.6 GB)
+    validations:
+      required: true
+
+  - type: input
+    id: backend
+    attributes:
+      label: Backend + runtime version
+      description: LM Studio or Ollama, plus the runtime/engine version. The runtime can flip template health on its own, so the exact version matters.
+      placeholder: LM Studio 0.4.19 (runtime cuda12-avx2 2.24.0)
+    validations:
+      required: true
+
+  - type: input
+    id: hardware
+    attributes:
+      label: GPU + VRAM
+      description: Say if the model spilled to RAM rather than staying VRAM-resident — it dominates speed.
+      placeholder: RTX 5060 Ti 16 GB — fully resident, no spill
+    validations:
+      required: true
+
+  - type: input
+    id: battery
+    attributes:
+      label: Battery score (core 50)
+      description: The frozen core-50 score, as "N/50". Include the context window you ran at.
+      placeholder: 50/50 @ 24k ctx
+    validations:
+      required: true
+
+  - type: input
+    id: k_score
+    attributes:
+      label: K score (new-language section, 8 tasks)
+      description: Scored separately from the core 50. Leave blank if you didn't run it.
+      placeholder: 8/8
+
+  - type: input
+    id: speed
+    attributes:
+      label: Generation speed (tok/s)
+      description: Roughly, at your run's context. Leave blank if you didn't measure it.
+      placeholder: ~70-76 tok/s
+
+  - type: textarea
+    id: load_command
+    attributes:
+      label: Load command
+      description: The exact command you loaded the model with — flags included. This is what lets someone reproduce your numbers.
+      render: shell
+      placeholder: |
+        lms load "byteshape/qwen3.6-35b-a3b-mtp" -c 65536 --parallel 1 \
+            --speculative-draft-mtp --speculative-draft-max-tokens 2 -y
+    validations:
+      required: true
+
+  - type: input
+    id: claudette_version
+    attributes:
+      label: Claudette version
+      description: Output of `claudette --version`.
+      placeholder: claudette 0.16.0
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes — where it failed, and anything surprising
+      description: Which task types it lost points on, spirals, template or tool-call weirdness, thermals. The failure shape is usually more useful than the score.
+
+  - type: checkboxes
+    id: honesty
+    attributes:
+      label: Before you submit
+      options:
+        - label: These numbers are from a run I actually did, not an estimate.
+          required: true
