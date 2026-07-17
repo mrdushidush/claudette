@@ -26,12 +26,14 @@ export CLAUDETTE_SKIP_LM_STUDIO_PROBE=1
 
 ## Pinning a brain (no preset gymnastics)
 
+Scores, speeds, and the full per-GPU tier table live on the canonical model page —
+[`hardware.md`](hardware.md#which-model-for-which-gpu-measured). The pinning mechanics:
+
 ```bash
-# Recommended on a 16 GB GPU (LM Studio backend) — 50/50 on the battery, ~70–76 tok/s,
-# fully VRAM-resident (measured 2026-07-11, see docs/hardware.md for the load command):
+# Recommended on a 16 GB GPU (LM Studio backend) — the measured champion:
 export CLAUDETTE_MODEL=byteshape/qwen3.6-35b-a3b-mtp
 
-# Known-good rollback (previous 16 GB default — 47/50, 33.8 tok/s):
+# Known-good rollback (previous 16 GB default):
 # export CLAUDETTE_MODEL=qwen3.6-35b-a3b@q3_k_xl
 
 # Or on 8 GB VRAM (Ollama backend):

@@ -90,8 +90,9 @@ pub fn classify_backend(base_url: &str, openai_compat: bool, configured: &str) -
 
 /// `[Y/n]` — default **yes** (this is a helpful offer, not a danger gate;
 /// the dangerous direction is doing nothing). EOF / read error / explicit
-/// `n` → false.
-fn confirm_default_yes(question: &str) -> bool {
+/// `n` → false. `pub(crate)`: shared with the `--setup` wizard so every
+/// onboarding prompt has the same default-yes semantics.
+pub(crate) fn confirm_default_yes(question: &str) -> bool {
     let mut err = std::io::stderr().lock();
     let _ = write!(
         err,
@@ -212,6 +213,64 @@ pub fn offer_fix_interactive() -> bool {
     }
 }
 
+// ─── First-success "what's next?" nudge ─────────────────────────────────
+
+/// Path of the "nudge already shown" sentinel under `home`. Absent =
+/// brand-new install that has never completed a successful REPL turn.
+fn onboarded_sentinel(home: &std::path::Path) -> std::path::PathBuf {
+    home.join(".claudette").join(".onboarded")
+}
+
+/// One-time "what's next?" menu after the first successful REPL turn of a
+/// brand-new install. Returns the menu when the sentinel was absent — and
+/// creates it BEFORE returning, so a crash mid-print can never re-arm it.
+/// `None` when the sentinel exists or can't be written (fail-closed: a box
+/// where `~/.claudette` isn't writable should stay quiet, not nudge every
+/// turn). Takes `home` explicitly so tests drive it via `with_temp_home`.
+pub(crate) fn first_success_nudge(home: &std::path::Path) -> Option<String> {
+    let path = onboarded_sentinel(home);
+    if path.exists() {
+        return None;
+    }
+    if let Some(dir) = path.parent() {
+        if std::fs::create_dir_all(dir).is_err() {
+            return None;
+        }
+    }
+    if std::fs::write(&path, "first-success nudge shown\n").is_err() {
+        return None;
+    }
+    Some(
+        "✨ first reply done — what's next?\n\
+         · point it at code — cd into a repo and ask \"explain this codebase\"\n\
+         · /help — the full slash-command list\n\
+         · claudette --forge \"<task>\" — the autonomous plan → code → verify pipeline\n\
+         · phone/voice assistant (Telegram) — docs/first-success.md#assistant"
+            .to_string(),
+    )
+}
+
+/// Print the first-success nudge if this install has never shown it. Called
+/// from the REPL's successful-turn arm only (one-shot / forge / TUI never
+/// call it), and additionally TTY-gated here because the REPL itself can be
+/// piped. Mirrors `offer_fix_interactive`'s fail-closed stance on pipes/CI.
+pub fn maybe_print_first_success_nudge() {
+    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+        return;
+    }
+    let home = crate::env_config::home_dir();
+    if let Some(menu) = first_success_nudge(&home) {
+        eprintln!();
+        let mut lines = menu.lines();
+        if let Some(first) = lines.next() {
+            eprintln!("{}", theme::accent(first));
+        }
+        for line in lines {
+            eprintln!("   {}", theme::dim(line));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{classify_models_response, FirstRunCause};
@@ -256,5 +315,50 @@ mod tests {
         // Under `cargo test`, stdin is not a TTY — the gate must refuse
         // before doing any network or printing anything.
         assert!(!super::offer_fix_interactive());
+    }
+
+    // ─── First-success nudge ─────────────────────────────────────────
+
+    #[test]
+    fn nudge_fires_once_then_never_again() {
+        crate::with_temp_home(|home| {
+            let first = super::first_success_nudge(home);
+            assert!(first.is_some(), "fresh home must fire the nudge");
+            assert!(
+                home.join(".claudette").join(".onboarded").exists(),
+                "sentinel must be created before the menu is returned"
+            );
+            assert!(
+                super::first_success_nudge(home).is_none(),
+                "second call must be suppressed by the sentinel"
+            );
+        });
+    }
+
+    #[test]
+    fn nudge_menu_names_every_next_step() {
+        crate::with_temp_home(|home| {
+            let menu = super::first_success_nudge(home).expect("fresh home fires");
+            for needle in ["/help", "--forge", "first-success.md#assistant"] {
+                assert!(menu.contains(needle), "menu missing `{needle}`:\n{menu}");
+            }
+        });
+    }
+
+    #[test]
+    fn nudge_respects_a_preexisting_sentinel() {
+        crate::with_temp_home(|home| {
+            let dir = home.join(".claudette");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join(".onboarded"), "").unwrap();
+            assert!(super::first_success_nudge(home).is_none());
+        });
+    }
+
+    #[test]
+    fn nudge_wrapper_is_quiet_when_stdin_is_piped() {
+        // Under `cargo test`, stdin is not a TTY — the wrapper must return
+        // before touching the real home directory or printing anything.
+        super::maybe_print_first_success_nudge();
     }
 }

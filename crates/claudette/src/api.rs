@@ -584,6 +584,22 @@ fn lm_studio_models_data_is_empty(body: &str) -> bool {
 
 impl ApiClient for OllamaApiClient {
     fn stream(&mut self, request: &ApiRequest<'_>) -> Result<Vec<AssistantEvent>, RuntimeError> {
+        // Cold-start heads-up, once per process: the first request may hit a
+        // model the backend still has to load into VRAM — 10–60s of silence
+        // on a big quant, which reads as a hang. Routed through the status
+        // controller so it can't collide with the REPL spinner, and so every
+        // non-REPL surface (one-shot, forge, TUI, tests) stays byte-for-byte
+        // unchanged (the controller is a no-op unless the interactive REPL
+        // enabled it). Fn-local static survives the runtime/client rebuilds
+        // that `brain_selector` does mid-session.
+        static COLD_START_NOTE: std::sync::Once = std::sync::Once::new();
+        COLD_START_NOTE.call_once(|| {
+            crate::status::global().print_note(
+                "first request — the backend may need to load the model into memory \
+                 (10–60s of silence is normal on a cold start; later turns are fast)",
+            );
+        });
+
         let body = self.build_chat_body(request);
         let path = if self.openai_compat {
             "/v1/chat/completions"

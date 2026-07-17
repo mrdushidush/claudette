@@ -81,6 +81,10 @@ struct CliArgs {
     /// secrets dir). Exits before any interactive mode starts. Non-zero
     /// exit code if any probe was a hard failure (warnings tolerated).
     doctor: bool,
+    /// `--setup`: run the interactive first-run wizard (backend detect →
+    /// VRAM → recommended-brain pull offer → integrations pointers →
+    /// closing `--doctor` pass). TTY-only; refused under `--offline`.
+    setup: bool,
 }
 
 /// Help text printed on `--help` / `-h`. One source of truth; the README
@@ -120,6 +124,11 @@ TELEGRAM OPTIONS:
                          username can DM and get a full assistant.
 
 ONE-SHOT SETUP COMMANDS (each exits after doing its one job):
+    --setup              Interactive first-run wizard: detect the backend
+                         (Ollama / LM Studio) and GPU VRAM, offer to pull the
+                         recommended brain, point at the integrations setup,
+                         then finish with a --doctor pass. Needs a terminal;
+                         refused under --offline (pulling a model is egress).
     --doctor             Probe every dependency (Ollama, embed model, OAuth
                          tokens, voice deps, secrets dir) and print a
                          green/red diagnostic report. Useful when a tool
@@ -241,6 +250,7 @@ fn main() -> ExitCode {
         allow_any_chat,
         forge,
         doctor,
+        setup,
     } = args;
 
     // ── Offline-mode banner ───────────────────────────────────────────
@@ -256,6 +266,19 @@ fn main() -> ExitCode {
                 claudette::api::resolve_ollama_url()
             ))
         );
+    }
+
+    // ── --setup: interactive first-run wizard ────────────────────────
+    // Before `probe_ollama` on purpose — setup's whole job is walking the
+    // user out of the dead-backend / missing-model states that the probe
+    // would otherwise fail on. Exits with the wizard's own status code.
+    if setup {
+        let code = claudette::setup::run();
+        return if code == 0 {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        };
     }
 
     // ── --doctor: full diagnostic probe ──────────────────────────────
@@ -523,6 +546,7 @@ fn parse_args(args: &[String]) -> CliArgs {
             "--days" => expect = ExpectNext::Days,
             "--forge" => out.forge = true,
             "--doctor" => out.doctor = true,
+            "--setup" => out.setup = true,
             "--faceless" => {
                 // Persona overlay opt-out (Eva for assistant, CodeX-7 for
                 // forge Coder). Set the env var so the secretary prompt
@@ -1063,6 +1087,14 @@ mod tests {
     }
 
     #[test]
+    fn parse_args_setup_flag() {
+        let a = parse_args(&["--setup".into()]);
+        assert!(a.setup);
+        assert!(!a.doctor);
+        assert!(a.prompt_words.is_empty());
+    }
+
+    #[test]
     fn parse_args_help_long() {
         let a = parse_args(&["--help".into()]);
         assert!(a.help);
@@ -1103,6 +1135,7 @@ mod tests {
             "--tui",
             "--forge",
             "--doctor",
+            "--setup",
             "--faceless",
             "--offline",
             "--chat",
