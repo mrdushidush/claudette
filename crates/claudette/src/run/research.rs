@@ -3,7 +3,13 @@
 //! plans 2-3-file batches, parses the reviewer's structured findings output,
 //! and persists progress/findings JSON so an interrupted run resumes exactly
 //! where it stopped.
-#![allow(dead_code)] // wired into the CLI driver in the follow-up PR (R2)
+#![allow(dead_code)] // verify/synthesize items wired in R3
+
+use std::fmt::Write as _;
+
+use crate::env_config;
+use crate::run::build_research_runtime;
+use crate::session::Session;
 
 pub(crate) const MAX_BATCH_BYTES: u64 = 48 * 1024;
 pub(crate) const MAX_FILE_BYTES: u64 = 256 * 1024;
@@ -265,6 +271,31 @@ impl Category {
             "smell" => Some(Self::Smell),
             _ => None,
         }
+    }
+}
+
+impl std::fmt::Display for Severity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::High => "HIGH",
+            Self::Medium => "MEDIUM",
+            Self::Low => "LOW",
+            Self::Info => "INFO",
+        })
+    }
+}
+
+impl std::fmt::Display for Category {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Bug => "bug",
+            Self::ErrorHandling => "error-handling",
+            Self::Security => "security",
+            Self::DeadCode => "dead-code",
+            Self::DocsDrift => "docs-drift",
+            Self::TestGap => "test-gap",
+            Self::Smell => "smell",
+        })
     }
 }
 
@@ -659,6 +690,576 @@ impl FindingsStore {
             });
         }
     }
+}
+
+/// Build the terse per-batch user prompt (SPEC §6). `files` is the batch's
+/// (rel_path, line_count) pairs; `focus` is the optional CLI focus hint
+/// (empty string when none).
+fn batch_prompt(n: usize, total: usize, files: &[(String, usize)], focus: &str) -> String {
+    let mut out = format!("Batch {n}/{total}. Files:\n");
+    for (path, lines) in files {
+        let _ = writeln!(out, "{path} ({lines} lines)");
+    }
+    if !focus.is_empty() {
+        let _ = writeln!(out, "{focus}");
+    }
+    out.push_str(
+        "Review per your briefing, then output:\n\
+         \n\
+         ### BATCH VERDICT\n\
+         <2-4 sentences: what these files do, overall health, anything odd>\n\
+         \n\
+         Then zero or more:\n\
+         \n\
+         ### FINDING\n\
+         file: <repo-relative path>:<line>\n\
+         severity: HIGH|MEDIUM|LOW|INFO\n\
+         category: bug|error-handling|security|dead-code|docs-drift|test-gap|smell\n\
+         claim: <one sentence>\n\
+         evidence: <quoted code, 1-3 lines>\n\
+         failure: <concrete scenario: inputs/state -> wrong outcome>",
+    );
+    out
+}
+
+/// The reviewer briefing system prompt (SPEC §6). `{root}` is substituted at build time.
+const RESEARCH_BRIEFING: &str = r"You are claudette in deep-research mode: a careful, skeptical code reviewer on
+a strictly read-only audit of the repository at {root}. You cannot modify
+anything; write tools are disabled and will be refused.
+
+Task per batch: read each assigned file COMPLETELY (read_file; large files in
+chunks), then report findings. Use repo_map/grep_search to check how the code
+is used elsewhere before judging it.
+
+Review lenses, in priority order: (1) correctness bugs, (2) error-handling and
+edge cases, (3) security, (4) dead or unreachable code, (5) comment/doc drift
+vs actual behavior, (6) missing or weak tests.
+
+Rules:
+- Report at most 5 findings per batch — only what you would defend to a
+  skeptical reviewer. A clean file is a valid result; say so and move on.
+- NEVER report a finding without a concrete failure scenario. No scenario,
+  no finding.
+- Cite exact file:line and quote the relevant code.
+- End with the required output format. Output nothing after it.";
+
+// ── Driver helpers (step 6) ────────────────────────────────────────────────
+
+/// Resolve the target root for a research run.
+/// `CLAUDETTE_WORKSPACE` first (first entry if platform-separated list; must be absolute),
+/// else `git rev-parse --show-toplevel`. Refuse with a clear error if neither resolves.
+fn resolve_target_root() -> Result<std::path::PathBuf, String> {
+    // Try CLAUDETTE_WORKSPACE first.
+    if let Ok(workspace) = std::env::var("CLAUDETTE_WORKSPACE") {
+        for entry in workspace.split(';') {
+            let path = entry.trim();
+            if !path.is_empty() && std::path::Path::new(path).is_absolute() {
+                return Ok(std::path::PathBuf::from(path));
+            }
+        }
+    }
+
+    // Fallback: git toplevel.
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Ok(std::path::PathBuf::from(path));
+            }
+        }
+        _ => {}
+    }
+
+    Err("neither CLAUDETTE_WORKSPACE (absolute) nor git toplevel resolved".into())
+}
+
+/// Resolve the output directory for research results.
+/// `CLAUDETTE_RESEARCH_DIR` used as-is if set; else
+/// `~/.claudette/research/<repo-dirname>-<YYYY-MM-DD>/`. Create it.
+fn resolve_output_dir(root: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    // Override: used as-is, but it must never sit inside the target tree —
+    // the read-only promise covers the whole repo, so writing findings into
+    // it would break that guarantee (SPEC §6b). Compare canonical paths when
+    // both resolve; fall back to the lexical path for a not-yet-created dir.
+    if let Ok(dir) = std::env::var("CLAUDETTE_RESEARCH_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        let root_c = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let dir_c = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+        if dir_c.starts_with(&root_c) {
+            return Err(format!(
+                "CLAUDETTE_RESEARCH_DIR ({}) is inside the target tree {}; \
+                 choose a path outside it",
+                dir.display(),
+                root.display()
+            ));
+        }
+        return Ok(dir);
+    }
+
+    // Default: ~/.claudette/research/<repo-dirname>-<YYYY-MM-DD>/
+    let repo_name = root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+    let date = current_date_str();
+
+    let home = env_config::home_dir();
+    Ok(home
+        .join(".claudette")
+        .join("research")
+        .join(format!("{repo_name}-{date}")))
+}
+
+/// Set `CLAUDETTE_OFFLINE=1` unless already set.
+fn force_offline_for_run() {
+    if std::env::var(crate::egress::OFFLINE_ENV).is_err() {
+        std::env::set_var(crate::egress::OFFLINE_ENV, "1");
+    }
+}
+
+/// Read `CLAUDETTE_RESEARCH_BATCH_FILES`, parse, clamp 1..=8, default DEFAULT_BATCH_FILES.
+fn batch_files_from_env() -> usize {
+    std::env::var("CLAUDETTE_RESEARCH_BATCH_FILES")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(crate::run::research::DEFAULT_BATCH_FILES)
+        .clamp(1, 8)
+}
+
+/// Read `CLAUDETTE_RESEARCH_MAX_BATCHES`, Some(n) if positive integer, else None.
+fn max_batches_from_env() -> Option<usize> {
+    std::env::var("CLAUDETTE_RESEARCH_MAX_BATCHES")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+}
+
+/// Resume decision per SPEC §8.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ResumeAction {
+    Fresh,
+    ResumeAt(usize),
+    RefuseChanged,
+    RefuseDone,
+}
+
+/// Compute the resume action given existing progress and a manifest hash.
+fn resume_action(existing: Option<&Progress>, manifest_hash: &str) -> ResumeAction {
+    let Some(prog) = existing else {
+        return ResumeAction::Fresh;
+    };
+    if prog.manifest_hash != manifest_hash {
+        return ResumeAction::RefuseChanged;
+    }
+    if prog.phase == Phase::Done {
+        return ResumeAction::RefuseDone;
+    }
+    match prog.next_pending() {
+        Some(id) => ResumeAction::ResumeAt(id),
+        None => ResumeAction::Fresh, // all done but phase != Done → treat as fresh batches
+    }
+}
+
+/// Format the FINDINGS.md run header (SPEC §10).
+fn findings_md_run_header(
+    root: &std::path::Path,
+    output_dir: &std::path::Path,
+    manifest: &Manifest,
+) -> String {
+    let total_files = manifest.files.len();
+    let skipped_oversize = manifest
+        .skipped
+        .iter()
+        .filter(|s| s.reason == "oversize")
+        .count();
+    let skipped_unreadable = manifest
+        .skipped
+        .iter()
+        .filter(|s| s.reason == "unreadable")
+        .count();
+
+    format!(
+        "# Deep Research Findings\n\
+         \n\
+         **Target:** `{}`  \n\
+         **Output dir:** `{}`  \n\
+         **Date:** {}  \n\
+         **Files reviewed:** {total_files}  \n\
+         **Skipped (oversize):** {skipped_oversize}  \n\
+         **Skipped (unreadable):** {skipped_unreadable}\n",
+        root.display(),
+        output_dir.display(),
+        current_date_str()
+    )
+}
+
+fn current_date_str() -> String {
+    chrono::Utc::now().format("%Y-%m-%d").to_string()
+}
+
+/// Format a batch block for FINDINGS.md.
+fn findings_md_batch_block(
+    batch_id: usize,
+    files: &[(String, usize)],
+    parsed: &ParsedBatch,
+) -> String {
+    let mut out = format!("\n## Batch {}\n\n", batch_id);
+    for (path, lines) in files {
+        let _ = writeln!(out, "  - `{path}` ({lines} lines)");
+    }
+    out.push_str("### Verdict\n");
+    out.push_str(&parsed.verdict);
+    if !parsed.findings.is_empty() {
+        out.push_str("\n\n### Findings\n");
+        for (i, f) in parsed.findings.iter().enumerate() {
+            let file_line = match f.line {
+                Some(l) => format!("{}:{}", f.file, l),
+                None => f.file.clone(),
+            };
+            let _ = write!(
+                out,
+                "\n#### Finding {}\n\n- **File:** `{}`\n- **Severity:** {}\n- **Category:** {}\n- **Claim:** {}\n- **Evidence:**\n  ```\n{}\n```\n- **Failure:** {}\n",
+                i + 1,
+                file_line,
+                f.severity,
+                f.category,
+                f.claim,
+                f.evidence,
+                f.failure,
+            );
+        }
+    } else {
+        out.push_str("\n\nNo findings.\n");
+    }
+    out
+}
+
+/// Format a skipped-batch note for FINDINGS.md.
+fn findings_md_skipped_note(batch_id: usize) -> String {
+    format!(
+        "\n## Batch {} — SKIPPED\n\nBatch could not be parsed after retries.\n",
+        batch_id
+    )
+}
+
+/// Classify a raw model response into an attempt outcome.
+#[derive(Debug)]
+pub(crate) enum AttemptOutcome {
+    Parsed(ParsedBatch),
+    Empty,
+    ParseError(String),
+}
+
+fn classify_attempt(text: &str, root: &std::path::Path) -> AttemptOutcome {
+    if text.trim().is_empty() {
+        return AttemptOutcome::Empty;
+    }
+    match parse_batch_output(text, root) {
+        Ok(parsed) => AttemptOutcome::Parsed(parsed),
+        Err(e) => AttemptOutcome::ParseError(e),
+    }
+}
+
+/// The main driver: `claudette --research` entry point.
+#[allow(clippy::too_many_lines)]
+pub fn run_deep_research(focus: &str) -> anyhow::Result<()> {
+    // 1. Force offline, resolve root and output dir.
+    force_offline_for_run();
+    let root = resolve_target_root().map_err(|e| anyhow::anyhow!("{}", e))?;
+    let output_dir = resolve_output_dir(&root).map_err(|e| anyhow::anyhow!("{}", e))?;
+
+    // Ensure output dir is not inside the target tree.
+    if output_dir.starts_with(&root) {
+        return Err(anyhow::anyhow!(
+            "CLAUDETTE_RESEARCH_DIR resolves inside the target tree — refuse to avoid write surface"
+        ));
+    }
+    std::fs::create_dir_all(&output_dir)
+        .map_err(|e| anyhow::anyhow!("failed to create output dir: {e}"))?;
+
+    // 2. Build or load manifest.json.
+    let manifest =
+        build_manifest(&root, batch_files_from_env()).map_err(|e| anyhow::anyhow!("{}", e))?;
+    let manifest_json = serde_json::to_string_pretty(&manifest)
+        .map_err(|e| anyhow::anyhow!("failed to serialize manifest: {e}"))?;
+    std::fs::write(output_dir.join("manifest.json"), &manifest_json)
+        .map_err(|e| anyhow::anyhow!("failed to write manifest: {e}"))?;
+
+    // 3. Load or init progress.json.
+    let progress_path = output_dir.join("progress.json");
+    let existing_progress = Progress::load(&progress_path).map_err(|e| anyhow::anyhow!(e))?;
+    let resume = resume_action(existing_progress.as_ref(), &manifest.hash);
+
+    match resume {
+        ResumeAction::RefuseChanged => {
+            return Err(anyhow::anyhow!(
+                "Manifest hash changed since last run. Delete {} or set CLAUDETTE_RESEARCH_DIR to start over.",
+                output_dir.display()
+            ));
+        }
+        ResumeAction::RefuseDone => {
+            return Err(anyhow::anyhow!(
+                "Previous run completed (phase=done). Check REPORT.md in {}. Set CLAUDETTE_RESEARCH_DIR for a fresh run.",
+                output_dir.display()
+            ));
+        }
+        _ => {}
+    }
+
+    let mut progress = match resume {
+        ResumeAction::Fresh => {
+            let started = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            Progress::new(&manifest, started)
+        }
+        ResumeAction::ResumeAt(id) => {
+            // ResumeAt is only produced when existing progress was present.
+            let prog = existing_progress.expect("ResumeAt implies existing progress");
+            eprintln!("resuming at batch {}", id);
+            prog
+        }
+        _ => unreachable!(),
+    };
+
+    // Write findings header for fresh runs.
+    if matches!(resume, ResumeAction::Fresh) {
+        let header = findings_md_run_header(&root, &output_dir, &manifest);
+        std::fs::write(output_dir.join("FINDINGS.md"), header)
+            .map_err(|e| anyhow::anyhow!("failed to write FINDINGS.md: {e}"))?;
+    }
+
+    // Init empty findings store for fresh runs.
+    let mut findings_store = match resume {
+        ResumeAction::Fresh => FindingsStore::new(),
+        _ => FindingsStore::load(&output_dir.join("findings.json"))
+            .map_err(|e| anyhow::anyhow!(e))?
+            .unwrap_or_else(FindingsStore::new),
+    };
+
+    // 4. Print header (SPEC §10).
+    eprintln!("Deep research: {}", root.display());
+    eprintln!("Output dir: {}", output_dir.display());
+    eprintln!(
+        "Files: {} | Batches: {}",
+        manifest.files.len(),
+        manifest.batches.len()
+    );
+    eprintln!("Offline mode enforced");
+    eprintln!("Read-only permission tier (write/exec/network denied)");
+
+    // 5. Batch loop.
+    let max_batches = max_batches_from_env();
+    let mut batches_done = 0usize;
+    let mut batches_skipped = 0usize;
+    let mut total_findings = 0usize;
+    let mut high_count = 0usize;
+
+    // Determine starting batch id.
+    let start_id = match resume {
+        ResumeAction::ResumeAt(id) => id,
+        _ => manifest.batches[0].id,
+    };
+
+    for batch in &manifest.batches {
+        if batch.id < start_id {
+            continue; // already done from previous run
+        }
+        if let Some(max) = max_batches {
+            if batches_done >= max {
+                break; // stopped by max_batches knob
+            }
+        }
+
+        let files: Vec<(String, usize)> = batch
+            .files
+            .iter()
+            .filter_map(|rel_path| {
+                manifest
+                    .files
+                    .iter()
+                    .find(|f| f.rel_path == *rel_path)
+                    .map(|mf| (mf.rel_path.clone(), mf.lines))
+            })
+            .collect();
+
+        let system_prompt = vec![RESEARCH_BRIEFING.replace("{root}", &root.display().to_string())];
+
+        // Up to 2 attempts.
+        let mut attempt_count: u32 = 0;
+        let mut parsed_batch: Option<ParsedBatch> = None;
+        let mut batch_status = BatchStatus {
+            id: batch.id,
+            state: BatchState::Pending,
+            attempts: 0,
+            findings: 0,
+            wall_secs: 0,
+        };
+
+        loop {
+            attempt_count += 1;
+            batch_status.attempts = attempt_count;
+            let start = std::time::SystemTime::now();
+
+            // Build runtime and run one turn.
+            let session = Session::new();
+            let mut runtime = build_research_runtime(session, system_prompt.clone());
+            let prompt = batch_prompt(batch.id, manifest.batches.len(), &files, focus);
+
+            // Run the turn — this is a blocking call that streams to stdout.
+            // A turn error (empty-stream flake, backend hiccup) yields no text,
+            // which classify_attempt treats as Empty (retry, then skip).
+            let text = match crate::brain_selector::run_turn_with_fallback(
+                &mut runtime,
+                &prompt,
+                &mut None,
+            ) {
+                Ok(summary) => crate::run::extract_assistant_text(&summary),
+                Err(_) => String::new(),
+            };
+
+            batch_status.wall_secs += start.elapsed().map_or(0, |d| d.as_secs());
+
+            match classify_attempt(&text, &root) {
+                AttemptOutcome::Parsed(pb) => {
+                    parsed_batch = Some(pb);
+                    break;
+                }
+                AttemptOutcome::Empty if attempt_count == 1 => {
+                    // Empty on the first attempt: loop around for a second try.
+                }
+                AttemptOutcome::ParseError(_) if attempt_count == 1 => {
+                    // Retry with appended line.
+                    let session2 = Session::new();
+                    let mut runtime2 = build_research_runtime(session2, system_prompt.clone());
+                    let prompt_with_retry = format!(
+                        "{}\n\nYour previous output did not match the required format. Re-output now, format only.",
+                        batch_prompt(batch.id, manifest.batches.len(), &files, focus)
+                    );
+                    let text2 = match crate::brain_selector::run_turn_with_fallback(
+                        &mut runtime2,
+                        &prompt_with_retry,
+                        &mut None,
+                    ) {
+                        Ok(summary2) => crate::run::extract_assistant_text(&summary2),
+                        Err(_) => String::new(),
+                    };
+                    batch_status.wall_secs += start.elapsed().map_or(0, |d| d.as_secs());
+
+                    match classify_attempt(&text2, &root) {
+                        AttemptOutcome::Parsed(pb) => {
+                            parsed_batch = Some(pb);
+                            break;
+                        }
+                        _ => {
+                            // Second failure → skip.
+                            batch_status.state = BatchState::Skipped;
+                            batches_skipped += 1;
+                            std::fs::write(
+                                output_dir.join("FINDINGS.md"),
+                                format!(
+                                    "{}\n{}",
+                                    std::fs::read_to_string(output_dir.join("FINDINGS.md"))
+                                        .unwrap_or_default(),
+                                    findings_md_skipped_note(batch.id)
+                                ),
+                            )
+                            .ok();
+                            break;
+                        }
+                    }
+                }
+                _ => {
+                    // Empty on attempt 2, or parse error on attempt 2 → skip.
+                    batch_status.state = BatchState::Skipped;
+                    batches_skipped += 1;
+                    std::fs::write(
+                        output_dir.join("FINDINGS.md"),
+                        format!(
+                            "{}\n{}",
+                            std::fs::read_to_string(output_dir.join("FINDINGS.md"))
+                                .unwrap_or_default(),
+                            findings_md_skipped_note(batch.id)
+                        ),
+                    )
+                    .ok();
+                    break;
+                }
+            }
+        }
+
+        if let Some(pb) = parsed_batch {
+            // Success: append to FINDINGS.md and findings.json.
+            std::fs::write(
+                output_dir.join("FINDINGS.md"),
+                format!(
+                    "{}{}",
+                    std::fs::read_to_string(output_dir.join("FINDINGS.md")).unwrap_or_default(),
+                    findings_md_batch_block(batch.id, &files, &pb)
+                ),
+            )
+            .ok();
+
+            findings_store.append_batch(batch.id, &pb.findings);
+            findings_store.save(&output_dir.join("findings.json")).ok();
+
+            batch_status.state = BatchState::Done;
+            batch_status.findings = pb.findings.len();
+            total_findings += pb.findings.len();
+            high_count += pb
+                .findings
+                .iter()
+                .filter(|f| f.severity == Severity::High)
+                .count();
+        }
+
+        // Capture the fields used by the stderr line before `batch_status`
+        // is moved into the progress vector below.
+        let batch_findings = batch_status.findings;
+        let batch_wall = batch_status.wall_secs;
+
+        // Update progress.
+        if let Some(status) = progress.batches.iter_mut().find(|b| b.id == batch.id) {
+            *status = batch_status;
+        }
+        progress.save(&progress_path).ok();
+
+        batches_done += 1;
+
+        // Per-batch stderr line (SPEC §10).
+        eprintln!(
+            "[{}/{}] {} — {} findings ({} HIGH) — {}s",
+            batches_done,
+            manifest.batches.len(),
+            root.display(),
+            batch_findings,
+            high_count,
+            batch_wall,
+        );
+    }
+
+    // 6. After batch loop: set phase = Verify if all pending done (not max-batches-capped).
+    let all_done = progress
+        .batches
+        .iter()
+        .all(|b| b.state == BatchState::Done || b.state == BatchState::Skipped);
+    if all_done && max_batches.is_none() {
+        progress.phase = Phase::Verify;
+    }
+    progress.save(&progress_path).ok();
+
+    // 7. Footer (SPEC §10).
+    eprintln!(
+        "\nDeep research complete: {} batches, {} skipped, {} findings ({} HIGH)",
+        batches_done, batches_skipped, total_findings, high_count
+    );
+    eprintln!("Output dir: {}", output_dir.display());
+
+    Ok(())
 }
 
 // ── Tests (step 9) ────────────────────────────────────────────────────────
@@ -1209,5 +1810,183 @@ failure: n/a
         assert_eq!(loaded.findings[2].id, 3);
 
         cleanup(&dir);
+    }
+
+    /// batch_prompt_lists_files_and_counts — two files → both path (N) lines present, header shows Batch 1/5, focus line present iff focus non-empty.
+    #[test]
+    fn batch_prompt_lists_files_and_counts() {
+        let files = vec![
+            ("src/main.rs".to_string(), 42),
+            ("src/lib.rs".to_string(), 37),
+        ];
+
+        // With focus.
+        let with_focus = batch_prompt(1, 5, &files, "focus on error handling");
+        assert!(with_focus.contains("Batch 1/5"));
+        assert!(with_focus.contains("src/main.rs (42 lines)"));
+        assert!(with_focus.contains("src/lib.rs (37 lines)"));
+        assert!(with_focus.contains("focus on error handling"));
+
+        // Without focus.
+        let no_focus = batch_prompt(1, 5, &files, "");
+        assert!(no_focus.contains("Batch 1/5"));
+        assert!(no_focus.contains("src/main.rs (42 lines)"));
+        assert!(!no_focus.contains("focus on error handling"));
+    }
+
+    /// findings_md_header_and_append_format — header names the root + counts; a batch block round-trips the verdict + a finding.
+    #[test]
+    fn findings_md_header_and_append_format() {
+        let dir = fixture_dir();
+        setup_fixture(&dir);
+        fs::write(dir.join("a.rs"), "x\n").unwrap();
+
+        let manifest = build_manifest(&dir, DEFAULT_BATCH_FILES).expect("build");
+        let header = findings_md_run_header(&dir, &dir.join("output"), &manifest);
+        assert!(header.contains("Deep Research Findings"));
+        assert!(header.contains("**Files reviewed:** 1"));
+
+        // Build a finding.
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(dir.join("src/good.rs"), "fn main() {}\n").unwrap();
+
+        let output = r"### BATCH VERDICT
+All good.
+
+### FINDING
+file: src/good.rs
+severity: high
+category: bug
+claim: test claim
+evidence: the code
+failure: bad thing happens";
+
+        let parsed = parse_batch_output(output, &dir).expect("parse");
+        let files = vec![("src/good.rs".to_string(), 1)];
+        let block = findings_md_batch_block(2, &files, &parsed);
+        assert!(block.contains("Batch 2"));
+        assert!(block.contains("All good."));
+        assert!(block.contains("test claim"));
+
+        cleanup(&dir);
+    }
+
+    /// classify_attempt_empty_parse_ok — empty → Empty; valid → Parsed; bad format → ParseError.
+    #[test]
+    fn classify_attempt_empty_parse_ok() {
+        let dir = fixture_dir();
+        setup_fixture(&dir);
+        fs::write(dir.join("a.rs"), "x\n").unwrap();
+
+        assert!(matches!(classify_attempt("", &dir), AttemptOutcome::Empty));
+        assert!(matches!(
+            classify_attempt("   \n  ", &dir),
+            AttemptOutcome::Empty
+        ));
+
+        let valid = r"### BATCH VERDICT
+ok";
+        match classify_attempt(valid, &dir) {
+            AttemptOutcome::Parsed(pb) => assert_eq!(pb.verdict, "ok"),
+            other => panic!("expected Parsed, got {:?}", other),
+        }
+
+        match classify_attempt("not a verdict", &dir) {
+            AttemptOutcome::ParseError(_) => {} // expected
+            other => panic!("expected ParseError, got {:?}", other),
+        }
+
+        cleanup(&dir);
+    }
+
+    /// resume_action_matrix — covers all four outcomes.
+    #[test]
+    fn resume_action_matrix() {
+        let dir = fixture_dir();
+        setup_fixture(&dir);
+        // Four files at 3-per-batch → two batches, so a resumed run has a
+        // pending batch 2 once batch 1 is marked done.
+        for name in ["a.rs", "b.rs", "c.rs", "d.rs"] {
+            fs::write(dir.join(name), "x\n").unwrap();
+        }
+        let manifest = build_manifest(&dir, DEFAULT_BATCH_FILES).expect("build");
+
+        // No existing progress → Fresh.
+        assert_eq!(resume_action(None, &manifest.hash), ResumeAction::Fresh);
+
+        // Hash mismatch → RefuseChanged.
+        let prog = Progress::new(&manifest, 0);
+        assert_eq!(
+            resume_action(Some(&prog), "different_hash"),
+            ResumeAction::RefuseChanged
+        );
+
+        // Phase Done → RefuseDone.
+        let mut done_prog = prog;
+        done_prog.phase = Phase::Done;
+        assert_eq!(
+            resume_action(Some(&done_prog), &manifest.hash),
+            ResumeAction::RefuseDone
+        );
+
+        // Phase Batches, pending batch exists → ResumeAt.
+        let mut resume_prog = Progress::new(&manifest, 0);
+        resume_prog.batches[0].state = BatchState::Done;
+        assert_eq!(
+            resume_action(Some(&resume_prog), &manifest.hash),
+            ResumeAction::ResumeAt(2)
+        );
+
+        cleanup(&dir);
+    }
+
+    /// output_dir_default_and_override — override honored as-is; default ends with <repo>-<date>.
+    #[test]
+    fn output_dir_default_and_override() {
+        let _guard = crate::test_env_lock();
+
+        // Override.
+        std::env::set_var("CLAUDETTE_RESEARCH_DIR", "/custom/output");
+        let dir = fixture_dir();
+        setup_fixture(&dir);
+        fs::write(dir.join("a.rs"), "x\n").unwrap();
+        assert_eq!(
+            resolve_output_dir(&dir).expect("override"),
+            std::path::PathBuf::from("/custom/output")
+        );
+
+        // Default.
+        std::env::remove_var("CLAUDETTE_RESEARCH_DIR");
+        let result = resolve_output_dir(&dir).expect("default");
+        let result_str = result.to_string_lossy();
+        assert!(result_str.contains(".claudette"));
+        assert!(result_str.contains("research"));
+
+        cleanup(&dir);
+    }
+
+    /// force_offline_for_run_sets_env — unset → becomes "1"; a pre-set value is left untouched.
+    #[test]
+    fn force_offline_for_run_sets_env() {
+        let _guard = crate::test_env_lock();
+
+        // Unset → set to "1".
+        std::env::remove_var(crate::egress::OFFLINE_ENV);
+        force_offline_for_run();
+        assert_eq!(
+            std::env::var(crate::egress::OFFLINE_ENV).ok(),
+            Some("1".to_string())
+        );
+
+        // Pre-set value left untouched.
+        std::env::set_var(crate::egress::OFFLINE_ENV, "0");
+        force_offline_for_run();
+        assert_eq!(
+            std::env::var(crate::egress::OFFLINE_ENV).ok(),
+            Some("0".to_string())
+        );
+
+        // Clean up.
+        std::env::remove_var(crate::egress::OFFLINE_ENV);
     }
 }

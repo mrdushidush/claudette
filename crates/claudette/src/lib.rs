@@ -105,8 +105,8 @@ pub use executor::AgentToolExecutor;
 pub use memory::{default_memory_path, try_load_memory, try_load_memory_at, MAX_MEMORY_CHARS};
 pub use prompt::{agent_system_prompt, agent_system_prompt_with_memory, forge_system_prompt};
 pub use run::{
-    default_session_path, run_agent, run_agent_repl, run_forge_mission, save_session,
-    save_session_at, try_load_session, try_load_session_at, SessionOptions,
+    default_session_path, run_agent, run_agent_repl, run_deep_research, run_forge_mission,
+    save_session, save_session_at, try_load_session, try_load_session_at, SessionOptions,
 };
 pub use tools::{agent_tools_json, workspace_startup_diagnostics};
 
