@@ -831,6 +831,17 @@ fn force_offline_for_run() {
     }
 }
 
+/// Point `CLAUDETTE_WORKSPACE` at the target root unless already set, so the
+/// per-batch read-only runtimes may read the reviewed repo when it lives
+/// outside `$HOME` (the file sandbox re-reads the env on every request).
+/// When the var is already set, `resolve_target_root` derived the root from
+/// it, so there is nothing to do.
+fn force_workspace_for_run(root: &std::path::Path) {
+    if std::env::var("CLAUDETTE_WORKSPACE").is_err() {
+        std::env::set_var("CLAUDETTE_WORKSPACE", root);
+    }
+}
+
 /// Read `CLAUDETTE_RESEARCH_BATCH_FILES`, parse, clamp 1..=8, default DEFAULT_BATCH_FILES.
 fn batch_files_from_env() -> usize {
     std::env::var("CLAUDETTE_RESEARCH_BATCH_FILES")
@@ -977,9 +988,10 @@ fn classify_attempt(text: &str, root: &std::path::Path) -> AttemptOutcome {
 /// The main driver: `claudette --research` entry point.
 #[allow(clippy::too_many_lines)]
 pub fn run_deep_research(focus: &str) -> anyhow::Result<()> {
-    // 1. Force offline, resolve root and output dir.
+    // 1. Force offline, resolve root, point the workspace boundary at it.
     force_offline_for_run();
     let root = resolve_target_root().map_err(|e| anyhow::anyhow!("{}", e))?;
+    force_workspace_for_run(&root);
     let output_dir = resolve_output_dir(&root).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     // Ensure output dir is not inside the target tree.
@@ -2290,6 +2302,37 @@ ok";
 
         // Clean up.
         std::env::remove_var(crate::egress::OFFLINE_ENV);
+    }
+
+    /// force_workspace_for_run — unset → set to the root; a pre-set value is
+    /// left untouched. Restores the original value either way (the dev shell
+    /// often has CLAUDETTE_WORKSPACE exported — never leak a change).
+    #[test]
+    fn force_workspace_for_run_sets_env() {
+        let _guard = crate::test_env_lock();
+        let original = std::env::var("CLAUDETTE_WORKSPACE").ok();
+
+        // Unset → set to the root.
+        std::env::remove_var("CLAUDETTE_WORKSPACE");
+        force_workspace_for_run(std::path::Path::new("/tmp/research-target"));
+        assert_eq!(
+            std::env::var("CLAUDETTE_WORKSPACE").ok().as_deref(),
+            Some("/tmp/research-target")
+        );
+
+        // Pre-set value left untouched.
+        std::env::set_var("CLAUDETTE_WORKSPACE", "/already/set");
+        force_workspace_for_run(std::path::Path::new("/tmp/research-target"));
+        assert_eq!(
+            std::env::var("CLAUDETTE_WORKSPACE").ok().as_deref(),
+            Some("/already/set")
+        );
+
+        // Restore the original environment.
+        match original {
+            Some(v) => std::env::set_var("CLAUDETTE_WORKSPACE", v),
+            None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+        }
     }
 
     /// parse_finding_with_line_range — `file: path:6-7` (range) is kept, not
