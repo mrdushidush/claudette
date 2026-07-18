@@ -3,7 +3,6 @@
 //! plans 2-3-file batches, parses the reviewer's structured findings output,
 //! and persists progress/findings JSON so an interrupted run resumes exactly
 //! where it stopped.
-#![allow(dead_code)] // verify/synthesize items wired in R3
 
 use std::fmt::Write as _;
 
@@ -1143,7 +1142,11 @@ pub fn run_deep_research(focus: &str) -> anyhow::Result<()> {
                 AttemptOutcome::Empty if attempt_count == 1 => {
                     // Empty on the first attempt: loop around for a second try.
                 }
-                AttemptOutcome::ParseError(_) if attempt_count == 1 => {
+                AttemptOutcome::ParseError(e) if attempt_count == 1 => {
+                    eprintln!(
+                        "  batch {}: findings did not parse ({e}) — retrying",
+                        batch.id
+                    );
                     // Retry with appended line.
                     let session2 = Session::new();
                     let mut runtime2 = build_research_runtime(session2, system_prompt.clone());
@@ -1253,15 +1256,39 @@ pub fn run_deep_research(focus: &str) -> anyhow::Result<()> {
         );
     }
 
-    // 6. After batch loop: set phase = Verify if all pending done (not max-batches-capped).
+    // 6. After the batch loop: if every batch is resolved and this run was not
+    // capped by CLAUDETTE_RESEARCH_MAX_BATCHES, advance through the verify and
+    // synthesize phases (SPEC §9). Each phase is gated on progress.phase and
+    // saved on completion, so a resumed run picks up exactly where it stopped.
     let all_done = progress
         .batches
         .iter()
         .all(|b| b.state == BatchState::Done || b.state == BatchState::Skipped);
     if all_done && max_batches.is_none() {
-        progress.phase = Phase::Verify;
+        if progress.phase == Phase::Batches {
+            progress.phase = Phase::Verify;
+            progress.save(&progress_path).ok();
+        }
+        if progress.phase == Phase::Verify {
+            run_verify_pass(&root, &output_dir, &mut findings_store);
+            progress.phase = Phase::Synthesize;
+            progress.save(&progress_path).ok();
+        }
+        if progress.phase == Phase::Synthesize {
+            run_synthesize_pass(
+                &root,
+                &output_dir,
+                &manifest,
+                &findings_store,
+                batches_done,
+                batches_skipped,
+            )?;
+            progress.phase = Phase::Done;
+            progress.save(&progress_path).ok();
+        }
+    } else {
+        progress.save(&progress_path).ok();
     }
-    progress.save(&progress_path).ok();
 
     // 7. Footer (SPEC §10).
     eprintln!(
@@ -1270,6 +1297,270 @@ pub fn run_deep_research(focus: &str) -> anyhow::Result<()> {
     );
     eprintln!("Output dir: {}", output_dir.display());
 
+    Ok(())
+}
+
+/// System prompt for one verify-pass conversation (SPEC §9). `{root}` is
+/// substituted by the driver at build time.
+const RESEARCH_VERIFY_BRIEFING: &str = "\
+You are claudette verifying a single code-review finding on a strictly \
+read-only audit of the repository at {root}. Write tools are disabled.
+
+Re-read the cited file (read_file; use grep_search or repo_map to check how \
+the code is actually used) and decide whether the finding's failure scenario \
+truly holds. You are rewarded for RETRACTING weak, speculative, or incorrect \
+findings — not for defending them. Confirm only what you would stake your \
+reputation on.
+
+Output EXACTLY two lines, nothing before or after:
+VERDICT: CONFIRMED or RETRACTED
+reason: <one sentence>";
+
+/// Parse a verify-pass response into a verdict. Looks for a line beginning
+/// `VERDICT:` (case-insensitive) carrying CONFIRMED or RETRACTED. Returns
+/// None if neither token is present (driver retries, then marks Unverified).
+fn parse_verdict(text: &str) -> Option<Verdict> {
+    for line in text.lines() {
+        let lower = line.trim().to_ascii_lowercase();
+        if let Some(rest) = lower.strip_prefix("verdict:") {
+            if rest.contains("confirmed") {
+                return Some(Verdict::Confirmed);
+            }
+            if rest.contains("retracted") {
+                return Some(Verdict::Retracted);
+            }
+        }
+    }
+    None
+}
+
+/// System prompt for the single synthesize conversation (SPEC §9).
+const RESEARCH_SYNTH_BRIEFING: &str = "\
+You are claudette writing the final report for a completed, strictly \
+read-only review of the repository at {root}. You are given a table of every \
+finding with its verification verdict. Do not read files; work only from the \
+table.
+
+Write a concise, triage-ready report in Markdown:
+- Executive summary: 3-5 sentences on overall health, coverage, and the \
+headline risks.
+- Top findings, ranked (CONFIRMED first, then by severity). One bullet each: \
+`file:line` — severity — one-sentence claim.
+- Recurring themes: patterns across findings, if any.
+- Suggested missions: 3-7 card-sized work items, each as \
+`<title> — why it matters — files touched`.
+
+Output only the report body. Do not reprint the raw table.";
+
+/// A finding needs verification iff it is HIGH or MEDIUM and has no verdict
+/// yet (LOW/INFO skip verification; a set verdict means a prior run did it).
+fn needs_verify(f: &StoredFinding) -> bool {
+    f.verdict.is_none() && matches!(f.finding.severity, Severity::High | Severity::Medium)
+}
+
+/// One-word label for a stored verdict; `—` when the finding was never sent
+/// to verification (LOW/INFO).
+fn verdict_label(v: Option<Verdict>) -> &'static str {
+    match v {
+        Some(Verdict::Confirmed) => "confirmed",
+        Some(Verdict::Retracted) => "retracted",
+        Some(Verdict::Unverified) => "unverified",
+        None => "—",
+    }
+}
+
+/// The user prompt for verifying one finding (SPEC §9).
+fn verify_prompt(f: &Finding) -> String {
+    let file_line = match f.line {
+        Some(l) => format!("{}:{}", f.file, l),
+        None => f.file.clone(),
+    };
+    format!(
+        "Finding to verify:\n\n\
+         file: {}\nseverity: {}\ncategory: {}\nclaim: {}\nevidence: {}\nfailure: {}\n\n\
+         Re-read the cited file and decide. Output the two-line verdict only.",
+        file_line, f.severity, f.category, f.claim, f.evidence, f.failure,
+    )
+}
+
+/// Compact pipe table of all findings for the synthesis prompt (SPEC §9):
+/// id, batch, file:line, severity, category, verdict, claim. No prose.
+fn findings_table(store: &FindingsStore) -> String {
+    let mut out = String::from(
+        "| id | batch | file:line | severity | category | verdict | claim |\n\
+         |---|---|---|---|---|---|---|\n",
+    );
+    for sf in &store.findings {
+        let file_line = match sf.finding.line {
+            Some(l) => format!("{}:{}", sf.finding.file, l),
+            None => sf.finding.file.clone(),
+        };
+        let _ = writeln!(
+            out,
+            "| {} | {} | {} | {} | {} | {} | {} |",
+            sf.id,
+            sf.batch,
+            file_line,
+            sf.finding.severity,
+            sf.finding.category,
+            verdict_label(sf.verdict),
+            sf.finding.claim.replace('|', "\\|"),
+        );
+    }
+    out
+}
+
+/// Driver-generated metadata header for REPORT.md (SPEC §9). Counts come
+/// from the store; coverage from the manifest.
+fn report_metadata_header(
+    root: &std::path::Path,
+    model: &str,
+    manifest: &Manifest,
+    store: &FindingsStore,
+    batches_done: usize,
+    batches_skipped: usize,
+) -> String {
+    let total = store.findings.len();
+    let high = store
+        .findings
+        .iter()
+        .filter(|f| f.finding.severity == Severity::High)
+        .count();
+    let confirmed = store
+        .findings
+        .iter()
+        .filter(|f| f.verdict == Some(Verdict::Confirmed))
+        .count();
+    let retracted = store
+        .findings
+        .iter()
+        .filter(|f| f.verdict == Some(Verdict::Retracted))
+        .count();
+    let unverified = store
+        .findings
+        .iter()
+        .filter(|f| f.verdict == Some(Verdict::Unverified))
+        .count();
+    let oversize = manifest
+        .skipped
+        .iter()
+        .filter(|s| s.reason == "oversize")
+        .count();
+    format!(
+        "# Deep Research Report\n\
+         \n\
+         **Target:** `{}`  \n\
+         **Date:** {}  \n\
+         **Model:** {model}  \n\
+         **Batches:** {batches_done} done, {batches_skipped} skipped  \n\
+         **Findings:** {total} ({high} HIGH) — {confirmed} confirmed, {retracted} retracted, {unverified} unverified  \n\
+         **Coverage:** {} files reviewed, {oversize} skipped-oversize\n\
+         \n---\n",
+        root.display(),
+        current_date_str(),
+        manifest.files.len(),
+    )
+}
+
+/// Verify pass (SPEC §9): for every HIGH/MEDIUM finding without a verdict,
+/// one fresh read-only conversation decides CONFIRMED/RETRACTED. Two attempts;
+/// unparseable twice → Unverified. findings.json is saved after each verdict
+/// so an interrupted verify pass resumes. LOW/INFO are never verified.
+fn run_verify_pass(
+    root: &std::path::Path,
+    output_dir: &std::path::Path,
+    findings_store: &mut FindingsStore,
+) {
+    // Collect target indices up front so the loop body can mutate + save the
+    // store without holding a borrow over it (and to dodge needless_range_loop).
+    let targets: Vec<usize> = findings_store
+        .findings
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| needs_verify(f))
+        .map(|(i, _)| i)
+        .collect();
+    if targets.is_empty() {
+        return;
+    }
+    let pending = targets.len();
+    eprintln!("Verifying {pending} HIGH/MEDIUM findings...");
+    let system_prompt =
+        vec![RESEARCH_VERIFY_BRIEFING.replace("{root}", &root.display().to_string())];
+    for (done, idx) in targets.into_iter().enumerate() {
+        let finding = findings_store.findings[idx].finding.clone();
+        let user = verify_prompt(&finding);
+        let mut verdict = None;
+        for _ in 0..2 {
+            let session = Session::new();
+            let mut runtime = build_research_runtime(session, system_prompt.clone());
+            let text =
+                match crate::brain_selector::run_turn_with_fallback(&mut runtime, &user, &mut None)
+                {
+                    Ok(summary) => crate::run::extract_assistant_text(&summary),
+                    Err(_) => String::new(),
+                };
+            if let Some(v) = parse_verdict(&text) {
+                verdict = Some(v);
+                break;
+            }
+        }
+        let verdict = verdict.unwrap_or(Verdict::Unverified);
+        findings_store.findings[idx].verdict = Some(verdict);
+        findings_store.save(&output_dir.join("findings.json")).ok();
+        eprintln!(
+            "  [{}/{}] finding {} — {}",
+            done + 1,
+            pending,
+            findings_store.findings[idx].id,
+            verdict_label(Some(verdict)),
+        );
+    }
+}
+
+/// Synthesize pass (SPEC §9): one fresh conversation gets the compact findings
+/// table and writes a triage-ready report. The driver writes REPORT.md as a
+/// generated metadata header + the model's report body.
+fn run_synthesize_pass(
+    root: &std::path::Path,
+    output_dir: &std::path::Path,
+    manifest: &Manifest,
+    findings_store: &FindingsStore,
+    batches_done: usize,
+    batches_skipped: usize,
+) -> anyhow::Result<()> {
+    eprintln!("Synthesizing report...");
+    let model = crate::model_config::active().brain.model;
+    let system_prompt =
+        vec![RESEARCH_SYNTH_BRIEFING.replace("{root}", &root.display().to_string())];
+    let user = format!(
+        "Findings ({} total):\n\n{}\n\nWrite the report per your briefing.",
+        findings_store.findings.len(),
+        findings_table(findings_store),
+    );
+    let session = Session::new();
+    let mut runtime = build_research_runtime(session, system_prompt);
+    let body = match crate::brain_selector::run_turn_with_fallback(&mut runtime, &user, &mut None) {
+        Ok(summary) => crate::run::extract_assistant_text(&summary),
+        Err(_) => String::new(),
+    };
+    let body = if body.trim().is_empty() {
+        "_(synthesis pass produced no output)_".to_string()
+    } else {
+        body
+    };
+    let header = report_metadata_header(
+        root,
+        &model,
+        manifest,
+        findings_store,
+        batches_done,
+        batches_skipped,
+    );
+    let report_path = output_dir.join("REPORT.md");
+    std::fs::write(&report_path, format!("{header}\n{body}\n"))
+        .map_err(|e| anyhow::anyhow!("failed to write REPORT.md: {e}"))?;
+    eprintln!("Report written: {}", report_path.display());
     Ok(())
 }
 
@@ -2036,5 +2327,117 @@ ok";
         assert!(parsed.findings[0].evidence.contains("let x = 1;"));
 
         cleanup(&dir);
+    }
+
+    #[test]
+    fn parse_verdict_confirmed_retracted_none() {
+        assert_eq!(
+            parse_verdict("VERDICT: CONFIRMED\nreason: holds"),
+            Some(Verdict::Confirmed)
+        );
+        assert_eq!(
+            parse_verdict("chatter\nVERDICT: retracted\nreason: nope"),
+            Some(Verdict::Retracted)
+        );
+        assert_eq!(parse_verdict("no verdict line here"), None);
+    }
+
+    #[test]
+    fn needs_verify_high_medium_only() {
+        let mk = |sev: Severity, v: Option<Verdict>| StoredFinding {
+            id: 1,
+            batch: 1,
+            finding: Finding {
+                file: "a.rs".into(),
+                line: None,
+                severity: sev,
+                category: Category::Bug,
+                claim: "c".into(),
+                evidence: "e".into(),
+                failure: "f".into(),
+            },
+            verdict: v,
+        };
+        assert!(needs_verify(&mk(Severity::High, None)));
+        assert!(needs_verify(&mk(Severity::Medium, None)));
+        assert!(!needs_verify(&mk(Severity::Low, None)));
+        assert!(!needs_verify(&mk(Severity::Info, None)));
+        assert!(!needs_verify(&mk(Severity::High, Some(Verdict::Confirmed))));
+    }
+
+    #[test]
+    fn findings_table_lists_rows() {
+        let mut store = FindingsStore::new();
+        store.append_batch(
+            1,
+            &[Finding {
+                file: "src/a.rs".into(),
+                line: Some(3),
+                severity: Severity::High,
+                category: Category::Bug,
+                claim: "boom".into(),
+                evidence: "e".into(),
+                failure: "f".into(),
+            }],
+        );
+        store.findings[0].verdict = Some(Verdict::Confirmed);
+        let table = findings_table(&store);
+        assert!(table.contains("| id |"));
+        assert!(table.contains("src/a.rs:3"));
+        assert!(table.contains("confirmed"));
+    }
+
+    #[test]
+    fn report_header_names_root_model_and_counts() {
+        let manifest = Manifest {
+            root: "r".into(),
+            files: vec![],
+            skipped: vec![],
+            batches: vec![],
+            hash: "h".into(),
+        };
+        let mut store = FindingsStore::new();
+        store.append_batch(
+            1,
+            &[Finding {
+                file: "a.rs".into(),
+                line: None,
+                severity: Severity::High,
+                category: Category::Bug,
+                claim: "c".into(),
+                evidence: "e".into(),
+                failure: "f".into(),
+            }],
+        );
+        store.findings[0].verdict = Some(Verdict::Confirmed);
+        let h = report_metadata_header(
+            std::path::Path::new("/tmp/repo"),
+            "test-model",
+            &manifest,
+            &store,
+            5,
+            1,
+        );
+        assert!(h.contains("Deep Research Report"));
+        assert!(h.contains("test-model"));
+        assert!(h.contains("1 HIGH"));
+        assert!(h.contains("1 confirmed"));
+    }
+
+    #[test]
+    fn verify_prompt_carries_finding() {
+        let f = Finding {
+            file: "src/x.rs".into(),
+            line: Some(9),
+            severity: Severity::Medium,
+            category: Category::Security,
+            claim: "unchecked input".into(),
+            evidence: "e".into(),
+            failure: "boom scenario".into(),
+        };
+        let p = verify_prompt(&f);
+        assert!(p.contains("src/x.rs:9"));
+        assert!(p.contains("unchecked input"));
+        assert!(p.contains("boom scenario"));
     }
 }
