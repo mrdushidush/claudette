@@ -95,6 +95,21 @@ Two layers enforce it: an HTTP-layer guard in the reqwest path checks the destin
 | `CLAUDETTE_MAX_FIX_ROUNDS` | `3` | Cap on Coder→Verifier fix-loop rounds in `--forge`. Default 3 is the empirical sweet spot for local 8b coders. Raise to 4–6 if you've pinned a stronger Verifier model and want it to keep pushing back. Clamped at 10. |
 | `CLAUDETTE_FORGE_ABORT_WINDOW_SECS` | `3` | Grace window (seconds) to Ctrl-C out of a forge run before it starts working. Set `0` to skip the pause in CI / scripted runs. Clamped at 30. |
 
+## Deep research (`--research`)
+
+`--research` runs an unattended, read-only review loop over the target repo
+(`CLAUDETTE_WORKSPACE`, else the git toplevel). The read-only and offline
+guarantees are enforced at the permission layer, not by prompt: the runtime is
+capped at a hard `ReadOnly` tier — every write / exec / network tool is denied
+at dispatch, before any prompter — and the run forces `--offline`. Findings are
+checkpointed under `~/.claudette/research/`, so an interrupted run resumes.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CLAUDETTE_RESEARCH_DIR` | `~/.claudette/research/<repo>-<date>/` | Output directory override for `--research` (used as-is; must be outside the target tree). |
+| `CLAUDETTE_RESEARCH_MAX_BATCHES` | unlimited | Stop a `--research` run after N batches (smoke tests / partial runs). |
+| `CLAUDETTE_RESEARCH_BATCH_FILES` | `3` | Max files per review batch (clamped `1`–`8`). |
+
 ## Tokens (per-tool)
 
 | Variable | Purpose |

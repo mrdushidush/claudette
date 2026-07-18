@@ -24,8 +24,8 @@
 use std::process::ExitCode;
 
 use claudette::{
-    probe_ollama, run_agent, run_agent_repl, run_forge_mission, theme, try_load_session,
-    workspace_startup_diagnostics, SessionOptions,
+    probe_ollama, run_agent, run_agent_repl, run_deep_research, run_forge_mission, theme,
+    try_load_session, workspace_startup_diagnostics, SessionOptions,
 };
 use claudette::{ContentBlock, Session};
 // External-cloud integrations: only compiled into an `integrations` build.
@@ -85,6 +85,11 @@ struct CliArgs {
     /// VRAM → recommended-brain pull offer → integrations pointers →
     /// closing `--doctor` pass). TTY-only; refused under `--offline`.
     setup: bool,
+    /// `--research`: point claudette at a repo and run the unattended,
+    /// hard-enforced read-only review loop (batches of files per fresh
+    /// conversation, findings checkpointed to `~/.claudette/research/`).
+    /// Trailing prompt words become an optional focus hint. Forces offline.
+    research: bool,
 }
 
 /// Help text printed on `--help` / `-h`. One source of truth; the README
@@ -112,6 +117,9 @@ MODES (pick one; default is interactive REPL):
                          start one with /brownfield <repo> first. v0a runs a
                          single brain turn with file/search/git/advanced/github
                          tools pre-enabled and exits at mission_submit (auto-PR).
+    --research [FOCUS]   Unattended read-only review of the repo (CLAUDETTE_
+                         WORKSPACE or the git toplevel). Writes a findings
+                         report to ~/.claudette/research/. Forces --offline.
 
 TELEGRAM OPTIONS:
     --chat <id>          Restrict the Telegram bot to chat ID <id>.
@@ -251,6 +259,7 @@ fn main() -> ExitCode {
         forge,
         doctor,
         setup,
+        research,
     } = args;
 
     // ── Offline-mode banner ───────────────────────────────────────────
@@ -324,6 +333,25 @@ fn main() -> ExitCode {
         if !claudette::firstrun::offer_fix_interactive() {
             return ExitCode::FAILURE;
         }
+    }
+
+    // ── Deep-research mode (read-only, offline, unattended) ───────────
+    // Runs the batches phase of the review loop against the resolved repo
+    // and exits. Forces the air-gap and a hard ReadOnly permission tier;
+    // trailing prompt words are an optional focus hint.
+    if research {
+        let focus = prompt_args.join(" ");
+        return match run_deep_research(&focus) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!(
+                    "{} {}",
+                    theme::error(theme::ERR_GLYPH),
+                    theme::error(&format!("{e:#}"))
+                );
+                ExitCode::FAILURE
+            }
+        };
     }
 
     // ── Forge-mode (single-stage v0a) ─────────────────────────────────
@@ -547,6 +575,7 @@ fn parse_args(args: &[String]) -> CliArgs {
             "--forge" => out.forge = true,
             "--doctor" => out.doctor = true,
             "--setup" => out.setup = true,
+            "--research" => out.research = true,
             "--faceless" => {
                 // Persona overlay opt-out (Eva for assistant, CodeX-7 for
                 // forge Coder). Set the env var so the secretary prompt
@@ -930,6 +959,22 @@ mod tests {
             Some(v) => std::env::set_var(claudette::egress::OFFLINE_ENV, v),
             None => std::env::remove_var(claudette::egress::OFFLINE_ENV),
         }
+    }
+
+    #[test]
+    fn parse_args_research_flag() {
+        // `--research` is consumed; the trailing words remain the focus hint.
+        let a = parse_args(&[
+            "--research".into(),
+            "focus".into(),
+            "on".into(),
+            "parsers".into(),
+        ]);
+        assert!(a.research, "--research sets the research flag");
+        assert_eq!(
+            a.prompt_words,
+            vec!["focus".to_string(), "on".to_string(), "parsers".to_string()]
+        );
     }
 
     #[test]

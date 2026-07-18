@@ -50,8 +50,8 @@ pub(crate) use cli_prompter::{format_ctx_gauge, EMPTY_RESPONSE_NUDGE};
 // mission code keep resolving.
 mod runtime_build;
 pub(crate) use runtime_build::{
-    build_forge_role_runtime, build_forge_runtime, build_permission_policy, build_runtime,
-    build_runtime_streaming, build_runtime_with_brain,
+    build_forge_role_runtime, build_forge_runtime, build_permission_policy, build_research_runtime,
+    build_runtime, build_runtime_streaming, build_runtime_with_brain,
 };
 
 // Interactive agent REPL loop. Extracted to `run/repl.rs` (Wave C6);
@@ -68,8 +68,9 @@ pub(crate) use forge_run::forge_auto_approve_enabled;
 pub use forge_run::run_forge_mission;
 
 /// Deep-research mode pure core (manifest / batches / finding parser /
-/// progress stores). Driven by the CLI flag added in the follow-up PR.
+/// progress stores) plus the `--research` driver.
 mod research;
+pub use research::run_deep_research;
 
 /// Resolve the model name the runtime is currently using. Sprint 14: this
 /// now delegates to `model_config::active().brain.model`, so once a

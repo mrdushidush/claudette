@@ -312,6 +312,55 @@ pub(crate) fn build_forge_role_runtime(
         })
 }
 
+/// Build a fresh runtime for one deep-research batch: the active brain with
+/// read-only tools (Files/Search/Semantic) and a HARD `ReadOnly` permission
+/// tier. The tier cap denies every write/exec/network tool at dispatch —
+/// before any prompter — regardless of which tool name the model invents
+/// (role-isolation lesson, roast RC-B). No prompter is wired (all permitted
+/// tools are ReadOnly-tier, so nothing needs approval); `CLAUDETTE_FORGE_
+/// AUTO_APPROVE` deliberately has NO effect here (research never builds an
+/// Allow-mode policy).
+pub(crate) fn build_research_runtime(
+    session: Session,
+    system_prompt: Vec<String>,
+) -> ConversationRuntime<OllamaApiClient, AgentToolExecutor> {
+    let brain = model_config::active().brain;
+
+    let mut reg = ToolRegistry::new();
+    for group in [ToolGroup::Files, ToolGroup::Search, ToolGroup::Semantic] {
+        reg.enable(group);
+    }
+    let registry = Arc::new(Mutex::new(reg));
+
+    let api_client = OllamaApiClient::with_registry(brain.model.clone(), registry.clone())
+        .with_context(brain.num_ctx)
+        .with_max_predict(brain.num_predict)
+        .with_text_callback(stdout_text_callback());
+
+    let hinter_registry = Arc::clone(&registry);
+    let executor = AgentToolExecutor::with_registry(registry);
+    let policy = research_permission_policy();
+
+    ConversationRuntime::new(session, api_client, executor, policy, system_prompt)
+        .with_max_iterations(max_iterations())
+        .with_auto_compaction_input_tokens_threshold(u32::MAX)
+        .with_unknown_tool_hinter(move |name: &str| {
+            ToolGroup::parse(name).map_or_else(Vec::new, |group| {
+                let reg = match hinter_registry.lock() {
+                    Ok(g) => g,
+                    Err(p) => p.into_inner(),
+                };
+                reg.group_tool_names(group)
+            })
+        })
+}
+
+/// The permission policy for a deep-research runtime: the ambient policy,
+/// hard-capped at `ReadOnly`. Factored out so the cap is directly testable.
+pub(crate) fn research_permission_policy() -> PermissionPolicy {
+    build_permission_policy().with_max_tier(crate::PermissionMode::ReadOnly)
+}
+
 /// v0b helper: resolve any forge role's model from `~/.claudettes-forge/
 /// models.toml` (or env overrides). Returns `None` on any failure — the
 /// caller falls back to claudette's active brain model. Best-effort; a
@@ -576,5 +625,24 @@ mod tests {
         assert_eq!(p.role, forge::types::Role::Coder);
         assert!(!p.voice.is_empty(), "codex7 should have a voice");
         assert!(!p.backstory.is_empty(), "codex7 should have backstory");
+    }
+
+    /// The research permission policy caps at `ReadOnly`: every write/exec
+    /// tool is denied at the tier ceiling before any prompter is consulted,
+    /// regardless of the ambient mode (role-isolation guard, roast RC-B).
+    #[test]
+    fn research_policy_is_read_only_capped() {
+        let _guard = crate::test_env_lock();
+        let policy = research_permission_policy();
+        assert_eq!(policy.max_tier(), PermissionMode::ReadOnly);
+        for tool in ["write_file", "bash", "apply_diff", "git_commit"] {
+            assert!(
+                matches!(
+                    policy.authorize(tool, "{}", None),
+                    crate::PermissionOutcome::Deny { .. }
+                ),
+                "{tool} must be denied under the ReadOnly cap"
+            );
+        }
     }
 }
