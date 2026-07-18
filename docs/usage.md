@@ -14,6 +14,7 @@ binary has no cloud code, so it errors with a one-line reinstall hint instead.
 | `--telegram`, `-t` | **(integrations)** Run as a Telegram bot (needs `TELEGRAM_BOT_TOKEN`). |
 | `--tui` | Launch the fullscreen TUI. |
 | `--forge "<prompt>"` | Run forge-mode (Planner → Coder → Verifier pipeline) against the active brownfield mission. Requires an active mission — start one with `/brownfield <repo>` or `mission_start` first. |
+| `--research [focus]` | Unattended read-only review of the repo you are in: fresh conversation per 2–3-file batch, findings checkpointed under `~/.claudette/research/`, HIGH/MEDIUM findings verified, final `REPORT.md`. Forces offline; re-run the same command to resume. Trailing words become an optional focus hint. See [research.md](research.md). |
 | `--chat <id>` | Restrict Telegram bot to a specific chat ID. Repeatable, or set `CLAUDETTE_TELEGRAM_CHAT` to a comma-separated list. The bot **default-denies** when no allowlist is provided. |
 | `--chat any` | Explicit accept-all: serve every incoming Telegram chat. Required to start the bot with no allowlist. Prints a loud warning. |
 | `--auth-google [scope]` | **(integrations)** Run the loopback OAuth flow. Scope is `calendar` (default) or `gmail`. Stores tokens under `~/.claudette/secrets/`. |

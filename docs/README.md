@@ -25,6 +25,7 @@
 
 - [architecture.md](architecture.md) — module layout, tool-group contract, storage layout
 - [forge.md](forge.md) — the Planner → Coder → Verifier pipeline, brownfield missions, `models.toml`
+- [research.md](research.md) — deep-research mode: the unattended read-only audit loop, its guarantees, output files, resume, knobs
 - [comparison.md](comparison.md) — honest side-by-side vs. opencode / Aider / OpenHands / Cline / Continue
 
 ## Setup & deployment
