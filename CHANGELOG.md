@@ -27,6 +27,19 @@ bumps are non-breaking bugfixes only.
 
 ### Added
 
+- **Deep-research mode: `claudette --research` — an unattended, read-only
+  repo audit.** Batches of 2–3 files are each reviewed in a fresh
+  conversation (a stateless outer loop, so long runs cannot drift), findings
+  are checkpointed to `~/.claudette/research/<repo>-<date>/` after every
+  batch, every HIGH/MEDIUM finding is re-verified in its own conversation
+  (`CONFIRMED` / `RETRACTED` / `UNVERIFIED`), and a final synthesize pass
+  writes a ranked, triage-ready `REPORT.md`. Read-only is enforced at the
+  permission layer (mutating tools are denied at dispatch, not by prompt) and
+  the run forces `--offline`; interrupt it any time — re-running the same
+  command resumes at the first unfinished batch. Knobs:
+  `CLAUDETTE_RESEARCH_DIR`, `CLAUDETTE_RESEARCH_MAX_BATCHES`,
+  `CLAUDETTE_RESEARCH_BATCH_FILES`. See `docs/research.md`.
+
 - **`repo_map` now extracts Kotlin definitions** (`.kt` / `.kts`): top-level
   and member `fun`, `class` (incl. `data` / `enum` / `sealed` / `annotation` /
   `value`), `interface` (incl. `fun interface`), and `object` / `companion
