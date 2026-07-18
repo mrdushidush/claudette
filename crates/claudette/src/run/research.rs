@@ -473,9 +473,13 @@ fn process_section(
             Some(_) => {}
             None => match open_field {
                 Some("claim") => append_field(&mut claim_val, &trimmed),
-                Some("evidence") => append_field(&mut evidence_val, &trimmed),
+                // Skip ``` / ```lang fence markers so the reviewer's fenced
+                // evidence blocks don't leak the fences into stored evidence.
+                Some("evidence") if !trimmed.starts_with("```") => {
+                    append_field(&mut evidence_val, &trimmed);
+                }
                 Some("failure") => append_field(&mut failure_val, &trimmed),
-                // Chatter before the first free-text key — ignored.
+                // Chatter before the first free-text key, or a fence line — ignored.
                 _ => {}
             },
         }
@@ -509,12 +513,19 @@ fn process_section(
         norm_file = norm_file[2..].to_string();
     }
 
-    // Strip trailing :<digits> into line number.
+    // Strip a trailing line-spec into the line number. Accepts `:N`, `:N-M`
+    // (range → take N), and `:N:C` (line:col → N): after the FIRST colon the
+    // leading run of digits is the line, and the rest (`-M`, `:C`) is dropped.
+    // Use the first colon, not the last, so `path:6:3` doesn't leave a stray
+    // `path:6` that the unsafe-path guard below would then reject.
     let mut line: Option<u32> = None;
-    if let Some(colon_pos) = norm_file.rfind(':') {
-        let suffix = &norm_file[colon_pos + 1..];
-        if suffix.chars().all(|c| c.is_ascii_digit()) && !suffix.is_empty() {
-            line = suffix.parse::<u32>().ok();
+    if let Some(colon_pos) = norm_file.find(':') {
+        let digits: String = norm_file[colon_pos + 1..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        if !digits.is_empty() {
+            line = digits.parse::<u32>().ok();
             norm_file = norm_file[..colon_pos].to_string();
         }
     }
@@ -1988,5 +1999,42 @@ ok";
 
         // Clean up.
         std::env::remove_var(crate::egress::OFFLINE_ENV);
+    }
+
+    /// parse_finding_with_line_range — `file: path:6-7` (range) is kept, not
+    /// dropped as an unsafe path; the line is the start of the range.
+    #[test]
+    fn parse_finding_with_line_range() {
+        let dir = fixture_dir();
+        setup_fixture(&dir);
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(dir.join("src/math.rs"), "x\n").unwrap();
+
+        let output = "### BATCH VERDICT\nok\n### FINDING\nfile: src/math.rs:6-7\nseverity: high\ncategory: bug\nclaim: c\nevidence: e\nfailure: f";
+        let parsed = parse_batch_output(output, &dir).expect("parse");
+        assert_eq!(parsed.findings.len(), 1);
+        assert_eq!(parsed.findings[0].file, "src/math.rs");
+        assert_eq!(parsed.findings[0].line, Some(6));
+        assert!(parsed.dropped.is_empty());
+
+        cleanup(&dir);
+    }
+
+    /// parse_evidence_strips_code_fences — a fenced ```rust … ``` evidence block
+    /// is captured without the fence markers.
+    #[test]
+    fn parse_evidence_strips_code_fences() {
+        let dir = fixture_dir();
+        setup_fixture(&dir);
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(dir.join("src/math.rs"), "x\n").unwrap();
+
+        let output = "### BATCH VERDICT\nok\n### FINDING\nfile: src/math.rs:6\nseverity: high\ncategory: bug\nclaim: c\nevidence:\n```rust\nlet x = 1;\n```\nfailure: f";
+        let parsed = parse_batch_output(output, &dir).expect("parse");
+        assert_eq!(parsed.findings.len(), 1);
+        assert!(!parsed.findings[0].evidence.contains("```"));
+        assert!(parsed.findings[0].evidence.contains("let x = 1;"));
+
+        cleanup(&dir);
     }
 }
