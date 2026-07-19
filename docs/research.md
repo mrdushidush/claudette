@@ -82,3 +82,14 @@ also refuses and points you at its `REPORT.md`.
 | `CLAUDETTE_RESEARCH_DIR` | `~/.claudette/research/<repo>-<date>/` | Output directory override (used as-is; must be outside the target tree). |
 | `CLAUDETTE_RESEARCH_MAX_BATCHES` | unlimited | Stop after N batches — smoke tests / partial runs. A capped run stays in the batches phase; re-running continues it. |
 | `CLAUDETTE_RESEARCH_BATCH_FILES` | `3` | Max files per review batch (clamped `1`–`8`). |
+
+## Backend hiccups
+
+A batch whose turns come back content-less gets one immediate retry, then the
+driver probes the backend with cheap "reply OK" turns until it generates again —
+running `CLAUDETTE_RESEARCH_RECOVER_CMD` once, if set, as a driver-side remedy
+(for example `lms unload --all` to force a clean model reload). If the backend
+never recovers, the run halts checkpointed; re-invoking resumes at the same
+batch. Skips are reserved for batch-bound failures and always record a reason in
+`progress.json`. To re-queue previously skipped batches on a resume, set
+`CLAUDETTE_RESEARCH_RETRY_SKIPPED=1`.
