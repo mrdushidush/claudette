@@ -10,6 +10,8 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-19
+
 ### Docs
 
 - **Model recommendations refreshed from the 2026-07 champion-tuning battery**
@@ -2341,7 +2343,8 @@ Initial public release of Claudette as a standalone repository.
 
 ---
 
-[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/mrdushidush/claudette/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/mrdushidush/claudette/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/mrdushidush/claudette/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/mrdushidush/claudette/compare/v0.13.1...v0.14.0
@@ -2349,6 +2352,24 @@ Initial public release of Claudette as a standalone repository.
 [0.13.0]: https://github.com/mrdushidush/claudette/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/mrdushidush/claudette/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/mrdushidush/claudette/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/mrdushidush/claudette/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/mrdushidush/claudette/compare/v0.8.9...v0.9.0
+[0.8.9]: https://github.com/mrdushidush/claudette/compare/v0.8.8...v0.8.9
+[0.8.8]: https://github.com/mrdushidush/claudette/compare/v0.8.7...v0.8.8
+[0.8.7]: https://github.com/mrdushidush/claudette/compare/v0.8.6...v0.8.7
+[0.8.6]: https://github.com/mrdushidush/claudette/compare/v0.8.5...v0.8.6
+[0.8.5]: https://github.com/mrdushidush/claudette/compare/v0.8.4...v0.8.5
+[0.8.4]: https://github.com/mrdushidush/claudette/compare/v0.8.3...v0.8.4
+[0.8.3]: https://github.com/mrdushidush/claudette/compare/v0.8.2...v0.8.3
+[0.8.2]: https://github.com/mrdushidush/claudette/compare/v0.8.1...v0.8.2
+[0.8.1]: https://github.com/mrdushidush/claudette/compare/v0.8.0...v0.8.1
+[0.7.0]: https://github.com/mrdushidush/claudette/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/mrdushidush/claudette/compare/v0.5.4...v0.6.0
+[0.5.4]: https://github.com/mrdushidush/claudette/compare/v0.5.3...v0.5.4
+[0.5.3]: https://github.com/mrdushidush/claudette/compare/v0.5.2...v0.5.3
+[0.5.2]: https://github.com/mrdushidush/claudette/compare/v0.5.1...v0.5.2
+[0.5.1]: https://github.com/mrdushidush/claudette/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/mrdushidush/claudette/compare/v0.4.1...v0.5.0
 [0.4.0]: https://github.com/mrdushidush/claudette/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/mrdushidush/claudette/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/mrdushidush/claudette/compare/v0.2.3...v0.3.0
