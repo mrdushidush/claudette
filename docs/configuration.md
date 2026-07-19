@@ -109,6 +109,8 @@ checkpointed under `~/.claudette/research/`, so an interrupted run resumes.
 | `CLAUDETTE_RESEARCH_DIR` | `~/.claudette/research/<repo>-<date>/` | Output directory override for `--research` (used as-is; must be outside the target tree). |
 | `CLAUDETTE_RESEARCH_MAX_BATCHES` | unlimited | Stop a `--research` run after N batches (smoke tests / partial runs). |
 | `CLAUDETTE_RESEARCH_BATCH_FILES` | `3` | Max files per review batch (clamped `1`–`8`). |
+| `CLAUDETTE_RESEARCH_RETRY_SKIPPED` | unset | `1` on a `--research` resume re-queues previously skipped batches (flake recovery / validation). |
+| `CLAUDETTE_RESEARCH_RECOVER_CMD` | unset | Driver-side shell command run once per backend sick-episode during `--research` (e.g. `lms unload --all`); the model never sees it. |
 
 ## Tokens (per-tool)
 

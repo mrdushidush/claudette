@@ -581,6 +581,8 @@ pub(crate) struct BatchStatus {
     pub attempts: u32,
     pub findings: usize,
     pub wall_secs: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -603,6 +605,7 @@ impl Progress {
                 attempts: 0,
                 findings: 0,
                 wall_secs: 0,
+                skip_reason: None,
             })
             .collect();
         Self {
@@ -859,6 +862,51 @@ fn max_batches_from_env() -> Option<usize> {
         .filter(|n| *n > 0)
 }
 
+/// Health-probe system prompt (driver-side liveness check between attempts).
+const PROBE_SYSTEM: &str =
+    "You are a health probe. Reply with exactly: OK. No other text, no tool calls.";
+
+/// Health-probe user prompt.
+const PROBE_PROMPT: &str = "Reply with exactly: OK";
+
+/// Probe rounds per recovery stage before giving up on the backend.
+const PROBE_ROUNDS: usize = 5;
+
+/// Seconds to sleep before each recovery probe.
+const PROBE_SLEEP_SECS: u64 = 60;
+
+/// `CLAUDETTE_RESEARCH_RETRY_SKIPPED=1` re-queues previously skipped batches
+/// on resume.
+fn retry_skipped_enabled() -> bool {
+    std::env::var("CLAUDETTE_RESEARCH_RETRY_SKIPPED").is_ok_and(|v| v == "1")
+}
+
+/// Optional driver-side recovery command (`CLAUDETTE_RESEARCH_RECOVER_CMD`).
+fn recover_cmd_from_env() -> Option<String> {
+    std::env::var("CLAUDETTE_RESEARCH_RECOVER_CMD")
+        .ok()
+        .filter(|c| !c.trim().is_empty())
+}
+
+/// `true` when a probe response counts as healthy (any non-whitespace content).
+fn probe_healthy(text: &str) -> bool {
+    !text.trim().is_empty()
+}
+
+/// Flip every `Skipped` batch back to `Pending`; returns how many were flipped.
+fn flip_skipped_to_pending(progress: &mut Progress) -> usize {
+    let mut flipped = 0usize;
+    for b in &mut progress.batches {
+        if b.state == BatchState::Skipped {
+            b.state = BatchState::Pending;
+            b.attempts = 0;
+            b.skip_reason = None;
+            flipped += 1;
+        }
+    }
+    flipped
+}
+
 /// Resume decision per SPEC §8.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ResumeAction {
@@ -960,10 +1008,10 @@ fn findings_md_batch_block(
 }
 
 /// Format a skipped-batch note for FINDINGS.md.
-fn findings_md_skipped_note(batch_id: usize) -> String {
+fn findings_md_skipped_note(batch_id: usize, reason: &str) -> String {
     format!(
-        "\n## Batch {} — SKIPPED\n\nBatch could not be parsed after retries.\n",
-        batch_id
+        "\n## Batch {} — SKIPPED\n\nBatch skipped after retries: {}.\n",
+        batch_id, reason
     )
 }
 
@@ -983,6 +1031,60 @@ fn classify_attempt(text: &str, root: &std::path::Path) -> AttemptOutcome {
         Ok(parsed) => AttemptOutcome::Parsed(parsed),
         Err(e) => AttemptOutcome::ParseError(e),
     }
+}
+
+/// One cheap generation probe. `true` = backend produced visible content.
+fn probe_backend() -> bool {
+    let session = Session::new();
+    let mut runtime = build_research_runtime(session, vec![PROBE_SYSTEM.to_string()]);
+    match crate::brain_selector::run_turn_with_fallback(&mut runtime, PROBE_PROMPT, &mut None) {
+        Ok(summary) => probe_healthy(&crate::run::extract_assistant_text(&summary)),
+        Err(_) => false,
+    }
+}
+
+/// Wait out a backend sick-episode (consecutive content-less turns).
+///
+/// Stage 1: up to `PROBE_ROUNDS` probes, `PROBE_SLEEP_SECS` apart. If all fail
+/// and `CLAUDETTE_RESEARCH_RECOVER_CMD` is set and unused this run, run it
+/// driver-side (the model never sees it) and probe one more stage.
+/// `true` = backend is generating again.
+fn recover_backend(recover_cmd_used: &mut bool) -> bool {
+    for stage in 0..2u8 {
+        for round in 1..=PROBE_ROUNDS {
+            eprintln!(
+                "  backend produced no content — recovery probe {round}/{PROBE_ROUNDS} in {PROBE_SLEEP_SECS}s"
+            );
+            std::thread::sleep(std::time::Duration::from_secs(PROBE_SLEEP_SECS));
+            if probe_backend() {
+                eprintln!("  backend recovered");
+                return true;
+            }
+        }
+        if stage == 1 {
+            break;
+        }
+        let Some(cmd) = recover_cmd_from_env() else {
+            return false;
+        };
+        if *recover_cmd_used {
+            return false;
+        }
+        *recover_cmd_used = true;
+        eprintln!("  running CLAUDETTE_RESEARCH_RECOVER_CMD: {cmd}");
+        let launched = if cfg!(windows) {
+            std::process::Command::new("cmd")
+                .args(["/C", &cmd])
+                .status()
+        } else {
+            std::process::Command::new("sh").args(["-c", &cmd]).status()
+        };
+        if let Err(e) = launched {
+            eprintln!("  recover command failed to launch: {e}");
+            return false;
+        }
+    }
+    false
 }
 
 /// The main driver: `claudette --research` entry point.
@@ -1013,7 +1115,15 @@ pub fn run_deep_research(focus: &str) -> anyhow::Result<()> {
 
     // 3. Load or init progress.json.
     let progress_path = output_dir.join("progress.json");
-    let existing_progress = Progress::load(&progress_path).map_err(|e| anyhow::anyhow!(e))?;
+    let mut existing_progress = Progress::load(&progress_path).map_err(|e| anyhow::anyhow!(e))?;
+    if let Some(prog) = existing_progress.as_mut() {
+        if retry_skipped_enabled() && prog.phase == Phase::Batches {
+            let flipped = flip_skipped_to_pending(prog);
+            if flipped > 0 {
+                eprintln!("retry-skipped: re-queued {flipped} previously skipped batch(es)");
+            }
+        }
+    }
     let resume = resume_action(existing_progress.as_ref(), &manifest.hash);
 
     match resume {
@@ -1078,18 +1188,17 @@ pub fn run_deep_research(focus: &str) -> anyhow::Result<()> {
     let max_batches = max_batches_from_env();
     let mut batches_done = 0usize;
     let mut batches_skipped = 0usize;
+    let mut recover_cmd_used = false;
     let mut total_findings = 0usize;
     let mut high_count = 0usize;
 
-    // Determine starting batch id.
-    let start_id = match resume {
-        ResumeAction::ResumeAt(id) => id,
-        _ => manifest.batches[0].id,
-    };
-
     for batch in &manifest.batches {
-        if batch.id < start_id {
-            continue; // already done from previous run
+        let is_pending = progress
+            .batches
+            .iter()
+            .any(|b| b.id == batch.id && b.state == BatchState::Pending);
+        if !is_pending {
+            continue; // done or skipped in a previous run
         }
         if let Some(max) = max_batches {
             if batches_done >= max {
@@ -1111,15 +1220,22 @@ pub fn run_deep_research(focus: &str) -> anyhow::Result<()> {
 
         let system_prompt = vec![RESEARCH_BRIEFING.replace("{root}", &root.display().to_string())];
 
-        // Up to 2 attempts.
+        // Attempt ladder: parse errors burn a 2-attempt budget; content-less
+        // turns get one immediate retry, then a probe-gated recovery wait, then
+        // one final attempt. Skips are batch-bound only; a dead backend halts
+        // the run checkpointed instead of punching coverage holes.
         let mut attempt_count: u32 = 0;
+        let mut empty_streak: u32 = 0;
+        let mut recovered_once = false;
         let mut parsed_batch: Option<ParsedBatch> = None;
+        let mut skip_reason: Option<String> = None;
         let mut batch_status = BatchStatus {
             id: batch.id,
             state: BatchState::Pending,
             attempts: 0,
             findings: 0,
             wall_secs: 0,
+            skip_reason: None,
         };
 
         loop {
@@ -1127,23 +1243,28 @@ pub fn run_deep_research(focus: &str) -> anyhow::Result<()> {
             batch_status.attempts = attempt_count;
             let start = std::time::SystemTime::now();
 
-            // Build runtime and run one turn.
             let session = Session::new();
             let mut runtime = build_research_runtime(session, system_prompt.clone());
-            let prompt = batch_prompt(batch.id, manifest.batches.len(), &files, focus);
+            let prompt = if attempt_count > 1 && empty_streak == 0 {
+                format!(
+                    "{}\n\nYour previous output did not match the required format. Re-output now, format only.",
+                    batch_prompt(batch.id, manifest.batches.len(), &files, focus)
+                )
+            } else {
+                batch_prompt(batch.id, manifest.batches.len(), &files, focus)
+            };
 
-            // Run the turn — this is a blocking call that streams to stdout.
-            // A turn error (empty-stream flake, backend hiccup) yields no text,
-            // which classify_attempt treats as Empty (retry, then skip).
             let text = match crate::brain_selector::run_turn_with_fallback(
                 &mut runtime,
                 &prompt,
                 &mut None,
             ) {
                 Ok(summary) => crate::run::extract_assistant_text(&summary),
-                Err(_) => String::new(),
+                Err(e) => {
+                    eprintln!("  batch {}: turn error: {e}", batch.id);
+                    String::new()
+                }
             };
-
             batch_status.wall_secs += start.elapsed().map_or(0, |d| d.as_secs());
 
             match classify_attempt(&text, &root) {
@@ -1151,71 +1272,57 @@ pub fn run_deep_research(focus: &str) -> anyhow::Result<()> {
                     parsed_batch = Some(pb);
                     break;
                 }
-                AttemptOutcome::Empty if attempt_count == 1 => {
-                    // Empty on the first attempt: loop around for a second try.
+                AttemptOutcome::Empty => {
+                    empty_streak += 1;
+                    if empty_streak == 1 {
+                        continue;
+                    }
+                    if recovered_once {
+                        skip_reason = Some(
+                            "no content from a verified-healthy backend (batch-bound)".to_string(),
+                        );
+                        break;
+                    }
+                    if recover_backend(&mut recover_cmd_used) {
+                        recovered_once = true;
+                        empty_streak = 1;
+                        continue;
+                    }
+                    progress.save(&progress_path).ok();
+                    return Err(anyhow::anyhow!(
+                        "backend stopped producing content and did not recover; \
+                         run checkpointed — re-invoke to resume at batch {}",
+                        batch.id
+                    ));
                 }
-                AttemptOutcome::ParseError(e) if attempt_count == 1 => {
+                AttemptOutcome::ParseError(e) => {
+                    empty_streak = 0;
+                    if attempt_count >= 2 {
+                        skip_reason = Some(format!("findings did not parse: {e}"));
+                        break;
+                    }
                     eprintln!(
                         "  batch {}: findings did not parse ({e}) — retrying",
                         batch.id
                     );
-                    // Retry with appended line.
-                    let session2 = Session::new();
-                    let mut runtime2 = build_research_runtime(session2, system_prompt.clone());
-                    let prompt_with_retry = format!(
-                        "{}\n\nYour previous output did not match the required format. Re-output now, format only.",
-                        batch_prompt(batch.id, manifest.batches.len(), &files, focus)
-                    );
-                    let text2 = match crate::brain_selector::run_turn_with_fallback(
-                        &mut runtime2,
-                        &prompt_with_retry,
-                        &mut None,
-                    ) {
-                        Ok(summary2) => crate::run::extract_assistant_text(&summary2),
-                        Err(_) => String::new(),
-                    };
-                    batch_status.wall_secs += start.elapsed().map_or(0, |d| d.as_secs());
-
-                    match classify_attempt(&text2, &root) {
-                        AttemptOutcome::Parsed(pb) => {
-                            parsed_batch = Some(pb);
-                            break;
-                        }
-                        _ => {
-                            // Second failure → skip.
-                            batch_status.state = BatchState::Skipped;
-                            batches_skipped += 1;
-                            std::fs::write(
-                                output_dir.join("FINDINGS.md"),
-                                format!(
-                                    "{}\n{}",
-                                    std::fs::read_to_string(output_dir.join("FINDINGS.md"))
-                                        .unwrap_or_default(),
-                                    findings_md_skipped_note(batch.id)
-                                ),
-                            )
-                            .ok();
-                            break;
-                        }
-                    }
-                }
-                _ => {
-                    // Empty on attempt 2, or parse error on attempt 2 → skip.
-                    batch_status.state = BatchState::Skipped;
-                    batches_skipped += 1;
-                    std::fs::write(
-                        output_dir.join("FINDINGS.md"),
-                        format!(
-                            "{}\n{}",
-                            std::fs::read_to_string(output_dir.join("FINDINGS.md"))
-                                .unwrap_or_default(),
-                            findings_md_skipped_note(batch.id)
-                        ),
-                    )
-                    .ok();
-                    break;
                 }
             }
+        }
+
+        if let Some(reason) = skip_reason {
+            batch_status.state = BatchState::Skipped;
+            batch_status.skip_reason = Some(reason.clone());
+            batches_skipped += 1;
+            eprintln!("  batch {}: SKIPPED — {reason}", batch.id);
+            std::fs::write(
+                output_dir.join("FINDINGS.md"),
+                format!(
+                    "{}\n{}",
+                    std::fs::read_to_string(output_dir.join("FINDINGS.md")).unwrap_or_default(),
+                    findings_md_skipped_note(batch.id, &reason)
+                ),
+            )
+            .ok();
         }
 
         if let Some(pb) = parsed_batch {
@@ -1259,7 +1366,7 @@ pub fn run_deep_research(focus: &str) -> anyhow::Result<()> {
         // Per-batch stderr line (SPEC §10).
         eprintln!(
             "[{}/{}] {} — {} findings ({} HIGH) — {}s",
-            batches_done,
+            batch.id,
             manifest.batches.len(),
             root.display(),
             batch_findings,
@@ -2482,5 +2589,66 @@ ok";
         assert!(p.contains("src/x.rs:9"));
         assert!(p.contains("unchecked input"));
         assert!(p.contains("boom scenario"));
+    }
+
+    #[test]
+    fn probe_healthy_rejects_whitespace() {
+        assert!(!probe_healthy("  \n\t"));
+        assert!(probe_healthy("OK"));
+    }
+
+    #[test]
+    fn flip_skipped_to_pending_flips_only_skipped() {
+        let mut progress = Progress {
+            manifest_hash: "h".to_string(),
+            started_unix: 0,
+            phase: Phase::Batches,
+            batches: vec![
+                BatchStatus {
+                    id: 1,
+                    state: BatchState::Done,
+                    attempts: 1,
+                    findings: 2,
+                    wall_secs: 10,
+                    skip_reason: None,
+                },
+                BatchStatus {
+                    id: 2,
+                    state: BatchState::Skipped,
+                    attempts: 2,
+                    findings: 0,
+                    wall_secs: 99,
+                    skip_reason: Some("findings did not parse: x".to_string()),
+                },
+                BatchStatus {
+                    id: 3,
+                    state: BatchState::Pending,
+                    attempts: 0,
+                    findings: 0,
+                    wall_secs: 0,
+                    skip_reason: None,
+                },
+            ],
+        };
+        assert_eq!(flip_skipped_to_pending(&mut progress), 1);
+        assert_eq!(progress.batches[0].state, BatchState::Done);
+        assert_eq!(progress.batches[1].state, BatchState::Pending);
+        assert_eq!(progress.batches[1].attempts, 0);
+        assert_eq!(progress.batches[1].skip_reason, None);
+        assert_eq!(progress.batches[2].state, BatchState::Pending);
+    }
+
+    #[test]
+    fn batch_status_skip_reason_defaults_to_none() {
+        let json = r#"{"id":1,"state":"done","attempts":1,"findings":2,"wall_secs":30}"#;
+        let s: BatchStatus = serde_json::from_str(json).unwrap();
+        assert_eq!(s.skip_reason, None);
+    }
+
+    #[test]
+    fn skipped_note_includes_reason() {
+        let note = findings_md_skipped_note(7, "findings did not parse: bad enum");
+        assert!(note.contains("Batch 7"));
+        assert!(note.contains("bad enum"));
     }
 }
