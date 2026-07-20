@@ -10,6 +10,17 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **`--research` scope control.** `CLAUDETTE_RESEARCH_EXCLUDE` skips
+  comma-separated paths / directory names (bare names match at any depth; paths
+  with a slash match that subtree), on top of a built-in `docs/archive` default
+  so stale archived docs stay out of reviews. Excluded files are recorded in
+  `manifest.json` and counted in the `FINDINGS.md` header, not silently dropped.
+  A run also warns at startup about files dense with chat-template control
+  tokens (e.g. `api/harmony.rs`), which reliably provoke content-less batches —
+  exclude them if the flake cost isn't worth the coverage.
+
 ## [0.17.0] - 2026-07-19
 
 ### Docs
