@@ -58,6 +58,9 @@ wildcards = "deny"
 # pins. Keep in sync with `cargo tree -d`.
 skip = [
     { crate = "hashbrown" },
+    # syn 2.x (darling_core) vs 3.x (from the cargo-minor-and-patch bump) — a
+    # benign, upstream-driven split; drop this once the tree converges.
+    { crate = "syn" },
     { crate = "winnow" },
     { crate = "windows-sys" },
     { crate = "windows-targets" },
