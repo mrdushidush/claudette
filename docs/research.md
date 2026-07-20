@@ -82,6 +82,35 @@ also refuses and points you at its `REPORT.md`.
 | `CLAUDETTE_RESEARCH_DIR` | `~/.claudette/research/<repo>-<date>/` | Output directory override (used as-is; must be outside the target tree). |
 | `CLAUDETTE_RESEARCH_MAX_BATCHES` | unlimited | Stop after N batches — smoke tests / partial runs. A capped run stays in the batches phase; re-running continues it. |
 | `CLAUDETTE_RESEARCH_BATCH_FILES` | `3` | Max files per review batch (clamped `1`–`8`). |
+| `CLAUDETTE_RESEARCH_EXCLUDE` | unset | Extra paths/dir names to skip, added to the `docs/archive` default. |
+
+## Scoping the review
+
+Gitignored paths (`.gitignore`, `.git/info/exclude`, hidden files) never reach
+the manifest. Beyond that, `docs/archive/` is excluded by default — archived
+docs are stale by design, and reviewing them just produces `docs-drift` findings
+against files nobody maintains. Add your own exclusions with
+`CLAUDETTE_RESEARCH_EXCLUDE`:
+
+```sh
+CLAUDETTE_RESEARCH_EXCLUDE=vendor,generated,harmony.rs claudette --research
+```
+
+An entry with a slash (`docs/archive`, `crates/foo/src/api`) is anchored at the
+repo root and matches exactly that path or the subtree beneath it; a bare name
+(`vendor`, `harmony.rs`) matches a directory or file of that name at *any* depth
+— but not a longer name that merely starts with it (`archive` never touches
+`archive.rs`). Excluded files are recorded in
+`manifest.json` and counted in the `FINDINGS.md` header, never silently dropped.
+To review something that lives under a default exclude, scope the whole run to
+that subtree with `CLAUDETTE_WORKSPACE=<subtree>` instead.
+
+Some source files are worth excluding for a different reason: a file dense with
+chat-template control tokens (`<|channel|>`, `<|end|>`, …) — for example a
+Harmony/Qwen separator-stripping utility that embeds those tokens in its doc
+comments and tests — reliably provokes content-less generation when the reviewer
+reads it, wasting retries. The run prints a warning naming any such file at
+startup; exclude it if the flake cost outweighs the coverage.
 
 ## Backend hiccups
 
