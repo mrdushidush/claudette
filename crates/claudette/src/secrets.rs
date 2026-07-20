@@ -330,7 +330,9 @@ mod tests {
     #[test]
     fn read_secret_picks_up_env_var() {
         // Test the short-form env var path. Use a unique name so we don't
-        // collide with real tokens.
+        // collide with real tokens. Hold the env lock so our `set_var` can't
+        // race a sibling test's `with_temp_home` HOME swap.
+        let _lock = crate::test_env_lock();
         let var_name = "ZZZTESTUNIQUE42_TOKEN";
         std::env::set_var(var_name, "test-token-value");
         let result = read_secret("zzztestunique42");
@@ -340,6 +342,7 @@ mod tests {
 
     #[test]
     fn read_secret_trims_whitespace() {
+        let _lock = crate::test_env_lock();
         let var_name = "ZZZTESTTRIM99_TOKEN";
         std::env::set_var(var_name, "  spaced-token  \n");
         let result = read_secret("zzztesttrim99");
@@ -349,6 +352,7 @@ mod tests {
 
     #[test]
     fn read_secret_rejects_empty_env_var() {
+        let _lock = crate::test_env_lock();
         let var_name = "ZZZTESTEMPTY77_TOKEN";
         std::env::set_var(var_name, "   ");
         let result = read_secret("zzztestempty77");
@@ -358,15 +362,20 @@ mod tests {
 
     #[test]
     fn read_secret_file_fallback() {
-        // Write a temp token file and verify it's picked up.
-        let dir = secrets_dir();
-        let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("zzztestfile88.token");
-        std::fs::write(&path, "file-based-token\n").unwrap();
+        // Write a temp token file and verify it's picked up. Runs under an
+        // isolated temp HOME (which holds `test_env_lock` for the closure) so a
+        // sibling test swapping HOME can't move `secrets_dir()` between our
+        // write and our read — the race that previously flaked this on CI.
+        crate::with_temp_home(|_home| {
+            let dir = secrets_dir();
+            let _ = std::fs::create_dir_all(&dir);
+            let path = dir.join("zzztestfile88.token");
+            std::fs::write(&path, "file-based-token\n").unwrap();
 
-        let result = read_secret("zzztestfile88");
-        let _ = std::fs::remove_file(&path);
-        assert_eq!(result.unwrap(), "file-based-token");
+            let result = read_secret("zzztestfile88");
+            let _ = std::fs::remove_file(&path);
+            assert_eq!(result.unwrap(), "file-based-token");
+        });
     }
 
     #[cfg(not(unix))]
