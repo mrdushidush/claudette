@@ -24,6 +24,13 @@ pub(crate) const EXCLUDE_FILES: &[&str] = &[
     "yarn.lock",
 ];
 
+/// Paths excluded from every `--research` run by default. Conservative on
+/// purpose: `docs/archive` is matched as a path prefix (not a bare segment) so
+/// it only catches the conventional stale-docs tree, never a real
+/// `src/archive/` source module. Operators add more via
+/// `CLAUDETTE_RESEARCH_EXCLUDE`.
+pub(crate) const DEFAULT_EXCLUDES: &[&str] = &["docs/archive"];
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ManifestFile {
     pub rel_path: String,
@@ -51,16 +58,38 @@ pub(crate) struct Manifest {
     pub skipped: Vec<SkippedFile>,
     pub batches: Vec<Batch>,
     pub hash: String,
+    /// Kept files whose content is dense with chat-template control tokens
+    /// (`<|channel|>`, `<|end|>`, …). These reliably provoke content-less
+    /// generation; the driver warns and points at `CLAUDETTE_RESEARCH_EXCLUDE`.
+    /// Informational only — not part of the resume `hash`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flagged_control_tokens: Vec<String>,
+}
+
+/// Build a deterministic review manifest from `root` with no scope excludes.
+/// Thin wrapper over [`build_manifest_with_excludes`]; the driver uses the
+/// `_with_excludes` form so operator/default excludes apply. Test-only — the
+/// production path always passes an exclude set.
+#[cfg(test)]
+pub(crate) fn build_manifest(
+    root: &std::path::Path,
+    max_batch_files: usize,
+) -> Result<Manifest, String> {
+    build_manifest_with_excludes(root, max_batch_files, &[])
 }
 
 /// Build a deterministic review manifest from `root`.
 ///
-/// Walks the directory tree (respecting `.gitignore`), collects eligible files,
-/// plans them into size-aware batches, and returns a [`Manifest`].
+/// Walks the directory tree (respecting `.gitignore`), drops files matching
+/// `excludes` (recorded as `skipped` with reason `"excluded"`), collects the
+/// eligible remainder, plans them into size-aware batches, flags any file whose
+/// content is dense with chat-template control tokens, and returns a
+/// [`Manifest`].
 #[allow(clippy::too_many_lines)] // card-prescribed algorithm, kept inline
-pub(crate) fn build_manifest(
+pub(crate) fn build_manifest_with_excludes(
     root: &std::path::Path,
     max_batch_files: usize,
+    excludes: &[String],
 ) -> Result<Manifest, String> {
     // Clamp max_batch_files to 1..=8.
     let max_batch_files = max_batch_files.clamp(1, 8);
@@ -79,6 +108,7 @@ pub(crate) fn build_manifest(
     // Collect eligible files.
     let mut kept: Vec<ManifestFile> = Vec::new();
     let mut skipped: Vec<SkippedFile> = Vec::new();
+    let mut flagged: Vec<String> = Vec::new();
 
     for entry in builder.build().flatten() {
         if !entry.file_type().is_some_and(|ft| ft.is_file()) {
@@ -109,6 +139,16 @@ pub(crate) fn build_manifest(
             |p| p.to_string_lossy().replace('\\', "/"),
         );
 
+        // Scope excludes (defaults + CLAUDETTE_RESEARCH_EXCLUDE). Recorded, not
+        // silently dropped, so coverage numbers stay honest.
+        if path_is_excluded(&rel_path, excludes) {
+            skipped.push(SkippedFile {
+                rel_path,
+                reason: "excluded".to_string(),
+            });
+            continue;
+        }
+
         // Metadata.
         let meta = std::fs::metadata(path).ok();
         let size = meta.as_ref().map_or(0, std::fs::Metadata::len);
@@ -137,6 +177,12 @@ pub(crate) fn build_manifest(
         };
 
         let lines = content.lines().count();
+
+        // Files dense with chat-template control tokens reliably provoke
+        // content-less generation; flag for the driver's warning.
+        if content_has_control_tokens(&content) {
+            flagged.push(rel_path.clone());
+        }
 
         kept.push(ManifestFile {
             rel_path,
@@ -197,12 +243,15 @@ pub(crate) fn build_manifest(
     let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let hash = manifest_hash(&kept);
 
+    flagged.sort();
+
     Ok(Manifest {
         root: canonical_root.to_string_lossy().to_string(),
         files: kept,
         skipped,
         batches,
         hash,
+        flagged_control_tokens: flagged,
     })
 }
 
@@ -219,6 +268,49 @@ pub(crate) fn manifest_hash(files: &[ManifestFile]) -> String {
         }
     }
     format!("{hash:016x}")
+}
+
+/// Parse a comma-separated exclude list into normalized entries: trimmed,
+/// backslashes → `/`, trailing `/` stripped, empties dropped. No env access.
+pub(crate) fn parse_exclude_list(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|e| e.trim().replace('\\', "/"))
+        .map(|e| e.trim_end_matches('/').to_string())
+        .filter(|e| !e.is_empty())
+        .collect()
+}
+
+/// The active exclude set for a run: [`DEFAULT_EXCLUDES`] plus whatever
+/// `CLAUDETTE_RESEARCH_EXCLUDE` contributes. The only env reader here.
+pub(crate) fn research_excludes() -> Vec<String> {
+    let mut excludes: Vec<String> = DEFAULT_EXCLUDES.iter().map(|s| (*s).to_string()).collect();
+    if let Ok(raw) = std::env::var("CLAUDETTE_RESEARCH_EXCLUDE") {
+        excludes.extend(parse_exclude_list(&raw));
+    }
+    excludes
+}
+
+/// `true` when `rel_path` (forward-slash, repo-relative) is covered by any
+/// exclude entry. An entry matches when the path equals it, sits under it as a
+/// directory (`entry/` prefix), or — for a bare entry with no `/` — has a path
+/// *segment* equal to it. So `harmony.rs` excludes the file at any depth and
+/// `archive` excludes any `archive/` directory, but `archive` leaves
+/// `archive.rs` (a distinct segment) alone.
+pub(crate) fn path_is_excluded(rel_path: &str, excludes: &[String]) -> bool {
+    excludes.iter().any(|e| {
+        if rel_path == e || rel_path.starts_with(&format!("{e}/")) {
+            return true;
+        }
+        !e.contains('/') && rel_path.split('/').any(|seg| seg == e)
+    })
+}
+
+/// `true` when `content` holds three or more `<|` sequences — the shape of
+/// Qwen/Harmony chat-template control tokens (`<|channel|>`, `<|end|>`, …).
+/// Cheap and dependency-free; ordinary source never trips it, token-dense
+/// files (e.g. `api/harmony.rs`) always do.
+pub(crate) fn content_has_control_tokens(content: &str) -> bool {
+    content.matches("<|").count() >= 3
 }
 
 // ── Finding types (step 6) ────────────────────────────────────────────────
@@ -950,6 +1042,11 @@ fn findings_md_run_header(
         .iter()
         .filter(|s| s.reason == "unreadable")
         .count();
+    let skipped_excluded = manifest
+        .skipped
+        .iter()
+        .filter(|s| s.reason == "excluded")
+        .count();
 
     format!(
         "# Deep Research Findings\n\
@@ -959,7 +1056,8 @@ fn findings_md_run_header(
          **Date:** {}  \n\
          **Files reviewed:** {total_files}  \n\
          **Skipped (oversize):** {skipped_oversize}  \n\
-         **Skipped (unreadable):** {skipped_unreadable}\n",
+         **Skipped (unreadable):** {skipped_unreadable}  \n\
+         **Skipped (excluded):** {skipped_excluded}\n",
         root.display(),
         output_dir.display(),
         current_date_str()
@@ -1107,7 +1205,21 @@ pub fn run_deep_research(focus: &str) -> anyhow::Result<()> {
 
     // 2. Build or load manifest.json.
     let manifest =
-        build_manifest(&root, batch_files_from_env()).map_err(|e| anyhow::anyhow!("{}", e))?;
+        build_manifest_with_excludes(&root, batch_files_from_env(), &research_excludes())
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+    if !manifest.flagged_control_tokens.is_empty() {
+        eprintln!(
+            "warning: {} file(s) are dense with chat-template control tokens and \
+             often provoke content-less batches (skips/retries):",
+            manifest.flagged_control_tokens.len()
+        );
+        for path in &manifest.flagged_control_tokens {
+            eprintln!("  {path}");
+        }
+        eprintln!(
+            "  exclude them with CLAUDETTE_RESEARCH_EXCLUDE if the flake cost isn't worth it."
+        );
+    }
     let manifest_json = serde_json::to_string_pretty(&manifest)
         .map_err(|e| anyhow::anyhow!("failed to serialize manifest: {e}"))?;
     std::fs::write(output_dir.join("manifest.json"), &manifest_json)
@@ -1740,6 +1852,93 @@ mod tests {
 
         // Cargo.lock and photo.png should be filtered out (not in skipped).
         assert!(manifest.skipped.is_empty());
+
+        cleanup(&dir);
+    }
+
+    #[test]
+    fn parse_exclude_list_normalizes() {
+        assert_eq!(
+            parse_exclude_list("docs/archive, plans ,,src\\x/"),
+            vec!["docs/archive", "plans", "src/x"]
+        );
+        assert!(parse_exclude_list("").is_empty());
+        assert!(parse_exclude_list("  , ").is_empty());
+    }
+
+    #[test]
+    fn path_is_excluded_matches_rules() {
+        let ex = vec!["docs/archive".to_string()];
+        // Path-prefix default: the archive tree is out, live docs stay in.
+        assert!(path_is_excluded("docs/archive/old.md", &ex));
+        assert!(path_is_excluded("docs/archive", &ex));
+        assert!(!path_is_excluded("docs/guide.md", &ex));
+        // docs/archive is a full path, not a bare name — a src/archive/ module
+        // is untouched.
+        assert!(!path_is_excluded("src/archive/mod.rs", &ex));
+
+        // Bare-name entry matches any path segment (a dir or the file itself)
+        // but not a longer segment that merely starts with it.
+        let bare = vec!["archive".to_string(), "harmony.rs".to_string()];
+        assert!(path_is_excluded("src/archive/x.rs", &bare));
+        assert!(path_is_excluded("crates/c/src/api/harmony.rs", &bare));
+        assert!(!path_is_excluded("src/archive.rs", &bare));
+        assert!(!path_is_excluded("src/harmony_impl.rs", &bare));
+    }
+
+    #[test]
+    fn content_has_control_tokens_detects_dense_tokens() {
+        assert!(content_has_control_tokens(
+            "<|channel|>analysis<|message|>real<|end|>"
+        ));
+        assert!(!content_has_control_tokens("if x < y && y > z"));
+        assert!(!content_has_control_tokens(
+            "<div><span>plain markup</span>"
+        ));
+        // Below the threshold of three.
+        assert!(!content_has_control_tokens("one <| and <| only two"));
+    }
+
+    /// Excluded files are recorded in `skipped` (reason "excluded"), absent from
+    /// `files`, while everything else is kept.
+    #[test]
+    fn manifest_excludes_recorded_not_dropped() {
+        let dir = fixture_dir();
+        setup_fixture(&dir);
+
+        fs::write(dir.join("keep.rs"), "fn keep() {}\n").unwrap();
+        fs::create_dir_all(dir.join("docs/archive")).unwrap();
+        fs::write(dir.join("docs/archive/old.md"), "# stale\n").unwrap();
+
+        let excludes = vec!["docs/archive".to_string()];
+        let manifest =
+            build_manifest_with_excludes(&dir, DEFAULT_BATCH_FILES, &excludes).expect("build");
+
+        assert_eq!(manifest.files.len(), 1);
+        assert_eq!(manifest.files[0].rel_path, "keep.rs");
+        assert_eq!(manifest.skipped.len(), 1);
+        assert_eq!(manifest.skipped[0].rel_path, "docs/archive/old.md");
+        assert_eq!(manifest.skipped[0].reason, "excluded");
+
+        cleanup(&dir);
+    }
+
+    /// A file dense with chat-template control tokens is flagged (the 2-arg
+    /// wrapper applies no excludes, so the file is still kept).
+    #[test]
+    fn manifest_flags_control_token_files() {
+        let dir = fixture_dir();
+        setup_fixture(&dir);
+
+        fs::write(dir.join("clean.rs"), "fn clean() {}\n").unwrap();
+        fs::write(
+            dir.join("tokens.rs"),
+            "// leaks <|channel|>thought<|message|> and <|end|>\n",
+        )
+        .unwrap();
+
+        let manifest = build_manifest(&dir, DEFAULT_BATCH_FILES).expect("build");
+        assert_eq!(manifest.flagged_control_tokens, vec!["tokens.rs"]);
 
         cleanup(&dir);
     }
@@ -2545,6 +2744,7 @@ ok";
             skipped: vec![],
             batches: vec![],
             hash: "h".into(),
+            flagged_control_tokens: vec![],
         };
         let mut store = FindingsStore::new();
         store.append_batch(

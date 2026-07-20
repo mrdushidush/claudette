@@ -111,6 +111,7 @@ checkpointed under `~/.claudette/research/`, so an interrupted run resumes.
 | `CLAUDETTE_RESEARCH_BATCH_FILES` | `3` | Max files per review batch (clamped `1`–`8`). |
 | `CLAUDETTE_RESEARCH_RETRY_SKIPPED` | unset | `1` on a `--research` resume re-queues previously skipped batches (flake recovery / validation). |
 | `CLAUDETTE_RESEARCH_RECOVER_CMD` | unset | Driver-side shell command run once per backend sick-episode during `--research` (e.g. `lms unload --all`); the model never sees it. |
+| `CLAUDETTE_RESEARCH_EXCLUDE` | unset | Comma-separated paths/directory names to skip in a `--research` run, on top of the built-in `docs/archive` default. Bare names (e.g. `harmony.rs`) match at any depth; paths with a slash (e.g. `docs/archive`) match that subtree only. |
 
 ## Tokens (per-tool)
 
