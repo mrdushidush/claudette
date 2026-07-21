@@ -48,3 +48,9 @@ Q47	shell	error-handling	Q47	600
 Q48	shell	api-misuse	Q48	600
 Q49	shell	multi-file	Q49	600
 Q50	shell	implement-spec	Q50	600
+Q51	python	implement-spec	Q51	600
+Q52	rust	implement-spec	Q52	700
+Q53	js	implement-spec	Q53	700
+Q54	python	implement-spec	Q54	600
+Q55	ts	implement-spec	Q55	600
+Q56	rust	implement-spec	Q56	600
