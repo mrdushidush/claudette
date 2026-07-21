@@ -1,0 +1,1 @@
+The `chunk` function in solution.mjs splits an array into groups of `size` elements. There's a bug: when the array doesn't divide evenly it drops the final partial group, and when the array is shorter than a single chunk it returns nothing at all. Fix it so every element ends up in a chunk. You can check the basics with `node test_basic.mjs`; keep it passing.

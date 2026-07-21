@@ -1,0 +1,1 @@
+Implement `is_valid_ipv4` in src/lib.rs. It takes a string and returns true only if it's a valid IPv4 address in dotted-quad form, like "192.168.0.1". There's a test for a normal address. Reject anything that isn't a genuine, canonical IPv4 address.

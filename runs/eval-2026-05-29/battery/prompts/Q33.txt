@@ -1,0 +1,1 @@
+Clean up the `average` function in solution.mjs into something modern and readable — it computes the mean of an array of numbers. While you're at it, make it return 0 for an empty array instead of NaN. Don't change the results for non-empty inputs. You can check the basics with `node test_basic.mjs`; keep it passing.

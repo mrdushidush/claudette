@@ -1,0 +1,1 @@
+The `parse_int_list` function in src/lib.rs is a mess — it scans the string one character at a time. Clean it up into something idiomatic and readable. It's meant to parse a comma-separated list of integers like "3, -1, 42" (values can be negative, and there may be stray whitespace around them). Keep the existing test passing.

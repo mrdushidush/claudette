@@ -1,0 +1,5 @@
+Finish solution.sh so it reads text from stdin and prints a word-frequency tally: one line per distinct word in the form "COUNT WORD", sorted by count from highest to lowest, with ties broken alphabetically by word. Words are separated by any whitespace (spaces, tabs, newlines) and should be compared case-insensitively (lowercase them). For example, the input "the cat the DOG the cat" produces:
+3 the
+2 cat
+1 dog
+The current draft gets the casing, ordering, and output format wrong.

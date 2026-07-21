@@ -1,0 +1,1 @@
+The `Counter` in src/lib.rs is meant to be safe to share across threads, but when many threads call `increment` at the same time the final count comes out too low — increments are getting lost. Fix `increment` so that concurrent increments are never lost and the counter always ends up at exactly the number of calls made. Keep the public API (`new`, `increment`, `get`) the same.

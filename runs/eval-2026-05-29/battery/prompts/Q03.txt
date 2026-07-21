@@ -1,0 +1,1 @@
+There's a bug in `split_bill` in src/lib.rs. When a bill doesn't divide evenly between people, the shares no longer add up to the total — some cents go missing. Fix it so the returned shares always sum to exactly total_cents, while keeping the split as even as possible. The existing test should still pass.

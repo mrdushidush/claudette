@@ -1,0 +1,1 @@
+The `paginate` function in solution.py splits a list into pages of at most page_size items, but it misbehaves on some inputs: when the list divides evenly into full pages it tacks on a stray empty page at the end, and an empty input list should produce no pages at all (not one empty page). Fix it so the result never contains an empty page. Keep the existing test passing.

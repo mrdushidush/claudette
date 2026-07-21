@@ -1,0 +1,1 @@
+Finish the `lower_bound` function in src/lib.rs. Given a slice that's already sorted ascending, it returns the index where a new value should be inserted to keep the slice sorted — the leftmost valid position. For example, inserting 3 into [1, 2, 4, 5] returns index 2. There's a test showing that case. It should behave sensibly for any sorted input.

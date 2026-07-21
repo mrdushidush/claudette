@@ -1,0 +1,10 @@
+[package]
+name = "q04"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+# Escape the parent repo's cargo workspace so the fixture builds standalone.
+[workspace]
