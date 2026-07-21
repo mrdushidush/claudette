@@ -14,6 +14,7 @@ assert.deepEqual(range(5, 0, -1), [5, 4, 3, 2, 1], "descending");
 assert.deepEqual(range(10, 0, -2), [10, 8, 6, 4, 2], "descending step 2");
 assert.deepEqual(range(0, 5, 2), [0, 2, 4], "non-dividing stops before end");
 assert.deepEqual(range(3, 3), [], "equal endpoints");
+assert.deepEqual(range(0, 5, 0), [], "zero step -> empty (no infinite loop)");
 console.log("OK");
 TS
 

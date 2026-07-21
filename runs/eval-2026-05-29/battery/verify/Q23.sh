@@ -23,6 +23,9 @@ def test_whitespace_tolerated():
 
 def test_unordered_singletons():
     assert parse_ranges("3,1,2") == [1, 2, 3]
+
+def test_single_element_range():
+    assert parse_ranges("4-4") == [4]
 PY
 
 out=$(python -m pytest -q hidden_gate_test.py 2>&1)

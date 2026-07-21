@@ -15,6 +15,7 @@ assert.deepEqual(parseQueryString("q=a+b"), { q: "a b" }, "plus is space");
 assert.deepEqual(parseQueryString("?a=1"), { a: "1" }, "leading question mark");
 assert.deepEqual(parseQueryString("flag"), { flag: "" }, "bare key");
 assert.deepEqual(parseQueryString(""), {}, "empty");
+assert.deepEqual(parseQueryString("token=a=b=c"), { token: "a=b=c" }, "split on first = only");
 console.log("OK");
 TS
 

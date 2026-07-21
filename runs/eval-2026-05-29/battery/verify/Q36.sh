@@ -20,6 +20,12 @@ assert.strictEqual(arr[0][0], 1, "nested array independence");
 assert.deepEqual(deepClone({ x: { y: [1, 2] } }), { x: { y: [1, 2] } }, "equal values");
 assert.strictEqual(deepClone(5), 5, "primitive number");
 assert.strictEqual(deepClone("s"), "s", "primitive string");
+
+// array of objects: each cloned object must be independent
+const aoo = [{ n: 1 }, { n: 2 }];
+const caoo = deepClone(aoo);
+caoo[0].n = 99;
+assert.strictEqual(aoo[0].n, 1, "array-of-objects element independence");
 console.log("OK");
 TS
 

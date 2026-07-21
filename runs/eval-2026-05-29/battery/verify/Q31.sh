@@ -20,6 +20,7 @@ assert.deepEqual(
 );
 assert.deepEqual(groupBy([], () => "x"), {}, "empty");
 assert.deepEqual(groupBy([2, 4, 6], () => "even"), { even: [2, 4, 6] }, "single group");
+assert.deepEqual(groupBy([1, 2, 3, 4], (n) => n % 2), { 0: [2, 4], 1: [1, 3] }, "numeric keys");
 console.log("OK");
 JS
 

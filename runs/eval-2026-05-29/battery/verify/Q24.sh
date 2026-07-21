@@ -27,6 +27,9 @@ def test_collapses_multiple_spaces():
 
 def test_trims_and_handles_tabs():
     assert word_wrap("  a\tb  ", 20) == "a b"
+
+def test_whitespace_only_is_empty():
+    assert word_wrap("   \t  ", 10) == ""
 PY
 
 out=$(python -m pytest -q hidden_gate_test.py 2>&1)

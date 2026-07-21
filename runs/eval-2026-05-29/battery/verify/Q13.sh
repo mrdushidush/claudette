@@ -23,6 +23,10 @@ def test_trailing_empty_field():
 
 def test_quoted_empty_field():
     assert parse_csv_line('a,"",c') == ["a", "", "c"]
+
+def test_unquoted_spaces_preserved():
+    # RFC-4180: spaces are part of an unquoted field; don't trim them.
+    assert parse_csv_line("a, b ,c") == ["a", " b ", "c"]
 PY
 
 out=$(python -m pytest -q hidden_gate_test.py 2>&1)

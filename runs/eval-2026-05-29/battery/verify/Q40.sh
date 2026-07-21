@@ -43,6 +43,15 @@ assert.strictEqual(m, 1, "once fires once");
 // unknown event is a no-op (must not throw)
 const f = new EventEmitter();
 f.emit("nothing");
+
+// the same listener registered twice fires twice
+const g = new EventEmitter();
+let twice = 0;
+const bump = () => { twice += 1; };
+g.on("e", bump);
+g.on("e", bump);
+g.emit("e");
+assert.strictEqual(twice, 2, "same listener added twice fires twice");
 console.log("OK");
 TS
 

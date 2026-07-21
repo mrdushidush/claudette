@@ -24,6 +24,7 @@ def test_scales_up():
     assert human_readable_size(1048576) == "1.0 MB"
     assert human_readable_size(1073741824) == "1.0 GB"
     assert human_readable_size(1099511627776) == "1.0 TB"
+    assert human_readable_size(1125899906842624) == "1.0 PB"
 PY
 
 out=$(python -m pytest -q hidden_gate_test.py 2>&1)

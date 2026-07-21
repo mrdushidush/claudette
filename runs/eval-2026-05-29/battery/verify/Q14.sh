@@ -27,6 +27,14 @@ def test_inputs_not_mutated():
     deep_merge(a, b)
     assert a == a0, "first argument was mutated"
     assert b == b0, "second argument was mutated"
+
+def test_dict_replaces_scalar():
+    # b's value is a dict where a's is a scalar: b wins wholesale.
+    assert deep_merge({"x": 1}, {"x": {"y": 2}}) == {"x": {"y": 2}}
+
+def test_scalar_replaces_dict():
+    # b's value is a scalar where a's is a dict: b wins wholesale.
+    assert deep_merge({"x": {"y": 2}}, {"x": 5}) == {"x": 5}
 PY
 
 out=$(python -m pytest -q hidden_gate_test.py 2>&1)

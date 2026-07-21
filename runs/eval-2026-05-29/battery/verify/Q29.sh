@@ -14,6 +14,7 @@ assert.strictEqual(safeGet({ a: null }, "a.b", "d"), "d", "through null");
 assert.strictEqual(safeGet({ a: [{ b: 5 }] }, "a.0.b"), 5, "array index");
 assert.strictEqual(safeGet({ a: { b: 0 } }, "a.b", "def"), 0, "present falsy kept");
 assert.strictEqual(safeGet({ a: 1 }, "a.b", "d"), "d", "past a primitive");
+assert.strictEqual(safeGet(null, "a.b", "d"), "d", "null root -> default");
 console.log("OK");
 JS
 

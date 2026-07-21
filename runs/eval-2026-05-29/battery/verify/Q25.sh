@@ -26,6 +26,11 @@ def test_mixed_list():
 
 def test_empty():
     assert total_cents([]) == 0
+
+def test_integer_dollar_string():
+    # a price with no decimal point still means whole dollars
+    assert total_cents(["5"]) == 500
+    assert total_cents(["5", "0.99"]) == 599
 PY
 
 out=$(python -m pytest -q hidden_gate_test.py 2>&1)

@@ -37,6 +37,15 @@ def test_reraises_last_exception():
         retry(f, 3)
     assert "boom 3" in str(excinfo.value)
     assert calls["n"] == 3
+
+def test_single_attempt_reraises():
+    calls = {"n": 0}
+    def f():
+        calls["n"] += 1
+        raise KeyError("once")
+    with pytest.raises(KeyError):
+        retry(f, 1)
+    assert calls["n"] == 1
 PY
 
 out=$(python -m pytest -q hidden_gate_test.py 2>&1)

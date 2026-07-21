@@ -16,4 +16,5 @@ chk '4' 4 4            # single line
 chk '1\n2' 1 2         # from start
 chk '8\n9\n10' 8 100   # end beyond EOF
 chk '' 20 30           # start beyond EOF
+chk '' 5 3             # start after end -> empty (degenerate range)
 pass "inclusive line range correct including edges"
