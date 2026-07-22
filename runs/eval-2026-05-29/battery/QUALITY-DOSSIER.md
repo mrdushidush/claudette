@@ -71,10 +71,34 @@ Downloads are the thermal spike — watch ≤71 °C (David 2026-07-21); prefer d
 
 | config | Q56 PASS | fixes champ-fails? | gen tok/s | spill | template | verdict |
 |--------|----------|--------------------|-----------|-------|----------|---------|
-| champ bs-3.06 (MTP) | 49/56 (median TBD) | — (baseline) | ~70 | none | ok | baseline |
+| champ bs-3.06 (MTP) | **50/56** (median 49/50/50) | — (baseline) | ~70 | none | ok | baseline |
+| `qwen3.6-35b-a3b@iq4_xs` | **50/56** | 2/5 (Q05,Q52 ✓; Q03/Q25/Q51 ✗) | ~29 | slight | ok | **NO — ties baseline, +0; regresses Q14/Q49; slower** |
 | _candidates…_ | | | | | | |
+
+### IQ4_XS result (full-56, 2026-07-22, tag `q50-iq4xs`, ctx 32768)
+50/56 PASS in ~53 min wall. FAILS: Q03 Q13 Q14 Q25 Q49 Q51. Same aggregate as the
+champion median but a *different profile*: it FIXED Q05 (blank-line skip) and Q52
+(capacity-0 ring buffer), yet REGRESSED on Q14 (deep_merge bugfix — champion passes),
+Q49 (multi-file shell — champion passes), and Q13 (champion-flaky). Net +0 vs baseline,
+fixes only 2/5 consistent fails → **fails the crown rule on both axes**, and it is ~2.4×
+slower (29 vs 70 tok/s) with a slight RAM spill. Not a crown candidate — a strictly worse
+trade than the champion. *Validation note:* IQ4_XS cleared exactly the ≥2/5 screen gate,
+and the full run confirmed the screen threshold is calibrated right (a marginal pass that
+the full run legitimately rejects).
+
+## Hunt protocol v2 (2026-07-22, David) — screen-first, one model at a time, 2 h apart
+
+Per-candidate, to save tokens and thermal budget:
+1. **Pull ONE model** (download-then-run; watch NVMe ≤71 °C).
+2. Load (LMS bare id, confirm ctx 32768 / parallel 1 in `lms ps`), A1 smoke gate, speed probe (≥15 tok/s).
+3. **Screen on the 5 champion-consistent-fails only** (`manifest-q50-champfails.tsv` = Q03 Q05 Q25 Q51 Q52).
+4. **Gate:** passes **≥2 of 5** → promote to full 56. **<2** → reject, record, move on (no full run).
+5. **Wait ~2 h between battery runs.** One candidate in flight at a time.
+
+Candidate queue (coder-30b DROPPED per David — "will suck vs champion"):
+byteshape MTP-GPU-3 (3.53 bpw) → MTP-GPU-4 (3.97) → MTP-GPU-5 (4.19), cheapest quality bump first.
 
 ## Status
 
-Battery frozen-pending-median (2 champion confirmation runs in flight). Next: freeze →
-run the two free on-disk candidates (IQ4_XS, qwen3-coder-30b) → decide byteshape-ladder downloads.
+Battery FROZEN (50/56 median baseline). IQ4_XS on-disk candidate RUN + REJECTED (ties, +0).
+Next per protocol v2: pull byteshape MTP-GPU-3 (3.53 bpw) → screen on the 5 champ-fails → full-56 only if ≥2 pass.

@@ -1,0 +1,5 @@
+Q03	rust	bugfix	Q03	600
+Q05	rust	error-handling	Q05	600
+Q25	python	api-misuse	Q25	600
+Q51	python	implement-spec	Q51	600
+Q52	rust	implement-spec	Q52	700
