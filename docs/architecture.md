@@ -18,9 +18,15 @@ src/
 │   ├── prompt.rs       — ProjectContext discovery (cwd, git status, instruction files)
 │   ├── config.rs       — Optional configuration loaders (settings.json: hooks, model)
 │   └── json.rs         — Hand-rolled JSON for the no-serde-dep runtime paths
-├── api.rs            — OllamaApiClient: /api/chat streamer, truncation, budget math, probe
-├── run.rs            — Runtime builder, REPL loop, autosave, session compaction, forge pipeline
-├── executor.rs       — SecretaryToolExecutor: enable_tools meta-tool + dispatch
+│   └── context_evict.rs — Stale tool-result stubbing on the outgoing payload (opt-in)
+├── api.rs            — OllamaApiClient: /api/chat + /v1/chat/completions streamers, truncation, budget math, probe
+├── run.rs            — Mode dispatch + turn retry; the pieces below were split out of it
+├── run/              — repl.rs (REPL loop + autosave), runtime_build.rs (every runtime
+│                       builder + the permission policy), compaction_policy.rs (thresholds,
+│                       max_iterations), forge_run.rs (the 5-phase pipeline),
+│                       research.rs (deep-research batches), cli_prompter.rs ([y/N] gate),
+│                       recall_index.rs (post-turn indexing + embed probe)
+├── executor.rs       — AgentToolExecutor: enable_tools meta-tool + dispatch
 ├── tools.rs          — Aggregates per-group schemas + routes dispatch_tool() through each sub-module
 ├── tools/            — One module per tool cluster (calendar, facts, file_ops, git, github, gmail, ide, notes, registry, schedule, search, shell, telegram, todos, web_search)
 ├── tool_groups.rs    — ToolRegistry + the 20 on-demand tool-group definitions
@@ -39,12 +45,48 @@ src/
 ├── voice.rs          — Whisper transcription pipeline
 ├── tts.rs            — edge-tts TTS integration
 ├── theme.rs          — Colored output, emoji glyphs, TTY detection
+├── doctor.rs         — `--doctor`: ten flat diagnostic probes with copy-paste fixes
+├── setup.rs          — `--setup`: the five-step first-run wizard (TTY-gated)
+├── firstrun.rs       — Backend-failure classifier + the post-first-success nudge
+├── egress.rs         — The `--offline` air-gap guard (in-process HTTP + subprocesses)
+├── env_config.rs     — Env primitives (home_dir, is_truthy, is_enabled)
+├── security_review.rs — Deterministic added-lines scan for the forge gate (opt-in)
+├── transcript.rs     — Mutating-action log + trash-backed /undo and /diff
+├── recall.rs         — Cross-session semantic memory (sqlite + local embeddings)
+├── missions.rs       — Brownfield mission state + path routing
+├── redact.rs         — Secret redaction for logs and transcripts
+├── hw.rs             — GPU / VRAM / temperature probes
+├── status.rs         — REPL activity spinner (TTY-only)
+├── image_attach.rs   — Image attachment handling for multimodal turns
+├── diff_preview.rs   — Colored unified diff for the [y/N] edit gate
 ├── tui.rs            — Ratatui TUI app, 5 tabs, render loop
 ├── tui_events.rs     — TUI event enums (worker ↔ render channel)
 ├── tui_executor.rs   — ToolExecutor wrapper that fires TUI events
 ├── tui_worker.rs     — Worker thread that owns the ConversationRuntime
 └── forge/            — Forge-mode plumbing (personas, role-map, types) — folded back in v0.5.1
 ```
+
+## Storage layout
+
+Everything Claudette persists lives under `~/.claudette/` (resolved by
+`env_config::home_dir()`). Nothing is written outside it without a prompt.
+
+| Path | Written by | Notes |
+|------|-----------|-------|
+| `sessions/last.json` | every REPL turn | Autosaved. `--resume` reads it; override with `CLAUDETTE_SESSION`. |
+| `sessions/<name>.json` | `/save` | Named snapshots, managed by `/sessions`. |
+| `CLAUDETTE.MD` | you | User memory, injected as background information. 800-char cap; `/reload` re-reads it. |
+| `recall.sqlite` | the async indexer | Cross-session semantic memory (local embeddings, 50k-row FIFO). Tool calls and results are deliberately **not** indexed. |
+| `transcript/actions.jsonl` | every *mutating* tool call | ReadOnly calls are never logged. Backs `/undo` and `/diff`. |
+| `trash/` | deletes and overwrites | Timestamped originals — the restore source for `/undo`. |
+| `notes/*.md` | `note_create` | One hand-editable markdown file per note. |
+| `todos.json` | the todo tools | Also live-editable from the TUI Todos tab. |
+| `missions/` | `mission_start` | Brownfield clones + `active_mission.json`. Non-ephemeral missions survive a restart. |
+| `research/<repo>-<date>/` | `--research` | Manifest, progress, findings, `REPORT.md`. Resumable. |
+| `secrets/*.token` | OAuth + token storage | `0600` on Unix, ACL-tightened on Windows. |
+| `schedule.jsonl` | the scheduler | Recurring entries. Only the Telegram consumer loop fires them. |
+| `.env` | you | The only dotenv auto-loaded. A CWD `.env` is deliberately **not** read. |
+| `.onboarded` | first success | Sentinel for the one-time "what's next?" nudge. |
 
 ## The on-demand tool-group contract
 

@@ -12,8 +12,12 @@ binary has no cloud code, so it errors with a one-line reinstall hint instead.
 |------|--------|
 | `--resume`, `-r` | Continue the most recent saved session. |
 | `--telegram`, `-t` | **(integrations)** Run as a Telegram bot (needs `TELEGRAM_BOT_TOKEN`). |
-| `--tui` | Launch the fullscreen TUI. |
-| `--forge "<prompt>"` | Run forge-mode (Planner → Coder → Verifier pipeline) against the active brownfield mission. Requires an active mission — start one with `/brownfield <repo>` or `mission_start` first. |
+| `--tui` | **(experimental)** Launch the fullscreen TUI. Demo-only — known rendering rough edges; the REPL is the supported daily driver. |
+| `--setup` | Guided first-run wizard: detect the backend, read your VRAM, offer to pull the fitting brain, then run a closing `--doctor` pass. Needs a TTY; refused under `--offline`. |
+| `--doctor` | Run the diagnostic probes (backend reachable, brain pulled, recall embeddings, build toolchains, OAuth, voice, secrets dir) and exit. Each failure prints a copy-paste `↳ fix:` line. Non-zero exit if any probe hard-failed. |
+| `--offline` | Enforced air-gap: hard-block every outbound call except your local model server and loopback. `bash` / `bash_background` are refused wholesale. See [PRIVACY.md](../PRIVACY.md). |
+| `--faceless` | Drop the persona overlay (Eva in assistant mode, CodeX-7 for the forge Coder). Same surface as `CLAUDETTE_FACELESS=1`. |
+| `--forge "<prompt>"` | Run the autonomous forge pipeline: Planner → Coder → Verifier → fix-loop → Submitter, with a real build+test gate every round. Uses the active brownfield mission, or bootstraps an ephemeral one in the current repo when there is none. You approve the plan and the full diff before any PR opens. |
 | `--research [focus]` | Unattended read-only review of the repo you are in: fresh conversation per 2–3-file batch, findings checkpointed under `~/.claudette/research/`, HIGH/MEDIUM findings verified, final `REPORT.md`. Forces offline; re-run the same command to resume. Trailing words become an optional focus hint. See [research.md](research.md). |
 | `--chat <id>` | Restrict Telegram bot to a specific chat ID. Repeatable, or set `CLAUDETTE_TELEGRAM_CHAT` to a comma-separated list. The bot **default-denies** when no allowlist is provided. |
 | `--chat any` | Explicit accept-all: serve every incoming Telegram chat. Required to start the bot with no allowlist. Prints a loud warning. |
@@ -39,25 +43,32 @@ binary has no cloud code, so it errors with a one-line reinstall hint instead.
 /memory              Show CLAUDETTE.MD contents.
 /reload              Re-read CLAUDETTE.MD into the system prompt.
 /sessions, /ls       List saved sessions.
+/sessions delete <name>  Delete a saved session (aliases: rm, remove).
+/sessions rename <old> <new>  Rename a saved session (alias: mv).
 /save <name>         Save the current session under <name>.
 /load <name>         Load a named session.
 /compact             Force context compaction now.
 /clear               Reset to a fresh session.
 /capabilities        Full configuration dump.
 /recall <query>      Search past conversations across sessions (semantic).
-/undo                Restore the last destructive action (delete/overwrite) from ~/.claudette/trash/.
+/recall reprobe      Re-run the embedding probe after fixing a recall problem.
+/undo                Restore everything the last turn changed, from ~/.claudette/trash/.
+/undo one            Restore only the single most recent action.
+/diff                Colored unified diff of what the last turn changed on disk.
 /brownfield <target> Clone a repo and make it the active mission (one-shot).
 /forge <prompt>      Run the forge pipeline against the active mission.
+/mission_exit        Clear the active mission (unblocks /forge after a failed clone).
 /exit                Leave the REPL.
 ```
 
 ## Telegram-mode slash commands
 
-A subset of the REPL commands works identically inside Telegram chats: `/help`, `/status`, `/compact`, `/clear`, `/save`, `/load`. `/exit` and the destructive DangerFullAccess commands are blocked.
+Telegram handles a small, explicit set: `/start`, `/status`, `/compact`, `/clear`, plus the Telegram-only commands below. Anything else you type with a leading slash — including `/help`, `/save`, and `/load` — is **not** a command here; it falls through to the model as ordinary text. `/exit` and the destructive DangerFullAccess commands are blocked.
 
-Three additional commands are **Telegram-only** (they have no effect in the REPL or TUI):
+Four additional commands are **Telegram-only** (they have no effect in the REPL or TUI):
 
 ```
+/start               Greeting + what this bot can do.
 /voice               Toggle voice output (edge-tts on / off).
 /lang he|en          Switch voice transcription + TTS language.
 /briefing            Run the morning briefing now (calendar + weather + VIP unread).

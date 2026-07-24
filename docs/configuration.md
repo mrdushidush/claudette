@@ -33,7 +33,8 @@ These are read by the one-line install scripts, not by the binary itself:
 | `CLAUDETTE_OPENAI_COMPAT` | unset | Set to `1` to talk to an OpenAI-compatible server (LM Studio, vLLM, llama.cpp's `--api`) instead of native Ollama. Brain calls switch to `/v1/chat/completions`; recall embeddings switch to `/v1/embeddings`. `OLLAMA_HOST` doubles as the compat-server URL. |
 | `CLAUDETTE_SKIP_OLLAMA_PROBE` | unset | Set to `1` to skip the Ollama startup probe (CI / offline). |
 | `CLAUDETTE_SKIP_LM_STUDIO_PROBE` | unset | Set to `1` to skip the LM Studio probe (only used when `CLAUDETTE_OPENAI_COMPAT=1`). The probe checks `/v1/models` returns a non-empty model list — set this if you load models post-launch. |
-| `CLAUDETTE_FALLBACK_BRAIN_MODEL` | `qwen3.5:9b` (Auto preset) | Brain to fall back to on stuck signals. |
+| `CLAUDETTE_FALLBACK_BRAIN_MODEL` | `qwen3.5:9b` (Auto preset) | Brain to escalate to on stuck signals. Escalation is **skipped** — with a one-line notice — when this resolves to the same model as the brain, or when the backend isn't already serving it. That guard matters on LM Studio: loading a second model there evicts the one you deliberately loaded, so Claudette will not do it behind your back mid-turn. Set it empty (`CLAUDETTE_FALLBACK_BRAIN_MODEL=`) or use `/preset fast` to turn the tiered brain off entirely. |
+| `CLAUDETTE_FACELESS` | unset | Set to `1` (or pass `--faceless`) to drop the persona overlay — Eva in assistant mode, CodeX-7 for the forge Coder. Identity strings only; no effect on tools or permissions. |
 | `CLAUDETTE_WORKSPACE` | unset | Extra read roots outside `$HOME`, colon-separated on Unix, semicolon-separated on Windows. Example: `D:\dev\claudette` for developing Claudette itself. Reads under `$HOME` and under a `$HOME`-rooted CWD are always allowed regardless. |
 
 ### Recommended brain
