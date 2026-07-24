@@ -7,8 +7,6 @@
 //! `use`s below are the external crate paths.
 use super::*;
 
-use std::io::{self, Write};
-
 use crate::commands::{dispatch_slash_command, parse_slash_command, ReplState, SlashOutcome};
 use crate::theme;
 
@@ -99,39 +97,35 @@ pub fn run_agent_repl(opts: SessionOptions) -> Result<()> {
 
     eprintln!();
 
-    loop {
-        // Print prompt.
-        {
-            let stderr = io::stderr();
-            let mut err = stderr.lock();
-            write!(err, "{} ", theme::accent(theme::PROMPT_ARROW))?;
-            err.flush()?;
-        }
+    // History, arrows, and tab completion. Degrades to a plain `read_line`
+    // when stdin/stderr isn't a terminal, so piped input, CI, and the eval
+    // battery (`claudette "<prompt>" < /dev/null`) behave exactly as before.
+    let mut editor = crate::run::line_editor::LineEditor::new();
+    let prompt = format!("{} ", theme::accent(theme::PROMPT_ARROW));
 
-        // Read one line WITHOUT holding the stdin lock across run_turn.
-        // The CliPrompter needs stdin access for [y/N] confirmation
-        // prompts, so we must drop the lock before entering the runtime.
-        let line = {
-            let stdin = io::stdin();
-            let mut buf = String::new();
-            match stdin.read_line(&mut buf) {
-                Ok(0) => {
-                    eprintln!();
-                    break; // EOF
-                }
-                Ok(_) => buf,
-                Err(e) => {
-                    eprintln!("stdin error: {e}");
-                    break;
-                }
+    loop {
+        // The editor owns stdin only for the duration of this call, and
+        // never across run_turn — the CliPrompter needs stdin for its
+        // [y/N] confirmations.
+        let line = match editor.read_line(&prompt, 2) {
+            Ok(crate::run::line_editor::ReadOutcome::Line(l)) => l,
+            // Ctrl+C: abandon the half-typed line, keep the session.
+            Ok(crate::run::line_editor::ReadOutcome::Interrupted) => continue,
+            Ok(crate::run::line_editor::ReadOutcome::Eof) => {
+                eprintln!();
+                break;
+            }
+            Err(e) => {
+                eprintln!("stdin error: {e}");
+                break;
             }
         };
-        // stdin lock is now dropped — safe for the prompter to read.
 
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
+        editor.push_history(trimmed);
         if matches!(trimmed, "exit" | "quit" | ":q") {
             break;
         }
