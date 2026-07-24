@@ -65,18 +65,125 @@ impl StuckReason {
     }
 }
 
-/// Iteration-count heuristic for the "no text at max iter" signal. If the
-/// primary runtime ran at least this many iterations AND produced no text,
-/// treat it as stuck. `11` is two short of the configured `max_iterations
-/// = 15` in `build_runtime_with_brain` — catches the real stalls
-/// (long tool chains that never emit final text) without firing on
-/// ordinary single-tool turns.
-const MAX_ITER_STUCK_THRESHOLD: usize = 11;
+/// How far short of the iteration cap the "no text at max iter" signal
+/// fires. The intent has always been "nearly out of iterations and still
+/// nothing to say", expressed as a margin below the cap rather than an
+/// absolute count — the original `11` was written against
+/// `max_iterations = 15` and silently became a 27%-of-budget tripwire when
+/// the cap moved to 40, diagnosing ordinary long tool chains as stalls and
+/// replaying them wholesale on the bigger brain.
+const MAX_ITER_STUCK_MARGIN: usize = 4;
+
+/// Absolute floor for the stuck threshold, so a small `CLAUDETTE_MAX_ITERATIONS`
+/// can't drive it down to "escalate on the second tool call".
+const MAX_ITER_STUCK_FLOOR: usize = 11;
+
+/// Iteration count at or above which a text-free turn counts as stuck,
+/// derived from the cap actually in force.
+fn max_iter_stuck_threshold() -> usize {
+    crate::run::max_iterations()
+        .saturating_sub(MAX_ITER_STUCK_MARGIN)
+        .max(MAX_ITER_STUCK_FLOOR)
+}
 
 /// Minimum streak of consecutive `is_error` tool results before we treat
 /// it as "the brain can't recover". Three is the threshold the Sprint 14
 /// plan locked in — two in a row happens during normal path-guessing.
 const TOOL_ERROR_STREAK_THRESHOLD: usize = 3;
+
+/// Why an otherwise-configured fallback brain was not used for this turn.
+///
+/// The tiered-brain design assumes Ollama on a small card: escalating pulls
+/// a second model into memory for one turn, then evicts it. That assumption
+/// breaks badly on the setup the README now recommends for 16 GB — LM Studio
+/// with one large model resident — because escalating asks the server to
+/// JIT-load a *second* model, which evicts the brain the user deliberately
+/// loaded. `~/.claudette/models.toml` does not exist on a fresh install, so
+/// `Preset::Auto` supplies `fallback_brain = qwen3.5:9b` to every new user
+/// whether or not they have ever heard of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FallbackSkip {
+    /// The fallback resolves to the same model as the primary. Escalating
+    /// would replay the whole turn against an identical brain for an
+    /// identical result, at double the latency.
+    SameAsPrimary,
+    /// The backend does not serve the fallback model. Escalating would make
+    /// the server fetch it: a JIT load (LM Studio — evicts the resident
+    /// model) or a multi-gigabyte pull (Ollama). Neither is something to do
+    /// behind the user's back mid-turn.
+    NotServed,
+}
+
+impl FallbackSkip {
+    fn explain(self, fallback: &str) -> String {
+        match self {
+            FallbackSkip::SameAsPrimary => {
+                format!("fallback brain '{fallback}' is the same model as the primary")
+            }
+            FallbackSkip::NotServed => {
+                format!("fallback brain '{fallback}' is not loaded on the backend")
+            }
+        }
+    }
+}
+
+/// Decide whether escalation must be skipped. Pure — `served` is passed in
+/// so this is unit-testable with no backend in the loop.
+///
+/// `served == None` (probe failed) and `served == Some(&[])` (backend
+/// answered but listed nothing) both mean "can't tell", and both fail
+/// **open**: an unreachable probe must not silently disable a working
+/// fallback. The startup probe already refuses to launch against an
+/// LM Studio with no model loaded, so the empty case is not load-bearing
+/// here.
+fn fallback_skip_reason(
+    primary: &str,
+    fallback: &str,
+    served: Option<&[String]>,
+) -> Option<FallbackSkip> {
+    // Reuse doctor's loose matcher so `qwen3.5:9b` and `qwen3.5:9b:latest`
+    // count as the same model on both sides of the comparison.
+    if crate::doctor::model_present(&[primary.to_string()], fallback) {
+        return Some(FallbackSkip::SameAsPrimary);
+    }
+    match served {
+        Some(names) if !names.is_empty() && !crate::doctor::model_present(names, fallback) => {
+            Some(FallbackSkip::NotServed)
+        }
+        _ => None,
+    }
+}
+
+/// Model ids the backend is currently serving, fetched once per process.
+///
+/// Cached because this sits on the escalation path, which can fire on many
+/// turns in a row. A cache that goes stale mid-session can only produce a
+/// *skipped* escalation, never a surprise model load — the safe direction.
+fn served_model_names() -> Option<&'static Vec<String>> {
+    static CACHE: std::sync::OnceLock<Option<Vec<String>>> = std::sync::OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let openai_compat = crate::api::resolve_openai_compat();
+            let base = crate::api::resolve_ollama_url();
+            let url = if openai_compat {
+                format!("{base}/v1/models")
+            } else {
+                format!("{base}/api/tags")
+            };
+            let client = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(4))
+                .build()
+                .ok()?;
+            let body = client
+                .get(&url)
+                .send()
+                .ok()?
+                .json::<serde_json::Value>()
+                .ok()?;
+            Some(crate::doctor::extract_model_names(&body, openai_compat))
+        })
+        .as_ref()
+}
 
 /// Run a turn with automatic 4b → fallback → revert escalation.
 ///
@@ -100,16 +207,29 @@ pub fn run_turn_with_fallback(
         return run_turn_with_retry(runtime, input, prompter_reborrow(prompter));
     };
 
-    // Snapshot BEFORE letting the primary mutate the session. If we
-    // escalate, we rewind from here so the fallback doesn't see a
-    // duplicated user message or a stuck assistant turn.
-    let pre_turn_session: Session = runtime.session().clone();
-
     // Capture the primary model name BEFORE the turn — the same value the
     // runtime was built against, and the one we want to record in the
     // fallback log. The active config is the source of truth because
     // `ConversationRuntime` doesn't expose its api_client.
     let primary_model = model_config::active().brain.model.clone();
+
+    // Decide up front whether escalation is even usable. Doing it here — and
+    // not at the stuck-signal site — means an unusable fallback also skips
+    // the pre-turn session clone below, so the passthrough stays as cheap as
+    // the no-fallback-configured path.
+    if let Some(skip) = fallback_skip_reason(
+        &primary_model,
+        &fallback_cfg.model,
+        served_model_names().map(Vec::as_slice),
+    ) {
+        warn_fallback_disabled_once(skip, &fallback_cfg.model);
+        return run_turn_with_retry(runtime, input, prompter_reborrow(prompter));
+    }
+
+    // Snapshot BEFORE letting the primary mutate the session. If we
+    // escalate, we rewind from here so the fallback doesn't see a
+    // duplicated user message or a stuck assistant turn.
+    let pre_turn_session: Session = runtime.session().clone();
 
     // Scope each reborrow to a short-lived block so its lifetime ends
     // before the next `run_turn_with_retry` call needs a fresh one.
@@ -160,6 +280,22 @@ pub fn run_turn_with_fallback(
     fallback_result
 }
 
+/// Tell the user once per process that the configured fallback brain is
+/// inert, and how to silence it. Once, not per turn: this fires on the
+/// escalation path, which a genuinely struggling model can hit repeatedly,
+/// and a repeated warning would bury the turn output it is attached to.
+fn warn_fallback_disabled_once(skip: FallbackSkip, fallback: &str) {
+    static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    eprintln!(
+        "  \u{25B8} tiered brain off: {reason} — staying on the primary. \
+         Set CLAUDETTE_FALLBACK_BRAIN_MODEL to a loaded model, or /preset fast to silence this.",
+        reason = skip.explain(fallback),
+    );
+}
+
 /// Inspect a primary-brain turn result for stuck signals. Returns `Some`
 /// if the fallback should fire. Pure function — no side effects, so it
 /// can be unit-tested without a real Ollama in the loop.
@@ -181,7 +317,7 @@ fn diagnose_summary(summary: &TurnSummary) -> Option<StuckReason> {
         return None;
     }
     let text_blocks = count_text_blocks(&summary.assistant_messages);
-    if text_blocks == 0 && summary.iterations >= MAX_ITER_STUCK_THRESHOLD {
+    if text_blocks == 0 && summary.iterations >= max_iter_stuck_threshold() {
         return Some(StuckReason::NoTextAtMaxIter);
     }
     if max_consecutive_tool_errors(&summary.tool_results) >= TOOL_ERROR_STREAK_THRESHOLD {
@@ -420,6 +556,59 @@ mod tests {
         }
     }
 
+    fn names(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn fallback_to_the_same_model_is_skipped() {
+        assert_eq!(
+            fallback_skip_reason("qwen3.5:9b", "qwen3.5:9b", None),
+            Some(FallbackSkip::SameAsPrimary),
+        );
+        // The loose matcher makes the `:latest` spelling the same model too.
+        assert_eq!(
+            fallback_skip_reason("qwen3.5:9b", "qwen3.5:9b:latest", None),
+            Some(FallbackSkip::SameAsPrimary),
+        );
+    }
+
+    #[test]
+    fn fallback_not_loaded_on_the_backend_is_skipped() {
+        // The shipped hazard: a fresh install has no ~/.claudette/models.toml,
+        // so Preset::Auto hands every new user fallback_brain = qwen3.5:9b.
+        // On the 16 GB LM Studio setup the README recommends, escalating
+        // would JIT-load a second model and evict the resident champion.
+        let served = names(&["qwen3.6-35b-a3b-mtp"]);
+        assert_eq!(
+            fallback_skip_reason("qwen3.6-35b-a3b-mtp", "qwen3.5:9b", Some(&served)),
+            Some(FallbackSkip::NotServed),
+        );
+    }
+
+    #[test]
+    fn fallback_that_is_loaded_still_escalates() {
+        // A user who deliberately loaded both models wants the tiered brain.
+        let served = names(&["qwen3.5:4b", "qwen3.5:9b"]);
+        assert_eq!(
+            fallback_skip_reason("qwen3.5:4b", "qwen3.5:9b", Some(&served)),
+            None,
+        );
+    }
+
+    #[test]
+    fn unknown_backend_inventory_fails_open() {
+        // A probe that failed (None) or answered with nothing (empty) must
+        // not silently disable a working fallback — the safe default here is
+        // the previous behavior, since the caller only reaches this path
+        // after a real stuck signal.
+        assert_eq!(fallback_skip_reason("qwen3.5:4b", "qwen3.5:9b", None), None);
+        assert_eq!(
+            fallback_skip_reason("qwen3.5:4b", "qwen3.5:9b", Some(&[])),
+            None,
+        );
+    }
+
     #[test]
     fn diagnose_empty_response_from_err_message() {
         let r: Result<TurnSummary, String> = Err("no content in response".to_string());
@@ -444,16 +633,65 @@ mod tests {
         assert_eq!(diagnose(&Ok(summary)), None);
     }
 
+    // These pin the *relationship* to the iteration cap, not a magic number.
+    // Hardcoding `13`/`8` is what let the threshold rot: they were written
+    // against `max_iterations = 15` and kept passing after the cap moved to
+    // 40, while the production heuristic had quietly become a 27%-of-budget
+    // tripwire.
     #[test]
     fn diagnose_empty_text_at_max_iter_escalates() {
-        let summary = make_summary(vec![], vec![], 13);
+        let summary = make_summary(vec![], vec![], max_iter_stuck_threshold());
         assert_eq!(diagnose(&Ok(summary)), Some(StuckReason::NoTextAtMaxIter));
     }
 
     #[test]
     fn diagnose_empty_text_under_threshold_does_not_escalate() {
-        let summary = make_summary(vec![], vec![], 8);
+        let summary = make_summary(vec![], vec![], max_iter_stuck_threshold() - 1);
         assert_eq!(diagnose(&Ok(summary)), None);
+    }
+
+    #[test]
+    fn stuck_threshold_tracks_the_iteration_cap() {
+        let _guard = crate::test_env_lock();
+        let prev = std::env::var("CLAUDETTE_MAX_ITERATIONS").ok();
+
+        std::env::set_var("CLAUDETTE_MAX_ITERATIONS", "40");
+        assert_eq!(max_iter_stuck_threshold(), 36, "cap 40 - margin 4");
+
+        std::env::set_var("CLAUDETTE_MAX_ITERATIONS", "15");
+        assert_eq!(
+            max_iter_stuck_threshold(),
+            11,
+            "the historical cap/threshold pair"
+        );
+
+        // The floor keeps a tiny cap from turning the heuristic into
+        // "escalate on the second tool call".
+        std::env::set_var("CLAUDETTE_MAX_ITERATIONS", "6");
+        assert_eq!(max_iter_stuck_threshold(), MAX_ITER_STUCK_FLOOR);
+
+        match prev {
+            Some(v) => std::env::set_var("CLAUDETTE_MAX_ITERATIONS", v),
+            None => std::env::remove_var("CLAUDETTE_MAX_ITERATIONS"),
+        }
+    }
+
+    #[test]
+    fn long_legitimate_tool_chain_is_not_diagnosed_as_stuck_at_the_default_cap() {
+        // The regression this fix exists for: a 12-round tool chain that
+        // hasn't emitted text yet is ordinary work at a cap of 40, but the
+        // frozen `11` diagnosed it as a stall and replayed the entire turn
+        // on the bigger brain — a 5-10s model swap plus a full re-run.
+        let _guard = crate::test_env_lock();
+        let prev = std::env::var("CLAUDETTE_MAX_ITERATIONS").ok();
+        std::env::remove_var("CLAUDETTE_MAX_ITERATIONS");
+
+        let summary = make_summary(vec![], vec![], 12);
+        assert_eq!(diagnose(&Ok(summary)), None);
+
+        if let Some(v) = prev {
+            std::env::set_var("CLAUDETTE_MAX_ITERATIONS", v);
+        }
     }
 
     #[test]
@@ -463,7 +701,7 @@ mod tests {
                 text: "   \n ".into(),
             }],
             vec![],
-            12,
+            max_iter_stuck_threshold(),
         );
         assert_eq!(diagnose(&Ok(summary)), Some(StuckReason::NoTextAtMaxIter));
     }
