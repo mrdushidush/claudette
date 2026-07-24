@@ -56,6 +56,11 @@ pub(crate) use runtime_build::{
 
 // Interactive agent REPL loop. Extracted to `run/repl.rs` (Wave C6);
 // re-exported so `lib.rs` / `main.rs` keep resolving `run::run_agent_repl`.
+// REPL line editing (history, arrows, tab completion). Split out of
+// `repl.rs` so the editing rules are a pure, unit-testable state machine
+// rather than logic tangled with the turn loop.
+mod line_editor;
+
 mod repl;
 pub use repl::run_agent_repl;
 

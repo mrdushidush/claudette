@@ -29,6 +29,27 @@ binary has no cloud code, so it errors with a one-line reinstall hint instead.
 | `--help`, `-h` | Show the flag reference and exit. |
 | `--version`, `-V` | Show the Claudette version and exit. |
 
+## REPL line editing
+
+The prompt is a real line editor. History persists across sessions in
+`~/.claudette/repl_history` (last 500 entries, consecutive duplicates
+collapsed).
+
+| Key | Effect |
+|-----|--------|
+| `↑` / `↓`, `Ctrl+P` / `Ctrl+N` | Walk history. Going past the newest entry restores the line you were typing. |
+| `←` / `→`, `Ctrl+B` / `Ctrl+F` | Move the cursor. |
+| `Ctrl+A` / `Ctrl+E`, `Home` / `End` | Jump to start / end of line. |
+| `Ctrl+W` | Delete the word before the cursor. |
+| `Ctrl+U` / `Ctrl+K` | Delete to the start / end of the line. |
+| `Tab` | Complete a leading slash command (fills the shared prefix when several match). |
+| `Ctrl+C` | Abandon the current line, keep the session. |
+| `Ctrl+D` | On an empty line, leave the REPL. Mid-line it does nothing. |
+
+When stdin or stderr isn't a terminal — piped input, CI, the eval battery —
+the editor steps aside and input is read plainly, so scripted use is
+unchanged.
+
 ## Slash commands (REPL + TUI)
 
 ```
