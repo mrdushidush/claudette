@@ -7,7 +7,10 @@
 # smoke (abort on jinja/HTTP-400) -> run the 10 SCREEN-10 tasks (tag screen-<id>,
 # appending) -> score = count of status EXACTLY "PASS" -> print GATE verdict.
 set -u
-BAT="/d/dev/claudette/runs/eval-2026-05-29/battery"
+# Battery home = this script's own directory, so the harness runs from any
+# clone on any box. Override with BATTERY_HOME only if the corpus has been
+# relocated away from the scripts.
+BAT="${BATTERY_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 LMS="/c/Users/david/.lmstudio/bin/lms"
 CAPDIR="$HOME/claudette-eval-captures"
 mkdir -p "$CAPDIR"

@@ -12,7 +12,10 @@
 # reported alongside as server_tps. Appends one row per invocation to
 # SPEED-PROBES.tsv (created with a header if missing).
 set -u
-BAT="/d/dev/claudette/runs/eval-2026-05-29/battery"
+# Battery home = this script's own directory, so the harness runs from any
+# clone on any box. Override with BATTERY_HOME only if the corpus has been
+# relocated away from the scripts.
+BAT="${BATTERY_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 MODEL="${1:?model-id required}"
 LABEL="${2:-$MODEL}"
 BASE="${PROBE_BASE_URL:-http://localhost:1234}"

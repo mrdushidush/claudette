@@ -13,7 +13,10 @@
 #
 # usage:  bash gate_q50.sh <id> [id2 ...]      (no args = every fixtures/Q* task)
 set -u
-BAT="/d/dev/claudette/runs/eval-2026-05-29/battery"
+# Battery home = this script's own directory, so the harness runs from any
+# clone on any box. Override with BATTERY_HOME only if the corpus has been
+# relocated away from the scripts.
+BAT="${BATTERY_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 DUMMY="$BAT/work-gate/.dummy-transcript"; mkdir -p "$BAT/work-gate"; : > "$DUMMY"
 
 status_of(){ printf '%s\n' "$1" | sed -n 's/^RESULT: \([A-Z]*\).*/\1/p' | head -1; }

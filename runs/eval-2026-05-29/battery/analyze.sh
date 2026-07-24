@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Summarize SCORES.tsv: aggregate + by-type + by-lang + failure list.
 set -u
-BAT="/d/dev/claudette/runs/eval-2026-05-29/battery"
+# Battery home = this script's own directory, so the harness runs from any
+# clone on any box. Override with BATTERY_HOME only if the corpus has been
+# relocated away from the scripts.
+BAT="${BATTERY_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 # Accepts an explicit scores file as $1, else honors BATTERY_TAG, else the default.
 S="${1:-$BAT/SCORES${BATTERY_TAG:+-$BATTERY_TAG}.tsv}"
 [ -f "$S" ] || { echo "no scores file: $S"; exit 0; }
