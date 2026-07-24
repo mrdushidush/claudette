@@ -70,11 +70,11 @@ struct CliArgs {
     /// previous "run --telegram and accidentally expose the bot to
     /// anyone who guesses the username" footgun.
     allow_any_chat: bool,
-    /// `--forge`: run the trailing prompt in forge-mode inside the active
-    /// brownfield mission. Errors if no mission is active. v0a is single-
-    /// stage: one model turn against a pre-enabled toolset, ending at
-    /// `mission_submit` (auto-PR). The prompt text is taken from
-    /// `prompt_words`.
+    /// `--forge`: run the trailing prompt through the forge pipeline
+    /// (v0c: Planner → Coder → Verifier → fix-loop → Submitter, with a real
+    /// build+test gate each round). Uses the active brownfield mission, or
+    /// auto-bootstraps an ephemeral one in the current repo when there is
+    /// none. The prompt text is taken from `prompt_words`.
     forge: bool,
     /// `--doctor`: run flat diagnostic probes (Ollama reachable, brain
     /// pulled, recall embed model loaded, OAuth tokens valid, voice deps,
@@ -90,6 +90,71 @@ struct CliArgs {
     /// conversation, findings checkpointed to `~/.claudette/research/`).
     /// Trailing prompt words become an optional focus hint. Forces offline.
     research: bool,
+    /// Args that look like flags but match nothing. Collected rather than
+    /// swallowed into `prompt_words`: before this, `claudette --setpu` sent
+    /// "--setpu" to the model as a prompt and printed a chatty reply, so a
+    /// typo in the one command new users are told to run looked like the
+    /// tool working. `main()` reports these and exits 2.
+    unknown_flags: Vec<String>,
+}
+
+/// Every flag `parse_args` accepts, for the unknown-flag "did you mean".
+/// Kept next to the parser so a new flag that misses this list only costs a
+/// suggestion, never a false rejection — the match arms remain the single
+/// source of truth for what is actually accepted.
+const KNOWN_FLAGS: &[&str] = &[
+    "--help",
+    "-h",
+    "--version",
+    "-V",
+    "--resume",
+    "-r",
+    "--telegram",
+    "-t",
+    "--tui",
+    "--chat",
+    "--auth-google",
+    "--revoke",
+    "--briefing",
+    "--time",
+    "--days",
+    "--forge",
+    "--doctor",
+    "--setup",
+    "--research",
+    "--faceless",
+    "--offline",
+];
+
+/// True when `arg` should be read as a flag rather than prompt text.
+///
+/// Deliberately narrow, because the prompt is positional and a false
+/// positive would reject legitimate input: a token only counts as a flag if
+/// it starts with `-`, has something after the dash, contains no whitespace
+/// (`"--wat is this"` is one quoted prompt word, not a flag), and is not a
+/// negative number (`-5` in an unquoted arithmetic prompt).
+fn looks_like_flag(arg: &str) -> bool {
+    arg.starts_with('-')
+        && arg.len() > 1
+        && !arg.contains(char::is_whitespace)
+        && arg.parse::<f64>().is_err()
+}
+
+/// Closest known flags to `unknown`, nearest first, capped at 2. Uses the
+/// same Levenshtein the permission layer uses for tool-name suggestions.
+///
+/// Distance 2 covers the realistic typo classes — one transposition
+/// (`--setpu`, `--reserach`), one dropped or doubled char (`--offlin`), one
+/// substitution (`--docter`) — while keeping unrelated flags out. At 3,
+/// `--setpu` also "suggested" `--help`, which is noise dressed as help.
+fn suggest_flags(unknown: &str) -> Vec<&'static str> {
+    let mut scored: Vec<(u32, &'static str)> = KNOWN_FLAGS
+        .iter()
+        .map(|f| (claudette::permissions::levenshtein(unknown, f), *f))
+        .filter(|(d, _)| *d <= 2)
+        .collect();
+    scored.sort_by_key(|(d, f)| (*d, *f));
+    scored.into_iter().take(2).map(|(_, f)| f).collect()
 }
 
 /// Help text printed on `--help` / `-h`. One source of truth; the README
@@ -112,11 +177,14 @@ MODES (pick one; default is interactive REPL):
                          (Chat / Tools / Notes / Todos / HW tabs). Demo-only:
                          has known rendering rough edges (doubled text, tool
                          pane, footer). The REPL is the supported daily driver.
-    --forge \"<prompt>\"   Run the prompt in forge-mode inside the active
-                         brownfield mission. Errors if no mission is active —
-                         start one with /brownfield <repo> first. v0a runs a
-                         single brain turn with file/search/git/advanced/github
-                         tools pre-enabled and exits at mission_submit (auto-PR).
+    --forge \"<prompt>\"   Run the prompt through the autonomous forge pipeline:
+                         Planner -> Coder -> Verifier -> fix-loop -> Submitter.
+                         The Verifier builds and runs the real test suite each
+                         round, so a diff that breaks the build or a test can't
+                         pass. Runs in the active brownfield mission, or
+                         bootstraps a throwaway one in the current repo if
+                         there is none. You approve the plan and the full diff
+                         before any PR opens.
     --research [FOCUS]   Unattended read-only review of the repo (CLAUDETTE_
                          WORKSPACE or the git toplevel). Writes a findings
                          report to ~/.claudette/research/. Forces --offline.
@@ -228,6 +296,26 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
+    // ── Unknown flags ─────────────────────────────────────────────────
+    // After --help/--version so those still work alongside a typo, but
+    // before every subsystem: a mistyped flag must never reach the model
+    // as prompt text.
+    if !args.unknown_flags.is_empty() {
+        for flag in &args.unknown_flags {
+            eprintln!("{} unknown option: {flag}", theme::warn(theme::WARN_GLYPH));
+            let suggestions = suggest_flags(flag);
+            if !suggestions.is_empty() {
+                eprintln!("  ↳ did you mean {}?", suggestions.join(" or "));
+            }
+        }
+        eprintln!("  ↳ `claudette --help` lists every option.");
+        eprintln!(
+            "  ↳ to send this text to the model, quote it or use `--`: claudette -- {}",
+            args.unknown_flags.join(" ")
+        );
+        return ExitCode::from(2);
+    }
+
     // ── Workspace-roots startup probe ─────────────────────────────────
     // Catches the 2026-04-28 wrapper-forgot-CLAUDETTE_WORKSPACE class of
     // bug at startup rather than first read attempt. Prints to stderr
@@ -260,6 +348,8 @@ fn main() -> ExitCode {
         doctor,
         setup,
         research,
+        // Already consumed above: a non-empty list exits 2 before we get here.
+        unknown_flags: _,
     } = args;
 
     // ── Offline-mode banner ───────────────────────────────────────────
@@ -503,6 +593,9 @@ fn main() -> ExitCode {
 fn parse_args(args: &[String]) -> CliArgs {
     let mut out = CliArgs::default();
     let mut expect = ExpectNext::Nothing;
+    // Set by a bare `--`: everything after it is prompt text, even if it
+    // starts with a dash.
+    let mut end_of_flags = false;
 
     // Also check env var for chat IDs. The literal string "any" (any
     // casing) sets the accept-all sentinel, identical to `--chat any`.
@@ -557,6 +650,10 @@ fn parse_args(args: &[String]) -> CliArgs {
             }
             ExpectNext::Nothing => {}
         }
+        if end_of_flags {
+            out.prompt_words.push(arg.clone());
+            continue;
+        }
         match arg.as_str() {
             "--help" | "-h" => out.help = true,
             "--version" | "-V" => out.version = true,
@@ -589,6 +686,10 @@ fn parse_args(args: &[String]) -> CliArgs {
                 // `CLAUDETTE_OFFLINE=1`. See `egress.rs`.
                 std::env::set_var(claudette::egress::OFFLINE_ENV, "1");
             }
+            // `--` ends flag parsing, POSIX-style, so a prompt that really
+            // does start with a dash stays reachable: `claudette -- --tui`.
+            "--" => end_of_flags = true,
+            other if looks_like_flag(other) => out.unknown_flags.push(other.to_string()),
             _ => out.prompt_words.push(arg.clone()),
         }
     }
@@ -895,6 +996,67 @@ mod tests {
             std::env::set_var("CLAUDETTE_TELEGRAM_CHAT", v);
         }
         out
+    }
+
+    #[test]
+    fn parse_args_typo_flag_is_rejected_not_sent_to_the_model() {
+        // The regression: `claudette --setpu` used to push "--setpu" into
+        // prompt_words, so a typo in the first command new users are told to
+        // run produced a chatty model reply instead of an error.
+        let a = parse_args_clean(&["--setpu".into()]);
+        assert_eq!(a.unknown_flags, vec!["--setpu".to_string()]);
+        assert!(a.prompt_words.is_empty());
+        assert!(!a.setup);
+    }
+
+    #[test]
+    fn suggest_flags_finds_the_intended_flag() {
+        assert!(suggest_flags("--setpu").contains(&"--setup"));
+        assert!(suggest_flags("--reserach").contains(&"--research"));
+        assert!(suggest_flags("--offlin").contains(&"--offline"));
+        assert!(suggest_flags("--docter").contains(&"--doctor"));
+        // Nothing close enough: better to say nothing than to guess wildly.
+        assert!(suggest_flags("--zzzzzzzzzzzz").is_empty());
+    }
+
+    #[test]
+    fn parse_args_double_dash_ends_flag_parsing() {
+        // The escape hatch the error message points at, so a prompt that
+        // genuinely starts with a dash is still reachable.
+        let a = parse_args_clean(&["--".into(), "--tui".into(), "means".into()]);
+        assert!(!a.tui, "--tui after -- is prompt text, not a flag");
+        assert!(a.unknown_flags.is_empty());
+        assert_eq!(
+            a.prompt_words,
+            vec!["--tui".to_string(), "means".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_args_does_not_mistake_prompt_text_for_flags() {
+        // A quoted prompt containing a dash, and unquoted negative numbers,
+        // must stay prompt text — a false positive here would reject valid
+        // input, which is worse than the bug being fixed.
+        let a = parse_args_clean(&["--wat is this".into(), "-5".into(), "-".into()]);
+        assert!(
+            a.unknown_flags.is_empty(),
+            "got unexpected unknown flags: {:?}",
+            a.unknown_flags
+        );
+        assert_eq!(a.prompt_words.len(), 3);
+    }
+
+    #[test]
+    fn parse_args_known_flags_list_matches_the_parser() {
+        // Guard against KNOWN_FLAGS drifting from the match arms: every
+        // listed flag must actually parse without landing in unknown_flags.
+        for flag in KNOWN_FLAGS {
+            let a = parse_args_clean(&[(*flag).to_string()]);
+            assert!(
+                a.unknown_flags.is_empty(),
+                "{flag} is in KNOWN_FLAGS but the parser rejects it"
+            );
+        }
     }
 
     #[test]

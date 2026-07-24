@@ -292,7 +292,12 @@ impl PermissionPolicy {
 
 /// Iterative Levenshtein distance, two-row variant. `O(m*n)` time, `O(min(m,n))`
 /// space. Operates on chars so non-ASCII names aren't penalised by byte length.
-fn levenshtein(a: &str, b: &str) -> u32 {
+///
+/// `pub` rather than private because the `claudette` binary is a separate
+/// crate from this library and drives its unknown-flag "did you mean" from
+/// the same function — one implementation for tool-name and flag-name typo
+/// suggestions instead of two that could drift apart.
+pub fn levenshtein(a: &str, b: &str) -> u32 {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
     if a.is_empty() {
