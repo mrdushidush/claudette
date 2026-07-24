@@ -151,6 +151,10 @@ exact allow-list. See [Air-gapped, and enforced](../README.md#-air-gapped-and-en
 
 ## The TUI in 60 seconds
 
+> **Experimental — demo-only.** The TUI has known rendering rough edges
+> (doubled text, tool pane, footer). The REPL is the supported daily driver;
+> reach for `--tui` to show Claudette off, not to live in it.
+
 ```bash
 claudette --tui
 ```
@@ -170,7 +174,10 @@ Five tabs across the top — switch with number keys or cycle with `Tab` /
   input box is empty, so you can still type "1pm").
 - **Slash commands work here too** — `/help`, `/brownfield`, `/forge`, `/recall`,
   everything the REPL has.
-- **`Ctrl+V`** pastes an image or text block into your next message.
+- **`Alt+V`** pastes an image or text block into your next message. (Not `Ctrl+V`
+  — Windows Terminal and most modern terminals intercept that at the terminal
+  level and paste the clipboard's *text* form, so the keypress never reaches
+  Claudette.)
 - **`Ctrl+C`** (or `Ctrl+D`) quits.
 
 ## Forge: hands-off code changes with a review gate

@@ -1,6 +1,6 @@
 # Claudette vs. the open-source AI agent landscape
 
-_As of June 2026._
+_As of July 2026._
 
 "Open claw" ≈ **opencode** (SST) — the most-cited open-source alternative to Claude Code. This doc
 compares Claudette against opencode and the other leading open-source AI coding / agent tools so
