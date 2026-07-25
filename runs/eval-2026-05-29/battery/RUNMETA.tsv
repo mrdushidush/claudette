@@ -17,16 +17,25 @@
 # not changed since 2026-07-20 12:12:33, which predates every Q50 run — so the
 # agent was genuinely constant across the whole campaign.
 #
+# cpu_expert_ratio/offload_ratio (added 2026-07-25): the GPU/CPU expert split, the
+# same class of hazard as KV — sticky per-model config, not an `lms load` flag, not
+# in `lms ps --json`. It moved mid-session on MTP-GPU-4 and shifted A1 from 67s to
+# 30s, so VRAM alone was recording it only indirectly. Rows predating the column
+# carry `na`; `unset(default)` means LM Studio auto-split for this box's hardware.
+#
 # ONLY compare scores across rows whose kv_k/kv_v AND ctx match.
-date	tag	identifier	ctx	parallel	kv_k	kv_v	base_url	vram_mib	bin_ver	bin_mtime	provenance	model_path
-2026-07-21	q50-champ-bs306	qwen3.6-35b-a3b-mtp	32768	1	q8_0	q8_0	http://localhost:1234	na	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf
-2026-07-22	q50-champ-full56	qwen3.6-35b-a3b-mtp	32768	1	q8_0	q8_0	http://localhost:1234	na	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf
-2026-07-22	q50-champ-full56-v2	qwen3.6-35b-a3b-mtp	32768	1	q8_0	q8_0	http://localhost:1234	na	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf
-2026-07-22	q50-champ-full56-v3	qwen3.6-35b-a3b-mtp	32768	1	q8_0	q8_0	http://localhost:1234	na	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf
-2026-07-22	q50-iq4xs	qwen3.6-35b-a3b@iq4_xs	32768	1	q8_0	q8_0	http://localhost:1234	13947	claudette 0.17.0	2026-07-20 12:12:33	inferred	unsloth UD-IQ4_XS (on-disk)
-2026-07-22	q50-mtpgpu3-screen	qwen3.6-35b-a3b-mtp@iq4_xs	32768	1	q8_0	q8_0	http://localhost:1234	14891	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF (MTP-GPU-3, ~3.53bpw)
-2026-07-23	q50-mtpgpu3	qwen3.6-35b-a3b-mtp@iq4_xs	32768	1	q8_0	q8_0	http://localhost:1234	14891	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF (MTP-GPU-3, ~3.53bpw)
-2026-07-23	q50-champ-kvfp16-screen	qwen3.6-35b-a3b-mtp	65536	1	f16	f16	http://localhost:1234	15556	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf
-2026-07-25	q50-champ-kvfp16-r1	qwen3.6-35b-a3b-mtp@iq3_s	65536	1	f16	f16	http://localhost:1234	15772	claudette 0.17.0	2026-07-20 12:12:33	measured	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf
-2026-07-25	q50-champ-kvfp16-32k-r2	qwen3.6-35b-a3b-mtp	32768	1	f16	f16	http://localhost:1234	15080	claudette 0.17.0	2026-07-20 12:12:33	measured	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf
-2026-07-25	q50-champ-q8-control-r3	qwen3.6-35b-a3b-mtp	32768	1	q8_0	q8_0	http://localhost:1234	14820	claudette 0.17.0	2026-07-20 12:12:33	measured	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf
+date	tag	identifier	ctx	parallel	kv_k	kv_v	base_url	vram_mib	bin_ver	bin_mtime	provenance	model_path	cpu_expert_ratio	offload_ratio
+2026-07-21	q50-champ-bs306	qwen3.6-35b-a3b-mtp	32768	1	q8_0	q8_0	http://localhost:1234	na	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf	na	na
+2026-07-22	q50-champ-full56	qwen3.6-35b-a3b-mtp	32768	1	q8_0	q8_0	http://localhost:1234	na	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf	na	na
+2026-07-22	q50-champ-full56-v2	qwen3.6-35b-a3b-mtp	32768	1	q8_0	q8_0	http://localhost:1234	na	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf	na	na
+2026-07-22	q50-champ-full56-v3	qwen3.6-35b-a3b-mtp	32768	1	q8_0	q8_0	http://localhost:1234	na	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf	na	na
+2026-07-22	q50-iq4xs	qwen3.6-35b-a3b@iq4_xs	32768	1	q8_0	q8_0	http://localhost:1234	13947	claudette 0.17.0	2026-07-20 12:12:33	inferred	unsloth UD-IQ4_XS (on-disk)	na	na
+2026-07-22	q50-mtpgpu3-screen	qwen3.6-35b-a3b-mtp@iq4_xs	32768	1	q8_0	q8_0	http://localhost:1234	14891	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF (MTP-GPU-3, ~3.53bpw)	na	na
+2026-07-23	q50-mtpgpu3	qwen3.6-35b-a3b-mtp@iq4_xs	32768	1	q8_0	q8_0	http://localhost:1234	14891	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF (MTP-GPU-3, ~3.53bpw)	na	na
+2026-07-23	q50-champ-kvfp16-screen	qwen3.6-35b-a3b-mtp	65536	1	f16	f16	http://localhost:1234	15556	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf	na	na
+2026-07-25	q50-champ-kvfp16-r1	qwen3.6-35b-a3b-mtp@iq3_s	65536	1	f16	f16	http://localhost:1234	15772	claudette 0.17.0	2026-07-20 12:12:33	measured	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf	na	na
+2026-07-25	q50-champ-kvfp16-32k-r2	qwen3.6-35b-a3b-mtp	32768	1	f16	f16	http://localhost:1234	15080	claudette 0.17.0	2026-07-20 12:12:33	measured	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf	na	na
+2026-07-25	q50-champ-q8-control-r3	qwen3.6-35b-a3b-mtp	32768	1	q8_0	q8_0	http://localhost:1234	14820	claudette 0.17.0	2026-07-20 12:12:33	measured	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf	na	na
+2026-07-25	smoke-mtpgpu4	mtpgpu4	32768	1	q8_0	q8_0	http://localhost:1234	13996	claudette 0.17.0	2026-07-20 12:12:33	measured	byteshape/Qwen3.6-35B-A3B-MTP-GPU4-GGUF/Qwen3.6-35B-A3B-IQ4_XS-3.97bpw.gguf	unset(default)	unset(default)
+2026-07-25	smoke-mtpgpu4-tweak	mtpgpu4	32768	1	q8_0	q8_0	http://localhost:1234	15669	claudette 0.17.0	2026-07-20 12:12:33	measured	byteshape/Qwen3.6-35B-A3B-MTP-GPU4-GGUF/Qwen3.6-35B-A3B-IQ4_XS-3.97bpw.gguf	0.24390243902439024	1
+2026-07-25	q50-mtpgpu4-screen	mtpgpu4	32768	1	q8_0	q8_0	http://localhost:1234	15564	claudette 0.17.0	2026-07-20 12:12:33	measured	byteshape/Qwen3.6-35B-A3B-MTP-GPU4-GGUF/Qwen3.6-35B-A3B-IQ4_XS-3.97bpw.gguf	0.24390243902439024	1

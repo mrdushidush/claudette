@@ -402,5 +402,76 @@ bound (≥9) purely to absorb the ±1 run-to-run noise measured above.
 Cost: 12 of 56 tasks, and the screen is ~4× cheaper than a full run. It is a **reject-fast
 filter, not the verdict** — the crown is still decided on full-56 across ≥2 runs.
 
-**▶ NEXT:** the hunt resumes at byteshape **MTP-GPU-4 (3.97 bpw)** — screened on the 12-task
-aggregate gate above, and with wall-clock recorded.
+## MTP-GPU-4 (3.97 bpw) — SCREENED AND REJECTED 2026-07-25
+
+Tag `q50-mtpgpu4-screen`. **7/12 on the corrected screen vs a ≥9/12 gate → rejected, no full 56.**
+
+| field | value |
+|---|---|
+| model key | `qwen3.6-35b-a3b-mtp-gpu4` (own repo dir — see the naming hazard below) |
+| config | KV q8_0 / ctx 32768 / parallel 1, **measured** |
+| VRAM | 15,611 MiB of 16,311 after the expert-split tweak (13,923 before) |
+| probe | 21.51 tok/s untweaked → **37.40 tok/s** tweaked (+74%) |
+| screen | **7/12**, 12m28s, no timeouts (slowest task 214 s of a 600 s ceiling) |
+| passes | Q05 Q19 Q26 Q36 Q45 Q46 Q50 |
+| fails | Q03 Q13 Q25 Q51 Q52 |
+
+**Why 7 is a reject and not a near-miss.** The champion sits at 6/12 median (5–6 range), so this
+is +1 — inside the rotation noise. And the bound bites: max full-56 = `7 + 44` = **51**, i.e. +1
+over the champion's 50, against a crown rule needing ≥54. Even granting a lucky +1 flip to 8/12
+it cannot reach the crown. A full-56 night here would have bought a number we can already
+bracket.
+
+**The +1 is churn, not a lift.** Against the q8 control it *fixed* Q05/Q26/Q36 and *broke*
+Q25/Q52 — five changes to net one point. That is the same rotation signature the champion
+produces against itself, which is precisely what the aggregate screen was built to see through.
+
+**And it costs 2× wall-clock**: 748 s on these 12 tasks vs the champion's 372 s (control r3) /
+314 s (v3). It also needs 15.6 GB of a 16.3 GB card, so it cannot coexist with David's ctx-65536
+daily-driver config.
+
+### ★ The real finding: bpw is not the axis
+
+Four points on the same model family, all at KV q8 / ctx 32768:
+
+| variant | bpw | result |
+|---|---|---|
+| champion MTP-GPU-2 | 3.06 | 50/56 · **6/12** screen |
+| MTP-GPU-3 | 3.53 | 49/56 (regressed Q01/Q53) |
+| **MTP-GPU-4** | **3.97** | **7/12 screen** |
+| UD-IQ4_XS | 4.25 | 50/56 (regressed Q14/Q49) |
+
+**Quality is flat within noise from 3.06 → 4.25 bpw while speed varies ~3×.** Every rung of the
+ladder has now returned "ties the champion, slower". The champion is the *lowest* bpw of the four
+and still the best deal.
+
+**▶ RECOMMENDATION: drop MTP-GPU-5 (4.19 bpw) from the queue.** It interpolates between two
+measured-flat points (3.97 and 4.25) and would cost a download plus a GPU night to re-measure
+noise. The quantisation ladder is exhausted; if the hunt continues it should move to a
+**different model family**, not a higher bpw of this one.
+
+### ⚠️ Naming hazard — byteshape ships three files all called `IQ4_XS`
+
+3.53, 3.97 and 4.19 bpw share the quant name, and LM Studio derives its model key from it. Left
+in the default directory, MTP-GPU-4 would have answered to `qwen3.6-35b-a3b-mtp@iq4_xs` — the
+same key as the already-rejected MTP-GPU-3. It was downloaded into its own repo dir
+(`Qwen3.6-35B-A3B-MTP-GPU4-GGUF`) to force a distinct key. **Do the same for MTP-GPU-5 if it is
+ever pulled.**
+
+Note also that a new repo dir gets a *fresh* per-model config, so KV does **not** inherit and
+defaults silently. The config was pre-seeded to q8_0 before the first load and verified
+`measured` in RUNMETA.
+
+### Expert-split tweak (David, mid-session)
+
+LM Studio's auto-split was conservative — 13,923 MiB, leaving 2.4 GB of VRAM unused. Setting
+`numCpuExpertLayersRatio` to 0.2439 with `offloadRatio` 1 took it to 15,611 MiB. Effect:
+probe 21.51 → 37.40 tok/s, and **A1 end-to-end 67 s → 30 s (2.2×)**.
+
+⚠️ Another datapoint against the probe: it predicted 1.74× and the real gain was 2.2× — this
+time the probe *under*-sold. It is directionally useful but quantitatively unreliable in both
+directions. Only timed runs count.
+
+This also removed a real confound. At the untweaked speed the candidate ran 4.8× the champion's
+A1, close enough to the 600 s ceiling that a slow task could have scored FAIL for being slow
+rather than wrong. The screen was restarted from scratch on the tweaked config for that reason.

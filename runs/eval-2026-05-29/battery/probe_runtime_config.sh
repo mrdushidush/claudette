@@ -92,6 +92,39 @@ print("unset(default)")
 KV_K="$(read_kv k)"
 KV_V="$(read_kv v)"
 
+# ---- the GPU/CPU expert split (added 2026-07-25) -------------------------------
+# Same class of hazard as KV: it lives in the sticky per-model config, is not an
+# `lms load` flag, and `lms ps --json` does not report it. It moved mid-session on
+# MTP-GPU-4 (LM Studio's auto-split left 2.4 GB of VRAM unused; forcing more
+# experts onto the GPU took the probe 21.5 -> 37.4 tok/s and A1 67 s -> 30 s).
+# VRAM alone only records it indirectly, so read the knobs themselves.
+# "unset(default)" means LM Studio auto-split for the hardware — which is a real,
+# reproducible-only-on-this-box setting, not a neutral one.
+read_cfg_plain() {
+  local key="$1" file="$CFG_ROOT/$MPATH.json"
+  { [ "$MPATH" = "na" ] || [ ! -f "$file" ]; } && { na; return; }
+  python -c '
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        cfg = json.load(fh)
+except Exception:
+    print("na"); sys.exit()
+for f in cfg.get("load", {}).get("fields", []):
+    if f.get("key") == sys.argv[2]:
+        v = f.get("value")
+        if isinstance(v, dict):
+            print(v.get("value", "na") if v.get("checked") else "off(default)")
+        else:
+            print("na" if v is None else v)
+        sys.exit()
+print("unset(default)")
+' "$file" "$key" 2>/dev/null || na
+}
+
+CPU_EXP="$(read_cfg_plain llm.load.numCpuExpertLayersRatio)"
+OFFLOAD="$(read_cfg_plain llm.load.llama.acceleration.offloadRatio)"
+
 # ---- VRAM, for spill detection ------------------------------------------------
 VRAM='na'
 if command -v nvidia-smi >/dev/null 2>&1; then
@@ -118,7 +151,10 @@ fi
 # `measured` distinguishes these rows from the hand-reconstructed pre-2026-07-25
 # ones in RUNMETA.tsv, which are labelled `inferred`. Same columns either way so
 # a probe row appends straight onto the table.
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+# cpu_expert_ratio/offload_ratio are APPENDED after model_path so every existing
+# column index is unchanged and the awk one-liners in the dossier still work.
+# Rows written before 2026-07-25 carry `na` there.
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
   "$(date +%Y-%m-%d)" "$TAG" "$IDENT" "$CTX" "$PAR" "$KV_K" "$KV_V" \
   "${BATTERY_BASE_URL:-http://localhost:1234}" "$VRAM" "$BIN_VER" "$BIN_MTIME" \
-  'measured' "$MPATH"
+  'measured' "$MPATH" "$CPU_EXP" "$OFFLOAD"
