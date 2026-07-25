@@ -1,0 +1,12 @@
+Q03	rust	bugfix	Q03	600
+Q05	rust	error-handling	Q05	600
+Q13	python	implement-spec	Q13	600
+Q19	python	implement-spec	Q19	600
+Q25	python	api-misuse	Q25	600
+Q26	js	implement-spec	Q26	600
+Q36	ts	bugfix	Q36	600
+Q45	shell	bugfix	Q45	600
+Q46	shell	boundary	Q46	600
+Q50	shell	implement-spec	Q50	600
+Q51	python	implement-spec	Q51	600
+Q52	rust	implement-spec	Q52	700

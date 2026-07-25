@@ -335,8 +335,11 @@ Per-candidate, to save tokens and thermal budget:
    dominated by prompt processing over the KV cache. Use the probe to reject slow models; never
    cite it as evidence a config is fast. **Only a timed full run measures speed.**
    Record wall-clock total for every full run so this is comparable across rows.
-3. **Screen on the 5 champion-consistent-fails only** (`manifest-q50-champfails.tsv` = Q03 Q05 Q25 Q51 Q52).
-4. **Gate:** passes **≥2 of 5** → promote to full 56. **<2** → reject, record, move on (no full run).
+3. **Screen on the 12 ever-failed tasks, scored in aggregate**
+   (`manifest-q50-everfailed.tsv` = Q03 Q05 Q13 Q19 Q25 Q26 Q36 Q45 Q46 Q50 Q51 Q52).
+   ⚠️ Superseded `manifest-q50-champfails.tsv` (the 5-task screen) — kept on disk only so old
+   rows stay reproducible. **Do not screen on it; it misfired twice.**
+4. **Gate: ≥9/12 → promote to the full 56. ≤8/12 → reject, record, move on.**
 5. **Wait ~2 h between battery runs.** One candidate in flight at a time.
 
 Candidate queue (coder-30b DROPPED per David — "will suck vs champion"):
@@ -369,5 +372,35 @@ Q05/Q52. That theory is dead, so its q8 rejection stands. Saves a GPU night.
   full 56, and never on task identity. See Q50.md.
 - Speed probes do not measure end-to-end speed; only a timed full run does.
 
-**▶ NEXT:** the hunt resumes at byteshape **MTP-GPU-4 (3.97 bpw)** — screened on the corrected
-3-task gate, and with wall-clock recorded.
+## The corrected screen — `manifest-q50-everfailed.tsv` (built 2026-07-25)
+
+The 12 tasks that failed at least once across the champion's six full-56 runs. Scored **in
+aggregate**; task identity is explicitly NOT part of the gate.
+
+**Champion reference, recomputed from the six frozen SCORES files:**
+
+| run | screen | that run's failures |
+|---|---|---|
+| `champ-full56` | 5/12 | Q03 Q05 Q25 Q45 Q50 Q51 Q52 |
+| `champ-full56-v2` | 6/12 | Q03 Q05 Q13 Q25 Q51 Q52 |
+| `champ-full56-v3` | 6/12 | Q03 Q05 Q13 Q25 Q51 Q52 |
+| `champ-kvfp16-r1` | 6/12 | Q03 Q19 Q25 Q46 Q51 Q52 |
+| `champ-kvfp16-32k-r2` | 6/12 | Q03 Q05 Q13 Q25 Q46 Q52 |
+| `champ-q8-control-r3` | 6/12 | Q03 Q05 Q13 Q26 Q36 Q51 |
+
+**Champion = 6/12 median, range 5–6.** Note how well this vindicates the aggregate rule: no two
+runs share a failure list, yet the count moves by at most 1. The old 5-task screen was reading
+the rotation as signal.
+
+**Why the gate is ≥9/12 — this is a bound, not a preference.** The champion passes **44/44** of
+the tasks outside this set in every run, so a challenger's full-56 score is
+`screen12 + (at most 44)`. To clear the crown rule (≥ 54 = 50 + 4) it therefore needs
+**screen12 ≥ 10 with zero regressions on the other 44**. Anything scoring ≤9 on the screen
+*cannot* win the crown even with a flawless remainder. The gate sits one point below that hard
+bound (≥9) purely to absorb the ±1 run-to-run noise measured above.
+
+Cost: 12 of 56 tasks, and the screen is ~4× cheaper than a full run. It is a **reject-fast
+filter, not the verdict** — the crown is still decided on full-56 across ≥2 runs.
+
+**▶ NEXT:** the hunt resumes at byteshape **MTP-GPU-4 (3.97 bpw)** — screened on the 12-task
+aggregate gate above, and with wall-clock recorded.
