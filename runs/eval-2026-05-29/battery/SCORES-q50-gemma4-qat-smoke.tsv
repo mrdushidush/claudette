@@ -1,0 +1,5 @@
+Q01	rust	implement-spec	PASS	60s	EC=0	recall=na	PASS — all 6 hidden slug tests passed
+Q13	python	implement-spec	PASS	82s	EC=0	recall=na	PASS — all hidden CSV tests passed
+Q26	js	implement-spec	PASS	99s	EC=0	recall=na	PASS — all hidden deepEqual tests passed
+Q35	ts	implement-spec	PASS	79s	EC=0	recall=na	PASS — all hidden parseQueryString tests passed
+Q43	shell	bugfix	PASS	111s	EC=0	recall=na	PASS — line counts correct with and without trailing newline
