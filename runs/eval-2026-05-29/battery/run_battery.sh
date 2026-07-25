@@ -131,3 +131,25 @@ echo "================ SUMMARY ================"
 p=$(grep -cP '\tPASS\t' "$SCORES"); f=$(grep -cP '\tFAIL' "$SCORES"); t=$(wc -l < "$SCORES")
 echo "PASS=$p  FAIL/other=$((t-p))  total=$t"
 [ "$t" -gt 0 ] && echo "aggregate: $(awk "BEGIN{printf \"%.1f%%\", 100*$p/$t}")"
+# Total wall-clock. 2026-07-25: `probe_speed.sh` tok/s does NOT predict this — a config
+# that probed FASTER (73 vs 70 tok/s) ran 2.5x slower here, because the battery is
+# dominated by prompt processing, not generation. Report it on every run.
+[ "$t" -gt 0 ] && awk -F'\t' '{gsub(/s/,"",$5); s+=$5} END{printf "wall-clock: %dm%02ds (avg %ds/task)\n", s/60, s%60, s/NR}' "$SCORES"
+
+# Record the runtime config this run was ACTUALLY measured under (KV cache type, ctx,
+# parallel, VRAM, claudette build). Q50.md listed these as "held constant" but nothing
+# verified them, and the KV type silently flipped to f16 — invalidating comparisons that
+# nobody knew were invalid. Appended to RUNMETA.tsv, keyed by tag.
+#
+# Deliberately at the END, not the start: the model JIT-loads on the first task, so a
+# probe at t=0 reports `na`. Best-effort — never fail a completed run over metadata.
+if [ -f "$BAT/probe_runtime_config.sh" ]; then
+  RUNMETA="$BAT/RUNMETA.tsv"
+  if row="$(BATTERY_TAG="$TAG" bash "$BAT/probe_runtime_config.sh" "${TAG:-<none>}" 2>/dev/null)"; then
+    printf '%s\n' "$row" >> "$RUNMETA"
+    printf '%s' "$row" | awk -F'\t' -v f="$(basename "$RUNMETA")" \
+      '{printf "runtime config -> %s: ctx=%s kv=%s/%s parallel=%s vram=%sMiB %s\n", f, $4, $6, $7, $5, $9, $10}'
+  else
+    echo "[warn] runtime-config probe failed; RUNMETA.tsv not updated for tag '${TAG:-<none>}'"
+  fi
+fi

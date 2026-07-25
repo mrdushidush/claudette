@@ -1,0 +1,32 @@
+# Runtime config per battery tag — the "held constant" fields, actually recorded.
+#
+# Q50.md has always listed ctx 32768 / KV q8_0 / parallel 1 under "Held constant
+# for every row (comparability)". Nothing ever RECORDED or VERIFIED it. The KV
+# type then silently flipped to f16 on this box (it is sticky, global, and not an
+# `lms load` flag), and rows were compared across two different KV settings
+# without anyone knowing. A held-constant nobody measures is not held.
+#
+# provenance=measured  -> emitted by probe_runtime_config.sh at run time. Trust it.
+# provenance=inferred  -> reconstructed from QUALITY-DOSSIER.md / Q50.md notes plus
+#                         corroborating VRAM in SPEED-PROBES.tsv, because nothing
+#                         recorded it at the time. Best available reconstruction,
+#                         NOT evidence. Do not cite an inferred row as proof.
+#
+# bin_ver/bin_mtime: `claudette --version` is identical across dev rebuilds of the
+# same release, so the mtime is the actual build fingerprint. The PATH binary has
+# not changed since 2026-07-20 12:12:33, which predates every Q50 run — so the
+# agent was genuinely constant across the whole campaign.
+#
+# ONLY compare scores across rows whose kv_k/kv_v AND ctx match.
+date	tag	identifier	ctx	parallel	kv_k	kv_v	base_url	vram_mib	bin_ver	bin_mtime	provenance	model_path
+2026-07-21	q50-champ-bs306	qwen3.6-35b-a3b-mtp	32768	1	q8_0	q8_0	http://localhost:1234	na	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf
+2026-07-22	q50-champ-full56	qwen3.6-35b-a3b-mtp	32768	1	q8_0	q8_0	http://localhost:1234	na	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf
+2026-07-22	q50-champ-full56-v2	qwen3.6-35b-a3b-mtp	32768	1	q8_0	q8_0	http://localhost:1234	na	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf
+2026-07-22	q50-champ-full56-v3	qwen3.6-35b-a3b-mtp	32768	1	q8_0	q8_0	http://localhost:1234	na	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf
+2026-07-22	q50-iq4xs	qwen3.6-35b-a3b@iq4_xs	32768	1	q8_0	q8_0	http://localhost:1234	13947	claudette 0.17.0	2026-07-20 12:12:33	inferred	unsloth UD-IQ4_XS (on-disk)
+2026-07-22	q50-mtpgpu3-screen	qwen3.6-35b-a3b-mtp@iq4_xs	32768	1	q8_0	q8_0	http://localhost:1234	14891	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF (MTP-GPU-3, ~3.53bpw)
+2026-07-23	q50-mtpgpu3	qwen3.6-35b-a3b-mtp@iq4_xs	32768	1	q8_0	q8_0	http://localhost:1234	14891	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF (MTP-GPU-3, ~3.53bpw)
+2026-07-23	q50-champ-kvfp16-screen	qwen3.6-35b-a3b-mtp	65536	1	f16	f16	http://localhost:1234	15556	claudette 0.17.0	2026-07-20 12:12:33	inferred	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf
+2026-07-25	q50-champ-kvfp16-r1	qwen3.6-35b-a3b-mtp@iq3_s	65536	1	f16	f16	http://localhost:1234	15772	claudette 0.17.0	2026-07-20 12:12:33	measured	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf
+2026-07-25	q50-champ-kvfp16-32k-r2	qwen3.6-35b-a3b-mtp	32768	1	f16	f16	http://localhost:1234	15080	claudette 0.17.0	2026-07-20 12:12:33	measured	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf
+2026-07-25	q50-champ-q8-control-r3	qwen3.6-35b-a3b-mtp	32768	1	q8_0	q8_0	http://localhost:1234	14820	claudette 0.17.0	2026-07-20 12:12:33	measured	byteshape/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-IQ3_S-3.06bpw.gguf
