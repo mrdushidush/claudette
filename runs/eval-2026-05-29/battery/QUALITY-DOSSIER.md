@@ -635,3 +635,61 @@ buys quality with size: coder-30b is the largest file here (17.7 GB) and lands t
 is the **lowest-bpw** model in the whole campaign and still beats both mid-rows. Quality is
 tracking the model family and its post-training, not bits, not gigabytes — the same conclusion the
 exhausted bpw ladder reached from the other direction.
+
+---
+
+## ★ 2026-07-26 (session 7) — ROW 3: Devstral-Small-2-24B = 40/56, and the vision projector is a VRAM tax
+
+**`devstral-small-2-24b-instruct-2512@iq4_xs` = 40/56 (71.4%), 20m01s, avg 21s/task.**
+Tag `q50-devstral-iq4xs`, RUNMETA `measured`, ctx 32768 / parallel 1 / KV q8_0+q8_0 /
+`offloadRatio` 1 / 15515 MiB / `cpu_expert_ratio` n/a (dense).
+Fails (16): Q01 Q03 Q04 Q05 Q07 Q13 Q24 Q25 Q26 Q35 Q40 Q44 Q45 Q46 Q51 Q52.
+
+### ★★ THE FIT FINDING — multimodal GGUF repos ship a projector and LM Studio LOADS IT
+
+Q4_K_M was tried first and **could not finish a single task in 3 minutes**. Cause, from the
+arithmetic: LMS gave the model ~15,279 MiB, weights are 13,672 MiB, leaving **1,607 MiB — almost
+exactly the 1,675 MiB `mmproj-F32.gguf`**. The projector took the space the KV cache needed, so
+all ~2.7 GB of KV went to Windows shared system RAM. **`lms ls` SIZE = weights + projector in
+decimal GB**, which is why the recorded "16.09 GB" and the handoff's "13.35 GB" were *both* right:
+13.35 **GiB** of weights, 16.09 decimal GB of weights+projector. Same for Q3_K_S (9.69 GiB /
+10.40 GB). ⇒ **Never size a model from `lms ls` alone; list the repo dir.**
+
+**Fix, and it is reusable:** move `mmproj-*.gguf` out of the repo dir (model must be unloaded —
+Windows locks it). The key's reported size drops to weights-only and LMS loads text-only. Parked
+at `~/.lmstudio/_disabled-mmproj/<publisher>-<repo>/` — a single `mv` back restores vision.
+After parking, IQ4_XS loaded in **5.76 s at 15,467 MiB (94.8%)**, VRAM flat 15,497–15,515 through
+the whole run. A coding battery never uses the projector, so this is free VRAM on **every**
+multimodal candidate: nemotron-omni's is **3.17 GB**, gemma-4-26b-a4b's 1.19 GB,
+gemma-4-12b's 0.18 GB, Qwen3.6-27B's 1.84 GB.
+
+### ★ DAVID'S RULE (2026-07-26): MoE spilling is OK, DENSE spilling is unacceptable
+
+Mechanism: a MoE reads only a couple of experts per token, so spilled weights are touched rarely;
+a dense model walks every layer every token, so any spill hits the critical path — exactly the
+Q4_K_M crawl. **Consequence: for a dense candidate, the quant must fit VRAM entirely** (~12.3 GiB
+weights at ctx 32768 / KV q8_0); for a MoE, hanging over the edge is fine.
+⚠️**This BLOCKS dense Qwen3.6-27B**: all three copies are complete on disk (UD-Q3_K_XL 13.48 GiB,
+Q3_K_S 11.51 GiB, lmstudio-community Q4_K_M 15.41 GiB) but only Q3_K_S fits, i.e. only the
+unattributable-Q3 case. Recommend dropping it in favour of `gemma-4-12B-it` **Q8_0** (11.80 GiB,
+near-lossless, fully resident) as the clean dense data point.
+
+### Reading the row
+
+- **Ties gpt-oss-20b at exactly 40/56 but shares only 6 of 16 failures with it** (Q05 Q24 Q25 Q26
+  Q51 Q52). Two models, one score, different competence profiles — more evidence that the
+  aggregate is the score and the fail *list* is not a fingerprint of capability.
+- ★**Inverted difficulty profile:** it swept the genuinely hard tail (Q53 CSV / Q54 toposort /
+  Q55 merge-intervals / Q56 version-compare all PASS) while failing the *easy* opening on
+  degenerate-input guards (Q03 zero-people panic, Q04 empty-input panic, Q07 empty-text). Strong
+  algorithms, weak unstated-edge-case discipline.
+- Q01 reached for the **`unicode_segmentation` crate**, which the fixture does not vendor →
+  `E0432 unresolved import`. It did NOT repeat across the other 11 Rust tasks, so it is a one-off,
+  not a systematic agent failure like gpt-oss-20b's unparseable-output class.
+- **No reasoning mode exists to enable.** Checked the GGUF header directly: no `[THINK]`/`[/THINK]`
+  tokens and no thinking block in the chat template; the only `think`/`reason` hits are ordinary
+  tokenizer vocabulary. Mistral's reasoning line is Magistral — Devstral is agent/SWE-tuned
+  instruct. It is also the oldest base in the sweep (`2512` = Dec 2025).
+- ⚠️**Smoke was 2/5 and the full run was 40/56 (71%).** The smoke's opening cluster is precisely
+  where this model is weakest, so it under-predicted badly. **A 5-task smoke is a template/speed
+  check, never a quality estimate** — the same lesson the 12-task screen taught at 44 tasks.

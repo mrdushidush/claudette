@@ -1,0 +1,5 @@
+Q01	rust	implement-spec	FAIL	18s	EC=0	recall=na	FAIL — hidden tests failed: error[E0432]: unresolved import `unicode_segmentation` error[E0599]: no method named `graphemes` found for struct `String` in the current scope 
+Q13	python	implement-spec	FAIL	24s	EC=0	recall=na	FAIL — hidden tests failed: >       assert parse_csv_line('"she said ""hi"""') == ['she said "hi"'] E       assert ['she said hi'] == ['she said "hi"'] hidden_gate_test.py:12: AssertionError FAILED hidden_gate_test.py::test_escaped_quote - assert ['she said hi'] == ['... 
+Q26	js	implement-spec	PASS	106s	EC=0	recall=na	PASS — all hidden deepEqual tests passed
+Q35	ts	implement-spec	FAIL	25s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: split on first = only 
+Q43	shell	bugfix	PASS	16s	EC=0	recall=na	PASS — line counts correct with and without trailing newline
