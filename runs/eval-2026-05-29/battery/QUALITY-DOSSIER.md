@@ -558,3 +558,80 @@ second brain that is loaded on demand, and the campaign brief priced this in fro
 ⚠️ The **1.19 GB vision projector is loaded** (`lms ps` shows 15.63 GB = 14.44 weights + 1.19
 mmproj) and a coding battery never touches it. Reclaiming it is the obvious ~1.1 GB if a future
 session wants to buy speed with a lower `cpu_expert_ratio`.
+
+---
+
+## qwen3-coder-30b-a3b-instruct — the owed row, 43/56 (2026-07-26, tag `q50-coder30b`)
+
+**43/56 (76.8%), 57m46s, avg 61 s/task.** UD-Q4_K_XL, 17.67 GB on disk. Config as approved by
+David on 07-25 and re-verified by `preseed_model_config.sh` at **zero drift**: ctx 32768 /
+parallel 1 / KV q8_0+q8_0 / `offloadRatio` 1 / `cpu_expert_ratio` **0.25** / 15494 MiB, load
+14.5 s. RUNMETA row `measured`.
+
+This closes the row killed at 14/56 on 2026-07-25. **Restarted from scratch, never resumed**, per
+the standing rule; the quarantined partial was ignored.
+
+**Fails (13):** Q05 Q09 Q13 Q14 Q20 Q23 Q24 Q35 Q43 Q46 Q51 Q52 Q54.
+
+- **The 32k template is HEALTHY** on runtime 2.25.2 — every task returned `EC=0` with real test
+  output, 12–318 s. `SCORES-coder30b-BROKEN-template-32k.tsv` is confirmed a **stale hazard** for
+  this model. The broken signature (every task ~1 s, EC=1) appeared nowhere.
+- ⚠️ **It is faster than the partial predicted.** The 14-task partial extrapolated to ~78 s/task
+  ⇒ 70–75 min; the real full run was **61 s/task ⇒ 57m46s**. The partial covered the Rust opening,
+  which is the corpus's slowest stretch — another reason partials must not be extrapolated.
+- **Q43 is the outlier: 318 s and still FAIL** (`expected 3, got '4'` on a trailing-newline line
+  count) against a 21–108 s norm for shell tasks. Long thrash, wrong answer.
+- ⚠️ **The old core-50 number (40/50) remains non-comparable** — it was measured at ctx 8096. This
+  row is the model's first score at battery constants. Do not cite the two together.
+
+### ★ This row breaks the 12-task screen much harder than gemma did
+
+Coder-30b passes **7/12** on `manifest-q50-everfailed.tsv` (fails Q05 Q13 Q46 Q51 Q52) — one
+better than the champion's 6/12. The screen's bound says full-56 ≤ `screen12 + 44` = **51**.
+
+**Its actual score is 43.** The bound overshoots by **8 points**, because coder-30b fails *eight*
+tasks the screen cannot see: Q09 Q14 Q20 Q23 Q24 Q35 Q43 Q54.
+
+Gemma violated the bound by 1 point (Q11); coder-30b violates it by 8. **The screen is only valid
+for models whose weaknesses are a subset of the champion's, which is precisely what cannot be
+known in advance.** Combined with its two historical misfires (UD-IQ4_XS and fp16 KV both cleared
+≥2/5 and then tied 50/56), the conclusion is firm:
+
+> **Use the screen only to reject cheaply. Never to promote, never to bound, never to confirm a
+> crown. Any model that will appear in the published table gets the full 56.**
+
+This is exactly the "screening leaves a HOLE in the table" argument from the sweep plan, now with
+a measured magnitude attached.
+
+⚠️ **Q03 passed again** — the champion's only 6/6 failure, now solved by gpt-oss-20b (40/56),
+coder-30b (43/56) and gemma (55/56), i.e. by every challenger regardless of overall standing.
+**Task identity carries no signal. Judge on aggregate.** (Fourth confirmation.)
+
+---
+
+## ★ SWEEP TABLE (2026-07-26) — five rows at verified battery constants
+
+| # | model | quant / size | score | wall | avg/task | note |
+|---|---|---|---|---|---|---|
+| ★ | **gemma-4-26b-a4b-qat** | Q4_0 14.4 GB | **55/56** (54/55/55) | 75m35s | 80s | ⬆ **QUALITY CHAMPION**, +5, median of 3 |
+| — | qwen3.6-35b-a3b-mtp (champion) | IQ3_S 3.06bpw 13.6 GB | **50/56** | ~23m | ~25s | median of 6; **daily driver on speed** |
+| 2 | qwen3-coder-30b-a3b-instruct | UD-Q4_K_XL 17.7 GB | **43/56** | 57m46s | 61s | top-local-coder row |
+| 1 | gpt-oss-20b | MXFP4 12.1 GB | **40/56** | 11m23s | 12s | 3 of 16 losses = unparseable output |
+| — | qwen3.6-35b-a3b @ UD-IQ4_XS | 19.5 GB | 50/56 | ~55m | — | same family, higher bpw; ties champ |
+
+All rows: ctx 32768 / parallel 1 / KV q8_0 / `offloadRatio` 1, RUNMETA `measured`, claudette
+0.17.0 (same binary mtime). **Every score is a full 56 — no screened rows, no holes.**
+
+**Still unrun** (all need David's config approval before their first full pass, and none has ever
+been loaded/configured): Devstral-Small-2-24B, North Mini Code 1.0 (⚠️`cohere2_moe` arch risk),
+nemotron-3-nano-omni (floor row), MTP-GPU-4 (17.6 GB on disk, screened-out at 7/12), and dense
+Qwen3.6-27B last (download partial preserved at 1.46/13.48 GB — `lms get` resumes, do not delete
+the `.part`).
+
+### What the table says so far
+
+The two extremes are **11 minutes and 40/56** versus **76 minutes and 55/56**. Nothing in between
+buys quality with size: coder-30b is the largest file here (17.7 GB) and lands third. The champion
+is the **lowest-bpw** model in the whole campaign and still beats both mid-rows. Quality is
+tracking the model family and its post-training, not bits, not gigabytes — the same conclusion the
+exhausted bpw ladder reached from the other direction.
