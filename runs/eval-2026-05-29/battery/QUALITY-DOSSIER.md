@@ -475,3 +475,86 @@ directions. Only timed runs count.
 This also removed a real confound. At the untweaked speed the candidate ran 4.8× the champion's
 A1, close enough to the 600 s ceiling that a slow task could have scored FAIL for being slow
 rather than wrong. The screen was restarted from scratch on the tweaked config for that reason.
+
+---
+
+## ★★★ gemma-4-26b-a4b-QAT — CROWNED QUALITY CHAMPION (3 runs, 2026-07-25/26)
+
+**`google/gemma-4-26b-a4b-qat`, Q4_0, median 55/56 across three full runs. The champion's
+50/56 is beaten by +5. This is the first model in the campaign to beat it at all.**
+
+All three runs at byte-identical held constants, every RUNMETA row `measured`, same claudette
+binary (mtime 2026-07-20 12:12:33): ctx 32768 / parallel 1 / KV q8_0+q8_0 / `offloadRatio` 1 /
+`cpu_expert_ratio` **0.1** / 15530–15622 MiB of 16311. David tuned and approved the split himself.
+
+| run | tag | score | wall | avg/task | fails |
+|---|---|---|---|---|---|
+| 1 | `q50-gemma4-qat` | **55/56** (98.2%) | 75m48s | 81s | Q46 |
+| 2 | `q50-gemma4-qat-r2` | **54/56** (96.4%) | 75m35s | 80s | **Q11**, Q46 |
+| 3 | `q50-gemma4-qat-r3` | **55/56** (98.2%) | 71m19s | 76s | Q46 |
+
+**Median 55, mean 54.67, range 54–55.** Aggregate spread is ±0.5 — exactly as tight as the
+champion's own 49/50/50/50/50/50. Two models, two competence plateaus, same instrument noise.
+
+### The crown rule, all three clauses
+
+| clause | requirement | result |
+|---|---|---|
+| (a) beat champion median | ≥ +4 over 50 (noise ±3) | **55 = +5** ✅ |
+| (b) fix a majority of the discriminating failures | > 6 of the ever-failed 12 | **11/12 in all three runs** (champ 6/12) ✅ |
+| (c) median of ≥2 runs | ≥2 | **3 runs** ✅ |
+
+**→ CROWNED.** `google/gemma-4-26b-a4b-qat` is the quality champion — a **load-on-demand second
+brain**. `qwen3.6-35b-a3b-mtp` keeps the daily-driver role on speed, per the campaign brief
+("15 tok/s is acceptable if quality is much higher").
+
+### What it actually fails
+
+- **Q46 — 3/3, its one stable failure.** `range 5..3` returns `[5]`, expected `[]`; a start>end
+  degenerate-input guard from the hardening batch. The champion also fails Q46, but only 2/6.
+- **Q11 — 1/3** (run 2 only). Rust concurrency, lost update: `left: 34143`. Passed in runs 1 and 3.
+
+So gemma's entire fail pool across 168 graded tasks is **two tasks**, one of them stable. 54 of
+56 never failed once. Compare the champion, where **12 distinct tasks rotate** through the
+failure slots across 6 runs. This is a materially different failure profile, not just a higher
+score: gemma is not merely winning the coin flips, it has fewer coins.
+
+### ⚠️ Methodological finding: the 12-task screen is champion-specific
+
+**Q11 is not in `manifest-q50-everfailed.tsv`** — that set was derived from tasks the *champion*
+ever failed. A challenger can therefore fail a task the screen cannot see, and its screen score
+will overstate its full-56 result. It did no harm here (gemma scored 11/12 on the screen in all
+three runs regardless, and the ≥9/12 gate was cleared on the first), but the derivation behind
+the gate — "challenger full-56 ≤ screen12 + 44" — **only holds if the challenger passes all 44
+off-screen tasks, which is exactly what Q11 violated.** In run 2 the bound predicted ≤55 and the
+true score was 54.
+
+**Consequence: the ≥9/12 screen is a reject-fast heuristic, not a sound bound.** Safe for killing
+weak candidates cheaply; never sufficient to confirm a crown. The crown was decided on three full
+56-task runs, which is the right call and should stay the standard. Say so in the writeup — a
+benchmark that publishes a screen gate should publish its failure mode too.
+
+### Two priors refuted (both were runtime-version artifacts, not model properties)
+
+- **"Gemma 4 crashes / swap-unstable"** (2026-05-16): did not reproduce. Four clean loads, three
+  75-minute runs, zero crashes.
+- **"Failed the A1 template gate 0/1"**: template is **healthy** on LMS runtime 2.25.2. Smoke was
+  5/5 — the best of any challenger, including Q35 which both gpt-oss-20b and coder-30b missed.
+
+**Lesson (already recorded, now confirmed a third time): runtime updates flip template health in
+both directions. Re-smoke, never assume — in either direction.**
+
+### The Q53 clock worry — resolved, retire it
+
+Run 1's Q53 took 662 s against a 700 s manifest ceiling (95%), raising the risk that a slower run
+would lose the point to the clock rather than to quality. It did not: **549 s (r2) and 557 s (r3)**.
+Run 1 was the outlier; the task sits comfortably ~79% of ceiling. No timeout-induced failure
+occurred in any run.
+
+### Cost
+
+**3.3× slower than the champion** — median 75m35s vs ~23m, ~80 s/task. Acceptable for a
+second brain that is loaded on demand, and the campaign brief priced this in from the start.
+⚠️ The **1.19 GB vision projector is loaded** (`lms ps` shows 15.63 GB = 14.44 weights + 1.19
+mmproj) and a coding battery never touches it. Reclaiming it is the obvious ~1.1 GB if a future
+session wants to buy speed with a lower `cpu_expert_ratio`.
