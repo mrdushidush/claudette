@@ -1,0 +1,5 @@
+Q01	rust	implement-spec	FAIL	30s	EC=0	recall=na	FAIL — hidden tests failed: already_a_slug_is_stable --- FAILED trim_and_strip_punct --- FAILED thread 'already_a_slug_is_stable' (336) panicked at tests\hidden_gate.rs:7:41: assertion `left == right` failed 
+Q13	python	implement-spec	FAIL	180s	EC=0	recall=na	FAIL — hidden tests failed: >       assert parse_csv_line('a,"",c') == ["a", "", "c"] E       assert ['a', '"', 'c'] == ['a', '', 'c'] hidden_gate_test.py:18: AssertionError FAILED hidden_gate_test.py::test_quoted_empty_field - assert ['a', '"', 'c'] ... 
+Q26	js	implement-spec	FAIL	28s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: array vs object 
+Q35	ts	implement-spec	PASS	70s	EC=0	recall=na	PASS — all hidden parseQueryString tests passed
+Q43	shell	bugfix	PASS	252s	EC=0	recall=na	PASS — line counts correct with and without trailing newline
