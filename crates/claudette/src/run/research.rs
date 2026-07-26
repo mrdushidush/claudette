@@ -1801,13 +1801,23 @@ fn run_synthesize_pass(
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    // A timestamp alone is not unique enough: Windows' system clock ticks at
+    // ~15.6ms, so tests that start within the same tick get the SAME nanos and
+    // therefore the same fixture directory. They then clobber each other's
+    // files and fail together on assertions about file counts. The counter is
+    // what actually guarantees uniqueness; the timestamp only keeps leftover
+    // directories from separate runs distinguishable.
+    static FIXTURE_SEQ: AtomicU64 = AtomicU64::new(0);
 
     fn fixture_dir() -> std::path::PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |d| d.as_nanos());
-        std::env::temp_dir().join(format!("claudette-research-test-{nanos}"))
+        let seq = FIXTURE_SEQ.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("claudette-research-test-{nanos}-{seq}"))
     }
 
     fn setup_fixture(dir: &std::path::Path) {
