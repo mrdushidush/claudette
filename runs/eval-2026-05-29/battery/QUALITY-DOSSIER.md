@@ -693,3 +693,86 @@ near-lossless, fully resident) as the clean dense data point.
 - ⚠️**Smoke was 2/5 and the full run was 40/56 (71%).** The smoke's opening cluster is precisely
   where this model is weakest, so it under-predicted badly. **A 5-task smoke is a template/speed
   check, never a quality estimate** — the same lesson the 12-task screen taught at 44 tasks.
+
+### ★★ 2026-07-26 — THE INFERENCE ENGINE MOVED MID-CAMPAIGN AND NOBODY RECORDED IT
+
+`lms runtime ls` shows the selected engine is **`llama.cpp-win-x86_64-nvidia-cuda12-avx2@2.27.1`**,
+installed **2026-07-26 01:21** — LM Studio pulled it on its own, *between* gemma runs r1 and r2.
+Reconstructed from runtime install mtimes against each run's log-dir timestamp:
+
+| row | finished | engine |
+|---|---|---|
+| champion ×6, gpt-oss-20b, gemma **r1 (55/56)** | ≤ 07-25 20:32 | 2.25.2 |
+| — runtime **2.27.1** installed 07-26 **01:21** — | | |
+| gemma **r2 (54/56)** | 07-26 02:54 | 2.27.1 |
+| gemma **r3 (55/56)** | 07-26 04:16 | 2.27.1 |
+| coder-30b (43/56) | 07-26 05:16 | 2.27.1 |
+| devstral (40/56) | 07-26 18:57 | 2.27.1 (verified) |
+
+**This is the third instance of the same failure mode** (KV precision → `numParallelSessions` →
+engine version): a constant that Q50.md declares held, that nothing records, and that moves on its
+own. The engine is not cosmetic — it flips chat templates in BOTH directions (gemma-4 failed the A1
+gate on 2.24.0 and passed on 2.25.2) and changes kernels.
+
+✅**Fixed:** `probe_runtime_config.sh` now records the selected engine as a 16th RUNMETA column;
+historical rows backfilled and marked `(inferred)` since they were reconstructed, not recorded.
+
+★**The crown survives it, and is stronger for it.** Gemma scored **55 on 2.25.2 and 54/55 on
+2.27.1** — the median spans both engines, so 55/56 is not an engine artifact.
+⚠️**The gap it leaves:** the champion's 50/56 baseline was measured entirely on ≤2.25.2 and never
+re-measured on 2.27.1, and that comparison is the headline. **A single ~23-min champion control run
+on 2.27.1 closes it** — worth doing before publishing.
+
+### ★ 2026-07-26 — CANDIDATE SEARCH (two independent agents; conflicts resolved by direct check)
+
+⚠️**Laguna is NO LONGER a dead end — the ruled-out note in this dossier is stale.** Verified via
+the GitHub API, not taken on an agent's word: llama.cpp **PR #25165 "Add support for Laguna XS.2 &
+M.1" merged 2026-07-22**, and **lmstudio-bug-tracker#1968 closed 2026-07-23**. (One agent asserted
+the opposite, reasoning that the arch string was unchanged — but an unchanged arch string is
+exactly what adding support for it looks like.) The model to run is **Laguna-XS 2.1** (33B-A3B MoE,
+2026-07-02), Q4_K_M 18.88 GiB ⇒ ~6 GB spill, acceptable under the MoE rule. ⚠️License is
+**OpenMDW-1.1**, not Apache/MIT — read it before publishing scores.
+
+★**The 2.27.1 upgrade silently unlocked the entire shortlist.** Grepped the engine binaries
+directly: `laguna` `cohere2moe` `mellum` `glm4moe` `nemotron_h` `mistral3` `qwen35moe` — **all
+present**. North Mini Code's `cohere2_moe` arch risk is therefore CLOSED, and nothing on the
+candidate list needs runtime surgery.
+
+Shortlist, in the order worth spending GPU on:
+1. **Ornith-1.0-35B** (MIT, 35B-A3B MoE, `qwen35moe` = the champion's own code path, so the
+   bpw-flat finding may transfer). `unsloth/…-GGUF` UD-IQ3_XXS **12.80 GiB** resident. Self-reported
+   SWE-V 75.6 and Terminal-Bench **64.2 vs 52.5** for the champion's base. ⚠️A second search found
+   an independent run scoring it ~20 points lower — probe, don't believe the card.
+2. **KAT-Coder-V2.5-Dev** (Apache 2.0, 35B-A3B) — a coding post-train of **qwen3.6-35b-a3b, the
+   champion's exact base** ⇒ the cleanest controlled A/B available: same weights, coding RL as the
+   only variable. bartowski Q3_K_S 14.45 GiB; an MTP-grafted GGUF matching our MTP-d2 setup exists.
+   ⚠️Its own reported Terminal-Bench (41.0) is BELOW its base (52.5) — expect it to lose.
+3. **Mellum2-12B-A2.5B-Thinking** (JetBrains, Apache 2.0, 12B-A2.5B MoE) — the only candidate
+   fully resident at **Q8_0 (12.04 GiB)**, i.e. near-zero quant damage ⇒ an attribution-clean row.
+   Its **Instruct** sibling gives thinking-vs-non-thinking on identical weights.
+4. **GLM-4.7-Flash** (MIT, 31B-A3B, `glm4moe`), UD-Q3_K_XL 12.84 GiB — the only candidate with a
+   *third-party* agentic measurement, which puts it level with our champion. Change of pace.
+
+★**ANSWER TO "IS IT WEAK BECAUSE REASONING IS OFF?" — NO, AND DON'T PICK FOR IT.** Devstral has no
+thinking mode to enable (checked the GGUF header: no `[THINK]` tokens, no thinking block; Mistral's
+reasoning line is Magistral). More useful, the Mellum2 pair is a real controlled experiment — same
+base, same size, same data: **LiveCodeBench 37.2 → 69.9 (+32.7)** but **tool use (BFCL v4) 44.2 →
+45.6 (+1.4)**. Reasoning buys enormously on algorithmic pass@1 and almost nothing on tool use, and
+a hidden-trap quality battery sits far nearer the tool-use end. That is why gpt-oss-20b (reasoning,
+40) lost to qwen3-coder-30b (non-thinking, 43).
+
+⚠️**REJECTED, do not spend a cycle:** Ternary-Bonsai-27B (dense 27B at 7.17 GB ternary would have
+solved the dense-Q3 problem, but there is **no CUDA kernel for its Q2_0 format** — PRs still open,
+three "won't run" reports); diffusiongemma-26B-A4B (needs a dedicated diffusion CLI, **cannot serve
+an OpenAI-compatible endpoint** ⇒ no tool loop); Granite-4.1-30b (dense 28.9B, ~14.3 GiB at IQ4_XS,
+over the dense ceiling); Qwen3.5-27B (best third-party agentic score in band but dense ~16 GiB —
+the one genuine loss); FrogBoss-32B (no GGUF exists).
+
+★**FOR THE WRITEUP — the public leaderboards do not rank this corpus.** A vendor table scores
+Gemma4-31B ~21 points BELOW Qwen3.6-35B on SWE-bench Verified, while on Q56 the gemma MoE beats the
+qwen champion 55 vs 50. LiveCodeBench v6 anti-correlates outright here (gemma LCB 77.1 → 55/56;
+qwen LCB 80.4 → 50/56) and is 0-verified/53-self-reported. BigCodeBench is frozen (last updated
+2025-04-14) and Aider polyglot is dead (2025-10-04). Scaffold choice alone swings the same weights
+~2× on Terminal-Bench (24.6% board vs 51.5% vendor-claimed). Use these boards to pick what to LOAD,
+never to predict a score — and that inversion is itself an argument for leading the launch with the
+benchmark.

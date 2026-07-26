@@ -148,13 +148,31 @@ if [ -n "$BIN_PATH" ] && [ -x "$BIN_PATH" ]; then
   [ -n "$BIN_MTIME" ] || BIN_MTIME='na'
 fi
 
+# ---- and the third uncontrolled variable: which INFERENCE ENGINE actually ran --
+# LM Studio ships llama.cpp as a versioned runtime extension and silently installs
+# newer ones; the selected engine is what a load actually executes. It flips chat
+# templates in BOTH directions (gemma-4 failed the A1 gate on 2.24.0 and passed on
+# 2.25.2) and changes kernels, so it is a held constant every bit as much as ctx or
+# KV precision. It went unrecorded until 2026-07-26, when `lms runtime ls` revealed
+# 2.27.1 had been installed at 01:21 *between* gemma runs r1 and r2 — nobody asked
+# for it. Recorded from here on; historical rows carry `na`.
+ENGINE='na'
+if command -v lms >/dev/null 2>&1; then
+  # The selected engine is the row flagged with a check mark; strip it and take
+  # the engine id. Tolerates the column shifting, hence the field-independent grep.
+  ENGINE="$(lms runtime ls 2>/dev/null | grep -F '✓' | head -1 \
+    | tr -d '\r' | awk '{print $1}' || true)"
+  [ -n "$ENGINE" ] || ENGINE='na'
+fi
+
 # `measured` distinguishes these rows from the hand-reconstructed pre-2026-07-25
 # ones in RUNMETA.tsv, which are labelled `inferred`. Same columns either way so
 # a probe row appends straight onto the table.
-# cpu_expert_ratio/offload_ratio are APPENDED after model_path so every existing
-# column index is unchanged and the awk one-liners in the dossier still work.
-# Rows written before 2026-07-25 carry `na` there.
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+# cpu_expert_ratio/offload_ratio/engine are APPENDED after model_path so every
+# existing column index is unchanged and the awk one-liners in the dossier still
+# work. Rows written before 2026-07-25 carry `na` in the first two; rows before
+# 2026-07-26 carry `na` in engine.
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
   "$(date +%Y-%m-%d)" "$TAG" "$IDENT" "$CTX" "$PAR" "$KV_K" "$KV_V" \
   "${BATTERY_BASE_URL:-http://localhost:1234}" "$VRAM" "$BIN_VER" "$BIN_MTIME" \
-  'measured' "$MPATH" "$CPU_EXP" "$OFFLOAD"
+  'measured' "$MPATH" "$CPU_EXP" "$OFFLOAD" "$ENGINE"
