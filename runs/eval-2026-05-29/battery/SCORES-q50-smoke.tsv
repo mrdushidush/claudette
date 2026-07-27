@@ -1,0 +1,5 @@
+Q01	rust	implement-spec	PASS	26s	EC=0	recall=na	PASS — all 6 hidden slug tests passed
+Q13	python	implement-spec	PASS	23s	EC=0	recall=na	PASS — all hidden CSV tests passed
+Q26	js	implement-spec	FAIL	60s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: array vs object 
+Q35	ts	implement-spec	PASS	49s	EC=0	recall=na	PASS — all hidden parseQueryString tests passed
+Q43	shell	bugfix	PASS	40s	EC=0	recall=na	PASS — line counts correct with and without trailing newline

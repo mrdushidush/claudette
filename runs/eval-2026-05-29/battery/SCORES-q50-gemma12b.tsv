@@ -1,0 +1,56 @@
+Q01	rust	implement-spec	FAIL	77s	EC=0	recall=na	FAIL — hidden tests failed: already_a_slug_is_stable --- FAILED thread 'already_a_slug_is_stable' (8980) panicked at tests\hidden_gate.rs:7:41: assertion `left == right` failed test result: FAILED. 5 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s 
+Q02	rust	boundary	PASS	26s	EC=0	recall=na	PASS — all 6 hidden lower_bound tests passed
+Q03	rust	bugfix	FAIL	33s	EC=0	recall=na	FAIL — hidden tests failed: zero_people_no_panic --- FAILED thread 'zero_people_no_panic' (18652) panicked at src\lib.rs:6:22: test result: FAILED. 5 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s error: test failed, to rerun pass `--test hidden_gate` 
+Q04	rust	refactor	PASS	47s	EC=0	recall=na	PASS — all 5 hidden parse_int_list tests passed
+Q05	rust	error-handling	PASS	57s	EC=0	recall=na	PASS — all 5 hidden parse_kv tests passed
+Q06	rust	implement-spec	PASS	29s	EC=0	recall=na	PASS — all hidden int_to_roman tests passed
+Q07	rust	api-misuse	PASS	40s	EC=0	recall=na	PASS — all 5 hidden word_frequencies tests passed
+Q08	rust	multi-file	PASS	101s	EC=0	recall=na	PASS — all hidden evaluator tests passed
+Q09	rust	boundary	PASS	38s	EC=0	recall=na	PASS — all hidden RLE tests passed
+Q10	rust	implement-spec	PASS	34s	EC=0	recall=na	PASS — all hidden ipv4 tests passed
+Q11	rust	concurrency	FAIL	27s	EC=0	recall=na	FAIL — hidden tests failed: 
+Q12	rust	perf	PASS	32s	EC=0	recall=na	PASS — correct and fast on large input
+Q13	python	implement-spec	PASS	31s	EC=0	recall=na	PASS — all hidden CSV tests passed
+Q14	python	bugfix	PASS	81s	EC=0	recall=na	PASS — all hidden deep_merge tests passed
+Q15	python	error-handling	FAIL	64s	EC=0	recall=na	FAIL — hidden tests failed: =================================== ERRORS ==================================== ____________________ ERROR collecting hidden_gate_test.py _____________________ C:\Users\david\AppData\Local\Programs\Python\Python314\Lib\site-packages\_pytest\assertion\rewrite.py:188: in exec_module E   SyntaxError: unexpected character after line continuation character 
+Q16	python	boundary	PASS	23s	EC=0	recall=na	PASS — all hidden paginate tests passed
+Q17	python	perf	FAIL	26s	EC=0	recall=na	FAIL — hidden tests failed: =================================== ERRORS ==================================== ____________________ ERROR collecting hidden_gate_test.py _____________________ C:\Users\david\AppData\Local\Programs\Python\Python314\Lib\site-packages\_pytest\assertion\rewrite.py:188: in exec_module E   SyntaxError: unexpected character after line continuation character 
+Q18	python	api-misuse	FAIL	24s	EC=0	recall=na	FAIL — hidden tests failed: =================================== ERRORS ==================================== ____________________ ERROR collecting hidden_gate_test.py _____________________ C:\Users\david\AppData\Local\Programs\Python\Python314\Lib\site-packages\_pytest\assertion\rewrite.py:188: in exec_module E   SyntaxError: unexpected character after line continuation character 
+Q19	python	implement-spec	FAIL	26s	EC=0	recall=na	FAIL — hidden tests failed: =================================== ERRORS ==================================== ____________________ ERROR collecting hidden_gate_test.py _____________________ C:\Users\david\AppData\Local\Programs\Python\Python314\Lib\site-packages\_pytest\assertion\rewrite.py:188: in exec_module E   SyntaxError: unexpected character after line continuation character 
+Q20	python	refactor	PASS	40s	EC=0	recall=na	PASS — keeps falsy-but-present values, drops only None
+Q21	python	multi-file	PASS	29s	EC=0	recall=na	PASS — tax applied on subtotal, no per-item drift
+Q22	python	concurrency	PASS	23s	EC=0	recall=na	PASS — concurrent increments not lost
+Q23	python	boundary	PASS	33s	EC=0	recall=na	PASS — all hidden parse_ranges tests passed
+Q24	python	implement-spec	PASS	46s	EC=0	recall=na	PASS — all hidden word_wrap tests passed
+Q25	python	api-misuse	PASS	50s	EC=0	recall=na	PASS — cent totals are exact
+Q26	js	implement-spec	PASS	41s	EC=0	recall=na	PASS — all hidden deepEqual tests passed
+Q27	js	bugfix	PASS	48s	EC=0	recall=na	PASS — all hidden flatten tests passed
+Q28	js	boundary	PASS	61s	EC=0	recall=na	PASS — all hidden chunk tests passed
+Q29	js	error-handling	PASS	59s	EC=0	recall=na	PASS — all hidden safeGet tests passed
+Q30	js	api-misuse	PASS	36s	EC=0	recall=na	PASS — all hidden sortNumbers tests passed
+Q31	js	implement-spec	PASS	23s	EC=0	recall=na	PASS — all hidden groupBy tests passed
+Q32	js	perf	PASS	29s	EC=0	recall=na	PASS — correct and fast on large input
+Q33	js	refactor	PASS	24s	EC=0	recall=na	PASS — all hidden average tests passed
+Q34	js	multi-file	PASS	85s	EC=0	recall=na	PASS — all hidden config-merge tests passed
+Q35	ts	implement-spec	FAIL	97s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: split on first = only 
+Q36	ts	bugfix	PASS	103s	EC=0	recall=na	PASS — all hidden deepClone tests passed
+Q37	ts	boundary	PASS	39s	EC=0	recall=na	PASS — all hidden range tests passed
+Q38	ts	error-handling	PASS	37s	EC=0	recall=na	PASS — all hidden safeJsonParse tests passed
+Q39	ts	api-misuse	PASS	31s	EC=0	recall=na	PASS — all hidden makeGrid tests passed
+Q40	ts	implement-spec	PASS	37s	EC=0	recall=na	PASS — all hidden EventEmitter tests passed
+Q41	ts	perf	PASS	29s	EC=0	recall=na	PASS — correct and fast on large input
+Q42	ts	refactor	PASS	32s	EC=0	recall=na	PASS — all hidden isPalindrome tests passed
+Q43	shell	bugfix	FAIL	102s	EC=0	recall=na	FAIL — input a\\nb\\nc: expected 3, got '2'
+Q44	shell	implement-spec	FAIL	24s	EC=0	recall=na	FAIL — input the\ cat\ the\ DOG\ the\ cat: expected [3 the
+Q45	shell	bugfix	PASS	19s	EC=0	recall=na	PASS — comments and blank lines stripped, inline # kept
+Q46	shell	boundary	FAIL	30s	EC=0	recall=na	FAIL — range 5..3: expected [] got [5]
+Q47	shell	error-handling	PASS	23s	EC=0	recall=na	PASS — divides correctly and handles zero divisor cleanly
+Q48	shell	api-misuse	FAIL	23s	EC=0	recall=na	FAIL — a b c -> ''
+Q49	shell	multi-file	PASS	24s	EC=0	recall=na	PASS — normalize strips both ends, keeps internal spacing
+Q50	shell	implement-spec	PASS	20s	EC=0	recall=na	PASS — extracts Nth comma field, handles missing/empty fields
+Q51	python	implement-spec	PASS	32s	EC=0	recall=na	PASS — all hidden parse_duration tests passed
+Q52	rust	implement-spec	FAIL	249s	EC=0	recall=na	FAIL — hidden tests failed: capacity_zero_never_panics --- FAILED thread 'capacity_zero_never_panics' (18988) panicked at src\lib.rs:17:9: test result: FAILED. 6 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s error: test failed, to rerun pass `--test hidden_gate` 
+Q53	js	implement-spec	FAIL	95s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: trailing newline 
+Q54	python	implement-spec	PASS	50s	EC=0	recall=na	PASS — all hidden topological_sort tests passed
+Q55	ts	implement-spec	PASS	30s	EC=0	recall=na	PASS — all hidden mergeIntervals tests passed
+Q56	rust	implement-spec	PASS	45s	EC=0	recall=na	PASS — all hidden compare_versions tests passed

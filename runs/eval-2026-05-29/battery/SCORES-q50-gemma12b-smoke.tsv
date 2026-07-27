@@ -1,0 +1,5 @@
+Q01	rust	implement-spec	PASS	34s	EC=0	recall=na	PASS — all 6 hidden slug tests passed
+Q13	python	implement-spec	PASS	33s	EC=0	recall=na	PASS — all hidden CSV tests passed
+Q26	js	implement-spec	PASS	42s	EC=0	recall=na	PASS — all hidden deepEqual tests passed
+Q35	ts	implement-spec	PASS	84s	EC=0	recall=na	PASS — all hidden parseQueryString tests passed
+Q43	shell	bugfix	FAIL	190s	EC=0	recall=na	FAIL — input a\\nb\\nc: expected 3, got '2'

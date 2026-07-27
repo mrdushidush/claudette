@@ -1,0 +1,5 @@
+Q01	rust	implement-spec	PASS	61s	EC=0	recall=na	PASS — all 6 hidden slug tests passed
+Q13	python	implement-spec	FAIL	50s	EC=0	recall=na	FAIL — hidden tests failed: >       assert parse_csv_line("x,y,z") == ["x", "y", "z"] E       AssertionError: assert [['x', 'y', 'z']] == ['x', 'y', 'z'] hidden_gate_test.py:6: AssertionError >       assert parse_csv_line('a,"b,c",d') == ["a", "b,c", "d"] 
+Q26	js	implement-spec	PASS	93s	EC=0	recall=na	PASS — all hidden deepEqual tests passed
+Q35	ts	implement-spec	PASS	47s	EC=0	recall=na	PASS — all hidden parseQueryString tests passed
+Q43	shell	bugfix	PASS	41s	EC=0	recall=na	PASS — line counts correct with and without trailing newline

@@ -1,0 +1,5 @@
+Q01	rust	implement-spec	FAIL	20s	EC=0	recall=na	FAIL — hidden tests failed: error[E0282]: type annotations needed 
+Q13	python	implement-spec	PASS	29s	EC=0	recall=na	PASS — all hidden CSV tests passed
+Q26	js	implement-spec	FAIL	17s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: NaN equals NaN 
+Q35	ts	implement-spec	FAIL	17s	EC=0	recall=na	FAIL — hidden tests failed: SyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]: Expression expected 
+Q43	shell	bugfix	FAIL	22s	EC=0	recall=na	FAIL — input a\\nb\\nc\\n: expected 3, got '4'
