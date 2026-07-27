@@ -1,0 +1,1 @@
+Running `python main.py` prints a total of $58.90 for the sample order, but the correct total for that order is $53.50. Something inside the app/ package is computing it wrong. Find the bug and fix it. Do not change main.py or the sample order itself, and do not change any behaviour that is already correct.

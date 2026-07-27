@@ -1,0 +1,1 @@
+`apply_overrides` in src/lib.rs merges an override `Settings` on top of a base `Settings`. It currently has a bug: a field that is absent from the override (`None`) wipes out the value from the base instead of leaving it alone. Fix it so that absent override fields keep the base value. Keep the function signature and the public API unchanged.
