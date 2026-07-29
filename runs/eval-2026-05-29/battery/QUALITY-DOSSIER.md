@@ -776,3 +776,75 @@ qwen LCB 80.4 → 50/56) and is 0-verified/53-self-reported. BigCodeBench is fro
 ~2× on Terminal-Bench (24.6% board vs 51.5% vendor-claimed). Use these boards to pick what to LOAD,
 never to predict a score — and that inversion is itself an argument for leading the launch with the
 benchmark.
+
+---
+
+## ★★★ 2026-07-28/29 — THE ERROR-BAR NIGHT: replication, and noise is MODEL-DEPENDENT
+
+**Why it was run.** The 2.27.1 control measured the champion's single-run range at **48–52
+(range 4)**. Tallied against the 13-row table, **seven rows sat inside a 3-point spread
+(43,43,42,42,41,40,40) and every one was a single run** — i.e. by our own instrument's
+admission the middle of the published ranking was unordered. Replication, not re-basing, was
+the gap. Plan: 2 extra runs for each of the 5 cluster rows → median-of-3, the standard the
+champion (n=8) and gemma-4-26b-a4b-qat (n=3) already met.
+
+**Delivered: 6 of 10 queued runs + 1 recovered (see the ops failure below).**
+
+| model | r1 | r2 | r3 | median | **range** |
+|---|---|---|---|---|---|
+| `openai/gpt-oss-20b` | 40 † | 38 | **32** | **38** | **8** |
+| `devstral-small-2-24b@iq4_xs` | 40 | 39 | 40 | **40** | 1 |
+| `google/gemma-4-e4b` (7.5B) | 43 | 42 | 42 | **42** | 1 |
+| `google/gemma-4-12b` | 42 | 43 | — | **42.5** (n=2) | 1 |
+| `google/gemma-4-12b-qat` | 41 | — | — | n=1 | **unreplicated** |
+
+† gpt-oss r1 ran on engine ≤2.25.2; r2/r3 on 2.27.1. **But r2 vs r3 alone — identical config,
+identical engine, consecutive — is 38 → 32.**
+
+### ★★ RESULT: the noise band is a property of the MODEL, not of the benchmark
+This was the open question and the answer is dramatic:
+- **`gpt-oss-20b` swings 6 points between consecutive identical runs** (range 8 across three).
+- **`gemma-4-e4b` is deterministic.** r2 and r3 are **byte-identical** — same 42/56, same fail
+  list, same error text, wall-clock 29m39s vs 29m32s.
+
+⇒ **A single global "±3 noise" figure was always wrong.** Error bars must be measured per model.
+★**Mechanism, visible in the logs:** gpt-oss's losses are dominated by the *agent-mechanics*
+failure class already documented here — bare top-level `return`, `SyntaxError: Unexpected end of
+input`, `ERR_INVALID_TYPESCRIPT_SYNTAX`. In r3 it lost Q17/Q23/Q28/Q37/Q38 to **syntax, not
+reasoning**. A model that fails by emitting an unparseable file is high-variance *by
+construction*: whether a file parses is close to a coin flip, whereas missing an edge case is
+stable. **That is why its band is 4× the champion's — the failure MODE predicts the variance.**
+
+### ★ WHAT CHANGED IN THE TABLE
+- ✅**"Size buys nothing" SURVIVES and is stronger.** e4b (42–43) and devstral-24B (39–40) have
+  **non-overlapping ranges** at n=3. What was a 3-point gap between two single runs is now a
+  clean separation.
+- ★**Restated more precisely: gemma-4-12b (42–43) TIES gemma-4-e4b (42–43).** The old single-run
+  table had e4b one point *above* the 12B, which read as a small-beats-big upset. With
+  replicates the honest claim is better: **scaling 7.5B → 12B within the same family buys
+  nothing measurable here**, and both gemmas separate cleanly from the 24B.
+- ⚠️**`gpt-oss-20b`'s published 40/56 was the TOP of its range, not its centre — its median is
+  38.** Single-run reporting flattered it by 2 and nothing in that run signalled it.
+- ⚠️**"QAT is free at 12B" is still unreplicated** — it rests on 42 vs 41, both n=1, and the
+  12B's own range is 42–43. **Do not publish that claim until gemma-12b-qat has ≥2 runs.**
+- Fail-list churn reproduces the standing result: gemma-12b r1/r2 share 9 fails with ~5 rotating
+  each way at a near-identical score.
+
+### ⛔ OPS FAILURE — an unattended queue hung for 4h33m and burned most of the night
+`lms.exe load google/gemma-4-12b -c 32768` started 01:38:43 and **never returned** (still hung at
+06:11; GPU idle 0%, nothing loaded). The driver guarded the load with `if ! lms load ...`, which
+catches a *failed* load but **cannot catch a hung one — there is no exit code to test**, so the
+queue blocked on run 7 of 10.
+★★**RULE: every `lms load` in an unattended script gets `timeout <n>`, and every long queue gets
+a liveness guard.** The no-monitors standing rule is about **thermals** (David's job, no temp
+polling, never abort for heat) — it does **not** cover watchdogging a hung subprocess, and
+conflating the two is what cost the night. ⚠️Note `watchdog timeout` is already a ranked
+never-inherited idea in `docs/essence-from-ancestors-2026-07.md`.
+★**`lms load` hung where the LM Studio UI loaded the same model instantly** — same class as the
+known "`lms load` never writes the config JSON" trap: the CLI and UI load paths differ. For
+gemma-4-12b, prefer the UI.
+⚠️**The two models never probed are exactly the two that failed to run.** The pre-flight probe
+pass was abandoned at gemma-12b; completing it would have surfaced this at 23:15 instead of 06:11.
+
+**▶ STILL OWED:** `gemma-12b` r3 and **`gemma-12b-qat` ×2** (the QAT claim). Everything else in
+the cluster is at n=3.
