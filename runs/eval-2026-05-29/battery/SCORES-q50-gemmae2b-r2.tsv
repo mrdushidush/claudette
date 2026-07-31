@@ -1,0 +1,56 @@
+Q01	rust	implement-spec	FAIL	23s	EC=0	recall=na	FAIL — hidden tests failed: all_punctuation_is_empty --- FAILED trim_and_strip_punct --- FAILED collapse_separator_runs --- FAILED digits_preserved --- FAILED 
+Q02	rust	boundary	PASS	23s	EC=0	recall=na	PASS — all 6 hidden lower_bound tests passed
+Q03	rust	bugfix	FAIL	21s	EC=0	recall=na	FAIL — hidden tests failed: zero_people_no_panic --- FAILED thread 'zero_people_no_panic' (2004) panicked at src\lib.rs:6:17: test result: FAILED. 5 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s error: test failed, to rerun pass `--test hidden_gate` 
+Q04	rust	refactor	PASS	18s	EC=0	recall=na	PASS — all 5 hidden parse_int_list tests passed
+Q05	rust	error-handling	PASS	13s	EC=0	recall=na	PASS — all 5 hidden parse_kv tests passed
+Q06	rust	implement-spec	FAIL	15s	EC=0	recall=na	FAIL — hidden tests failed: error[E0384]: cannot assign to immutable argument `n` 
+Q07	rust	api-misuse	PASS	26s	EC=0	recall=na	PASS — all 5 hidden word_frequencies tests passed
+Q08	rust	multi-file	FAIL	40s	EC=0	recall=na	FAIL — hidden tests failed: error[E0434]: can't capture dynamic environment in a fn item error[E0434]: can't capture dynamic environment in a fn item error[E0308]: mismatched types error[E0609]: no field `value` on type `Token` 
+Q09	rust	boundary	PASS	14s	EC=0	recall=na	PASS — all hidden RLE tests passed
+Q10	rust	implement-spec	PASS	16s	EC=0	recall=na	PASS — all hidden ipv4 tests passed
+Q11	rust	concurrency	PASS	14s	EC=0	recall=na	PASS — concurrent increments not lost
+Q12	rust	perf	FAIL	39s	EC=0	recall=na	FAIL — hidden tests failed: just_over_k --- FAILED large_input_must_be_fast --- FAILED thread 'just_over_k' (17000) panicked at tests\hidden_gate.rs:4:28: assertion failed: !has_duplicate_within_k(&[1, 2, 3, 1], 2) 
+Q13	python	implement-spec	FAIL	26s	EC=0	recall=na	FAIL — hidden tests failed: >       assert parse_csv_line('"she said ""hi"""') == ['she said "hi"'] E       assert ['she said "i"'] == ['she said "hi"'] hidden_gate_test.py:12: AssertionError FAILED hidden_gate_test.py::test_escaped_quote - assert ['she said "i"'] == [... 
+Q14	python	bugfix	FAIL	20s	EC=0	recall=na	FAIL — hidden tests failed: >       assert deep_merge(a, b) == {"cfg": {"x": 1, "y": 3, "z": 4}} E       AssertionError: assert {'cfg': {'y': 3, 'z': 4}} == {'cfg': {'x':...': 3, 'z': 4}} hidden_gate_test.py:14: AssertionError ___________________________ test_inputs_not_mutated ___________________________ 
+Q15	python	error-handling	PASS	23s	EC=0	recall=na	PASS — all hidden retry tests passed
+Q16	python	boundary	FAIL	26s	EC=0	recall=na	FAIL — hidden tests failed: >       assert paginate([1, 2, 3, 4], 2) == [[1, 2], [3, 4]] E       assert [[1, 2], [3, 4], []] == [[1, 2], [3, 4]] hidden_gate_test.py:6: AssertionError >       assert paginate([], 3) == [] 
+Q17	python	perf	FAIL	27s	EC=0	recall=na	FAIL — hidden tests failed:         assert got is False >       assert elapsed < 2.0, f"too slow: {elapsed:.2f}s (needs a linear approach)" E       AssertionError: too slow: 5.29s (needs a linear approach) E       assert 5.290627900001709 < 2.0 
+Q18	python	api-misuse	PASS	17s	EC=0	recall=na	PASS — buckets are independent per call
+Q19	python	implement-spec	FAIL	61s	EC=0	recall=na	FAIL — hidden tests failed: >       assert human_readable_size(1024) == "1.0 KB" E       AssertionError: assert '0.0 KB' == '1.0 KB' hidden_gate_test.py:10: AssertionError >       assert human_readable_size(1500) == "1.5 KB" 
+Q20	python	refactor	FAIL	13s	EC=0	recall=na	FAIL — hidden tests failed: >       assert keep_present([0, 1, 2]) == [0, 1, 2] E       assert [1, 2] == [0, 1, 2] hidden_gate_test.py:9: AssertionError >       assert keep_present(["", "a"]) == ["", "a"] 
+Q21	python	multi-file	PASS	23s	EC=0	recall=na	PASS — tax applied on subtotal, no per-item drift
+Q22	python	concurrency	FAIL	30s	EC=0	recall=na	FAIL — hidden tests failed: >       assert c.get() == 8 * 5000 E       assert 5188 == (8 * 5000) hidden_gate_test.py:15: AssertionError FAILED hidden_gate_test.py::test_concurrent_increments_not_lost - assert 5188... 
+Q23	python	boundary	FAIL	20s	EC=0	recall=na	FAIL — hidden tests failed: >       assert parse_ranges("1-3") == [1, 2, 3] E       assert [1, 2] == [1, 2, 3] hidden_gate_test.py:6: AssertionError >       assert parse_ranges("1-3,5,8-10") == [1, 2, 3, 5, 8, 9, 10] 
+Q24	python	implement-spec	PASS	21s	EC=0	recall=na	PASS — all hidden word_wrap tests passed
+Q25	python	api-misuse	FAIL	16s	EC=0	recall=na	FAIL — hidden tests failed: >       assert total_cents(["5"]) == 500 E           ValueError: not enough values to unpack (expected 2, got 1) solution.py:6: ValueError FAILED hidden_gate_test.py::test_integer_dollar_string - ValueError: not enou... 
+Q26	js	implement-spec	PASS	18s	EC=0	recall=na	PASS — all hidden deepEqual tests passed
+Q27	js	bugfix	PASS	57s	EC=0	recall=na	PASS — all hidden flatten tests passed
+Q28	js	boundary	FAIL	35s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: partial last 
+Q29	js	error-handling	PASS	27s	EC=0	recall=na	PASS — all hidden safeGet tests passed
+Q30	js	api-misuse	PASS	14s	EC=0	recall=na	PASS — all hidden sortNumbers tests passed
+Q31	js	implement-spec	PASS	14s	EC=0	recall=na	PASS — all hidden groupBy tests passed
+Q32	js	perf	FAIL	20s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: unique 
+Q33	js	refactor	PASS	17s	EC=0	recall=na	PASS — all hidden average tests passed
+Q34	js	multi-file	FAIL	25s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: user overrides scalar 
+Q35	ts	implement-spec	FAIL	23s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: basic 
+Q36	ts	bugfix	PASS	17s	EC=0	recall=na	PASS — all hidden deepClone tests passed
+Q37	ts	boundary	PASS	31s	EC=0	recall=na	PASS — all hidden range tests passed
+Q38	ts	error-handling	PASS	14s	EC=0	recall=na	PASS — all hidden safeJsonParse tests passed
+Q39	ts	api-misuse	PASS	20s	EC=0	recall=na	PASS — all hidden makeGrid tests passed
+Q40	ts	implement-spec	FAIL	31s	EC=0	recall=na	FAIL — hidden tests failed: SyntaxError: The requested module './solution.ts' does not provide an export named 'EventEmitter' 
+Q41	ts	perf	PASS	29s	EC=0	recall=na	PASS — correct and fast on large input
+Q42	ts	refactor	PASS	15s	EC=0	recall=na	PASS — all hidden isPalindrome tests passed
+Q43	shell	bugfix	FAIL	23s	EC=0	recall=na	FAIL — input a\\nb\\nc: expected 3, got '2'
+Q44	shell	implement-spec	FAIL	27s	EC=0	recall=na	FAIL — input the\ cat\ the\ DOG\ the\ cat: expected [3 the
+Q45	shell	bugfix	PASS	24s	EC=0	recall=na	PASS — comments and blank lines stripped, inline # kept
+Q46	shell	boundary	PASS	35s	EC=0	recall=na	PASS — inclusive line range correct including edges
+Q47	shell	error-handling	PASS	15s	EC=0	recall=na	PASS — divides correctly and handles zero divisor cleanly
+Q48	shell	api-misuse	FAIL	9s	EC=0	recall=na	FAIL — 'a b' c -> 'a,b,c'
+Q49	shell	multi-file	PASS	31s	EC=0	recall=na	PASS — normalize strips both ends, keeps internal spacing
+Q50	shell	implement-spec	PASS	14s	EC=0	recall=na	PASS — extracts Nth comma field, handles missing/empty fields
+Q51	python	implement-spec	FAIL	21s	EC=0	recall=na	FAIL — hidden tests failed: >       with pytest.raises(ValueError): E       Failed: DID NOT RAISE ValueError hidden_gate_test.py:32: Failed FAILED hidden_gate_test.py::test_stray_characters_raise - Failed: DID NOT RAI... 
+Q52	rust	implement-spec	PASS	32s	EC=0	recall=na	PASS — all hidden RingBuffer tests passed
+Q53	js	implement-spec	FAIL	73s	EC=0	recall=na	FAIL — hidden tests failed: SyntaxError: The requested module './solution.mjs' does not provide an export named 'parseCsv' 
+Q54	python	implement-spec	PASS	32s	EC=0	recall=na	PASS — all hidden topological_sort tests passed
+Q55	ts	implement-spec	PASS	15s	EC=0	recall=na	PASS — all hidden mergeIntervals tests passed
+Q56	rust	implement-spec	FAIL	14s	EC=0	recall=na	FAIL — hidden tests failed: error[E0608]: cannot index into a value of type `()` error[E0608]: cannot index into a value of type `()` 
