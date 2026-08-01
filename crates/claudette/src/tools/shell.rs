@@ -1201,13 +1201,15 @@ mod tests {
         assert!(job_id.starts_with("bg_"));
         assert!(v["pid"].as_u64().is_some());
 
-        // Wait for the reaper thread to land .done. Poll up to ~5s.
+        // Wait for the reaper thread to land .done. The budget is deliberately
+        // generous: a cold Windows CI runner can spend several seconds just
+        // starting PowerShell, and a 5s cap flaked there (observed at 5070ms,
+        // still "running"). The loop exits the moment the job is reaped, so a
+        // healthy run still costs milliseconds — only the failure path waits.
         let (_, _, _, done_path) = job_paths(&job_id);
-        for _ in 0..50 {
-            if done_path.exists() {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(100));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !done_path.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
 
         let status_out =
