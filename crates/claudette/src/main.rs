@@ -255,8 +255,8 @@ EXAMPLES:
 DOCS:
     README.md              Full feature / configuration reference
     examples/              Scenario walkthroughs
-    CONTRIBUTING.md        How to contribute
-    SECURITY.md            Vulnerability reporting
+    .github/CONTRIBUTING.md  How to contribute
+    .github/SECURITY.md      Vulnerability reporting
 ";
 
 #[allow(clippy::too_many_lines)]

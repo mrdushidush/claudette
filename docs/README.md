@@ -37,8 +37,8 @@
 ## Project-level
 
 - [../PRIVACY.md](../PRIVACY.md) — every place a byte could leave, and the condition for each
-- [../CONTRIBUTING.md](../CONTRIBUTING.md) — how to contribute; benching a model needs no Rust
-- [../SECURITY.md](../SECURITY.md) — private advisory flow for security issues
+- [../.github/CONTRIBUTING.md](../.github/CONTRIBUTING.md) — how to contribute; benching a model needs no Rust
+- [../.github/SECURITY.md](../.github/SECURITY.md) — private advisory flow for security issues
 - [../CHANGELOG.md](../CHANGELOG.md) — what shipped in each release
 
 ## Historical

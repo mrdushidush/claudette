@@ -204,7 +204,7 @@ Newcomer-friendly tasks carry the [`good first issue`](https://github.com/mrdush
 
 ## Contributing
 
-Bugs and PRs welcome - see [CONTRIBUTING.md](CONTRIBUTING.md). Conventional Commits (`feat:`, `fix:`, `docs:`, …). Security issues go through the private advisory flow in [SECURITY.md](SECURITY.md), not a public issue. Contributions are dual-licensed MIT OR Apache-2.0.
+Bugs and PRs welcome - see [CONTRIBUTING.md](.github/CONTRIBUTING.md). Conventional Commits (`feat:`, `fix:`, `docs:`, …). Security issues go through the private advisory flow in [SECURITY.md](.github/SECURITY.md), not a public issue. Contributions are dual-licensed MIT OR Apache-2.0.
 
 ## License
 

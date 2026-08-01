@@ -1,6 +1,6 @@
 # Deploy Claudette on a server
 
-The fastest way to put Claudette on a small VPS, a Raspberry Pi, or a home server: use the bundled `docker-compose.yml`. It brings up Ollama + Claudette together, runs Claudette in Telegram-bot mode, and keeps everything on local disk volumes.
+The fastest way to put Claudette on a small VPS, a Raspberry Pi, or a home server: use the bundled `docker/docker-compose.yml`. Run every `docker compose` command below from the `docker/` directory — the build context is set to the repo root, so the image still builds from the full source tree. It brings up Ollama + Claudette together, runs Claudette in Telegram-bot mode, and keeps everything on local disk volumes.
 
 This is the "Telegram bot on a tower at home" use case — talk to Claudette from your phone, all data stays in your house.
 
@@ -20,9 +20,9 @@ This is the "Telegram bot on a tower at home" use case — talk to Claudette fro
 ## Five-minute deploy
 
 ```bash
-# 1. Clone (or copy Dockerfile + docker-compose.yml to your server)
+# 1. Clone (or copy the docker/ directory to your server)
 git clone https://github.com/mrdushidush/claudette
-cd claudette
+cd claudette/docker
 
 # 2. Configure
 cat > .env <<EOF
@@ -64,7 +64,7 @@ environment:
   CLAUDETTE_MODEL: qwen2.5:1.5b
 ```
 
-Then `docker compose up -d` to apply.
+Then `docker compose up -d` (from `docker/`) to apply.
 
 ---
 
@@ -108,7 +108,7 @@ docker run --rm -v claudette-data:/data -v "$PWD":/backup alpine \
 
 ```bash
 git pull
-docker compose up -d --build
+cd docker && docker compose up -d --build
 ```
 
 Compose rebuilds the Claudette image and restarts the service. The data volumes survive the restart.
@@ -126,7 +126,8 @@ ollama pull qwen2.5:1.5b
 ollama serve &  # or use the systemd unit Ollama installs
 
 # 2. Claudette as a container, hitting host Ollama
-docker build -t claudette .
+#    (run from the repo root — the build context is the root, not docker/)
+docker build -f docker/Dockerfile -t claudette .
 docker run -d --name claudette --restart unless-stopped \
     -e TELEGRAM_BOT_TOKEN="123:abc" \
     -e OLLAMA_HOST="http://host.docker.internal:11434" \

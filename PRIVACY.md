@@ -126,4 +126,4 @@ Track or contribute these at <https://github.com/mrdushidush/claudette/issues>.
 
 ## Reporting a privacy bug
 
-If you observe Claudette making a network call this document doesn't account for, that's a real bug — please report it privately through the [`SECURITY.md`](SECURITY.md) flow rather than opening a public issue.
+If you observe Claudette making a network call this document doesn't account for, that's a real bug — please report it privately through the [`SECURITY.md`](.github/SECURITY.md) flow rather than opening a public issue.

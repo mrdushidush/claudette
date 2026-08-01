@@ -3,10 +3,11 @@
 # use case: claudette runs forever, ollama keeps a small CPU brain hot.
 #
 # Quick start:
-#   1. Copy .env.example to .env and set TELEGRAM_BOT_TOKEN.
-#   2. docker compose up -d
-#   3. docker compose exec ollama ollama pull qwen2.5:1.5b   # small CPU brain
-#   4. Send your bot a message on Telegram.
+#   1. cd docker
+#   2. Copy .env.example to .env and set TELEGRAM_BOT_TOKEN.
+#   3. docker compose up -d
+#   4. docker compose exec ollama ollama pull qwen2.5:1.5b   # small CPU brain
+#   5. Send your bot a message on Telegram.
 #
 # Storage:
 #   - ollama-models : downloaded model weights (~2 GB per brain)
@@ -35,7 +36,12 @@ services:
       start_period: 30s
 
   claudette:
-    build: .
+    # Context is the repo root, not this directory, so the Dockerfile's
+    # COPY paths (Cargo.toml, crates/) resolve — and so the root
+    # .dockerignore applies. See the note at the top of that file.
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     image: claudette:latest
     restart: unless-stopped
     depends_on:

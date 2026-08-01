@@ -1,3 +1,10 @@
+# NOTE: this file stays at the repo root even though the Dockerfile lives in
+# docker/. Docker resolves .dockerignore against the BUILD CONTEXT, which is
+# the repo root for both entry points (`docker compose` from docker/ sets
+# `context: ..`, and the documented single-container build passes `.`). Moving
+# it into docker/ would make the classic builder silently ignore it and ship a
+# multi-GB context.
+#
 # Build artifacts — never copied into the image. Keeps `docker build`
 # context small (the Rust target dir is several GB on a warm checkout).
 target/
@@ -26,12 +33,12 @@ Thumbs.db
 # Anything not needed at build time
 docs/
 launch-drafts/
+runs/
 target/package/
+.github/
+docker/
 CHANGELOG.md
 README.md
 PRIVACY.md
-SECURITY.md
-CODE_OF_CONDUCT.md
-CONTRIBUTING.md
 install.sh
 install.ps1
