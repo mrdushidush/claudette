@@ -2,10 +2,32 @@
 
 **An air-gapped AI coding agent in one Rust binary — run it `--offline` and your code physically cannot leave the machine.** It drives a model *you* run locally through [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai/); there is no cloud-brain code in the binary at all.
 
+It also ships **[Q56](#-start-here-q56-a-hidden-test-benchmark-for-local-coding-models)** — a hidden-test benchmark that measures which local model is actually worth running, with no LLM judge anywhere in the loop.
+
 [![Crates.io](https://img.shields.io/crates/v/claudette.svg)](https://crates.io/crates/claudette)
 [![CI](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml/badge.svg)](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Air-gap: enforced](https://img.shields.io/badge/air--gap-enforced-success.svg)](#-air-gapped-and-enforced)
+
+---
+
+## 📊 Start here: Q56, a hidden-test benchmark for local coding models
+
+Before the agent — **the measurement.** Claudette ships with a 56-task coding benchmark whose grading a model cannot talk its way through: the fixture it sees carries only happy-path tests, and at grade time a verifier injects **hidden reviewer tests** and builds them against whatever the model actually left on disk. Pass/fail is `cargo test`, `pytest` and `node`. **There is no LLM judge** — LLM judges inflate.
+
+**16 model configurations · 36 full runs · one RTX 5060 Ti 16 GB · every held-constant recorded, not assumed.**
+
+Three results that are worth your time even if you never install this:
+
+- **A 7.5B model beat a 24B.** `gemma-4-e4b` (7.5B, 4.97 GiB) scored **42/56**, above `devstral-small-2-24b` (40) and `gpt-oss-20b` (38). Three runs each, non-overlapping ranges. Size buys nothing between 7.5B and 12B — and that plateau has hard cliffs on both sides.
+- **The error bar belongs to the model, not the benchmark.** Across three identical consecutive runs, `gpt-oss-20b` swung **8 points** (40, 38, 32) while `gemma-4-e2b` was bit-for-bit identical (31, 31, 31). Weakness does not cause variance — the *failure mode* does. A single-run benchmark number is not a result.
+- **Public leaderboards anti-correlate here.** LiveCodeBench v6 rates gemma 77.1 and qwen 80.4; on this corpus they score 55/56 and 50/56. Use leaderboards to decide what to download, never to predict what happens inside your own harness.
+
+**[→ Full 16-row table, method, and the replication package](https://github.com/mrdushidush/claudette/tree/battery/q50-quality-corpus/runs/eval-2026-05-29/battery#readme)** · **[all 36 runs as CSV, with every run's failure list](https://github.com/mrdushidush/claudette/blob/battery/q50-quality-corpus/runs/eval-2026-05-29/battery/RESULTS-q56.csv)**
+
+The corpus, the hidden verifiers and the reference solutions are **all public** — so the numbers are checkable, and so Q56 carries a stated **contamination date of 2026-07-25**. Every model benchmarked was released before it. Benching a model we haven't covered needs no Rust and is the single most useful way to contribute.
+
+---
 
 <!-- TODO(onboarding 1.3): swap for docs/images/forge-demo.gif once recorded — scripts/record-demo.md has the shot list. -->
 ![Claudette editing her own repo, clearing the cargo gate, and opening a real pull request - all on a local model, offline](docs/images/claudette-ships-pr.png)
@@ -93,29 +115,43 @@ Claudette is developed *with* Claudette. She runs her own Forge pipeline against
 
 ## 🏅 Which model should I run?
 
-Every candidate runs the same objective 50-task battery - 11 languages × 12 task types - through Claudette's real tool loop, then an automated verifier checks the result (build/test passes, file is correct, ground-truth tokens appear). No model grades itself. `claudette --doctor` reads your VRAM and names the model that fits your GPU, with the load command.
+Answered by [the Q56 benchmark above](#-start-here-q56-a-hidden-test-benchmark-for-local-coding-models), not by a leaderboard. `claudette --doctor` reads your VRAM and names the model that fits your GPU, with the load command.
 
-*Measured 2026-07-11 · claudette v0.16.0 · LM Studio 0.4.19 (runtime cuda12-avx2 2.24.0) · RTX 5060 Ti 16 GB. "K" is a separate 8-task new-language section, scored apart from the frozen core 50.*
+*Measured on Q56 · RTX 5060 Ti 16 GB · Windows 11 · LM Studio. Held constant on every row: ctx 32768, KV cache q8_0, one parallel session, identical agent binary. Sizes are the measured GGUF in GiB.*
 
-| Your GPU | Pick | Battery | Speed | Why |
-|----------|------|---------|-------|-----|
-| **16 GB (best)** | `byteshape/qwen3.6-35b-a3b-mtp` (3.06 bpw, 13.6 GB) | **50/50 + K 8/8** @24k ctx · 49/50 + K 8/8 @64k | ~70–76 tok/s | Fully VRAM-resident, zero RAM spill - 2× the speed of every spilled 35B quant at equal-or-better quality. Community quant (ShapeLearn) with a bundled MTP draft head; LM Studio only. Load command below |
-| 16 GB, official-lineage alt | `qwen3.6-35b-a3b@iq4_xs` (unsloth UD-IQ4_XS, 17.7 GB) | **50/50 + K 8/8** | 27.8 tok/s | Same perfect score from the unsloth line; spills to RAM, so much slower. LM Studio only |
-| 16 GB, previous default | `qwen3.6-35b-a3b@q3_k_xl` (16.8 GB) | 47/50 + K 8/8 | 33.8 tok/s | Known-good rollback if the byteshape quant misbehaves. LM Studio only |
-| **8 GB or plain CPU** | **`qwen3.5:4b`** | 45/50 (90%) + K 8/8 | full battery in 12.8 min | **The default** - what `install` pulls (~3.4 GB); best value, runs anywhere |
-| Fastest / lowest overhead | `gpt-oss-20b` (13 GB) | 41/50 (82%) + K 7/8 | full battery in 6.1 min | Quickest full run; weak spot is multi-site refactor/rename |
-| 24 GB+ | untested on our rig | — | — | Honest gap: likely paths are unsloth UD-Q4_K_XL+ tiers for quality or higher-bpw byteshape MTP tiers for speed. Benching one is the most useful way to contribute |
+| model | params | quant | GiB | median | range | n | wall-clock |
+|---|---|---|---|---|---|---|---|
+| **google/gemma-4-26b-a4b-qat** | 26B-A4B | Q4_0 | 13.45 | **55** | 1 | 3 | 71–76 min |
+| unsloth/gemma-4-26B-A4B-it | 26B-A4B | UD-Q4_K_M | 15.78 | 54 | — | 1 | 71 min |
+| **qwen3.6-35b-a3b-mtp@iq3_s** | 35B-A3B | IQ3_S 3.06bpw | 12.67 | **50** | 4 | 6 | 21–31 min |
+| qwen3.6-35b-a3b@iq4_xs | 35B-A3B | UD-IQ4_XS 4.25bpw | 16.51 | 50 | — | 1 | 53 min |
+| qwen3.6-35b-a3b-mtp (GPU-3) | 35B-A3B | IQ4_XS 3.53bpw | 14.59 | 49 | — | 1 | 43 min |
+| qwen3.6-35b-a3b-mtp (GPU-4) | 35B-A3B | IQ4_XS 3.97bpw | 16.43 | 49 | — | 1 | 51 min |
+| qwen3-coder-30b-a3b-instruct | 30B-A3B | UD-Q4_K_XL | 16.45 | 43 | — | 1 | 58 min |
+| google/gemma-4-12b | 12B | Q8_0 | 11.80 | 42.5 | 1 | 2 | 44–53 min |
+| **google/gemma-4-e4b** | **7.5B** | Q4_K_M | **4.97** | **42** | 1 | 3 | 30–35 min |
+| north-mini-code-1.0 | 30B-A3B | UD-Q3_K_M | 13.24 | 42 | — | 1 | 82 min |
+| google/gemma-4-12b-qat | 12B | Q4_0 | 6.50 | 41 | — | 1 | 57 min |
+| devstral-small-2-24b-2512 | 24B | IQ4_XS | 11.90 | 40 | 1 | 3 | 19–22 min |
+| openai/gpt-oss-20b | 20B-A3.6B | MXFP4 | 11.28 | 38 | **8** | 3 | 10–12 min |
+| qwen3.5-4b | 4B | UD-Q8_K_XL | 5.54 | 33 | 2 | 3 | 33–42 min |
+| google/gemma-4-e2b | 4.6B | Q4_K_M | 3.19 | 31 | 0 | 3 | 23 min |
+| unsloth/granite-4.1-8b | 8B | Q8_0 | 8.70 | 25 | — | 1 | 22 min |
 
-16 GB champion load command (LM Studio; the MTP flags are what buy the speed):
+**Reading it for your card:** at **16 GB**, `gemma-4-26b-a4b-qat` is the quality pick (55/56) and `qwen3.6-35b-a3b-mtp` is the daily driver — 5 points lower but **~3× faster** and fully VRAM-resident, which is why it is the one wired up below. Under **8 GB**, `gemma-4-e4b` is the standout at 4.97 GiB. `range` is the spread over identical repeated runs; **rows with n=1 carry an error bar this benchmark can size and did not measure** — treat them as provisional, and never compare two models whose gap is smaller than either one's range.
+
+16 GB daily-driver load command (LM Studio; the MTP flags are what buy the speed):
 
 ```sh
-lms load "byteshape/qwen3.6-35b-a3b-mtp" -c 65536 --parallel 1 \
+lms load "qwen3.6-35b-a3b-mtp@iq3_s" -c 65536 --parallel 1 \
     --speculative-draft-mtp --speculative-draft-max-tokens 2 -y
 ```
 
-**What "50/50" is — and isn't.** It's a *tool-loop reliability* score: did the model drive Claudette's real tools to a verifier-confirmed result (build/test passes, ground-truth tokens present) across 50 short, mostly single-file tasks. It is **not** a SWE-bench-style task-resolution number and is **not comparable** to one - SWE-bench resolves multi-file issues in large real repos, a much harder bar. Read it as "how reliably does this model fly the tools," not "how good a coder is it." The perfect scores above are measured on *our* battery, reproducible via `run_model_eval.sh` - not a general coding-ability claim.
+**What a Q56 score is — and isn't.** It grades *first-shot code quality on unstated correctness traps*: the degenerate input, the falsy-vs-absent distinction, the boundary the prompt implies but never enumerates. It is **not** a SWE-bench-style task-resolution number and is **not comparable** to one. It is also **short-horizon** — iteration depth is p50 = 4, and the harness runs with auto-approve, so it cannot see context compaction, prefix-cache behaviour, model escalation or permission handling. The top of the range is saturating at 55/56.
 
-Full tables, methodology, per-config checkpoints, and the reusable harness → [MODEL-COMPARISON.md](runs/eval-2026-05-29/battery/MODEL-COMPARISON.md) + [CHAMPION-DOSSIER.md](runs/eval-2026-05-29/battery/CHAMPION-DOSSIER.md). How to choose for your hardware (VRAM residency, KV-cache settings, MTP, runtime pitfalls) → [docs/hardware.md](docs/hardware.md). Benching a model we haven't covered is the single most useful way to contribute - no Rust required.
+⚠️ **The installer default is `qwen3.5:4b`, which scores 33/56** — `gemma-4-e4b` scores 42 at a comparable footprint. The default is what `install` pulls today because it is a one-command Ollama pull that runs anywhere; if you have LM Studio and 5 GiB spare, run gemma-4-e4b instead.
+
+Full method, replication package and every run's failure list → **[the Q56 battery README](https://github.com/mrdushidush/claudette/tree/battery/q50-quality-corpus/runs/eval-2026-05-29/battery#readme)**. Older tool-loop-reliability tables (the superseded, now-saturated 50-task battery) → [MODEL-COMPARISON.md](runs/eval-2026-05-29/battery/MODEL-COMPARISON.md) + [CHAMPION-DOSSIER.md](runs/eval-2026-05-29/battery/CHAMPION-DOSSIER.md). How to choose for your hardware (VRAM residency, KV-cache settings, MTP, runtime pitfalls) → [docs/hardware.md](docs/hardware.md).
 
 Runs on 8 GB VRAM or plain CPU; 16 GB for the 35B brain. Footprint details → [docs/hardware.md](docs/hardware.md).
 
@@ -157,7 +193,7 @@ cargo build --release -p claudette
 
 Where Claudette is headed, and where help is most welcome:
 
-- **Broaden "Claudette Certified" coverage.** Battery-test more local models so `--doctor` can recommend the best fit for any GPU. Benching a model we haven't covered is the single most useful contribution — [no Rust required](https://github.com/mrdushidush/claudette/labels/good%20first%20issue).
+- **Broaden Q56 coverage.** Benchmark more local models so `--doctor` can recommend the best fit for any GPU. Benching a model we haven't covered is the single most useful contribution — [no Rust required](https://github.com/mrdushidush/claudette/labels/good%20first%20issue). The three highest-value runs right now: a **cross-session replicate** (three runs in one sitting, a fourth the next day), a **second high-variance model**, and **KV q8 vs f16 on a card where the model is not VRAM-resident** — details in [the battery README](https://github.com/mrdushidush/claudette/tree/battery/q50-quality-corpus/runs/eval-2026-05-29/battery#contributing-a-row).
 - **A leaner core.** Fold the overlapping edit tools into one canonical `edit_file` and keep trimming the dependency tree, for a smaller, faster single binary.
 - **Small-model reliability.** Keep hardening the agent loop against tool-call spirals so the 4B / 8 GB default stays dependable.
 - **More reach.** Editor integrations and deployment recipes (Pi / VPS / home-server) beyond today's VS Code extension and docker-compose.
