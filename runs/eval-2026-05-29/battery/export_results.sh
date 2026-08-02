@@ -57,12 +57,25 @@ echo "model,params,quant,gib,run_tag,date,score,tasks,wall_clock_s,engine,vram_m
 echo "$ROWS" | while IFS='|' read -r tag model params quant gib intable; do
     [ -n "$tag" ] || continue
     f="SCORES-q50-$tag.tsv"
-    if [ ! -f "$f" ]; then echo "MISSING $f" >&2; continue; fi
+    # Refuse, don't warn-and-continue. Skipping produced a silently SHORT
+    # CSV (31 rows instead of 36) while still exiting 0 — the published
+    # file then could not be reproduced from a clean checkout (roast
+    # BENCH-04). A missing scores file is a broken replication package.
+    if [ ! -f "$f" ]; then
+        echo "export_results.sh: FATAL — $f is missing; the replication" >&2
+        echo "  package is incomplete. Every row in ROWS needs its" >&2
+        echo "  SCORES-q50-<tag>.tsv committed. Refusing to emit a" >&2
+        echo "  partial CSV." >&2
+        exit 1
+    fi
 
     tasks=$(wc -l < "$f" | tr -d ' ')
     score=$(grep -cP '\tPASS\t' "$f" || true)
     secs=$(awk -F'\t' '{s=$5; gsub(/s$/,"",s); t+=s} END{print t+0}' "$f")
-    fails=$(awk -F'\t' '$4=="FAIL"{printf "%s ", $1}' "$f" | sed 's/ $//')
+    # `~ /^FAIL/`, not `== "FAIL"` — the status column also carries
+    # FAIL(TIMEOUT), and an exact match silently dropped those, leaving
+    # three rows summing to 55 instead of 56 (roast BENCH-04).
+    fails=$(awk -F'\t' '$4 ~ /^FAIL/{printf "%s ", $1}' "$f" | sed 's/ $//')
 
     # RUNMETA columns: 1 date, 2 tag, 3 model_key, 4 ctx, 5 parallel, 6 kCache,
     # 7 vCache, 8 host, 9 vram_mib, ..., 16 engine
