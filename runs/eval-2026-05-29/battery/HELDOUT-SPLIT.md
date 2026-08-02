@@ -57,7 +57,7 @@ cost and is stated as such in the writeup rather than dressed up.
 Recomputed 2026-08-01 across **all 34 ranking runs** (16 configurations; the two KV-fp16 champion
 runs are excluded as a different config).
 
-- **454 task-failures** in total.
+- **457 task-failures** in total.
 - **51 of 56 tasks defeat at least one run.**
 - **Only 5 tasks are never failed by anyone:** Q21, Q31, Q33, Q39, Q55.
 
@@ -65,8 +65,8 @@ The hardest tasks by failure count across those 34 runs:
 
 | task | fails | | task | fails |
 |---|---|---|---|---|
-| Q03 | 26 | | Q53 | 18 |
-| Q52 | 23 | | Q13 | 17 |
+| Q03 | 26 | | Q53 | 19 |
+| Q52 | 23 | | Q13 | 18 |
 | Q51 | 22 | | Q01 | 17 |
 | Q46 | 20 | | Q35 | 16 |
 | Q25 | 20 | | Q44 | 14 |
