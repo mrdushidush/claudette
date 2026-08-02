@@ -120,6 +120,21 @@ pub enum AssistantEvent {
         input: String,
     },
     Usage(TokenUsage),
+    /// End-of-stream diagnostics that the OpenAI-compat wire carries but the
+    /// assembled message body does not: *why* generation stopped, and how much
+    /// the model spent in the `reasoning_content` channel.
+    ///
+    /// Without this, a turn whose entire output budget went to reasoning is
+    /// indistinguishable from a turn where the backend genuinely said nothing —
+    /// both arrive as zero `TextDelta`/`ToolUse` events. That ambiguity is what
+    /// made the "empty-stream flake" undiagnosable: the wire said
+    /// `finish_reason: "length"` every time and the parser dropped it on the
+    /// floor. Carried as an event (rather than returned alongside) so the
+    /// existing `ApiClient` trait shape is unchanged.
+    StreamMeta {
+        finish_reason: Option<String>,
+        reasoning_chars: usize,
+    },
     MessageStop,
 }
 
@@ -446,17 +461,27 @@ where
             };
             let mut events = self.api_client.stream(&request)?;
             // Empty-turn recovery ("empty-stream flake"): this brain streams its
-            // chain-of-thought in a separate `reasoning_content` channel the SSE
-            // parser does not surface. When it spends the whole `num_predict`
+            // chain-of-thought in a separate `reasoning_content` channel that does
+            // not count as message content. When it spends the whole `num_predict`
             // budget reasoning and never emits a `content` token, the turn carries
-            // no visible text and no tool call, and `build_assistant_message`
-            // rejects it as "produced no content", aborting the run. The overrun is
-            // deterministic per-logits but intermittent run-to-run (MTP/CUDA jitter
-            // shifts the reasoning length across the budget boundary). Retry once
-            // with double the token ceiling so the reasoning has room to finish and
-            // still emit an answer — the surgical alternative to permanently raising
-            // `num_predict`, which is reserved out of every turn's context budget.
-            if turn_produced_no_content(&events) {
+            // no visible text and no tool call, and would be rejected as
+            // "produced no content", aborting the run mid-task.
+            //
+            // Measured against `qwen3.6-35b-a3b-mtp@iq3_s` on 2026-08-02 (raw SSE
+            // probes): reasoning demand tracks task *ambiguity*, not prompt size —
+            // 731 tokens for a trivial turn, 1276 on an 8.4K-token prompt with a
+            // clear task, but 4952 and 7818 on genuinely open-ended coding turns.
+            // That distribution straddles the 6144 default, which is exactly why a
+            // deterministic overrun looked like a random flake.
+            //
+            // So escalate rather than retry once at a fixed ceiling: each attempt
+            // doubles the budget, capped at `num_ctx / 2` so the ask can never
+            // crowd out the prompt. A single fixed retry left the ceiling at 2x
+            // forever, and the outer nudge retry in `run.rs` then restarted at the
+            // *base* budget — making the third attempt weaker than the second.
+            let mut attempt: u32 = 0;
+            while turn_produced_no_content(&events) && attempt < EMPTY_TURN_MAX_RETRIES {
+                attempt += 1;
                 let retry_request = ApiRequest {
                     system_prompt: request.system_prompt.clone(),
                     messages: apply_context_eviction(
@@ -464,9 +489,15 @@ where
                         num_ctx,
                         evict_trigger,
                     ),
-                    max_output_tokens: Some(crate::api::current_num_predict().saturating_mul(2)),
+                    max_output_tokens: Some(empty_turn_retry_ceiling(
+                        attempt,
+                        crate::api::current_num_ctx(),
+                    )),
                 };
                 events = self.api_client.stream(&retry_request)?;
+            }
+            if turn_produced_no_content(&events) {
+                return Err(empty_turn_error(&events));
             }
             let (assistant_message, usage) = build_assistant_message(events)?;
             if let Some(usage) = usage {
@@ -919,6 +950,71 @@ fn turn_produced_no_content(events: &[AssistantEvent]) -> bool {
     })
 }
 
+/// How many escalating re-asks an empty turn gets before the run aborts.
+/// Two, so the ceiling reaches 4x the configured budget — enough to clear the
+/// worst reasoning demand measured on the champion brain (7818 tokens against
+/// a 6144 default) without letting a genuinely mute backend spin forever.
+const EMPTY_TURN_MAX_RETRIES: u32 = 2;
+
+/// Output ceiling for empty-turn retry `attempt` (1-based): the configured
+/// `num_predict` doubled per attempt, clamped to half the context window.
+///
+/// The clamp is the safety property. `num_predict` is reserved out of every
+/// turn's context budget, so an unbounded doubling would eventually ask for
+/// more output room than the window holds and the backend would truncate the
+/// *prompt* to honour it — turning a recoverable empty turn into a corrupted
+/// one. Never returns less than the base budget, so a small `num_ctx` degrades
+/// to "retry at the same ceiling" (still useful: sampling is not deterministic)
+/// rather than to "retry with less room than the first attempt had".
+#[must_use]
+fn empty_turn_retry_ceiling(attempt: u32, num_ctx: u32) -> u32 {
+    let base = crate::api::current_num_predict();
+    // `attempt` is loop-bounded by EMPTY_TURN_MAX_RETRIES; min() keeps the
+    // shift total even if that constant is raised later.
+    let scaled = base.saturating_mul(1u32 << attempt.min(4));
+    scaled.min((num_ctx / 2).max(base))
+}
+
+/// Build the abort error for a turn that produced no content after every
+/// retry, naming the actual cause instead of just the symptom.
+///
+/// Keeps the substring `produced no content` — `run::run_turn_with_retry`
+/// matches on it to decide whether to fire the `enable_tools` nudge, and
+/// changing the wording silently would disable that outer recovery.
+fn empty_turn_error(events: &[AssistantEvent]) -> RuntimeError {
+    let meta = events.iter().find_map(|event| match event {
+        AssistantEvent::StreamMeta {
+            finish_reason,
+            reasoning_chars,
+        } => Some((finish_reason.as_deref(), *reasoning_chars)),
+        _ => None,
+    });
+    let budget = crate::api::current_num_predict();
+
+    match meta {
+        // The backend told us exactly what happened: generation was cut off at
+        // the token ceiling, and everything it produced went to the reasoning
+        // channel. Say so, and name the knob that fixes it.
+        Some((Some("length"), reasoning_chars)) => RuntimeError::new(format!(
+            "assistant stream produced no content — the model hit its {budget}-token \
+             output ceiling while still reasoning ({reasoning_chars} chars of \
+             reasoning, finish_reason=length) and never emitted an answer or a \
+             tool call. Raise CLAUDETTE_NUM_PREDICT above {budget}."
+        )),
+        // Stopped cleanly but said nothing at all — a different failure (bad
+        // chat template, over-eager stop token) that more budget will not fix.
+        Some((reason, reasoning_chars)) => RuntimeError::new(format!(
+            "assistant stream produced no content — the backend ended the turn \
+             cleanly (finish_reason={}) with {reasoning_chars} chars of reasoning \
+             and no answer. More output budget will not help; suspect the chat \
+             template or a stop-token mismatch.",
+            reason.unwrap_or("none")
+        )),
+        // No StreamMeta at all: the Ollama-native path, or a test double.
+        None => RuntimeError::new("assistant stream produced no content"),
+    }
+}
+
 fn build_assistant_message(
     events: Vec<AssistantEvent>,
 ) -> Result<(ConversationMessage, Option<TokenUsage>), RuntimeError> {
@@ -935,6 +1031,9 @@ fn build_assistant_message(
                 blocks.push(ContentBlock::ToolUse { id, name, input });
             }
             AssistantEvent::Usage(value) => usage = Some(value),
+            // Diagnostics only — never part of the assistant message. Consumed
+            // by `empty_turn_error` when the turn came back content-less.
+            AssistantEvent::StreamMeta { .. } => {}
             AssistantEvent::MessageStop => {
                 finished = true;
             }
@@ -1288,9 +1387,10 @@ impl ToolExecutor for StaticToolExecutor {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_context_eviction, build_turn_system_prompt, parse_auto_compaction_threshold,
-        ApiClient, ApiRequest, AssistantEvent, AutoCompactionEvent, ConversationRuntime,
-        RuntimeError, StaticToolExecutor, DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD,
+        apply_context_eviction, build_turn_system_prompt, empty_turn_retry_ceiling,
+        parse_auto_compaction_threshold, ApiClient, ApiRequest, AssistantEvent,
+        AutoCompactionEvent, ConversationRuntime, RuntimeError, StaticToolExecutor,
+        DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD, EMPTY_TURN_MAX_RETRIES,
         VISION_DISCIPLINE_HINT,
     };
     use crate::compact::CompactionConfig;
@@ -1488,19 +1588,27 @@ mod tests {
             })
             .expect("recovered turn must carry text");
         assert!(last_text.contains("42"));
-        let expected_retry_cap = crate::api::current_num_predict().saturating_mul(2);
+        // Wiring check: the base call is uncapped and the retry carries the
+        // first rung of the escalation ladder. The ladder's arithmetic is pinned
+        // separately in `empty_turn_retry_ceiling_doubles_then_clamps_to_half_the_window`.
+        let expected_retry_cap = empty_turn_retry_ceiling(1, crate::api::current_num_ctx());
         assert_eq!(
             runtime.api_client.seen_output_caps,
             vec![None, Some(expected_retry_cap)],
-            "base call uncapped, retry doubles the budget",
+            "base call uncapped, retry escalates the budget",
+        );
+        assert!(
+            expected_retry_cap > crate::api::current_num_predict(),
+            "the retry must ask for MORE room than the attempt that just failed",
         );
     }
 
     #[test]
-    fn empty_turn_twice_aborts_with_no_content_error() {
-        // Both the base call and the single retry come back empty: no infinite
-        // retry loop — the run aborts with the honest "no content" error.
+    fn empty_turn_aborts_after_escalating_retries_are_exhausted() {
+        // Every attempt comes back empty: no infinite retry loop — the run
+        // aborts once the escalation ladder is spent.
         let api = QueuedApi::new(vec![
+            vec![AssistantEvent::MessageStop],
             vec![AssistantEvent::MessageStop],
             vec![AssistantEvent::MessageStop],
         ]);
@@ -1508,15 +1616,112 @@ mod tests {
 
         let err = runtime
             .run_turn("what is the answer?", None)
-            .expect_err("two empty turns must abort");
+            .expect_err("exhausted retries must abort");
         assert!(
             err.to_string().contains("produced no content"),
             "unexpected error: {err}"
         );
         assert_eq!(
             runtime.api_client.seen_output_caps.len(),
-            2,
-            "exactly one retry, no more",
+            (EMPTY_TURN_MAX_RETRIES + 1) as usize,
+            "base call plus exactly EMPTY_TURN_MAX_RETRIES retries, no more",
+        );
+    }
+
+    #[test]
+    fn empty_turn_retry_ceiling_doubles_then_clamps_to_half_the_window() {
+        let base = crate::api::current_num_predict();
+        // A window with room to spare: the ladder doubles freely.
+        let roomy = base.saturating_mul(16);
+        assert_eq!(empty_turn_retry_ceiling(1, roomy), base * 2);
+        assert_eq!(empty_turn_retry_ceiling(2, roomy), base * 4);
+
+        // A window too small for the doubled ask: clamped to num_ctx/2 so the
+        // output reservation can never crowd the prompt out of the window.
+        let tight = base.saturating_mul(3);
+        assert_eq!(
+            empty_turn_retry_ceiling(2, tight),
+            tight / 2,
+            "clamped to half the context window"
+        );
+
+        // Pathologically small window: never drop BELOW the base budget, or the
+        // retry would have less room than the attempt that already failed.
+        assert_eq!(
+            empty_turn_retry_ceiling(1, 8),
+            base,
+            "floor is the configured budget"
+        );
+    }
+
+    #[test]
+    fn truncated_reasoning_turn_names_the_budget_as_the_cause() {
+        // The empty-stream flake, reproduced at the event level: the model spent
+        // its whole ceiling in the reasoning channel and was cut off. The abort
+        // must name the real cause and the knob that fixes it — not just report
+        // the symptom — and must keep the "produced no content" substring that
+        // `run::run_turn_with_retry` matches on to fire its outer nudge.
+        let truncated = || {
+            vec![
+                AssistantEvent::StreamMeta {
+                    finish_reason: Some("length".to_string()),
+                    reasoning_chars: 34_822,
+                },
+                AssistantEvent::MessageStop,
+            ]
+        };
+        let api = QueuedApi::new(vec![truncated(), truncated(), truncated()]);
+        let mut runtime = queued_runtime(api);
+
+        let err = runtime
+            .run_turn("implement the spec", None)
+            .expect_err("a fully-truncated turn must abort")
+            .to_string();
+
+        assert!(
+            err.contains("produced no content"),
+            "must keep the substring run.rs matches on: {err}"
+        );
+        assert!(
+            err.contains("finish_reason=length") && err.contains("34822"),
+            "must report the wire evidence: {err}"
+        );
+        assert!(
+            err.contains("CLAUDETTE_NUM_PREDICT"),
+            "must name the knob that fixes it: {err}"
+        );
+    }
+
+    #[test]
+    fn clean_but_silent_turn_does_not_blame_the_budget() {
+        // finish_reason=stop with no content is a different failure — a chat
+        // template or stop-token problem. Recommending a bigger budget there
+        // would send the user down the wrong path.
+        let silent = || {
+            vec![
+                AssistantEvent::StreamMeta {
+                    finish_reason: Some("stop".to_string()),
+                    reasoning_chars: 0,
+                },
+                AssistantEvent::MessageStop,
+            ]
+        };
+        let api = QueuedApi::new(vec![silent(), silent(), silent()]);
+        let mut runtime = queued_runtime(api);
+
+        let err = runtime
+            .run_turn("say something", None)
+            .expect_err("a silent turn must abort")
+            .to_string();
+
+        assert!(err.contains("produced no content"), "unexpected: {err}");
+        assert!(
+            !err.contains("CLAUDETTE_NUM_PREDICT"),
+            "must not blame the output budget: {err}"
+        );
+        assert!(
+            err.contains("chat template"),
+            "must point at the real suspect: {err}"
         );
     }
 
