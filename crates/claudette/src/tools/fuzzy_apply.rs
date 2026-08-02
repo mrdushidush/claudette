@@ -105,6 +105,16 @@ fn run_apply_diff(input: &str) -> Result<String, String> {
                 );
                 return Err(msg);
             }
+            // Pre-image before the write so `/undo` can restore this file
+            // (roast EDIT-03: apply_diff had no snapshot, which made `/undo`
+            // a no-op for the primary edit path). Fail-closed: no snapshot,
+            // no write. The file is known to exist — it was read above.
+            crate::transcript::snapshot_to_trash(&path).map_err(|e| {
+                format!(
+                    "apply_diff: pre-image snapshot failed, refusing to edit {}: {e}",
+                    path.display()
+                )
+            })?;
             // Atomic write via sibling tmp + rename, matching apply_patch.
             let tmp = path.with_extension("claudette-diff.tmp");
             fs::write(&tmp, &new_content)
@@ -660,5 +670,41 @@ mod tests {
         let err = result.expect_err("identical before/after must be a no-op error");
         assert!(err.contains("no change"), "got: {err}");
         assert_eq!(after_disk, original, "file must not be modified by a no-op");
+    }
+
+    #[test]
+    fn apply_diff_snapshots_a_pre_image() {
+        crate::with_temp_home(|home| {
+            let prev_ws = std::env::var("CLAUDETTE_WORKSPACE").ok();
+            std::env::remove_var("CLAUDETTE_WORKSPACE");
+
+            let file = home.join("diffme.txt");
+            fs::write(&file, "alpha\nbeta\n").unwrap();
+            let input = json!({
+                "path": file.display().to_string(),
+                "before": "beta",
+                "after": "gamma",
+            })
+            .to_string();
+            run_apply_diff(&input).unwrap();
+
+            assert_eq!(fs::read_to_string(&file).unwrap(), "alpha\ngamma\n");
+            let trash = home.join(".claudette").join("trash");
+            let entries: Vec<_> = fs::read_dir(&trash)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .collect();
+            assert_eq!(entries.len(), 1, "expected exactly one pre-image");
+            assert_eq!(
+                fs::read_to_string(&entries[0]).unwrap(),
+                "alpha\nbeta\n",
+                "pre-image must hold the ORIGINAL content"
+            );
+
+            match prev_ws {
+                Some(v) => std::env::set_var("CLAUDETTE_WORKSPACE", v),
+                None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+            }
+        });
     }
 }
