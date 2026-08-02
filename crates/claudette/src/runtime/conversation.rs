@@ -480,8 +480,13 @@ where
             // forever, and the outer nudge retry in `run.rs` then restarted at the
             // *base* budget — making the third attempt weaker than the second.
             let mut attempt: u32 = 0;
+            // The ceiling actually granted to the last attempt — not the base
+            // budget. Reporting the base would understate what was already tried
+            // and send the user to raise a knob that had in fact been exceeded.
+            let mut last_ceiling = crate::api::current_num_predict();
             while turn_produced_no_content(&events) && attempt < EMPTY_TURN_MAX_RETRIES {
                 attempt += 1;
+                last_ceiling = empty_turn_retry_ceiling(attempt, crate::api::current_num_ctx());
                 let retry_request = ApiRequest {
                     system_prompt: request.system_prompt.clone(),
                     messages: apply_context_eviction(
@@ -489,15 +494,33 @@ where
                         num_ctx,
                         evict_trigger,
                     ),
-                    max_output_tokens: Some(empty_turn_retry_ceiling(
-                        attempt,
-                        crate::api::current_num_ctx(),
-                    )),
+                    max_output_tokens: Some(last_ceiling),
                 };
                 events = self.api_client.stream(&retry_request)?;
             }
             if turn_produced_no_content(&events) {
-                return Err(empty_turn_error(&events));
+                // A content-less turn *after* the model has already worked this
+                // turn is it signalling "done" without writing a closing message:
+                // the backend ends the turn `finish_reason=stop` carrying only
+                // reasoning. Aborting here throws away an entire turn's completed
+                // work — edits already on disk, tool results already in the
+                // session — and reports failure for a run that had, in substance,
+                // succeeded.
+                //
+                // Measured 2026-08-02: this killed 2 of 3 co-dev cards *after*
+                // every edit had landed, leaving half-written trees behind. The
+                // escalating budget retry cannot help — these turns stop cleanly,
+                // they do not run out of room.
+                //
+                // Only a turn that produced nothing at all is a genuine failure,
+                // so the honest error is kept for that case. Ending silently would
+                // be its own lie, so hand the caller a line to print — the same
+                // contract the iteration-cap landing uses.
+                if !assistant_messages.is_empty() {
+                    synthesized_reply = Some(empty_final_turn_note(&events));
+                    break;
+                }
+                return Err(empty_turn_error(&events, last_ceiling));
             }
             let (assistant_message, usage) = build_assistant_message(events)?;
             if let Some(usage) = usage {
@@ -975,13 +998,30 @@ fn empty_turn_retry_ceiling(attempt: u32, num_ctx: u32) -> u32 {
     scaled.min((num_ctx / 2).max(base))
 }
 
+/// Note handed to the caller when a turn ended on a content-less reply *after*
+/// doing real work. The work is kept; this exists so the turn does not end in
+/// silence and leave the user guessing whether anything happened.
+fn empty_final_turn_note(events: &[AssistantEvent]) -> String {
+    let reason = events
+        .iter()
+        .find_map(|event| match event {
+            AssistantEvent::StreamMeta { finish_reason, .. } => finish_reason.as_deref(),
+            _ => None,
+        })
+        .unwrap_or("none");
+    format!(
+        "[the model ended this turn without a closing message (finish_reason={reason}); \
+         its tool calls above completed and their results are kept]"
+    )
+}
+
 /// Build the abort error for a turn that produced no content after every
 /// retry, naming the actual cause instead of just the symptom.
 ///
 /// Keeps the substring `produced no content` — `run::run_turn_with_retry`
 /// matches on it to decide whether to fire the `enable_tools` nudge, and
 /// changing the wording silently would disable that outer recovery.
-fn empty_turn_error(events: &[AssistantEvent]) -> RuntimeError {
+fn empty_turn_error(events: &[AssistantEvent], budget: u32) -> RuntimeError {
     let meta = events.iter().find_map(|event| match event {
         AssistantEvent::StreamMeta {
             finish_reason,
@@ -989,7 +1029,6 @@ fn empty_turn_error(events: &[AssistantEvent]) -> RuntimeError {
         } => Some((finish_reason.as_deref(), *reasoning_chars)),
         _ => None,
     });
-    let budget = crate::api::current_num_predict();
 
     match meta {
         // The backend told us exactly what happened: generation was cut off at
@@ -1689,6 +1728,66 @@ mod tests {
         assert!(
             err.contains("CLAUDETTE_NUM_PREDICT"),
             "must name the knob that fixes it: {err}"
+        );
+    }
+
+    #[test]
+    fn empty_turn_after_real_work_keeps_the_work_instead_of_aborting() {
+        // The failure that killed 2 of 3 co-dev cards on 2026-08-02: the model
+        // makes a tool call, gets its result, then ends the next turn cleanly
+        // with only reasoning and no closing message. Aborting there discarded a
+        // whole turn of completed edits and reported failure for work that had
+        // actually landed. The turn must now SUCCEED, keep the tool result, and
+        // hand the caller an honest line to print.
+        let silent = || {
+            vec![
+                AssistantEvent::StreamMeta {
+                    finish_reason: Some("stop".to_string()),
+                    reasoning_chars: 204,
+                },
+                AssistantEvent::MessageStop,
+            ]
+        };
+        let api = QueuedApi::new(vec![
+            // Iteration 1: a real tool call.
+            vec![
+                AssistantEvent::ToolUse {
+                    id: "call_1".to_string(),
+                    name: "add".to_string(),
+                    input: r#"{"a":1,"b":2}"#.to_string(),
+                },
+                AssistantEvent::MessageStop,
+            ],
+            // Iteration 2 and its retries: clean, silent, no answer.
+            silent(),
+            silent(),
+            silent(),
+        ]);
+        let mut runtime = queued_runtime(api);
+
+        let summary = runtime
+            .run_turn("use add", None)
+            .expect("work already done must not be thrown away");
+
+        assert_eq!(
+            summary.tool_results.len(),
+            1,
+            "the completed tool result must survive"
+        );
+        assert!(
+            !summary.assistant_messages.is_empty(),
+            "the assistant message carrying the tool call must survive"
+        );
+        let note = summary
+            .synthesized_reply
+            .expect("caller needs a line to print, or the turn ends in silence");
+        assert!(
+            note.contains("finish_reason=stop"),
+            "note must name what happened: {note}"
+        );
+        assert!(
+            !summary.hit_iteration_cap,
+            "this is not an iteration-cap landing"
         );
     }
 

@@ -565,6 +565,13 @@ fn main() -> ExitCode {
                         }
                     }
                 }
+                // A turn that ended without a closing message streams nothing and
+                // has no text block to print above — without this the run would
+                // finish in silence and look like it did nothing. Same contract
+                // the REPL honours (`run/repl.rs`).
+                if let Some(reply) = &summary.synthesized_reply {
+                    eprintln!("{}", theme::dim(reply));
+                }
                 eprintln!();
                 eprintln!(
                     "{} {}",
