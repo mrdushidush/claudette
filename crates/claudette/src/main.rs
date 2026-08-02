@@ -581,6 +581,23 @@ fn main() -> ExitCode {
                         summary.iterations, summary.usage.input_tokens, summary.usage.output_tokens,
                     ))
                 );
+                // The turn's work is kept, but a model that stopped without ever
+                // delivering a reply has not shown it finished — it may equally
+                // have abandoned mid-task. Exiting 0 here would report success on
+                // a run that did nothing, which is exactly the silent-optimistic
+                // failure this codebase keeps getting bitten by. Surface it and
+                // let the caller decide.
+                if summary.ended_without_reply {
+                    eprintln!(
+                        "{} {}",
+                        theme::warn(theme::WARN_GLYPH),
+                        theme::warn(
+                            "the model stopped without a closing reply — its work above is kept, \
+                             but the task is NOT confirmed complete"
+                        )
+                    );
+                    return ExitCode::FAILURE;
+                }
                 ExitCode::SUCCESS
             }
             Err(e) => {
