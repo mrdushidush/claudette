@@ -295,7 +295,7 @@ fn probe_brain() -> Status {
     );
 
     // Reachability
-    let client = match reqwest::blocking::Client::builder()
+    let client = match crate::egress::local_http_builder()
         .timeout(Duration::from_secs(4))
         .build()
     {

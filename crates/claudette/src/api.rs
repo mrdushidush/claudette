@@ -233,7 +233,7 @@ impl OllamaApiClient {
 
     fn build(model: String, tools: ToolsProvider) -> Self {
         let base_url = resolve_ollama_url();
-        let http = reqwest::blocking::Client::builder()
+        let http = crate::egress::local_http_builder()
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
             .build()
             .expect("failed to build reqwest blocking client");
@@ -512,7 +512,7 @@ pub fn probe_ollama() -> Result<String, String> {
     if skip_ollama_flag || (openai_compat && skip_lm_studio_flag) {
         return Ok(url);
     }
-    let client = reqwest::blocking::Client::builder()
+    let client = crate::egress::local_http_builder()
         .timeout(Duration::from_secs(3))
         .build()
         .map_err(|e| format!("could not build probe client: {e}"))?;

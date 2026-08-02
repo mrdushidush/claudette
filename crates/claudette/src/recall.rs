@@ -470,7 +470,7 @@ pub struct OllamaEmbedder {
 
 impl OllamaEmbedder {
     pub fn new() -> Result<Self, String> {
-        let client = reqwest::blocking::Client::builder()
+        let client = crate::egress::local_http_builder()
             // Embed calls themselves are fast (<100ms) but the first call
             // on a cold model triggers a load that can take ~2s on CPU.
             // Pulls are bounded by the separate ensure_model branch.
@@ -640,7 +640,7 @@ pub struct OpenAICompatEmbedder {
 
 impl OpenAICompatEmbedder {
     pub fn new() -> Result<Self, String> {
-        let client = reqwest::blocking::Client::builder()
+        let client = crate::egress::local_http_builder()
             .timeout(std::time::Duration::from_secs(60))
             .build()
             .map_err(|e| format!("recall: build http client: {e}"))?;

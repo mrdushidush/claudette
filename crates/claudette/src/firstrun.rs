@@ -65,7 +65,7 @@ pub fn classify_models_response(names: &[String], configured: &str) -> FirstRunC
 /// [`offer_fix_interactive`] does), so an offline session never probes.
 #[must_use]
 pub fn classify_backend(base_url: &str, openai_compat: bool, configured: &str) -> FirstRunCause {
-    let Ok(client) = reqwest::blocking::Client::builder()
+    let Ok(client) = crate::egress::local_http_builder()
         .timeout(Duration::from_secs(4))
         .build()
     else {

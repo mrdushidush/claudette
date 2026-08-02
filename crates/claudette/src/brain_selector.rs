@@ -170,7 +170,7 @@ fn served_model_names() -> Option<&'static Vec<String>> {
             } else {
                 format!("{base}/api/tags")
             };
-            let client = reqwest::blocking::Client::builder()
+            let client = crate::egress::local_http_builder()
                 .timeout(std::time::Duration::from_secs(4))
                 .build()
                 .ok()?;
