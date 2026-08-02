@@ -877,6 +877,21 @@ impl OllamaApiClient {
             }
         }
 
+        // Same diagnosis surface as the SSE path — a server that ignored
+        // `stream: true` can truncate mid-reasoning just as easily, and
+        // without this the fallback path would still report a bare
+        // "produced no content".
+        events.push(AssistantEvent::StreamMeta {
+            finish_reason: body
+                .pointer("/choices/0/finish_reason")
+                .and_then(Value::as_str)
+                .map(String::from),
+            reasoning_chars: message
+                .get("reasoning_content")
+                .and_then(Value::as_str)
+                .map_or(0, |r| r.chars().count()),
+        });
+
         let usage = body.get("usage");
         let input_tokens = usage
             .and_then(|u| u.get("prompt_tokens"))
@@ -1052,6 +1067,12 @@ impl OllamaApiClient {
             std::collections::BTreeMap::new();
         let mut input_tokens: u32 = 0;
         let mut output_tokens: u32 = 0;
+        // Why generation stopped, and how much went to the reasoning channel.
+        // Neither reaches the assistant message; both are what makes a
+        // content-less turn diagnosable instead of a mystery. See
+        // `runtime::conversation::empty_turn_error`.
+        let mut finish_reason: Option<String> = None;
+        let mut reasoning_chars: usize = 0;
 
         for line in reader.lines() {
             let line =
@@ -1095,6 +1116,28 @@ impl OllamaApiClient {
                         }
                     }
                 }
+            }
+
+            // Reasoning channel: `choices[0].delta.reasoning_content`. Deliberately
+            // NOT accumulated into `accumulated_text` — it is the model's private
+            // chain-of-thought and must never reach the transcript or the session.
+            // Only its size is kept, as evidence for the empty-turn diagnosis.
+            if let Some(reasoning) = chunk
+                .pointer("/choices/0/delta/reasoning_content")
+                .and_then(Value::as_str)
+            {
+                reasoning_chars += reasoning.chars().count();
+            }
+
+            // Stop reason: `choices[0].finish_reason`, non-null only on the final
+            // choice-bearing chunk. `"length"` means the token ceiling cut
+            // generation off — the difference between "needs a bigger budget" and
+            // "the model had nothing to say".
+            if let Some(reason) = chunk
+                .pointer("/choices/0/finish_reason")
+                .and_then(Value::as_str)
+            {
+                finish_reason = Some(reason.to_string());
             }
 
             // Tool-call deltas: concatenate `function.arguments` fragments by
@@ -1171,6 +1214,10 @@ impl OllamaApiClient {
             };
             events.push(AssistantEvent::ToolUse { id, name, input });
         }
+        events.push(AssistantEvent::StreamMeta {
+            finish_reason,
+            reasoning_chars,
+        });
         events.push(AssistantEvent::Usage(TokenUsage {
             input_tokens,
             output_tokens,
@@ -2606,13 +2653,58 @@ mod tests {
     }
 
     #[test]
-    fn sse_empty_returns_only_usage_and_stop() {
+    fn sse_empty_returns_only_meta_usage_and_stop() {
         let client = OllamaApiClient::new("test", json!([]));
         let stream = fake_sse(&[r"data: [DONE]"]);
         let events = client.consume_sse_lines(stream).unwrap();
-        assert_eq!(events.len(), 2);
-        assert!(matches!(events[0], AssistantEvent::Usage(_)));
-        assert!(matches!(events[1], AssistantEvent::MessageStop));
+        assert_eq!(events.len(), 3);
+        assert!(matches!(
+            events[0],
+            AssistantEvent::StreamMeta {
+                finish_reason: None,
+                reasoning_chars: 0
+            }
+        ));
+        assert!(matches!(events[1], AssistantEvent::Usage(_)));
+        assert!(matches!(events[2], AssistantEvent::MessageStop));
+    }
+
+    #[test]
+    fn sse_captures_reasoning_only_truncated_turn() {
+        // The empty-stream flake on the wire, verbatim from a live LM Studio
+        // probe on 2026-08-02: every token lands in `reasoning_content` and the
+        // terminating chunk carries `finish_reason: "length"`. The parser must
+        // surface BOTH facts — they are the only evidence that distinguishes
+        // "ran out of output budget" from "the model said nothing".
+        let client = OllamaApiClient::new("test", json!([]));
+        let stream = fake_sse(&[
+            r#"data: {"choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"Here"},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"index":0,"delta":{"reasoning_content":"'s a thought"},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}"#,
+            r"data: [DONE]",
+        ]);
+        let events = client.consume_sse_lines(stream).unwrap();
+
+        // No TextDelta: reasoning must never be mistaken for an answer, nor
+        // leak into the transcript.
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AssistantEvent::TextDelta(_))),
+            "reasoning_content must not become assistant text: {events:?}"
+        );
+        let meta = events
+            .iter()
+            .find_map(|e| match e {
+                AssistantEvent::StreamMeta {
+                    finish_reason,
+                    reasoning_chars,
+                } => Some((finish_reason.clone(), *reasoning_chars)),
+                _ => None,
+            })
+            .expect("stream must carry diagnostics");
+        assert_eq!(meta.0.as_deref(), Some("length"));
+        assert_eq!(meta.1, "Here".len() + "'s a thought".len());
     }
 
     #[test]
@@ -2823,19 +2915,29 @@ mod tests {
             "usage": {"prompt_tokens": 10, "completion_tokens": 3, "total_tokens": 13}
         });
         let events = client.parse_openai_response(&body).unwrap();
-        assert_eq!(events.len(), 3);
+        assert_eq!(events.len(), 4); // text, meta, usage, stop
         match &events[0] {
             AssistantEvent::TextDelta(t) => assert_eq!(t, "Hello world"),
             other => panic!("expected TextDelta, got {other:?}"),
         }
         match &events[1] {
+            AssistantEvent::StreamMeta {
+                finish_reason,
+                reasoning_chars,
+            } => {
+                assert_eq!(finish_reason.as_deref(), Some("stop"));
+                assert_eq!(*reasoning_chars, 0);
+            }
+            other => panic!("expected StreamMeta, got {other:?}"),
+        }
+        match &events[2] {
             AssistantEvent::Usage(u) => {
                 assert_eq!(u.input_tokens, 10);
                 assert_eq!(u.output_tokens, 3);
             }
             other => panic!("expected Usage, got {other:?}"),
         }
-        assert!(matches!(events[2], AssistantEvent::MessageStop));
+        assert!(matches!(events[3], AssistantEvent::MessageStop));
     }
 
     #[test]
@@ -2863,8 +2965,9 @@ mod tests {
             "usage": {"prompt_tokens": 50, "completion_tokens": 12}
         });
         let events = client.parse_openai_response(&body).unwrap();
-        // Expect: ToolUse, Usage, MessageStop — no TextDelta (content was null).
-        assert_eq!(events.len(), 3);
+        // Expect: ToolUse, StreamMeta, Usage, MessageStop — no TextDelta
+        // (content was null).
+        assert_eq!(events.len(), 4);
         match &events[0] {
             AssistantEvent::ToolUse { id, name, input } => {
                 assert_eq!(id, "call_abc");
@@ -2893,7 +2996,7 @@ mod tests {
             }]
         });
         let events = client.parse_openai_response(&body).unwrap();
-        assert_eq!(events.len(), 4); // text, tool, usage(0), stop
+        assert_eq!(events.len(), 5); // text, tool, meta, usage(0), stop
         assert!(
             matches!(&events[0], AssistantEvent::TextDelta(t) if t == "Let me check the time.")
         );

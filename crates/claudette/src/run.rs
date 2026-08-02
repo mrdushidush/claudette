@@ -297,11 +297,15 @@ pub(crate) fn run_turn_with_retry(
             if !msg.contains("no content") {
                 return Err(msg);
             }
-            // Empty response — retry with a nudge.
+            // Empty response — retry with a nudge. Print the runtime's own
+            // diagnosis rather than a fixed guess: since the SSE parser started
+            // reading `finish_reason`/`reasoning_content`, this message can name
+            // the actual cause (budget exhausted mid-reasoning vs. a clean but
+            // silent turn), and the two want different fixes from the user.
             eprintln!(
                 "  {} {}",
                 theme::dim("▸"),
-                theme::dim("empty response — retrying with enable_tools hint...")
+                theme::dim(&format!("{msg} — retrying with enable_tools hint..."))
             );
         }
     }
