@@ -120,6 +120,17 @@ fn run_apply_patch(input: &str) -> Result<String, String> {
     // dry_run path lets the caller validate first, which is the bigger
     // win over a real two-phase commit.
     if !dry_run {
+        // Pre-image EVERY target before writing ANY of them (roast EDIT-03),
+        // so a snapshot failure on the last file cannot leave earlier files
+        // already overwritten and unrecoverable. Fail-closed.
+        for (path, _) in &pending {
+            crate::transcript::snapshot_to_trash(path).map_err(|e| {
+                format!(
+                    "apply_patch: pre-image snapshot failed, refusing to edit {}: {e}",
+                    path.display()
+                )
+            })?;
+        }
         for (path, content) in &pending {
             let tmp = path.with_extension("claudette-apply.tmp");
             fs::write(&tmp, content)
@@ -537,5 +548,82 @@ mod tests {
         // Good file must NOT have been touched — that's the atomic guarantee.
         assert_eq!(after_good.as_deref(), Some("alpha\n"));
         assert_eq!(after_bad.as_deref(), Some("this is wrong\n"));
+    }
+
+    #[test]
+    fn apply_patch_snapshots_a_pre_image() {
+        crate::with_temp_home(|home| {
+            let prev_ws = std::env::var("CLAUDETTE_WORKSPACE").ok();
+            std::env::remove_var("CLAUDETTE_WORKSPACE");
+
+            let file = home.join("patchme.txt");
+            fs::write(&file, "alpha\nbeta\n").unwrap();
+
+            // Build a unified diff targeting the temp HOME path.
+            let diff = format!(
+                "--- a/{}\n+++ b/{}\n@@ -1,2 +1,2 @@\n alpha\n-beta\n+gamma\n",
+                file.display(),
+                file.display()
+            );
+            let input = json!({ "diff": diff }).to_string();
+            run_apply_patch(&input).unwrap();
+
+            assert_eq!(fs::read_to_string(&file).unwrap(), "alpha\ngamma\n");
+            let trash = home.join(".claudette").join("trash");
+            let entries: Vec<_> = fs::read_dir(&trash)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .collect();
+            assert_eq!(entries.len(), 1, "expected exactly one pre-image");
+            assert_eq!(
+                fs::read_to_string(&entries[0]).unwrap(),
+                "alpha\nbeta\n",
+                "pre-image must hold the ORIGINAL content"
+            );
+
+            match prev_ws {
+                Some(v) => std::env::set_var("CLAUDETTE_WORKSPACE", v),
+                None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+            }
+        });
+    }
+
+    #[test]
+    fn apply_patch_dry_run_makes_no_pre_image() {
+        crate::with_temp_home(|home| {
+            let prev_ws = std::env::var("CLAUDETTE_WORKSPACE").ok();
+            std::env::remove_var("CLAUDETTE_WORKSPACE");
+
+            let file = home.join("patchme-dry.txt");
+            fs::write(&file, "alpha\nbeta\n").unwrap();
+
+            let diff = format!(
+                "--- a/{}\n+++ b/{}\n@@ -1,2 +1,2 @@\n alpha\n-beta\n+gamma\n",
+                file.display(),
+                file.display()
+            );
+            let input = json!({ "diff": diff, "dry_run": true }).to_string();
+            run_apply_patch(&input).unwrap();
+
+            assert_eq!(
+                fs::read_to_string(&file).unwrap(),
+                "alpha\nbeta\n",
+                "file must be unchanged after dry_run"
+            );
+
+            let trash = home.join(".claudette").join("trash");
+            if trash.exists() {
+                let entries: Vec<_> = fs::read_dir(&trash)
+                    .unwrap()
+                    .map(|e| e.unwrap().path())
+                    .collect();
+                assert!(entries.is_empty(), "dry_run must not create trash entries");
+            }
+
+            match prev_ws {
+                Some(v) => std::env::set_var("CLAUDETTE_WORKSPACE", v),
+                None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+            }
+        });
     }
 }
