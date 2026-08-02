@@ -568,7 +568,7 @@ fn hw_ollama_url() -> String {
 }
 
 fn poll_ollama(url: &str) -> Result<Vec<OllamaModel>, String> {
-    let client = reqwest::blocking::Client::builder()
+    let client = crate::egress::local_http_builder()
         .timeout(Duration::from_secs(1))
         .build()
         .map_err(|e| e.to_string())?;

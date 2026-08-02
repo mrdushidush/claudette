@@ -352,6 +352,18 @@ fn main() -> ExitCode {
         unknown_flags: _,
     } = args;
 
+    // ── Offline preflight: proxy vars ────────────────────────────────
+    // Must precede the banner. A configured proxy routes even loopback
+    // traffic off-box, so printing "the air-gap is enforced" and then
+    // running would be a false claim — this is exactly the path that was
+    // demonstrated exfiltrating a whole conversation (roast SEC-01).
+    // Refuse instead: a guard that cannot honour its condition must not
+    // allow.
+    if let Err(msg) = claudette::egress::preflight_offline_proxy() {
+        eprintln!("{} {}", theme::error(theme::ERR_GLYPH), theme::error(&msg));
+        return ExitCode::FAILURE;
+    }
+
     // ── Offline-mode banner ───────────────────────────────────────────
     // Loud, one-line confirmation that the air-gap is enforced this run.
     // `--doctor` prints its own dedicated offline section, so skip it here

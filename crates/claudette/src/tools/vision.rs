@@ -217,7 +217,7 @@ fn run_image_describe(input: &str) -> Result<String, String> {
         }]
     });
 
-    let client = reqwest::blocking::Client::builder()
+    let client = crate::egress::local_http_builder()
         .timeout(std::time::Duration::from_secs(DESCRIBE_TIMEOUT_SECS))
         .build()
         .map_err(|e| format!("image_describe: build client failed: {e}"))?;

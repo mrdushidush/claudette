@@ -236,6 +236,79 @@ pub fn guard_subprocess(action: &str) -> Result<(), String> {
     ))
 }
 
+/// Proxy environment variables reqwest/hyper-util honour, in both the
+/// upper- and lower-case spellings the ecosystem accepts. Checked by
+/// [`proxy_vars_set`].
+pub const PROXY_ENV_VARS: &[&str] = &[
+    "HTTP_PROXY",
+    "http_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "ALL_PROXY",
+    "all_proxy",
+];
+
+/// Names of the proxy variables that are currently set to a non-empty value.
+/// Empty vec means no proxy is configured.
+#[must_use]
+pub fn proxy_vars_set() -> Vec<&'static str> {
+    PROXY_ENV_VARS
+        .iter()
+        .filter(|k| std::env::var(k).is_ok_and(|v| !v.trim().is_empty()))
+        .copied()
+        .collect()
+}
+
+/// The constructor every client that talks to the **local model backend**
+/// must use.
+///
+/// `.no_proxy()` is the whole point. `is_allowed_host` decides on the host
+/// string in the URL, but reqwest defaults to `auto_sys_proxy: true` and
+/// hyper-util's proxy matcher has no loopback bypass — so without this, a
+/// loopback URL passes the guard and the socket still goes to `$HTTP_PROXY`,
+/// carrying the entire conversation with it. That was demonstrated end-to-end
+/// while the `🔒 offline mode` banner was on screen (roast SEC-01).
+///
+/// Cloud-reaching clients deliberately do NOT use this: a corporate proxy is
+/// legitimate for `web_fetch`/GitHub/Gmail, and offline mode blocks those
+/// through [`guard`] instead.
+///
+/// No `#[must_use]`: `ClientBuilder` already carries it, and adding a second
+/// trips `clippy::double_must_use`.
+pub fn local_http_builder() -> reqwest::blocking::ClientBuilder {
+    reqwest::blocking::Client::builder().no_proxy()
+}
+
+/// Startup preflight for offline mode: refuse to run at all when a proxy is
+/// configured.
+///
+/// Under offline mode every allowed destination is loopback or the local
+/// backend, so a proxy is never legitimate — it can only move traffic
+/// off-box. Belt-and-braces with [`local_http_builder`]: that stops the
+/// local clients leaking, this stops the session starting in a posture whose
+/// banner would be a lie.
+///
+/// A no-op when offline mode is off.
+///
+/// # Errors
+/// Returns a message naming the offending variables when offline mode is on
+/// and any proxy variable is set.
+pub fn preflight_offline_proxy() -> Result<(), String> {
+    if !is_offline() {
+        return Ok(());
+    }
+    let set = proxy_vars_set();
+    if set.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "{BLOCK_PREFIX}: refusing to start — {} is set. A proxy would route \
+         even loopback traffic off this machine, so the air-gap could not be \
+         honoured. Unset it (or drop --offline) and re-run.",
+        set.join(", ")
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,12 +321,31 @@ mod tests {
     struct EnvGuard {
         offline: Option<String>,
         ollama: Option<String>,
+        /// Every proxy var, captured alongside the rest so restoration is
+        /// RAII and therefore panic-safe: a failing assert still hands the
+        /// next test a clean environment instead of leaking a proxy setting
+        /// into it.
+        proxies: Vec<(&'static str, Option<String>)>,
     }
     impl EnvGuard {
         fn capture() -> Self {
             Self {
                 offline: std::env::var(OFFLINE_ENV).ok(),
                 ollama: std::env::var("OLLAMA_HOST").ok(),
+                proxies: PROXY_ENV_VARS
+                    .iter()
+                    .map(|k| (*k, std::env::var(k).ok()))
+                    .collect(),
+            }
+        }
+
+        /// Clear every proxy var so a test asserts against a known-empty
+        /// baseline. Without this the proxy tests depend on the developer's
+        /// own environment — they would fail on exactly the corporate-proxy
+        /// machine this feature exists to protect.
+        fn clear_proxies() {
+            for k in PROXY_ENV_VARS {
+                std::env::remove_var(k);
             }
         }
     }
@@ -261,6 +353,9 @@ mod tests {
         fn drop(&mut self) {
             restore(OFFLINE_ENV, self.offline.as_deref());
             restore("OLLAMA_HOST", self.ollama.as_deref());
+            for (key, val) in &self.proxies {
+                restore(key, val.as_deref());
+            }
         }
     }
     fn restore(key: &str, val: Option<&str>) {
@@ -412,6 +507,95 @@ mod tests {
         assert!(
             lan.iter().any(|h| h == "192.168.1.50"),
             "LAN backend host listed: {lan:?}"
+        );
+    }
+
+    #[test]
+    fn proxy_vars_set_detects_both_spellings() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _g = EnvGuard::capture();
+        EnvGuard::clear_proxies();
+
+        // All unset → empty.
+        assert!(proxy_vars_set().is_empty(), "all unset should be empty");
+
+        // NOTE: assertions here use `contains`, never equality against an
+        // exact vec. Windows environment variables are case-INSENSITIVE, so
+        // `HTTP_PROXY` and `http_proxy` are the same variable there and
+        // setting one makes both spellings readable — while on Linux/macOS
+        // they are two independent variables. `contains` is the only
+        // assertion true on both, and Windows is in the CI matrix.
+
+        // An upper-case spelling is detected.
+        std::env::set_var("HTTP_PROXY", "http://p:8080");
+        assert!(
+            proxy_vars_set().contains(&"HTTP_PROXY"),
+            "HTTP_PROXY should be detected"
+        );
+
+        // A lower-case spelling is detected too.
+        EnvGuard::clear_proxies();
+        std::env::set_var("all_proxy", "http://p:8081");
+        let result = proxy_vars_set();
+        assert!(
+            result.contains(&"all_proxy") || result.contains(&"ALL_PROXY"),
+            "a lower-case spelling should be detected: {result:?}"
+        );
+
+        // An empty value must NOT count as configured — on Unix it reads
+        // back as `Ok("")`, on Windows it may be removed outright; either
+        // way it means "no proxy".
+        EnvGuard::clear_proxies();
+        std::env::set_var("HTTP_PROXY", "");
+        assert!(
+            proxy_vars_set().is_empty(),
+            "empty-string var must not count as set"
+        );
+    }
+
+    #[test]
+    fn preflight_is_noop_when_offline_off() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _g = EnvGuard::capture();
+        EnvGuard::clear_proxies();
+
+        // Ensure offline is off.
+        std::env::remove_var(OFFLINE_ENV);
+        // Set a proxy var.
+        std::env::set_var("HTTP_PROXY", "http://p:8080");
+
+        // Should be Ok because offline mode is off.
+        assert!(preflight_offline_proxy().is_ok());
+    }
+
+    #[test]
+    fn preflight_refuses_offline_with_proxy() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _g = EnvGuard::capture();
+        EnvGuard::clear_proxies();
+
+        // Enable offline mode.
+        std::env::set_var(OFFLINE_ENV, "1");
+        // Set HTTPS_PROXY.
+        std::env::set_var("HTTPS_PROXY", "http://p:8080");
+
+        let result = preflight_offline_proxy();
+        assert!(result.is_err(), "should be Err when offline + proxy set");
+        let msg = result.unwrap_err();
+        assert!(
+            msg.starts_with(BLOCK_PREFIX),
+            "message starts with BLOCK_PREFIX: {msg}"
+        );
+        assert!(
+            msg.contains("HTTPS_PROXY"),
+            "message names HTTPS_PROXY: {msg}"
+        );
+
+        // Unset the proxy var → should now be Ok.
+        std::env::remove_var("HTTPS_PROXY");
+        assert!(
+            preflight_offline_proxy().is_ok(),
+            "should be Ok after unsetting proxy"
         );
     }
 }
