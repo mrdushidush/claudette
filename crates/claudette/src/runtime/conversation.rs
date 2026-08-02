@@ -209,6 +209,20 @@ pub struct TurnSummary {
     /// nothing — the caller prints this instead. `None` when the landing
     /// produced real text (already streamed) or the cap was not hit.
     pub synthesized_reply: Option<String>,
+    /// Set when the turn ended on a content-less reply *after* doing real work:
+    /// the model stopped without writing a closing message.
+    ///
+    /// The work is kept — discarding a completed turn is never the right answer.
+    /// But "kept the work" is not the same as "the task is done", and the runtime
+    /// **cannot tell the two apart**: an empty final turn looks identical whether
+    /// the model finished or abandoned mid-task. Observed in the wild doing both,
+    /// including one run that announced its next step ("let me undo that and use
+    /// edit_file instead") and then simply stopped.
+    ///
+    /// So callers must not read a plain `Ok` as success. Single-shot exits
+    /// non-zero on this, because a turn that never delivered a reply has not
+    /// demonstrated it completed anything.
+    pub ended_without_reply: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -414,6 +428,7 @@ where
         let mut nudged_no_progress = false;
         let mut hit_iteration_cap = false;
         let mut synthesized_reply: Option<String> = None;
+        let mut ended_without_reply = false;
 
         loop {
             iterations += 1;
@@ -518,6 +533,7 @@ where
                 // contract the iteration-cap landing uses.
                 if !assistant_messages.is_empty() {
                     synthesized_reply = Some(empty_final_turn_note(&events));
+                    ended_without_reply = true;
                     break;
                 }
                 return Err(empty_turn_error(&events, last_ceiling));
@@ -794,6 +810,7 @@ where
             auto_compaction,
             hit_iteration_cap,
             synthesized_reply,
+            ended_without_reply,
         })
     }
 
@@ -1788,6 +1805,16 @@ mod tests {
         assert!(
             !summary.hit_iteration_cap,
             "this is not an iteration-cap landing"
+        );
+        // The work is kept, but the turn must NOT read as a clean success: the
+        // runtime cannot tell "finished" from "abandoned mid-task", and a caller
+        // that treats this as done will report success for a run that did
+        // nothing. Observed live: a model reverted its own edit, announced it
+        // would retry with another tool, then stopped — an empty patch that
+        // still compiled, so every gate passed.
+        assert!(
+            summary.ended_without_reply,
+            "an empty final turn must be flagged, not silently accepted as success"
         );
     }
 

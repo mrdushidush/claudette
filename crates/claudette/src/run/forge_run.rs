@@ -1128,6 +1128,7 @@ fn empty_turn_summary() -> TurnSummary {
         auto_compaction: None,
         hit_iteration_cap: false,
         synthesized_reply: None,
+        ended_without_reply: false,
     }
 }
 

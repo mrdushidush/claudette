@@ -1312,6 +1312,7 @@ mod tests {
             auto_compaction: None,
             hit_iteration_cap: false,
             synthesized_reply: None,
+            ended_without_reply: false,
         };
         let text = extract_response_text(&summary);
         assert!(text.contains("no text"));
