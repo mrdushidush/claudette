@@ -164,7 +164,9 @@ fn run_apply_diff(input: &str) -> Result<String, String> {
                      ambiguous. Add more surrounding lines so the block is unique."
                 ),
                 FuzzyError::EmptyBefore => {
-                    "apply_diff: 'before' is empty (nothing to find)".to_string()
+                    "apply_diff: 'before' is blank (nothing to find) — it must \
+                     contain at least one non-whitespace character"
+                        .to_string()
                 }
             };
             eprintln!(
@@ -283,7 +285,14 @@ fn reindent_to(block: &str, target_indent: &str) -> String {
 /// when more than one matches, so a genuinely ambiguous edit is rejected
 /// rather than silently applied to the first hit (roast RC-E C3).
 fn fuzzy_replace(content: &str, before: &str, after: &str) -> Result<String, FuzzyError> {
-    if before.is_empty() {
+    // Blank, not just empty: Pass 2 compares TRIMMED lines, so a `before` of
+    // "   " or "\n" trims to "" and matches ANY blank line in the file. With
+    // exactly one blank line the ambiguity check never fires and the block is
+    // injected at an arbitrary position, reported `ok:true` (roast EDIT-05).
+    // This one guard is sufficient: if `before.trim()` is non-empty then at
+    // least one of its lines has a non-empty trim, so no Pass-2 window can be
+    // made entirely of blank lines.
+    if before.trim().is_empty() {
         return Err(FuzzyError::EmptyBefore);
     }
 
@@ -360,7 +369,15 @@ fn fuzzy_replace(content: &str, before: &str, after: &str) -> Result<String, Fuz
     // splicing it verbatim corrupts whitespace-significant languages. Then
     // re-encode to the window's EOL style so a CRLF file keeps CRLF inside the
     // replaced region (roast RC-E H1).
-    let file_indent = leading_ws(content_lines[i]);
+    // Derive the indent from the first NON-BLANK line of the matched window.
+    // `leading_ws("\n")` is "", so a window that starts on a blank line used to
+    // re-base the whole replacement to column 0 — silently lifting it out of its
+    // scope (a Python method stopped being a method; YAML keys hoisted to
+    // document root), reported `ok:true` (roast EDIT-01).
+    let file_indent = content_lines[i..i + m]
+        .iter()
+        .find(|l| !l.trim().is_empty())
+        .map_or("", |l| leading_ws(l));
     let reindented = reindent_to(after, file_indent);
     let window_crlf = content_lines[i..i + m].iter().any(|l| l.ends_with("\r\n"));
     let mut after_norm = normalize_eol(&reindented, window_crlf);
@@ -563,6 +580,84 @@ mod tests {
     fn empty_before_errors() {
         let err = fuzzy_replace("anything", "", "x").unwrap_err();
         assert_eq!(err, FuzzyError::EmptyBefore);
+    }
+
+    // EDIT-01: a matched window whose FIRST line is blank must take its indent
+    // from the first non-blank line, not from the blank one.
+    //
+    // Every `before` below carries a DELIBERATELY WRONG indent so the Pass 1
+    // exact-match path cannot fire. That matters: Pass 1 returns early, and the
+    // bug being tested lives in Pass 2. A `before` copied verbatim out of
+    // `content` would make these tests vacuous.
+
+    #[test]
+    fn blank_first_line_window_keeps_python_method_nested() {
+        let content = "class Foo:\n\n    def bar(self):\n        pass\n";
+        let before = "\n  def bar(self):\n";
+        let after = "\n  def bar(self):\n      return 42\n";
+        let got = fuzzy_replace(content, before, after).unwrap();
+        assert!(
+            got.contains("\n    def bar(self):\n"),
+            "method must stay nested under the class: {got:?}"
+        );
+        assert!(
+            !got.contains("\ndef bar(self):"),
+            "method must not dedent to column 0: {got:?}"
+        );
+    }
+
+    #[test]
+    fn blank_first_line_window_keeps_yaml_keys_nested() {
+        let content = "server:\n\n  host: localhost\n  port: 8080\n";
+        let before = "\nhost: localhost\nport: 8080\n";
+        let after = "\nhost: 127.0.0.1\nport: 9090\n";
+        let got = fuzzy_replace(content, before, after).unwrap();
+        assert!(
+            got.contains("\n  host: 127.0.0.1\n"),
+            "keys must stay under `server:`: {got:?}"
+        );
+        assert!(
+            !got.contains("\nhost: 127.0.0.1"),
+            "keys must not hoist to document root: {got:?}"
+        );
+    }
+
+    #[test]
+    fn nonblank_first_line_window_is_unchanged_by_the_fix() {
+        // Regression guard only: this window's first line is non-blank, so the
+        // new code must pick exactly the indent the old code did.
+        let content = "def f():\n    x = 1\n    y = 2\n";
+        let before = "  x = 1\n  y = 2\n";
+        let after = "  x = 10\n  y = 20\n";
+        let got = fuzzy_replace(content, before, after).unwrap();
+        assert_eq!(got, "def f():\n    x = 10\n    y = 20\n");
+    }
+
+    // EDIT-05: a `before` made only of whitespace is a wildcard against any
+    // blank line. It must be refused, not applied.
+
+    #[test]
+    fn whitespace_only_before_is_refused() {
+        let err = fuzzy_replace("alpha\n\nbeta\n", "   ", "INJECTED\n").unwrap_err();
+        assert_eq!(err, FuzzyError::EmptyBefore);
+    }
+
+    #[test]
+    fn newline_only_before_is_refused() {
+        let err = fuzzy_replace("alpha\n\nbeta\n", "\n", "INJECTED\n").unwrap_err();
+        assert_eq!(err, FuzzyError::EmptyBefore);
+    }
+
+    #[test]
+    fn before_that_merely_starts_blank_is_still_accepted() {
+        // The EDIT-05 guard must not over-reject: a leading blank line is fine
+        // as long as the block carries real content somewhere.
+        let content = "alpha\n\n  beta\n";
+        let got = fuzzy_replace(content, "\nbeta\n", "\nGAMMA\n").unwrap();
+        assert!(
+            got.contains("GAMMA"),
+            "real block must still apply: {got:?}"
+        );
     }
 
     #[test]
