@@ -367,7 +367,9 @@ mod tests {
 
     #[test]
     fn is_offline_reads_truthy_env() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let _g = EnvGuard::capture();
 
         std::env::remove_var(OFFLINE_ENV);
@@ -388,7 +390,9 @@ mod tests {
 
     #[test]
     fn loopback_hosts_always_allowed() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let _g = EnvGuard::capture();
         std::env::set_var("OLLAMA_HOST", "http://localhost:11434");
 
@@ -405,7 +409,9 @@ mod tests {
 
     #[test]
     fn cloud_hosts_denied() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let _g = EnvGuard::capture();
         std::env::set_var("OLLAMA_HOST", "http://localhost:11434");
 
@@ -427,7 +433,9 @@ mod tests {
 
     #[test]
     fn configured_lan_backend_allowed_other_cloud_still_denied() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let _g = EnvGuard::capture();
         // A remote-but-LAN backend the user opted into — "your hardware".
         std::env::set_var("OLLAMA_HOST", "http://192.168.1.50:11434");
@@ -452,7 +460,9 @@ mod tests {
 
     #[test]
     fn guard_is_noop_when_offline_off() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let _g = EnvGuard::capture();
         std::env::remove_var(OFFLINE_ENV);
         // Even an obvious cloud host passes when offline mode is off.
@@ -462,7 +472,9 @@ mod tests {
 
     #[test]
     fn guard_blocks_cloud_and_allows_backend_when_offline_on() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let _g = EnvGuard::capture();
         std::env::set_var("OLLAMA_HOST", "http://localhost:11434");
         std::env::set_var(OFFLINE_ENV, "1");
@@ -492,7 +504,9 @@ mod tests {
 
     #[test]
     fn allow_list_includes_loopback_and_lan_backend() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let _g = EnvGuard::capture();
 
         std::env::set_var("OLLAMA_HOST", "http://localhost:11434");
@@ -512,7 +526,9 @@ mod tests {
 
     #[test]
     fn proxy_vars_set_detects_both_spellings() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let _g = EnvGuard::capture();
         EnvGuard::clear_proxies();
 
@@ -555,7 +571,9 @@ mod tests {
 
     #[test]
     fn preflight_is_noop_when_offline_off() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let _g = EnvGuard::capture();
         EnvGuard::clear_proxies();
 
@@ -570,7 +588,9 @@ mod tests {
 
     #[test]
     fn preflight_refuses_offline_with_proxy() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let _g = EnvGuard::capture();
         EnvGuard::clear_proxies();
 

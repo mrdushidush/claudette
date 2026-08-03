@@ -3699,7 +3699,7 @@ mod tests {
 
     #[test]
     fn post_edit_check_off_leaves_tool_result_untouched() {
-        let _lock = crate::tools::post_edit_check::ENV_LOCK.lock().unwrap();
+        let _guard = crate::tools::post_edit_check::CheckEnvGuard::acquire();
         std::env::remove_var(crate::tools::post_edit_check::CHECK_ENV);
         // A command that WOULD fail if the feature ran while disabled.
         std::env::set_var(
@@ -3713,13 +3713,11 @@ mod tests {
             output, "ok",
             "knob off must leave the result byte-identical"
         );
-
-        std::env::remove_var(crate::tools::post_edit_check::CMD_ENV);
     }
 
     #[test]
     fn post_edit_check_appends_failure_output() {
-        let _lock = crate::tools::post_edit_check::ENV_LOCK.lock().unwrap();
+        let _guard = crate::tools::post_edit_check::CheckEnvGuard::acquire();
         std::env::set_var(crate::tools::post_edit_check::CHECK_ENV, "1");
         std::env::set_var(
             crate::tools::post_edit_check::CMD_ENV,
@@ -3736,9 +3734,6 @@ mod tests {
             output.contains("[post_edit_check] the edited file fails its check:"),
             "check failure must be appended: {output}"
         );
-
-        std::env::remove_var(crate::tools::post_edit_check::CHECK_ENV);
-        std::env::remove_var(crate::tools::post_edit_check::CMD_ENV);
     }
 
     // CHECK-01 at the call site. The unit tests cover the mapping; this covers
@@ -3762,7 +3757,7 @@ mod tests {
             return;
         }
 
-        let _lock = crate::tools::post_edit_check::ENV_LOCK.lock().unwrap();
+        let _guard = crate::tools::post_edit_check::CheckEnvGuard::acquire();
         std::env::set_var(crate::tools::post_edit_check::CHECK_ENV, "1");
         std::env::set_var(crate::tools::post_edit_check::TIMEOUT_ENV, "1");
         // CLAUDETTE_CHECK_CMD is split on whitespace, so the -c body must not
@@ -3774,10 +3769,6 @@ mod tests {
 
         let summary = run_write_file_turn(vec!["a.rs"]);
         let output = tool_result_output(&summary, 0);
-
-        std::env::remove_var(crate::tools::post_edit_check::CHECK_ENV);
-        std::env::remove_var(crate::tools::post_edit_check::CMD_ENV);
-        std::env::remove_var(crate::tools::post_edit_check::TIMEOUT_ENV);
 
         assert!(
             output.starts_with("ok"),
@@ -3799,7 +3790,7 @@ mod tests {
 
     #[test]
     fn post_edit_check_caps_rounds_per_file() {
-        let _lock = crate::tools::post_edit_check::ENV_LOCK.lock().unwrap();
+        let _guard = crate::tools::post_edit_check::CheckEnvGuard::acquire();
         std::env::set_var(crate::tools::post_edit_check::CHECK_ENV, "1");
         std::env::set_var(
             crate::tools::post_edit_check::CMD_ENV,
@@ -3820,10 +3811,6 @@ mod tests {
             second.contains("still fails its check (output suppressed"),
             "round 2 gets the suppression notice: {second}"
         );
-
-        std::env::remove_var(crate::tools::post_edit_check::CHECK_ENV);
-        std::env::remove_var(crate::tools::post_edit_check::CMD_ENV);
-        std::env::remove_var(crate::tools::post_edit_check::MAX_ROUNDS_ENV);
     }
 
     // ── W5b: apply_context_eviction Cow wrapper ─────────────────────────────

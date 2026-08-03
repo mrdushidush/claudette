@@ -313,6 +313,58 @@ pub(crate) fn run_post_edit_check(file: &Path, workspace: &Path) -> CheckOutcome
 #[cfg(test)]
 pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Holds `ENV_LOCK` and restores every env var these tests touch on drop.
+///
+/// Manual `remove_var` calls placed after a test's assertions never run when an
+/// assertion fails, so a failing test used to leak `CLAUDETTE_POST_EDIT_CHECK=1`
+/// into every later test in the binary (roast CI-03). `Drop` runs during unwind,
+/// so this restores state even on panic.
+#[cfg(test)]
+pub(crate) struct CheckEnvGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    saved: Vec<(&'static str, Option<String>)>,
+}
+
+#[cfg(test)]
+impl CheckEnvGuard {
+    pub(crate) fn acquire() -> Self {
+        let guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // OFFLINE_ENV belongs here even though it is not a post-edit-check
+        // knob: run_post_edit_check_skips_under_offline sets it, and a guard
+        // that restores everything *except* it would leak CLAUDETTE_OFFLINE=1
+        // into every later test in the binary — which is the exact class of bug
+        // this guard exists to prevent.
+        let saved = [
+            CHECK_ENV,
+            CMD_ENV,
+            TIMEOUT_ENV,
+            MAX_ROUNDS_ENV,
+            crate::egress::OFFLINE_ENV,
+        ]
+        .into_iter()
+        .map(|k| (k, std::env::var(k).ok()))
+        .collect();
+        Self {
+            _lock: guard,
+            saved,
+        }
+    }
+}
+
+#[cfg(test)]
+impl Drop for CheckEnvGuard {
+    fn drop(&mut self) {
+        for (key, value) in &self.saved {
+            match value {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,7 +380,7 @@ mod tests {
 
     #[test]
     fn enabled_defaults_off_and_parses_truthy() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _guard = CheckEnvGuard::acquire();
         // Unset → false.
         unset_env(CHECK_ENV);
         assert!(!enabled());
@@ -350,13 +402,11 @@ mod tests {
         assert!(!enabled());
         set_env(CHECK_ENV, "");
         assert!(!enabled());
-
-        unset_env(CHECK_ENV);
     }
 
     #[test]
     fn timeout_defaults_and_clamps() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _guard = CheckEnvGuard::acquire();
         // Unset → 10.
         unset_env(TIMEOUT_ENV);
         assert_eq!(timeout_secs(), 10);
@@ -490,7 +540,7 @@ mod tests {
 
     #[test]
     fn run_post_edit_check_disabled_returns_skipped() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _guard = CheckEnvGuard::acquire();
         // Ensure CHECK_ENV is unset so enabled() → false.
         unset_env(CHECK_ENV);
         // Point CMD_ENV at a nonexistent program — if the function were to
@@ -504,13 +554,11 @@ mod tests {
             "should return Skipped when disabled; got {:?}",
             result
         );
-
-        unset_env(CMD_ENV);
     }
 
     #[test]
     fn run_post_edit_check_skips_under_offline() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _guard = CheckEnvGuard::acquire();
         set_env(CHECK_ENV, "1");
         // Simulate offline mode.
         std::env::set_var(crate::egress::OFFLINE_ENV, "1");
@@ -522,14 +570,11 @@ mod tests {
             "should return Skipped under offline; got {:?}",
             result
         );
-
-        unset_env(CHECK_ENV);
-        std::env::remove_var(crate::egress::OFFLINE_ENV);
     }
 
     #[test]
     fn max_rounds_defaults_and_clamps() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _guard = CheckEnvGuard::acquire();
         // Unset → 2.
         unset_env(MAX_ROUNDS_ENV);
         assert_eq!(max_rounds(), 2);
@@ -545,8 +590,6 @@ mod tests {
 
         set_env(MAX_ROUNDS_ENV, "garbage");
         assert_eq!(max_rounds(), 2); // fallback default.
-
-        unset_env(MAX_ROUNDS_ENV);
     }
 
     fn fake_run(success: bool, timed_out: bool, stdout: &str) -> crate::test_runner::CommandResult {

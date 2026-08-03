@@ -1729,7 +1729,9 @@ mod tests {
 
     #[test]
     fn human_review_disabled_under_auto_approve() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let prev_aa = std::env::var("CLAUDETTE_FORGE_AUTO_APPROVE").ok();
         let prev_nr = std::env::var("CLAUDETTE_FORGE_NO_REVIEW").ok();
         std::env::set_var("CLAUDETTE_FORGE_AUTO_APPROVE", "1");
@@ -1742,7 +1744,9 @@ mod tests {
 
     #[test]
     fn human_review_on_by_default_and_opt_out_works() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let prev_aa = std::env::var("CLAUDETTE_FORGE_AUTO_APPROVE").ok();
         let prev_nr = std::env::var("CLAUDETTE_FORGE_NO_REVIEW").ok();
         std::env::remove_var("CLAUDETTE_FORGE_AUTO_APPROVE");
@@ -1759,7 +1763,9 @@ mod tests {
 
     #[test]
     fn build_check_on_by_default_and_opt_out_works() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let prev = std::env::var("CLAUDETTE_FORGE_NO_BUILD_CHECK").ok();
         std::env::remove_var("CLAUDETTE_FORGE_NO_BUILD_CHECK");
         assert!(forge_build_check_enabled());
@@ -1770,7 +1776,9 @@ mod tests {
 
     #[test]
     fn test_timeout_defaults_and_clamps() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let prev = std::env::var("CLAUDETTE_FORGE_TEST_TIMEOUT_SECS").ok();
         std::env::remove_var("CLAUDETTE_FORGE_TEST_TIMEOUT_SECS");
         assert_eq!(forge_test_timeout_secs(), 180);

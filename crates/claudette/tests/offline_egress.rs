@@ -83,7 +83,9 @@ fn offline_probe_input(tool: &str) -> &'static str {
 
 #[test]
 fn every_net_tool_refuses_under_offline() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let _env = OfflineEnv::set();
 
     for tool in all_net_tools() {
@@ -99,7 +101,9 @@ fn every_net_tool_refuses_under_offline() {
 
 #[test]
 fn backend_and_loopback_stay_allowed_under_offline() {
-    let _lock = ENV_LOCK.lock().unwrap();
+    let _lock = ENV_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let _env = OfflineEnv::set();
 
     // The backend / recall-embeddings path is on the allow-list — offline mode

@@ -395,7 +395,9 @@ mod tests {
 
     #[test]
     fn default_session_path_honors_env_var() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let path = temp_session_file("env-var");
         let prev = std::env::var("CLAUDETTE_SESSION").ok();
         std::env::set_var("CLAUDETTE_SESSION", &path);
@@ -446,7 +448,9 @@ mod tests {
 
     #[test]
     fn maybe_compact_session_no_op_when_under_threshold() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let prev = std::env::var("CLAUDETTE_COMPACT_THRESHOLD").ok();
         std::env::set_var("CLAUDETTE_COMPACT_THRESHOLD", "1000000");
 
@@ -477,7 +481,9 @@ mod tests {
 
     #[test]
     fn maybe_compact_session_fires_when_over_threshold() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let prev = std::env::var("CLAUDETTE_COMPACT_THRESHOLD").ok();
         // Threshold of 10 tokens — every realistic session crosses this.
         std::env::set_var("CLAUDETTE_COMPACT_THRESHOLD", "10");
