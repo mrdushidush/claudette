@@ -740,20 +740,35 @@ where
                                 let path = read_file_path(&input);
                                 if !path.is_empty() {
                                     let workspace = crate::missions::active_cwd();
-                                    if let Some(check) =
+                                    use crate::tools::post_edit_check::CheckOutcome;
+                                    let outcome =
                                         crate::tools::post_edit_check::run_post_edit_check(
                                             std::path::Path::new(&path),
                                             &workspace,
-                                        )
-                                    {
+                                        );
+                                    // Skipped/Passed append nothing. Failed and
+                                    // TimedOut both consume a round, so a
+                                    // persistently slow or broken check cannot
+                                    // spam every edit in the turn.
+                                    let note = match outcome {
+                                        CheckOutcome::Skipped | CheckOutcome::Passed => None,
+                                        CheckOutcome::Failed(check) => Some(format!(
+                                            "\n\n[post_edit_check] the edited file fails its check:\n{check}\nFix this before moving on."
+                                        )),
+                                        CheckOutcome::TimedOut(secs) => Some(
+                                            crate::tools::post_edit_check::timeout_notice(
+                                                &path, secs,
+                                            ),
+                                        ),
+                                    };
+                                    if let Some(note) = note {
                                         let rounds = {
                                             let n = check_fails.entry(path.clone()).or_insert(0);
                                             *n += 1;
                                             *n
                                         };
                                         if rounds <= crate::tools::post_edit_check::max_rounds() {
-                                            use std::fmt::Write as _;
-                                            let _ = write!(output, "\n\n[post_edit_check] the edited file fails its check:\n{check}\nFix this before moving on.");
+                                            output.push_str(&note);
                                         } else {
                                             output.push_str(
                                                 &crate::tools::post_edit_check::suppressed_notice(
@@ -3724,6 +3739,62 @@ mod tests {
 
         std::env::remove_var(crate::tools::post_edit_check::CHECK_ENV);
         std::env::remove_var(crate::tools::post_edit_check::CMD_ENV);
+    }
+
+    // CHECK-01 at the call site. The unit tests cover the mapping; this covers
+    // the only thing the model actually sees. Without it the `TimedOut` arm can
+    // be reverted to `None` and the entire suite still passes — measured.
+    #[test]
+    fn post_edit_check_timeout_reaches_the_model_as_unverified() {
+        // A real timeout needs a real slow child. Python is the portable
+        // "sleep" this crate already leans on (see test_runner's
+        // run_command_drains_large_output_without_timeout), and we skip when
+        // it is absent because the assertion only means something if the
+        // subprocess really ran. No wall-clock bound is asserted: a loaded
+        // runner can only make the 1 s timeout fire harder, never softer.
+        let probe =
+            crate::test_runner::run_command_with_timeout("python", &["-c", "pass"], 10, None);
+        if !probe.success
+            && probe.exit_code.is_none()
+            && probe.stderr.starts_with("failed to spawn")
+        {
+            eprintln!("skipping: python not on PATH");
+            return;
+        }
+
+        let _lock = crate::tools::post_edit_check::ENV_LOCK.lock().unwrap();
+        std::env::set_var(crate::tools::post_edit_check::CHECK_ENV, "1");
+        std::env::set_var(crate::tools::post_edit_check::TIMEOUT_ENV, "1");
+        // CLAUDETTE_CHECK_CMD is split on whitespace, so the -c body must not
+        // contain any: __import__("time") avoids the usual `import time;`.
+        std::env::set_var(
+            crate::tools::post_edit_check::CMD_ENV,
+            "python -c __import__(\"time\").sleep(30) {file}",
+        );
+
+        let summary = run_write_file_turn(vec!["a.rs"]);
+        let output = tool_result_output(&summary, 0);
+
+        std::env::remove_var(crate::tools::post_edit_check::CHECK_ENV);
+        std::env::remove_var(crate::tools::post_edit_check::CMD_ENV);
+        std::env::remove_var(crate::tools::post_edit_check::TIMEOUT_ENV);
+
+        assert!(
+            output.starts_with("ok"),
+            "the tool's own output stays first: {output}"
+        );
+        assert!(
+            output.contains("was NOT verified"),
+            "a timed-out check must say so rather than stay silent: {output}"
+        );
+        assert!(
+            output.contains("not a pass"),
+            "the note must not be readable as success: {output}"
+        );
+        assert!(
+            !output.contains("fails its check"),
+            "a timeout is not a failure either — it is unverified: {output}"
+        );
     }
 
     #[test]
