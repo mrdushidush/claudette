@@ -27,6 +27,23 @@ pub(crate) const MAX_OUTPUT_LINES: usize = 30;
 /// Maximum number of output characters to retain (after line cap).
 pub(crate) const MAX_OUTPUT_CHARS: usize = 2000;
 
+/// The outcome of a post-edit check.
+///
+/// A timeout is deliberately NOT folded into "clean". A check that never
+/// finished has verified nothing, and reporting silence there is exactly how a
+/// corrupt file slips through unnoticed (roast CHECK-01).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CheckOutcome {
+    /// Feature off, offline, or no check command matched this file type.
+    Skipped,
+    /// The check ran to completion and the file is clean.
+    Passed,
+    /// The check ran to completion and the file fails; truncated output.
+    Failed(String),
+    /// The check did not finish within this many seconds — file UNVERIFIED.
+    TimedOut(u64),
+}
+
 /// A check command with its program, arguments, and working directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CheckCmd {
@@ -67,6 +84,18 @@ pub(crate) fn max_rounds() -> u32 {
         .and_then(|v| v.trim().parse::<u32>().ok())
         .unwrap_or(2)
         .clamp(1, 10)
+}
+
+/// Notice body for a check that never completed.
+///
+/// Says UNVERIFIED rather than staying silent: silence is indistinguishable
+/// from a pass, which is the whole of roast CHECK-01.
+pub(crate) fn timeout_notice(path: &str, secs: u64) -> String {
+    format!(
+        "\n\n[post_edit_check] {path} was NOT verified — its check did not \
+         finish within {secs}s. This is not a pass. Re-run the check yourself, \
+         or raise CLAUDETTE_CHECK_TIMEOUT_SECS, before relying on this edit."
+    )
 }
 
 /// Suppressed-notice body when the per-file round cap is exceeded.
@@ -231,40 +260,50 @@ pub(crate) fn command_for(file: &Path, workspace: &Path) -> Option<CheckCmd> {
     builtin_cmd(file, workspace, ruff_on_path())
 }
 
-/// Run a post-edit check on `file` in `workspace`.
+/// Map a finished command run onto a `CheckOutcome`.
 ///
-/// Returns `None` unless enabled; also returns `None` under offline mode or
-/// when no command can be determined. On success (exit 0) or timeout → `None`.
-/// Otherwise returns truncated failure output.
-pub(crate) fn run_post_edit_check(file: &Path, workspace: &Path) -> Option<String> {
-    if !enabled() {
-        return None;
-    }
-
-    if crate::egress::is_offline() {
-        return None;
-    }
-
-    let cmd = command_for(file, workspace)?;
-
-    let args: Vec<&str> = cmd.args.iter().map(String::as_str).collect();
-    let result = crate::test_runner::run_command_with_timeout(
-        &cmd.program,
-        &args,
-        timeout_secs(),
-        Some(&cmd.cwd),
-    );
-
+/// Split out of `run_post_edit_check` so the timeout-vs-pass distinction is
+/// unit-testable without spawning a genuinely slow process (roast CHECK-01).
+pub(crate) fn outcome_from_run(
+    result: &crate::test_runner::CommandResult,
+    secs: u64,
+) -> CheckOutcome {
     if result.timed_out {
-        return None;
+        return CheckOutcome::TimedOut(secs);
     }
 
     if result.success {
-        return None;
+        return CheckOutcome::Passed;
     }
 
     let output = format!("{}\n{}", result.stdout, result.stderr);
-    Some(truncate_output(&output))
+    CheckOutcome::Failed(truncate_output(&output))
+}
+
+/// Run a post-edit check on `file` in `workspace`.
+///
+/// `Skipped` unless enabled, and also when offline or when no command can be
+/// determined. Otherwise the command runs and the outcome distinguishes
+/// `Passed`, `Failed` and `TimedOut` — a timeout is NOT a pass (roast CHECK-01).
+pub(crate) fn run_post_edit_check(file: &Path, workspace: &Path) -> CheckOutcome {
+    if !enabled() {
+        return CheckOutcome::Skipped;
+    }
+
+    if crate::egress::is_offline() {
+        return CheckOutcome::Skipped;
+    }
+
+    let Some(cmd) = command_for(file, workspace) else {
+        return CheckOutcome::Skipped;
+    };
+
+    let args: Vec<&str> = cmd.args.iter().map(String::as_str).collect();
+    let secs = timeout_secs();
+    let result =
+        crate::test_runner::run_command_with_timeout(&cmd.program, &args, secs, Some(&cmd.cwd));
+
+    outcome_from_run(&result, secs)
 }
 
 /// Serializes every test that mutates the post-edit-check env knobs — the
@@ -450,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn run_post_edit_check_disabled_returns_none() {
+    fn run_post_edit_check_disabled_returns_skipped() {
         let _lock = ENV_LOCK.lock().unwrap();
         // Ensure CHECK_ENV is unset so enabled() → false.
         unset_env(CHECK_ENV);
@@ -459,9 +498,10 @@ mod tests {
         set_env(CMD_ENV, "/nonexistent_program_xyz");
 
         let result = run_post_edit_check(Path::new("test.rs"), Path::new("/ws"));
-        assert!(
-            result.is_none(),
-            "should return None when disabled; got {:?}",
+        assert_eq!(
+            result,
+            CheckOutcome::Skipped,
+            "should return Skipped when disabled; got {:?}",
             result
         );
 
@@ -476,9 +516,10 @@ mod tests {
         std::env::set_var(crate::egress::OFFLINE_ENV, "1");
 
         let result = run_post_edit_check(Path::new("test.rs"), Path::new("/ws"));
-        assert!(
-            result.is_none(),
-            "should return None under offline; got {:?}",
+        assert_eq!(
+            result,
+            CheckOutcome::Skipped,
+            "should return Skipped under offline; got {:?}",
             result
         );
 
@@ -506,6 +547,64 @@ mod tests {
         assert_eq!(max_rounds(), 2); // fallback default.
 
         unset_env(MAX_ROUNDS_ENV);
+    }
+
+    fn fake_run(success: bool, timed_out: bool, stdout: &str) -> crate::test_runner::CommandResult {
+        crate::test_runner::CommandResult {
+            success,
+            stdout: stdout.to_string(),
+            stderr: String::new(),
+            timed_out,
+            exit_code: if success { Some(0) } else { Some(1) },
+        }
+    }
+
+    // CHECK-01: the whole point. A timeout and a pass used to be the same
+    // value, so a check that never ran reported the file clean.
+
+    #[test]
+    fn timed_out_run_is_not_reported_as_clean() {
+        let out = outcome_from_run(&fake_run(false, true, ""), 10);
+        assert_eq!(
+            out,
+            CheckOutcome::TimedOut(10),
+            "a timeout must be its own outcome, never Passed/Skipped"
+        );
+        assert_ne!(out, CheckOutcome::Passed, "a timeout is NOT a pass");
+    }
+
+    #[test]
+    fn successful_run_is_passed() {
+        assert_eq!(
+            outcome_from_run(&fake_run(true, false, ""), 10),
+            CheckOutcome::Passed
+        );
+    }
+
+    #[test]
+    fn failed_run_carries_its_output() {
+        let out = outcome_from_run(&fake_run(false, false, "E0308 mismatched types"), 10);
+        match out {
+            CheckOutcome::Failed(text) => {
+                assert!(
+                    text.contains("E0308"),
+                    "failure output must survive: {text}"
+                );
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn timeout_notice_says_unverified_and_names_the_file() {
+        let notice = timeout_notice("src/main.rs", 10);
+        assert!(notice.contains("src/main.rs"));
+        assert!(notice.contains("NOT verified"));
+        assert!(notice.contains("10s"));
+        assert!(
+            notice.contains("not a pass"),
+            "the notice must not be readable as success: {notice}"
+        );
     }
 
     #[test]
