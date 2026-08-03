@@ -202,7 +202,9 @@ mod tests {
 
     #[test]
     fn compact_threshold_default_when_env_var_unset() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let prev = std::env::var("CLAUDETTE_COMPACT_THRESHOLD").ok();
         std::env::remove_var("CLAUDETTE_COMPACT_THRESHOLD");
 
@@ -218,7 +220,9 @@ mod tests {
 
     #[test]
     fn compact_threshold_honors_env_var() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let prev = std::env::var("CLAUDETTE_COMPACT_THRESHOLD").ok();
         std::env::set_var("CLAUDETTE_COMPACT_THRESHOLD", "12345");
 
@@ -232,7 +236,9 @@ mod tests {
 
     #[test]
     fn compact_threshold_falls_back_on_garbage() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let prev = std::env::var("CLAUDETTE_COMPACT_THRESHOLD").ok();
         std::env::set_var("CLAUDETTE_COMPACT_THRESHOLD", "not-a-number");
 
@@ -326,7 +332,9 @@ mod tests {
 
     #[test]
     fn soft_compact_threshold_returns_none_when_unset() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let prev = std::env::var("CLAUDETTE_SOFT_COMPACT_THRESHOLD").ok();
         std::env::remove_var("CLAUDETTE_SOFT_COMPACT_THRESHOLD");
 
@@ -339,7 +347,9 @@ mod tests {
 
     #[test]
     fn soft_compact_threshold_returns_some_when_set() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let prev = std::env::var("CLAUDETTE_SOFT_COMPACT_THRESHOLD").ok();
         std::env::set_var("CLAUDETTE_SOFT_COMPACT_THRESHOLD", "200000");
 
@@ -355,7 +365,9 @@ mod tests {
     fn soft_compact_threshold_treats_zero_as_unset() {
         // 0 is a magic "disabled" value — explicit opt-out via env without
         // having to unset.
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let prev = std::env::var("CLAUDETTE_SOFT_COMPACT_THRESHOLD").ok();
         std::env::set_var("CLAUDETTE_SOFT_COMPACT_THRESHOLD", "0");
 

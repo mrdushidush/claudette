@@ -176,7 +176,9 @@ mod tests {
 
     #[test]
     fn trigger_percent_parses() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // Unset → None
         std::env::remove_var(EVICT_ENV);
