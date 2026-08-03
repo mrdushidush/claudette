@@ -493,6 +493,8 @@ fn run_edit_file(input: &str) -> Result<String, String> {
         )
     })?;
 
+    super::log_file_write("edit_file", &path, Some(content.len()), new_content.len());
+
     let mut result = json!({
         "ok": true,
         "path": path.display().to_string(),

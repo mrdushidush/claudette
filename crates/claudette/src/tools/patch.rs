@@ -132,6 +132,11 @@ fn run_apply_patch(input: &str) -> Result<String, String> {
             })?;
         }
         for (path, content) in &pending {
+            // Read the pre-image size BEFORE the rename — the target still
+            // holds the original bytes at this point.
+            let previous_bytes = fs::metadata(path)
+                .ok()
+                .and_then(|m| usize::try_from(m.len()).ok());
             let tmp = path.with_extension("claudette-apply.tmp");
             fs::write(&tmp, content)
                 .map_err(|e| format!("apply_patch: write tmp {} failed: {e}", tmp.display()))?;
@@ -139,6 +144,7 @@ fn run_apply_patch(input: &str) -> Result<String, String> {
                 let _ = fs::remove_file(&tmp);
                 format!("apply_patch: rename to {} failed: {e}", path.display())
             })?;
+            super::log_file_write("apply_patch", path, previous_bytes, content.len());
         }
     }
 
