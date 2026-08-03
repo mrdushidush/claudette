@@ -429,6 +429,9 @@ where
         let mut hit_iteration_cap = false;
         let mut synthesized_reply: Option<String> = None;
         let mut ended_without_reply = false;
+        // Continuation nudges spent on content-less turns this turn. Bounded so
+        // a genuinely mute backend still terminates. See EMPTY_TURN_MAX_NUDGES.
+        let mut empty_turn_nudges = 0usize;
 
         loop {
             iterations += 1;
@@ -498,8 +501,21 @@ where
             // The ceiling actually granted to the last attempt — not the base
             // budget. Reporting the base would understate what was already tried
             // and send the user to raise a knob that had in fact been exceeded.
+            //
+            // Gated on the finish reason: a bigger budget only helps the turn
+            // that RAN OUT of room (`finish_reason=length`). A turn that stops
+            // CLEANLY carrying only reasoning has not hit any ceiling, so
+            // re-sending a byte-identical request with more room reproduces it
+            // deterministically — measured 2026-08-03, two co-dev runs burned
+            // 2 extra full-context streams each and landed zero edits. That
+            // variant is handled by the continuation nudge below instead.
+            // An absent finish_reason keeps the old behaviour (retry) — unknown
+            // is not proof the model was done.
             let mut last_ceiling = crate::api::current_num_predict();
-            while turn_produced_no_content(&events) && attempt < EMPTY_TURN_MAX_RETRIES {
+            while turn_produced_no_content(&events)
+                && stream_finish_reason(&events) != Some("stop")
+                && attempt < EMPTY_TURN_MAX_RETRIES
+            {
                 attempt += 1;
                 last_ceiling = empty_turn_retry_ceiling(attempt, crate::api::current_num_ctx());
                 let retry_request = ApiRequest {
@@ -532,6 +548,24 @@ where
                 // be its own lie, so hand the caller a line to print — the same
                 // contract the iteration-cap landing uses.
                 if !assistant_messages.is_empty() {
+                    // ASK before giving up. Keeping the work was right; ending the
+                    // run on the first silent turn was not. The runtime cannot tell
+                    // "finished" from "abandoned mid-task" by inspection — but it
+                    // can ask, and the two answer differently. A model that was done
+                    // replies in one sentence (cheap); a model that stalled resumes.
+                    //
+                    // Measured 2026-08-03: three co-dev runs on the same card ended
+                    // here after 4-8 iterations, having landed 0 of ~10 edits, while
+                    // a narrower prompt proved the model could do the work. Giving up
+                    // on the first silence was costing entire runs.
+                    if empty_turn_nudges < EMPTY_TURN_MAX_NUDGES {
+                        empty_turn_nudges += 1;
+                        self.session.messages.push(ConversationMessage::user_text(
+                            EMPTY_TURN_CONTINUATION_NUDGE,
+                        ));
+                        continue;
+                    }
+                    // Asked and still silent: stop. Keep the work, flag it honestly.
                     synthesized_reply = Some(empty_final_turn_note(&events));
                     ended_without_reply = true;
                     break;
@@ -996,6 +1030,39 @@ fn turn_produced_no_content(events: &[AssistantEvent]) -> bool {
 /// a 6144 default) without letting a genuinely mute backend spin forever.
 const EMPTY_TURN_MAX_RETRIES: u32 = 2;
 
+/// How many times a content-less turn that follows real work is asked to
+/// continue before the run gives up and flags `ended_without_reply`.
+///
+/// Two. One is too few — the observed brain emits a silent turn, resumes when
+/// asked, and can emit a second later in the same task. Many more would let a
+/// mute backend spin: every nudge costs a full-context round trip, and a model
+/// that ignored two direct "continue or say you're done" instructions is not
+/// going to answer the third.
+const EMPTY_TURN_MAX_NUDGES: usize = 2;
+
+/// Asked of a model that ended a turn with no content after doing real work.
+///
+/// Deliberately gives it BOTH exits: a finished model closes in one sentence, an
+/// unfinished one resumes. Neither answer is silence, which is the only outcome
+/// the runtime cannot act on.
+const EMPTY_TURN_CONTINUATION_NUDGE: &str =
+    "You ended that turn without a reply. If the task is complete, say so in one \
+     short sentence. If it is NOT complete, continue now — make the next tool call. \
+     Do not stop silently.";
+
+/// The `finish_reason` the backend reported for this stream, if it sent one.
+///
+/// Distinguishes the two content-less turns, which need opposite recoveries:
+/// `length` ran out of output budget (retry with more room), `stop` ended
+/// cleanly and will reproduce identically no matter how much room it is given
+/// (ask it to continue instead).
+fn stream_finish_reason(events: &[AssistantEvent]) -> Option<&str> {
+    events.iter().find_map(|event| match event {
+        AssistantEvent::StreamMeta { finish_reason, .. } => finish_reason.as_deref(),
+        _ => None,
+    })
+}
+
 /// Output ceiling for empty-turn retry `attempt` (1-based): the configured
 /// `num_predict` doubled per attempt, clamped to half the context window.
 ///
@@ -1446,8 +1513,8 @@ mod tests {
         apply_context_eviction, build_turn_system_prompt, empty_turn_retry_ceiling,
         parse_auto_compaction_threshold, ApiClient, ApiRequest, AssistantEvent,
         AutoCompactionEvent, ConversationRuntime, RuntimeError, StaticToolExecutor,
-        DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD, EMPTY_TURN_MAX_RETRIES,
-        VISION_DISCIPLINE_HINT,
+        DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD, EMPTY_TURN_CONTINUATION_NUDGE,
+        EMPTY_TURN_MAX_RETRIES, VISION_DISCIPLINE_HINT,
     };
     use crate::compact::CompactionConfig;
     use crate::config::{RuntimeFeatureConfig, RuntimeHookConfig};
@@ -1775,7 +1842,8 @@ mod tests {
                 },
                 AssistantEvent::MessageStop,
             ],
-            // Iteration 2 and its retries: clean, silent, no answer.
+            // Iterations 2-4: clean, silent, no answer — through both
+            // continuation nudges and out the other side.
             silent(),
             silent(),
             silent(),
@@ -1815,6 +1883,128 @@ mod tests {
         assert!(
             summary.ended_without_reply,
             "an empty final turn must be flagged, not silently accepted as success"
+        );
+    }
+
+    #[test]
+    fn a_silent_turn_is_asked_to_continue_before_the_run_gives_up() {
+        // The 2026-08-03 co-dev blocker: the model made tool calls, then ended a
+        // turn cleanly with only reasoning. The runtime gave up right there, so
+        // three consecutive runs on the same card landed 0 of ~10 edits — while a
+        // narrower prompt proved the model could do the work perfectly well.
+        //
+        // A clean stop is not evidence the task is finished. The runtime cannot
+        // tell by inspection, but it CAN ask — and the two cases answer
+        // differently. Here the model resumes and finishes.
+        let api = QueuedApi::new(vec![
+            // Iteration 1: real work.
+            vec![
+                AssistantEvent::ToolUse {
+                    id: "call_1".to_string(),
+                    name: "add".to_string(),
+                    input: r#"{"a":1,"b":2}"#.to_string(),
+                },
+                AssistantEvent::MessageStop,
+            ],
+            // Iteration 2: silent, stopped cleanly.
+            vec![
+                AssistantEvent::StreamMeta {
+                    finish_reason: Some("stop".to_string()),
+                    reasoning_chars: 204,
+                },
+                AssistantEvent::MessageStop,
+            ],
+            // Iteration 3: asked to continue, it delivers.
+            vec![
+                AssistantEvent::TextDelta("Done — the sum is 3.".to_string()),
+                AssistantEvent::MessageStop,
+            ],
+        ]);
+        let mut runtime = queued_runtime(api);
+
+        let summary = runtime
+            .run_turn("use add", None)
+            .expect("a nudged turn must complete normally");
+
+        assert!(
+            !summary.ended_without_reply,
+            "the model answered once asked — that is a clean success, not a failure"
+        );
+        assert!(
+            summary.synthesized_reply.is_none(),
+            "nothing to synthesize: the model delivered a real reply"
+        );
+        let last_text = summary
+            .assistant_messages
+            .last()
+            .and_then(|m| {
+                m.blocks.iter().find_map(|b| match b {
+                    ContentBlock::Text { text } => Some(text.clone()),
+                    _ => None,
+                })
+            })
+            .expect("final assistant message must carry the reply");
+        assert!(last_text.contains("the sum is 3"), "got: {last_text}");
+
+        // The nudge must reach the session as a real user message, or the model
+        // was never actually asked anything.
+        let nudges = runtime
+            .session
+            .messages
+            .iter()
+            .filter(|m| {
+                m.blocks.iter().any(|b| match b {
+                    ContentBlock::Text { text } => text.as_str() == EMPTY_TURN_CONTINUATION_NUDGE,
+                    _ => false,
+                })
+            })
+            .count();
+        assert_eq!(nudges, 1, "one silent turn earns exactly one nudge");
+    }
+
+    #[test]
+    fn a_clean_stop_never_burns_a_budget_escalation_retry() {
+        // `finish_reason=stop` means the model did NOT run out of room, so
+        // re-sending a byte-identical request with a bigger ceiling reproduces it
+        // verbatim — two wasted full-context round trips per silent turn,
+        // measured live on 2026-08-03. The escalation exists for
+        // `finish_reason=length` and must not fire for this variant at all.
+        let silent = || {
+            vec![
+                AssistantEvent::StreamMeta {
+                    finish_reason: Some("stop".to_string()),
+                    reasoning_chars: 204,
+                },
+                AssistantEvent::MessageStop,
+            ]
+        };
+        let api = QueuedApi::new(vec![
+            vec![
+                AssistantEvent::ToolUse {
+                    id: "call_1".to_string(),
+                    name: "add".to_string(),
+                    input: r#"{"a":1,"b":2}"#.to_string(),
+                },
+                AssistantEvent::MessageStop,
+            ],
+            silent(),
+            silent(),
+            silent(),
+        ]);
+        let mut runtime = queued_runtime(api);
+
+        let summary = runtime.run_turn("use add", None).expect("work is kept");
+
+        assert!(
+            summary.ended_without_reply,
+            "still silent after both nudges — must be flagged, not called success"
+        );
+        // One tool-call stream plus three silent ones, and every request carries
+        // no output cap. A budget escalation would have set `Some(_)` on a retry.
+        assert_eq!(
+            runtime.api_client.seen_output_caps,
+            vec![None, None, None, None],
+            "a clean stop must never trigger a budget-escalation retry"
         );
     }
 
