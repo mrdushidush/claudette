@@ -199,35 +199,22 @@ fn run_read_file(input: &str) -> Result<String, String> {
     .to_string())
 }
 
-fn run_write_file(input: &str) -> Result<String, String> {
-    let v: Value = serde_json::from_str(input)
-        .map_err(|e| format!("write_file: invalid JSON ({e}): {input}"))?;
-    let path_str = v
-        .get("path")
-        .and_then(Value::as_str)
-        .ok_or("write_file: missing 'path'")?;
-    let content = v
-        .get("content")
-        .and_then(Value::as_str)
-        .ok_or("write_file: missing 'content'")?;
-
-    if content.len() > MAX_FILE_BYTES {
-        return Err(format!(
-            "write_file: content is {} bytes, exceeds {MAX_FILE_BYTES}-byte limit",
-            content.len()
-        ));
-    }
-
-    // Bare relative paths get resolved under either the active mission
-    // tree (T2) or the scratch sandbox, NOT against the process CWD.
-    // Reasoning: the model says "save it to dolphins-post.txt" and
-    // expects it to land somewhere reasonable. Pre-T2 we rooted bare
-    // relative paths under ~/.claudette/files/. T2 keeps that fallback
-    // but routes to the mission tree when a brownfield mission is
-    // active — matching the brain's likely intent ("save README.md"
-    // means *the project's* README, not a copy in scratch).
-    // Absolute and ~/-prefixed paths still flow through validate_write_path
-    // unchanged so the user can still explicitly target a sub-folder.
+/// Resolve the raw `path` argument `write_file` was given to the file it will
+/// actually touch. Extracted from `run_write_file` so the permission gate
+/// (`PermissionPolicy::effective_required_mode`) and the `[y/N]` preview
+/// (`diff_preview::render`) test the SAME path the write uses — a second copy
+/// of this logic would drift and gate the wrong file.
+///
+/// Bare relative paths get resolved under either the active mission tree (T2)
+/// or the scratch sandbox, NOT against the process CWD. Reasoning: the model
+/// says "save it to dolphins-post.txt" and expects it to land somewhere
+/// reasonable. Pre-T2 we rooted bare relative paths under ~/.claudette/files/.
+/// T2 keeps that fallback but routes to the mission tree when a brownfield
+/// mission is active — matching the brain's likely intent ("save README.md"
+/// means *the project's* README, not a copy in scratch). Absolute and
+/// ~/-prefixed paths still flow through validate_write_path unchanged so the
+/// user can still explicitly target a sub-folder.
+fn resolve_write_target(path_str: &str) -> Result<std::path::PathBuf, String> {
     let resolved_input = if Path::new(path_str).is_absolute()
         || path_str.starts_with("~/")
         || path_str.starts_with("~\\")
@@ -247,7 +234,43 @@ fn run_write_file(input: &str) -> Result<String, String> {
         };
         base.join(path_str).display().to_string()
     };
-    let path = validate_write_path(&resolved_input)?;
+    validate_write_path(&resolved_input)
+}
+
+/// The file `write_file` would OVERWRITE for this raw `path` argument, or
+/// `None` when the call would create something new.
+///
+/// `is_file()`, not `exists()`: a directory target makes `run_write_file` fail
+/// anyway, and a preview must never try to read one as text.
+///
+/// Returning `None` for an unresolvable path is deliberate and safe — those
+/// calls make `run_write_file` return `Err` before touching the disk, so there
+/// is nothing to gate.
+pub(crate) fn existing_write_target(path_str: &str) -> Option<std::path::PathBuf> {
+    let path = resolve_write_target(path_str).ok()?;
+    path.is_file().then_some(path)
+}
+
+fn run_write_file(input: &str) -> Result<String, String> {
+    let v: Value = serde_json::from_str(input)
+        .map_err(|e| format!("write_file: invalid JSON ({e}): {input}"))?;
+    let path_str = v
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or("write_file: missing 'path'")?;
+    let content = v
+        .get("content")
+        .and_then(Value::as_str)
+        .ok_or("write_file: missing 'content'")?;
+
+    if content.len() > MAX_FILE_BYTES {
+        return Err(format!(
+            "write_file: content is {} bytes, exceeds {MAX_FILE_BYTES}-byte limit",
+            content.len()
+        ));
+    }
+
+    let path = resolve_write_target(path_str)?;
 
     if let Some(parent) = path.parent() {
         ensure_dir(parent)?;
@@ -257,16 +280,22 @@ fn run_write_file(input: &str) -> Result<String, String> {
     // have nothing to preserve. Fail-closed: no snapshot, no overwrite
     // (recoverability is the feature; a silent truncate was the data-loss
     // path the roast flagged).
-    if path.exists() {
+    let previous_bytes: Option<usize> = if path.exists() {
         crate::transcript::snapshot_to_trash(&path).map_err(|e| {
             format!(
                 "write_file: pre-image snapshot failed, refusing to overwrite {}: {e}",
                 path.display()
             )
         })?;
-    }
+        fs::metadata(&path)
+            .ok()
+            .and_then(|m| usize::try_from(m.len()).ok())
+    } else {
+        None
+    };
     fs::write(&path, content)
         .map_err(|e| format!("write_file: write {} failed: {e}", path.display()))?;
+    super::log_file_write("write_file", &path, previous_bytes, content.len());
 
     let result = json!({
         "ok": true,
@@ -398,6 +427,39 @@ mod tests {
                 std::fs::read_to_string(&entries[0]).unwrap(),
                 "v1",
                 "pre-image must hold the truncated content"
+            );
+
+            match prev_ws {
+                Some(v) => std::env::set_var("CLAUDETTE_WORKSPACE", v),
+                None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+            }
+        });
+    }
+
+    #[test]
+    fn existing_write_target_distinguishes_create_from_overwrite() {
+        crate::with_temp_home(|_home| {
+            let prev_ws = std::env::var("CLAUDETTE_WORKSPACE").ok();
+            std::env::remove_var("CLAUDETTE_WORKSPACE");
+
+            // Nothing there yet → a create, no danger-tier escalation.
+            assert!(
+                existing_write_target("target.txt").is_none(),
+                "a path with no file must read as a create"
+            );
+
+            run_write_file(r#"{"path":"target.txt","content":"v1"}"#).unwrap();
+
+            // Same path, now occupied → an overwrite the gate must catch.
+            let found = existing_write_target("target.txt")
+                .expect("an existing file must read as an overwrite");
+            assert_eq!(std::fs::read_to_string(&found).unwrap(), "v1");
+
+            // A directory is not an overwrite target — write_file refuses it
+            // anyway and a preview must never read one as text.
+            assert!(
+                existing_write_target(".").is_none(),
+                "a directory must not read as an overwrite"
             );
 
             match prev_ws {

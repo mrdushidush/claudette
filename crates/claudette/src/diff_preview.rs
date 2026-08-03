@@ -26,6 +26,7 @@ pub fn render(tool_name: &str, input: &str) -> Option<Vec<String>> {
         "apply_diff" => render_replacement(input, "before", "after"),
         "edit_file" => render_replacement(input, "old_text", "new_text"),
         "apply_patch" => render_unified(input),
+        "write_file" => render_overwrite(input),
         _ => None,
     }
 }
@@ -74,6 +75,37 @@ pub fn render_file_change(path: &str, old: &str, new: &str) -> Vec<String> {
         out.push(theme::dim(&format!("  {line}")).to_string());
     }
     out
+}
+
+/// Render a `write_file` that would REPLACE an existing file: read what is on
+/// disk right now and diff it against the content about to land, so the `[y/N]`
+/// gate shows what is being LOST rather than a wall of new content.
+///
+/// `None` for a brand-new file (nothing to lose — the raw dump is the right
+/// rendering there) or when the target can't be resolved or read as text.
+fn render_overwrite(input: &str) -> Option<Vec<String>> {
+    let v: Value = serde_json::from_str(input).ok()?;
+    let path_str = v.get("path").and_then(Value::as_str)?;
+    let content = v.get("content").and_then(Value::as_str)?;
+    let target = crate::tools::file_ops::existing_write_target(path_str)?;
+    let existing = std::fs::read_to_string(&target).ok()?;
+
+    let mut out = render_file_change(&target.display().to_string(), &existing, content);
+    // Headline the size change right under the path header. A whole-file diff
+    // of a truncation is hundreds of `-` lines, and the one number that decides
+    // the answer must not be something the reviewer has to count.
+    out.insert(
+        1,
+        theme::warn(&format!(
+            "OVERWRITING an existing file: {} lines ({} bytes) → {} lines ({} bytes)",
+            existing.lines().count(),
+            existing.len(),
+            content.lines().count(),
+            content.len(),
+        ))
+        .to_string(),
+    );
+    Some(out)
 }
 
 /// Render an apply_patch unified diff with per-line coloring: file headers and
@@ -206,5 +238,40 @@ mod tests {
         assert!(render("apply_diff", "not json").is_none());
         assert!(render("apply_diff", r#"{"path":"f","before":"x"}"#).is_none());
         assert!(render("apply_patch", r#"{"dry_run":true}"#).is_none());
+    }
+
+    /// roast EDIT-04: an overwrite preview must show what is being LOST and
+    /// lead with the size change — a truncation is otherwise hundreds of `-`
+    /// lines the reviewer has to count.
+    #[test]
+    fn write_file_overwrite_previews_the_loss() {
+        crate::with_temp_home(|_home| {
+            let prev_ws = std::env::var("CLAUDETTE_WORKSPACE").ok();
+            std::env::remove_var("CLAUDETTE_WORKSPACE");
+
+            // A path with no file behind it: nothing to lose, no preview.
+            let create = r#"{"path":"nothing-here.txt","content":"new\n"}"#;
+            assert!(render("write_file", create).is_none());
+
+            let target = crate::tools::file_ops::existing_write_target("nothing-here.txt");
+            assert!(target.is_none());
+
+            // Now make the file exist, then aim a truncating write at it.
+            let dir = crate::tools::files_dir();
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("victim.txt"), "keep\nme\nplease\n").unwrap();
+
+            let out = render("write_file", r#"{"path":"victim.txt","content":"oops\n"}"#)
+                .expect("an existing target must render a preview");
+            let joined = out.join("\n");
+            assert!(joined.contains("OVERWRITING"), "no size headline: {joined}");
+            assert!(joined.contains("- keep"), "lost line not shown: {joined}");
+            assert!(joined.contains("+ oops"), "new line not shown: {joined}");
+
+            match prev_ws {
+                Some(v) => std::env::set_var("CLAUDETTE_WORKSPACE", v),
+                None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+            }
+        });
     }
 }

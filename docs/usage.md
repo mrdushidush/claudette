@@ -103,6 +103,11 @@ Four additional commands are **Telegram-only** (they have no effect in the REPL 
 | **WorkspaceWrite** | Auto-allowed | note_create, todo_add, web_search, github comment |
 | **DangerFullAccess** | Prompts `[y/N]` every time | bash, edit_file, git add/commit/push/checkout, cross-org PRs |
 
+`write_file` is `WorkspaceWrite` when it creates a file and `DangerFullAccess` when
+the target already exists — overwriting a file is an edit, so it prompts and shows a
+diff of what would be lost. Every completed file write also prints a `▸` line naming
+the file and its size change, so unattended runs leave a trail.
+
 The REPL prompter is interactive. The TUI shows a confirmation modal over the chat — `y` allows; `n`, `Esc`, or `Enter` denies (deny is the default); long inputs scroll with `↑`/`↓` and are never truncated. Telegram bot denies DangerFullAccess by default (no TTY to confirm with).
 
 ## Sessions and auto-compaction

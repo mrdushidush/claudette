@@ -43,7 +43,7 @@ mod calendar {
 mod clipboard;
 mod dialog;
 mod facts;
-mod file_ops;
+pub(crate) mod file_ops;
 mod forge_tail;
 mod fuzzy_apply;
 mod git;
@@ -957,6 +957,37 @@ fn reject_write_symlink_escape(resolved: &Path, roots: &[PathBuf]) -> Result<(),
             target_canon.display()
         ))
     }
+}
+
+/// Emit one `▸` line for a completed file mutation, mirroring `apply_diff`'s
+/// call logging (`fuzzy_apply.rs`). Shared by `write_file`, `edit_file` and
+/// `apply_patch`, all three of which used to mutate files in COMPLETE silence:
+/// a live unattended run replaced a 710-line source file with a ~40-line
+/// fragment and the whole run log was 214 bytes (roast EDIT-04, reproduced
+/// 2026-08-02). Under `CLAUDETTE_AUTO_APPROVE=1` no permission prompt can
+/// fire, so this line is the only signal that anything happened at all.
+///
+/// `previous_bytes` is the size of what was replaced, or `None` for a newly
+/// created file. Losing more than half the file is printed in the warning
+/// colour: that is the signature of an output-budget cut mid-generation, and
+/// it is the one case worth interrupting a run for.
+pub(super) fn log_file_write(
+    tool: &str,
+    path: &Path,
+    previous_bytes: Option<usize>,
+    new_bytes: usize,
+) {
+    let line = match previous_bytes {
+        Some(before) => format!("{tool}: {} ({before} → {new_bytes} bytes)", path.display()),
+        None => format!("{tool}: {} (new, {new_bytes} bytes)", path.display()),
+    };
+    let shrank = previous_bytes.is_some_and(|before| new_bytes.saturating_mul(2) < before);
+    let body = if shrank {
+        crate::theme::warn(&format!("{line} — LOST MORE THAN HALF THE FILE"))
+    } else {
+        crate::theme::dim(&line)
+    };
+    eprintln!("  {} {}", crate::theme::dim("▸"), body);
 }
 
 /// Validate a write path. Allowed roots:

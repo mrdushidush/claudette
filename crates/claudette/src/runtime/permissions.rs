@@ -217,6 +217,40 @@ impl PermissionPolicy {
         scored.into_iter().map(|(_, n)| n).take(max).collect()
     }
 
+    /// The tier this specific CALL needs: `required_mode_for` (name only) plus
+    /// the one input-dependent rule we have.
+    ///
+    /// `write_file` onto a path that ALREADY EXISTS is an edit, not a create,
+    /// and every other edit tool (`edit_file`, `apply_diff`, `apply_patch`) is
+    /// `DangerFullAccess`. Leaving it at `WorkspaceWrite` made the only tool
+    /// that can replace a whole file the only one that never prompts and never
+    /// previews (roast EDIT-04): an output-budget cut mid-generation yields a
+    /// partial `content`, and the whole file is silently replaced by it.
+    ///
+    /// Deliberately lenient when the input cannot be evaluated (unparseable
+    /// JSON, no `path`, a path that fails `validate_write_path`). That is NOT
+    /// the "a guard that cannot evaluate its condition must refuse" case — in
+    /// every one of those branches `run_write_file` returns `Err` before
+    /// touching the disk, so there is provably nothing to guard.
+    #[must_use]
+    pub fn effective_required_mode(&self, tool_name: &str, input: &str) -> PermissionMode {
+        let base = self.required_mode_for(tool_name);
+        if tool_name != "write_file" || base != PermissionMode::WorkspaceWrite {
+            return base;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(input) else {
+            return base;
+        };
+        let Some(path_str) = v.get("path").and_then(serde_json::Value::as_str) else {
+            return base;
+        };
+        if crate::tools::file_ops::existing_write_target(path_str).is_some() {
+            PermissionMode::DangerFullAccess
+        } else {
+            base
+        }
+    }
+
     #[must_use]
     pub fn authorize(
         &self,
@@ -225,7 +259,7 @@ impl PermissionPolicy {
         mut prompter: Option<&mut dyn PermissionPrompter>,
     ) -> PermissionOutcome {
         let current_mode = self.active_mode();
-        let required_mode = self.required_mode_for(tool_name);
+        let required_mode = self.effective_required_mode(tool_name, input);
 
         // Hard cap: deny without prompt when a tool's required tier exceeds
         // the policy's `max_tier`. Independent of `active_mode` so even an
@@ -602,5 +636,56 @@ mod tests {
 
         assert_eq!(outcome, PermissionOutcome::Allow);
         assert_eq!(prompter.seen.len(), 1, "prompter should still be invoked");
+    }
+
+    /// roast EDIT-04: `write_file` onto an EXISTING file is an edit, so it must
+    /// reach the danger tier — the same tier `edit_file` / `apply_diff` /
+    /// `apply_patch` already sit at. Creating a new file stays auto-allowed.
+    #[test]
+    fn write_file_escalates_to_danger_only_when_it_overwrites() {
+        crate::with_temp_home(|_home| {
+            let prev_ws = std::env::var("CLAUDETTE_WORKSPACE").ok();
+            std::env::remove_var("CLAUDETTE_WORKSPACE");
+
+            let policy = crate::run::build_permission_policy();
+
+            let create = r#"{"path":"brand-new.txt","content":"hello"}"#;
+            assert_eq!(
+                policy.effective_required_mode("write_file", create),
+                PermissionMode::WorkspaceWrite,
+                "creating a file must stay auto-allowed"
+            );
+            assert_eq!(
+                policy.authorize("write_file", create, None),
+                PermissionOutcome::Allow
+            );
+
+            // Create it, then aim at it again.
+            crate::tools::dispatch_tool("write_file", create).expect("create should succeed");
+
+            assert_eq!(
+                policy.effective_required_mode("write_file", create),
+                PermissionMode::DangerFullAccess,
+                "overwriting an existing file must reach the danger tier"
+            );
+            // Non-interactive session (no prompter) can no longer silently
+            // truncate it — exactly how edit_file already behaves there.
+            assert!(matches!(
+                policy.authorize("write_file", create, None),
+                PermissionOutcome::Deny { .. }
+            ));
+
+            // An input the gate cannot evaluate is left alone: run_write_file
+            // rejects it before touching the disk, so there is nothing to guard.
+            assert_eq!(
+                policy.effective_required_mode("write_file", "{}"),
+                PermissionMode::WorkspaceWrite
+            );
+
+            match prev_ws {
+                Some(v) => std::env::set_var("CLAUDETTE_WORKSPACE", v),
+                None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
+            }
+        });
     }
 }
