@@ -34,6 +34,10 @@ enum FuzzyError {
     NotFound,
     EmptyBefore,
     Ambiguous,
+    /// `after` mixes tabs and spaces so a line's indentation can be related to
+    /// neither the block's anchor nor the file's. Refusing beats guessing: the
+    /// old fallback invented an indent the caller never sent (roast EDIT-02).
+    IndentMismatch,
 }
 
 pub(super) fn schemas() -> Vec<Value> {
@@ -168,6 +172,12 @@ fn run_apply_diff(input: &str) -> Result<String, String> {
                      contain at least one non-whitespace character"
                         .to_string()
                 }
+                FuzzyError::IndentMismatch => format!(
+                    "apply_diff: the 'after' block mixes tabs and spaces in a way that \
+                     cannot be lined up with its own first line, so it cannot be \
+                     re-indented into {raw_path} without inventing whitespace. Re-send \
+                     'after' using the file's actual indentation."
+                ),
             };
             eprintln!(
                 "  {} {}",
@@ -221,6 +231,18 @@ fn leading_ws(line: &str) -> &str {
     &line[..end]
 }
 
+/// The leading whitespace of a block's first non-blank line.
+///
+/// Shared so the caller can ask "is `after` already at the file's indent?" using
+/// exactly the anchor `reindent_to` would rebase against — two different answers
+/// to that question is how a block gets rebased onto itself (roast EDIT-02).
+fn anchor_indent(block: &str) -> &str {
+    block
+        .split_inclusive('\n')
+        .find(|l| !l.trim().is_empty())
+        .map_or("", |l| leading_ws(l))
+}
+
 /// Rebase `block` so its FIRST non-blank line sits at `target_indent`, shifting
 /// every other line by the SAME amount so the block keeps its internal relative
 /// nesting — including lines that dedent BELOW the first line (a closing brace,
@@ -239,22 +261,24 @@ fn leading_ws(line: &str) -> &str {
 /// when the first line was deeper than that minimum — e.g. an edit ending in a
 /// less-indented `}` — every line was shifted right by the difference, silently
 /// mis-indenting the whole block. Dogfood Tasks 9/10.)
-fn reindent_to(block: &str, target_indent: &str) -> String {
+///
+/// Refuses with `IndentMismatch` rather than guessing when a line's indentation
+/// neither extends nor prefixes the anchor. The old fallback pushed
+/// `target_indent` onto such a line, INVENTING whitespace the caller never sent
+/// (roast EDIT-02).
+fn reindent_to(block: &str, target_indent: &str) -> Result<String, FuzzyError> {
     let lines: Vec<&str> = block.split_inclusive('\n').collect();
     // Anchor = the leading whitespace of the first non-blank line. Every line is
     // re-based by the same (target − anchor) delta so relative nesting survives.
-    let anchor = lines
-        .iter()
-        .find(|l| !l.trim().is_empty())
-        .map_or("", |l| leading_ws(l));
+    let anchor = anchor_indent(block);
     let mut out = String::with_capacity(block.len() + target_indent.len() * lines.len());
     for line in &lines {
         if line.trim().is_empty() {
-            // Preserve a blank line as just its break (no trailing indent);
-            // normalize_eol re-encodes the terminator afterwards.
-            if line.ends_with('\n') {
-                out.push('\n');
-            }
+            // Preserve a blank line VERBATIM. Collapsing it to a bare break
+            // drops whitespace that may be CONTENT rather than layout — a blank
+            // line inside a heredoc or a multi-line string literal is part of
+            // the string's value (roast EDIT-02).
+            out.push_str(line);
             continue;
         }
         let ws = leading_ws(line);
@@ -270,13 +294,13 @@ fn reindent_to(block: &str, target_indent: &str) -> String {
             let keep = target_indent.len().saturating_sub(removed.len());
             out.push_str(&target_indent[..keep]);
         } else {
-            // Indentation styles diverge (mixed tabs/spaces): fall back to the
-            // target indent so at least the first-line anchor is honored.
-            out.push_str(target_indent);
+            // Indentation styles diverge (mixed tabs/spaces). Refuse: inventing
+            // an indent for this line is what corrupted files silently.
+            return Err(FuzzyError::IndentMismatch);
         }
         out.push_str(body);
     }
-    out
+    Ok(out)
 }
 
 /// Replace the first occurrence of `before` in `content` with `after`.
@@ -378,7 +402,15 @@ fn fuzzy_replace(content: &str, before: &str, after: &str) -> Result<String, Fuz
         .iter()
         .find(|l| !l.trim().is_empty())
         .map_or("", |l| leading_ws(l));
-    let reindented = reindent_to(after, file_indent);
+    // Align or refuse (roast EDIT-02). When `after` already sits at the window's
+    // indent there is nothing to rebase, so splice it VERBATIM. Re-indenting an
+    // already-correct block is what rewrote the interior of string literals and
+    // heredocs — changing a string's runtime value while reporting `ok:true`.
+    let reindented = if anchor_indent(after) == file_indent {
+        after.to_string()
+    } else {
+        reindent_to(after, file_indent)?
+    };
     let window_crlf = content_lines[i..i + m].iter().any(|l| l.ends_with("\r\n"));
     let mut after_norm = normalize_eol(&reindented, window_crlf);
     if !after_norm.is_empty()
@@ -522,6 +554,71 @@ mod tests {
         assert_eq!(
             got, "def f(x):\n    if x:\n        a = 10\n    else:\n        b = 20\n",
             "else: must stay at 4sp, not shift into the if-body: {got:?}"
+        );
+    }
+
+    #[test]
+    fn aligned_after_splices_verbatim_and_keeps_a_literal_blank_line() {
+        // EDIT-02: `after` is already at the window's indent, so there is
+        // nothing to rebase. The blank line inside the string literal carries
+        // three spaces — that is the string's CONTENT. Rebasing collapsed it to
+        // a bare newline and changed the value while reporting ok:true.
+        let content = "def q():\n    sql = \"\"\"\n      SELECT 1\n   \n    \"\"\"\n";
+        let before = "sql = \"\"\"\n      SELECT 1\n   \n    \"\"\"\n";
+        let after = "    sql = \"\"\"\n      SELECT 2\n   \n    \"\"\"\n";
+        let got = fuzzy_replace(content, before, after).unwrap();
+        assert_eq!(
+            got, "def q():\n    sql = \"\"\"\n      SELECT 2\n   \n    \"\"\"\n",
+            "an already-aligned after must be spliced byte-for-byte: {got:?}"
+        );
+    }
+
+    #[test]
+    fn shifted_block_keeps_a_blank_line_s_whitespace() {
+        // The same protection on the SHIFT path: `after` is misaligned (2sp vs
+        // the file's 4sp) so it IS rebased, but the blank line's own whitespace
+        // is content and must survive the shift untouched.
+        let content = "def f():\n    a = 1\n   \n    b = 2\n";
+        let before = "a = 1\n   \nb = 2\n";
+        let after = "  a = 10\n   \n  b = 20\n";
+        let got = fuzzy_replace(content, before, after).unwrap();
+        assert_eq!(
+            got, "def f():\n    a = 10\n   \n    b = 20\n",
+            "the shift must not rewrite the blank line: {got:?}"
+        );
+    }
+
+    #[test]
+    fn aligned_block_with_mixed_indent_is_spliced_not_refused() {
+        // The other half of "align or refuse": a Makefile-shaped file really
+        // does mix a tab body with space-aligned continuation lines. Because
+        // `after` already sits at the window's indent there is nothing to
+        // rebase, so it must be spliced — NOT rejected by IndentMismatch.
+        // Without the align-first branch, adding that error would regress every
+        // legitimately mixed-indentation file.
+        let content = "build:\n\techo one\n    echo two\ndone\n";
+        let before = "echo one\necho two\n";
+        let after = "\techo ONE\n    echo TWO\n";
+        let got = fuzzy_replace(content, before, after).unwrap();
+        assert_eq!(
+            got, "build:\n\techo ONE\n    echo TWO\ndone\n",
+            "an aligned block must splice even when its own indent is mixed: {got:?}"
+        );
+    }
+
+    #[test]
+    fn mixed_tab_and_space_after_is_refused_not_guessed() {
+        // EDIT-02: line 2's indent neither extends nor prefixes the tab anchor.
+        // The old code pushed target_indent onto it, inventing an indentation
+        // the model never sent. Refusing is the only honest answer.
+        let content = "fn f() {\n        one\n        two\n}\n";
+        let before = "one\ntwo\n";
+        let after = "\tone\n    two\n";
+        let err = fuzzy_replace(content, before, after).unwrap_err();
+        assert_eq!(
+            err,
+            FuzzyError::IndentMismatch,
+            "mixed tabs/spaces must refuse rather than invent an indent"
         );
     }
 
