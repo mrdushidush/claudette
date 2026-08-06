@@ -854,14 +854,18 @@ impl OllamaApiClient {
                     .and_then(Value::as_str)
                     .unwrap_or("unknown")
                     .to_string();
-                // OpenAI tool-call arguments are a JSON-encoded string, not
-                // a nested object. Keep it as-is — the runtime hands this
-                // straight to the tool dispatcher which parses it with
-                // `serde_json::from_str`.
-                let arguments_str = tc
-                    .pointer("/function/arguments")
-                    .and_then(Value::as_str)
-                    .map_or_else(|| "{}".to_string(), str::to_string);
+                // OpenAI emits tool-call arguments as a JSON-encoded STRING, and
+                // the runtime hands it straight to the dispatcher, which parses
+                // it with `serde_json::from_str`. But some OpenAI-compatible
+                // servers emit a nested OBJECT instead: taking only `as_str`
+                // turned that into `"{}"` with no error and no log, so the tool
+                // ran with NO arguments. Accept both shapes, exactly as the
+                // Ollama path already does.
+                let arguments_str = match tc.pointer("/function/arguments") {
+                    Some(Value::String(s)) => s.clone(),
+                    Some(v) => serde_json::to_string(v).unwrap_or_else(|_| "{}".to_string()),
+                    None => "{}".to_string(),
+                };
                 let id = tc
                     .get("id")
                     .and_then(Value::as_str)
@@ -1156,8 +1160,17 @@ impl OllamaApiClient {
                             entry.name = Some(name.to_string());
                         }
                     }
-                    if let Some(args) = tc.pointer("/function/arguments").and_then(Value::as_str) {
-                        entry.args.push_str(args);
+                    // Same both-shapes rule as the non-streaming path above: a
+                    // server that sends `arguments` as an object rather than a
+                    // string fragment must not be silently dropped.
+                    match tc.pointer("/function/arguments") {
+                        Some(Value::String(s)) => entry.args.push_str(s),
+                        Some(v) => {
+                            if let Ok(s) = serde_json::to_string(v) {
+                                entry.args.push_str(&s);
+                            }
+                        }
+                        None => {}
                     }
                 }
             }
@@ -2970,6 +2983,40 @@ mod tests {
                 assert_eq!(id, "call_abc");
                 assert_eq!(name, "get_time");
                 assert_eq!(input, "{\"tz\":\"UTC\"}");
+            }
+            other => panic!("expected ToolUse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_openai_response_accepts_object_arguments() {
+        // Roast API-04: some OpenAI-compatible servers emit `arguments` as a
+        // nested OBJECT rather than a JSON-encoded string. Taking only `as_str`
+        // replaced it with `{}` — no error, no log — and the tool then ran with
+        // NO arguments at all.
+        let client = OllamaApiClient::new("test", json!([])).with_openai_compat(true);
+        let body = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_obj",
+                        "type": "function",
+                        "function": {
+                            "name": "write_file",
+                            "arguments": { "path": "a.txt", "content": "hi" }
+                        }
+                    }]
+                }
+            }]
+        });
+        let events = client.parse_openai_response(&body).unwrap();
+        match &events[0] {
+            AssistantEvent::ToolUse { input, .. } => {
+                let parsed: Value = serde_json::from_str(input).expect("input must be valid JSON");
+                assert_eq!(parsed["path"], "a.txt");
+                assert_eq!(parsed["content"], "hi");
             }
             other => panic!("expected ToolUse, got {other:?}"),
         }
