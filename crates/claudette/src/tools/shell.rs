@@ -324,11 +324,22 @@ fn segment_destructive_git(segment: &str) -> Option<(&'static str, Option<String
     let mut work_dir = None;
     while i < args.len() {
         match args[i] {
-            "-C" => {
+            // `-C <dir>` and `--work-tree <dir>` BOTH retarget the operation.
+            // `--work-tree` used to fall into the skip arm below, which lost the
+            // target: `work_dir` stayed `None`, the guard resolved to the (clean)
+            // cwd, saw "nothing to lose" and returned Ok — so it ran, reported
+            // success, and let the op destroy a dirty tree it never looked at.
+            "-C" | "--work-tree" => {
                 work_dir = args.get(i + 1).map(|s| (*s).to_string());
                 i += 2;
             }
-            "--git-dir" | "--work-tree" | "--namespace" | "-c" => i += 2,
+            "--git-dir" | "--namespace" | "-c" => i += 2,
+            // Must precede the generic `--opt=value` arm below, which would
+            // otherwise swallow `--work-tree=<dir>` and lose the target again.
+            w if w.starts_with("--work-tree=") => {
+                work_dir = w.strip_prefix("--work-tree=").map(str::to_string);
+                i += 1;
+            }
             w if w.starts_with("--") && w.contains('=') => i += 1,
             w if w.starts_with('-') => i += 1,
             _ => break, // first bare token is the subcommand
@@ -337,10 +348,30 @@ fn segment_destructive_git(segment: &str) -> Option<(&'static str, Option<String
     let sub = *args.get(i)?;
     let flags = &args[i + 1..];
     let has = |f: &str| flags.contains(&f);
+    // A short-flag cluster carrying `c`: `-f`, `-fd` and `-fdx` all carry `f`.
+    // Long options are excluded so `--force` is matched by `has` alone.
+    let has_short = |c: char| {
+        flags
+            .iter()
+            .any(|f| f.starts_with('-') && !f.starts_with("--") && f[1..].contains(c))
+    };
     let op = match sub {
         "reset" if has("--hard") => "git reset --hard",
+        "reset" if has("--keep") => "git reset --keep",
         "checkout" if has("-f") || has("--force") => "git checkout --force",
+        // `git checkout -- .` / `git checkout HEAD -- .` overwrite tracked files
+        // from the index exactly like `restore`, without naming a force flag.
+        "checkout" if has("--") => "git checkout -- <pathspec>",
         "switch" if has("-f") || has("--force") || has("--discard-changes") => "git switch --force",
+        // The headline miss: `git restore .` is what a modern model emits, and
+        // `git status` prints it verbatim as the suggested command. `--staged`
+        // WITHOUT `--worktree` only unstages, which destroys nothing.
+        "restore" if !has("--staged") || has("--worktree") => "git restore",
+        "clean" if has_short('f') || has("--force") => "git clean -f",
+        "checkout-index" if has_short('f') || has("--force") => "git checkout-index -f",
+        "worktree" if flags.first() == Some(&"remove") && (has_short('f') || has("--force")) => {
+            "git worktree remove --force"
+        }
         _ => return None,
     };
     Some((op, work_dir))
@@ -813,6 +844,41 @@ mod tests {
             scan_destructive_git("git -C /repo reset --hard"),
             Some(("git reset --hard", Some("/repo".to_string())))
         );
+    }
+
+    #[test]
+    fn scan_catches_the_roast_bypass_table() {
+        // Every command below PASSED the 3-arm guard (roast 2026-08-02 SHELL-01).
+        for cmd in [
+            "git restore .",
+            "git restore --staged --worktree .",
+            "git restore --source=HEAD --worktree .",
+            "git checkout -- .",
+            "git checkout HEAD -- .",
+            "git clean -fd",
+            "git clean -fdx",
+            "git reset --keep origin/main",
+            "git checkout-index -f -a",
+            "git worktree remove --force ../wt",
+        ] {
+            assert!(
+                scan_destructive_git(cmd).is_some(),
+                "should be blocked but passed: {cmd}"
+            );
+        }
+        // SHELL-03: the target must survive, or the guard checks the wrong tree.
+        assert_eq!(
+            scan_destructive_git("git --work-tree=/dirty --git-dir=/dirty/.git reset --hard"),
+            Some(("git reset --hard", Some("/dirty".to_string())))
+        );
+        assert_eq!(
+            scan_destructive_git("git --work-tree /dirty reset --hard"),
+            Some(("git reset --hard", Some("/dirty".to_string())))
+        );
+        // Non-destructive neighbours must still pass.
+        assert_eq!(scan_destructive_git("git restore --staged ."), None);
+        assert_eq!(scan_destructive_git("git clean -n"), None);
+        assert_eq!(scan_destructive_git("git worktree list"), None);
     }
 
     #[test]
