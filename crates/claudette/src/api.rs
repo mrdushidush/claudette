@@ -930,14 +930,30 @@ impl OllamaApiClient {
         let mut input_tokens: u32 = 0;
         let mut output_tokens: u32 = 0;
 
+        // A mid-stream read/parse failure must NOT `?` out of this loop: the
+        // text callback has already fired for every delta above it, so the user
+        // has read the answer. Record the cause, stop reading, and keep what
+        // accumulated. (roast API-01)
+        let mut stream_error: Option<String> = None;
+
         for line in reader.lines() {
-            let line =
-                line.map_err(|e| RuntimeError::new(format!("Ollama stream read failed: {e}")))?;
+            let line = match line {
+                Ok(l) => l,
+                Err(e) => {
+                    stream_error = Some(format!("Ollama stream read failed: {e}"));
+                    break;
+                }
+            };
             if line.trim().is_empty() {
                 continue;
             }
-            let chunk: Value = serde_json::from_str(&line)
-                .map_err(|e| RuntimeError::new(format!("Ollama stream parse failed: {e}")))?;
+            let chunk: Value = match serde_json::from_str(&line) {
+                Ok(c) => c,
+                Err(e) => {
+                    stream_error = Some(format!("Ollama stream parse failed: {e}"));
+                    break;
+                }
+            };
 
             if let Some(err) = chunk.get("error").and_then(Value::as_str) {
                 return Err(RuntimeError::new(format!("Ollama error: {err}")));
@@ -1005,6 +1021,18 @@ impl OllamaApiClient {
                 .and_then(Value::as_str)
                 .map_or_else(|| format!("call_{idx}"), String::from);
             events.push(AssistantEvent::ToolUse { id, name, input });
+        }
+        // Only a stream that produced NOTHING is a hard error. Otherwise carry
+        // the truncation cause so the turn is recorded as partial rather than
+        // silently passing as complete.
+        if let Some(err) = stream_error {
+            if events.is_empty() {
+                return Err(RuntimeError::new(err));
+            }
+            events.push(AssistantEvent::StreamMeta {
+                finish_reason: Some(format!("stream_error: {err}")),
+                reasoning_chars: 0,
+            });
         }
         events.push(AssistantEvent::Usage(TokenUsage {
             input_tokens,
@@ -1074,9 +1102,18 @@ impl OllamaApiClient {
         let mut finish_reason: Option<String> = None;
         let mut reasoning_chars: usize = 0;
 
+        // Same rule as the Ollama reader: never `?` away a turn the user has
+        // already read off the screen. (roast API-01)
+        let mut stream_error: Option<String> = None;
+
         for line in reader.lines() {
-            let line =
-                line.map_err(|e| RuntimeError::new(format!("SSE stream read failed: {e}")))?;
+            let line = match line {
+                Ok(l) => l,
+                Err(e) => {
+                    stream_error = Some(format!("SSE stream read failed: {e}"));
+                    break;
+                }
+            };
             let line = line.trim();
             if line.is_empty() {
                 continue;
@@ -1091,8 +1128,13 @@ impl OllamaApiClient {
                 break;
             }
 
-            let chunk: Value = serde_json::from_str(payload)
-                .map_err(|e| RuntimeError::new(format!("SSE stream parse failed: {e}")))?;
+            let chunk: Value = match serde_json::from_str(payload) {
+                Ok(c) => c,
+                Err(e) => {
+                    stream_error = Some(format!("SSE stream parse failed: {e}"));
+                    break;
+                }
+            };
 
             // Errors can arrive mid-stream as a `data:` chunk; surface them the
             // same way `parse_openai_response` does.
@@ -1214,8 +1256,20 @@ impl OllamaApiClient {
             };
             events.push(AssistantEvent::ToolUse { id, name, input });
         }
+        // A stream that broke mid-flight and produced nothing at all is still a
+        // hard error; one that produced text or tool calls is a PARTIAL turn,
+        // and the cause replaces `finish_reason` so it reaches the same
+        // diagnosis path the empty-turn work built.
+        if let Some(err) = &stream_error {
+            if events.is_empty() {
+                return Err(RuntimeError::new(err.clone()));
+            }
+        }
         events.push(AssistantEvent::StreamMeta {
-            finish_reason,
+            finish_reason: match stream_error {
+                Some(err) => Some(format!("stream_error: {err}")),
+                None => finish_reason,
+            },
             reasoning_chars,
         });
         events.push(AssistantEvent::Usage(TokenUsage {
@@ -2257,6 +2311,40 @@ mod tests {
     }
 
     #[test]
+    fn stream_keeps_a_partial_turn_when_a_line_is_malformed() {
+        // Roast API-01: the reader used to `?` out on a parse failure, throwing
+        // away `accumulated_text` — but the text callback has ALREADY fired, so
+        // the user has read the answer. Keep it, and say why it stopped.
+        let client = OllamaApiClient::new("test", json!([]));
+        let stream = fake_stream(&[
+            r#"{"message":{"role":"assistant","content":"Hello"},"done":false}"#,
+            "{not json at all",
+        ]);
+        let events = client.consume_stream_lines(stream).unwrap();
+        match &events[0] {
+            AssistantEvent::TextDelta(t) => assert_eq!(t, "Hello"),
+            other => panic!("expected the text to survive, got {other:?}"),
+        }
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AssistantEvent::StreamMeta { finish_reason: Some(r), .. }
+                    if r.starts_with("stream_error:")
+            )),
+            "truncation cause must be reported, got {events:?}"
+        );
+    }
+
+    #[test]
+    fn stream_with_nothing_accumulated_is_still_an_error() {
+        // The other half of the rule: if the stream produced NOTHING, there is
+        // no turn to preserve and the failure must stay hard.
+        let client = OllamaApiClient::new("test", json!([]));
+        let stream = fake_stream(&["{not json at all"]);
+        assert!(client.consume_stream_lines(stream).is_err());
+    }
+
+    #[test]
     fn stream_text_only_single_chunk() {
         let client = OllamaApiClient::new("test", json!([]));
         let stream = fake_stream(&[
@@ -2436,6 +2524,35 @@ mod tests {
 
     fn fake_sse(lines: &[&str]) -> Cursor<Vec<u8>> {
         Cursor::new(lines.join("\n").into_bytes())
+    }
+
+    #[test]
+    fn sse_keeps_a_partial_turn_when_a_frame_is_malformed() {
+        // Roast API-01, compat side. A proxy closing the body mid-frame, a model
+        // swap, LM Studio being killed — the user sees a complete answer and the
+        // session used to record nothing at all.
+        let client = OllamaApiClient::new("test", json!([]));
+        let stream = fake_sse(&[
+            r#"data: {"choices":[{"delta":{"content":"hi"}}]}"#,
+            r"data: {broken",
+        ]);
+        let events = client.consume_sse_lines(stream).unwrap();
+        assert!(matches!(&events[0], AssistantEvent::TextDelta(t) if t == "hi"));
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AssistantEvent::StreamMeta { finish_reason: Some(r), .. }
+                    if r.starts_with("stream_error:")
+            )),
+            "truncation cause must be reported, got {events:?}"
+        );
+    }
+
+    #[test]
+    fn sse_with_nothing_accumulated_is_still_an_error() {
+        let client = OllamaApiClient::new("test", json!([]));
+        let stream = fake_sse(&[r"data: {broken"]);
+        assert!(client.consume_sse_lines(stream).is_err());
     }
 
     #[test]
