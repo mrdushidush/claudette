@@ -314,13 +314,87 @@ pub(crate) fn action_for(key: KeyEvent) -> EditAction {
     }
 }
 
+/// Sentinels that let *piped* input carry a multi-line prompt as one turn.
+///
+/// The piped branch of [`LineEditor::read_line`] is one `read_line` per turn,
+/// which is right for a human at a keyboard and wrong for any program feeding
+/// Claudette a prompt containing newlines: line two becomes turn two, a blank
+/// line inside the prompt is skipped by the REPL loop, and a line reading
+/// `exit` ends the session. There was no other way in — `Event::Paste` strips
+/// newlines and only fires under raw mode, one-shot carries newlines on argv
+/// but has no permission prompter, and no slash command reads a file into a
+/// turn.
+///
+/// So: a piped line that is exactly [`MULTILINE_OPEN`] opens a block, and every
+/// line up to one that is exactly [`MULTILINE_CLOSE`] is joined with `\n` and
+/// returned as a single [`ReadOutcome::Line`]. Interactive input never sees
+/// this — raw mode reads key events, not lines.
+///
+/// Hyphenated deliberately: `main.rs`'s doc-drift guard scans `src/` for
+/// `CLAUDETTE_` followed by capitals, and an underscored sentinel reads to it
+/// as an undocumented env var. It is not one, and should not look like one.
+const MULTILINE_OPEN: &str = "<<<CLAUDETTE-PROMPT";
+const MULTILINE_CLOSE: &str = "CLAUDETTE-PROMPT>>>";
+
 /// What one `read_line` call produced.
+#[derive(Debug)]
 pub(crate) enum ReadOutcome {
     Line(String),
     /// Ctrl+C: prompt again without running a turn.
     Interrupted,
     /// Ctrl+D on an empty line, or EOF on piped input.
     Eof,
+}
+
+/// One turn's worth of piped input: a plain line, or a sentinel-delimited
+/// multi-line block joined with `\n`.
+///
+/// Line endings are normalised to `\n`. The block is prompt *content*, often a
+/// code body the model is asked to reproduce, and a CRLF that survives into it
+/// corrupts the answer without ever looking wrong.
+///
+/// An unterminated block is an error, never a partial prompt. A truncated pipe
+/// has to be loud here, because half a prompt still produces a fluent answer.
+fn read_piped_turn(input: &mut impl io::BufRead) -> io::Result<ReadOutcome> {
+    let mut first = String::new();
+    if input.read_line(&mut first)? == 0 {
+        return Ok(ReadOutcome::Eof);
+    }
+    if strip_eol(&first) != MULTILINE_OPEN {
+        return Ok(ReadOutcome::Line(first));
+    }
+
+    let mut block = String::new();
+    let mut empty = true;
+    loop {
+        let mut line = String::new();
+        if input.read_line(&mut line)? == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                format!(
+                    "multi-line prompt opened with `{MULTILINE_OPEN}` reached end \
+                     of input before its closing `{MULTILINE_CLOSE}`"
+                ),
+            ));
+        }
+        let body = strip_eol(&line);
+        if body == MULTILINE_CLOSE {
+            return Ok(ReadOutcome::Line(block));
+        }
+        // Tracked separately from `block.is_empty()` so a prompt that opens
+        // with a blank line keeps it.
+        if !empty {
+            block.push('\n');
+        }
+        empty = false;
+        block.push_str(body);
+    }
+}
+
+/// Strip one trailing line terminator, CRLF or LF, and nothing else.
+fn strip_eol(line: &str) -> &str {
+    line.strip_suffix('\n')
+        .map_or(line, |l| l.strip_suffix('\r').unwrap_or(l))
 }
 
 /// Owns the history list and its backing file.
@@ -350,7 +424,13 @@ impl LineEditor {
     /// holding Up doesn't walk through the same command repeatedly.
     pub(crate) fn push_history(&mut self, line: &str) {
         let line = line.trim();
-        if line.is_empty() || self.history.last().map(String::as_str) == Some(line) {
+        // A multi-line block (piped, sentinel-delimited) is deliberately not
+        // recalled: Up restores into a single-line buffer, and the history file
+        // is one entry per line, so storing it would corrupt both.
+        if line.is_empty()
+            || line.contains('\n')
+            || self.history.last().map(String::as_str) == Some(line)
+        {
             return;
         }
         self.history.push(line.to_string());
@@ -368,11 +448,8 @@ impl LineEditor {
     /// occupy no columns).
     pub(crate) fn read_line(&mut self, prompt: &str, prompt_width: u16) -> io::Result<ReadOutcome> {
         if !self.interactive {
-            let mut buf = String::new();
-            return match io::stdin().read_line(&mut buf)? {
-                0 => Ok(ReadOutcome::Eof),
-                _ => Ok(ReadOutcome::Line(buf)),
-            };
+            let stdin = io::stdin();
+            return read_piped_turn(&mut stdin.lock());
         }
         self.read_line_raw(prompt, prompt_width)
     }
@@ -720,5 +797,121 @@ mod tests {
         let path = std::env::temp_dir().join("claudette-nonexistent-history-file");
         let _ = std::fs::remove_file(&path);
         assert!(load_history(&path).is_empty());
+    }
+
+    // --- piped input: the multi-line prompt path ---
+
+    fn piped(input: &str) -> io::Result<ReadOutcome> {
+        read_piped_turn(&mut input.as_bytes())
+    }
+
+    fn line_of(outcome: ReadOutcome) -> String {
+        match outcome {
+            ReadOutcome::Line(l) => l,
+            ReadOutcome::Interrupted => panic!("expected a line, got Interrupted"),
+            ReadOutcome::Eof => panic!("expected a line, got Eof"),
+        }
+    }
+
+    #[test]
+    fn a_plain_piped_line_is_unchanged_by_the_sentinel_path() {
+        // Including its trailing newline: the REPL trims, and the old
+        // behaviour is what every existing piped caller was built against.
+        assert_eq!(line_of(piped("write a haiku\n").unwrap()), "write a haiku\n");
+    }
+
+    #[test]
+    fn empty_input_is_eof() {
+        assert!(matches!(piped("").unwrap(), ReadOutcome::Eof));
+    }
+
+    #[test]
+    fn a_sentinel_block_becomes_one_line_joined_with_newlines() {
+        let got = line_of(
+            piped(&format!(
+                "{MULTILINE_OPEN}\nfirst\nsecond\nthird\n{MULTILINE_CLOSE}\n"
+            ))
+            .unwrap(),
+        );
+        assert_eq!(got, "first\nsecond\nthird");
+    }
+
+    #[test]
+    fn crlf_in_a_block_is_normalised_to_lf() {
+        let got = line_of(
+            piped(&format!(
+                "{MULTILINE_OPEN}\r\nfirst\r\nsecond\r\n{MULTILINE_CLOSE}\r\n"
+            ))
+            .unwrap(),
+        );
+        assert_eq!(got, "first\nsecond", "no CR survives into prompt content");
+    }
+
+    #[test]
+    fn blank_lines_inside_a_block_are_content_including_a_leading_one() {
+        let got = line_of(
+            piped(&format!(
+                "{MULTILINE_OPEN}\n\nfirst\n\nsecond\n{MULTILINE_CLOSE}\n"
+            ))
+            .unwrap(),
+        );
+        // The REPL loop skips a blank *line*; inside a block it is a blank
+        // line of the prompt, which is the whole point.
+        assert_eq!(got, "\nfirst\n\nsecond");
+    }
+
+    #[test]
+    fn exit_inside_a_block_is_content_not_a_command() {
+        let got =
+            line_of(piped(&format!("{MULTILINE_OPEN}\nexit\nquit\n{MULTILINE_CLOSE}\n")).unwrap());
+        assert_eq!(got, "exit\nquit");
+    }
+
+    #[test]
+    fn the_reader_resumes_after_the_closing_sentinel() {
+        let input = format!("{MULTILINE_OPEN}\nblock\n{MULTILINE_CLOSE}\nnext turn\n");
+        let mut bytes = input.as_bytes();
+        assert_eq!(line_of(read_piped_turn(&mut bytes).unwrap()), "block");
+        assert_eq!(
+            line_of(read_piped_turn(&mut bytes).unwrap()),
+            "next turn\n",
+            "the turn after a block reads normally",
+        );
+    }
+
+    #[test]
+    fn an_unterminated_block_errors_rather_than_delivering_half_a_prompt() {
+        let err = piped(&format!("{MULTILINE_OPEN}\nfirst\nsecond\n")).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+        assert!(
+            err.to_string().contains(MULTILINE_CLOSE),
+            "the error names the terminator that was missing: {err}",
+        );
+    }
+
+    #[test]
+    fn the_opener_must_match_exactly() {
+        // Trailing text, leading space, or a near-miss is an ordinary prompt.
+        for near in [
+            format!("{MULTILINE_OPEN} \n"),
+            format!(" {MULTILINE_OPEN}\n"),
+            format!("{MULTILINE_OPEN}x\n"),
+        ] {
+            let got = line_of(piped(&near).unwrap());
+            assert_eq!(got, near, "near-miss opener stays a plain line");
+        }
+    }
+
+    #[test]
+    fn history_refuses_a_multi_line_entry() {
+        let mut ed = LineEditor {
+            history: Vec::new(),
+            path: None,
+            interactive: false,
+        };
+        ed.push_history("first\nsecond");
+        assert!(ed.history.is_empty(), "a block would corrupt the history file");
+        ed.push_history("plain");
+        assert_eq!(ed.history, hist(&["plain"]));
     }
 }

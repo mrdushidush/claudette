@@ -12,6 +12,19 @@ bumps are non-breaking bugfixes only.
 
 ### Added
 
+- **Multi-line prompts over a pipe.** A piped line reading exactly
+  `<<<CLAUDETTE-PROMPT` opens a block that runs as **one turn** when a line
+  reading exactly `CLAUDETTE-PROMPT>>>` closes it. Without this, piped input is
+  one line per turn, so a prompt containing newlines silently became several
+  turns — with a blank line skipped and a line reading `exit` ending the
+  session — and there was no other way in (`Event::Paste` strips newlines and
+  only fires under raw mode, one-shot carries newlines on argv but has no
+  permission prompter, and no slash command reads a file into a turn). Line
+  endings inside a block are normalised to `\n`, blank lines are kept, an
+  unterminated block is an error rather than a partial prompt, and blocks are
+  kept out of `repl_history`. Interactive input is untouched. See
+  [docs/usage.md](docs/usage.md).
+
 - **`--research` scope control.** `CLAUDETTE_RESEARCH_EXCLUDE` skips
   comma-separated paths / directory names (bare names match at any depth; paths
   with a slash match that subtree), on top of a built-in `docs/archive` default

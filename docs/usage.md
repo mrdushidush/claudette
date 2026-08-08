@@ -50,6 +50,26 @@ When stdin or stderr isn't a terminal — piped input, CI, the eval battery —
 the editor steps aside and input is read plainly, so scripted use is
 unchanged.
 
+### Piping a multi-line prompt
+
+Piped input is one line per turn, which is a problem when the prompt itself
+contains newlines: line two would start a second turn, a blank line would be
+skipped, and a line reading `exit` would end the session. Wrap it in sentinels
+and the whole block arrives as a single turn:
+
+```bash
+{
+  echo '<<<CLAUDETTE-PROMPT'
+  cat task.md
+  echo 'CLAUDETTE-PROMPT>>>'
+} | claudette
+```
+
+Both sentinels must be alone on their line and match exactly; anything else is
+an ordinary prompt line. Line endings inside the block are normalised to `\n`,
+and blank lines are kept. A block that never closes is an error rather than a
+half-delivered prompt. The block is not added to `~/.claudette/repl_history`.
+
 ## Slash commands (REPL + TUI)
 
 ```
