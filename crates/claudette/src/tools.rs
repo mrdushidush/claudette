@@ -1919,8 +1919,7 @@ mod tests {
         // closure-ish scope. Skip if cwd happens to be inside `ws` (rare
         // but possible if a test runner roots itself in the temp dir).
         let cwd_inside_ws = std::env::current_dir()
-            .ok()
-            .is_some_and(|c| normalize_path(&c).starts_with(normalize_path(&ws)));
+            .is_ok_and(|c| normalize_path(&c).starts_with(normalize_path(&ws)));
 
         let assert_result = if cwd_inside_ws {
             // The helper deliberately returns None when cwd is inside the

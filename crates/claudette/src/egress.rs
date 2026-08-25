@@ -139,9 +139,7 @@ pub const INTEGRATION_NET_TOOLS: &[&str] = &[];
 /// `CLAUDETTE_ALLOW_REMOTE_OLLAMA`, and the skip-probe flags.
 #[must_use]
 pub fn is_offline() -> bool {
-    std::env::var(OFFLINE_ENV)
-        .ok()
-        .is_some_and(|v| !v.is_empty() && v != "0")
+    std::env::var(OFFLINE_ENV).is_ok_and(|v| !v.is_empty() && v != "0")
 }
 
 /// The allow-list, as host strings, for display in `--doctor`. Order: loopback

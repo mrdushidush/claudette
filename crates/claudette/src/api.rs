@@ -503,12 +503,10 @@ pub fn probe_ollama() -> Result<String, String> {
         );
     }
 
-    let skip_ollama_flag = std::env::var("CLAUDETTE_SKIP_OLLAMA_PROBE")
-        .ok()
-        .is_some_and(|v| !v.is_empty() && v != "0");
-    let skip_lm_studio_flag = std::env::var("CLAUDETTE_SKIP_LM_STUDIO_PROBE")
-        .ok()
-        .is_some_and(|v| !v.is_empty() && v != "0");
+    let skip_ollama_flag =
+        std::env::var("CLAUDETTE_SKIP_OLLAMA_PROBE").is_ok_and(|v| !v.is_empty() && v != "0");
+    let skip_lm_studio_flag =
+        std::env::var("CLAUDETTE_SKIP_LM_STUDIO_PROBE").is_ok_and(|v| !v.is_empty() && v != "0");
     if skip_ollama_flag || (openai_compat && skip_lm_studio_flag) {
         return Ok(url);
     }
@@ -694,8 +692,7 @@ impl OllamaApiClient {
         let text = resp.text().unwrap_or_default();
 
         let retry_disabled = std::env::var("CLAUDETTE_DISABLE_MODEL_RELOAD_RETRY")
-            .ok()
-            .is_some_and(|v| !v.is_empty() && v != "0");
+            .is_ok_and(|v| !v.is_empty() && v != "0");
 
         if retry_disabled || !is_model_reload_transient(status, &text) {
             return Err(RuntimeError::new(format!(
