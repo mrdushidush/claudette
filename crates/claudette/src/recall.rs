@@ -183,9 +183,8 @@ pub fn decode_vec_into(bytes: &[u8], dst: &mut Vec<f32>) -> Result<(), String> {
     }
     dst.clear();
     dst.reserve(bytes.len() / 4);
-    for chunk in bytes.chunks_exact(4) {
-        let arr: [u8; 4] = chunk.try_into().expect("chunks_exact yields 4-byte slices");
-        dst.push(f32::from_le_bytes(arr));
+    for arr in bytes.as_chunks::<4>().0 {
+        dst.push(f32::from_le_bytes(*arr));
     }
     Ok(())
 }

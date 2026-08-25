@@ -58,8 +58,7 @@ pub(crate) struct CheckCmd {
 /// Unset or anything else → `false`. Default is OFF.
 pub(crate) fn enabled() -> bool {
     std::env::var(CHECK_ENV)
-        .ok()
-        .is_some_and(|v| matches!(v.to_ascii_lowercase().trim(), "1" | "true" | "yes" | "on"))
+        .is_ok_and(|v| matches!(v.to_ascii_lowercase().trim(), "1" | "true" | "yes" | "on"))
 }
 
 /// Returns the configured timeout in seconds, clamped to `1..=120`.
@@ -217,8 +216,7 @@ pub(crate) fn ruff_on_path() -> bool {
     std::process::Command::new("ruff")
         .arg("--version")
         .output()
-        .ok()
-        .is_some_and(|out| out.status.success())
+        .is_ok_and(|out| out.status.success())
 }
 
 /// Truncate raw output to the first `MAX_OUTPUT_LINES` lines, then cut at
