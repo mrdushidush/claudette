@@ -1,4 +1,4 @@
-# Show me — what can I actually ask Claudette?
+# Show me - what can I actually ask Claudette?
 
 You don't need to learn a command syntax. Open Claudette (REPL, TUI, or Telegram) and type or speak in plain English. These are real prompts that work today.
 
@@ -18,13 +18,13 @@ Claudette keeps a markdown notebook and a task list under `~/.claudette/`. Nothi
 - *"List all my open todos."*
 - *"Mark the gas bill task done."*
 
-You'll get the note back from a search later even if you forgot the exact words you used — Claudette searches by meaning, not just keywords.
+You'll get the note back from a search later even if you forgot the exact words you used - Claudette searches by meaning, not just keywords.
 
 ---
 
 ## Calendar and email
 
-Once you've connected Google (one-time OAuth — see [`google_setup.md`](google_setup.md)), Claudette can manage your calendar and read your inbox.
+Once you've connected Google (one-time OAuth - see [`google_setup.md`](google_setup.md)), Claudette can manage your calendar and read your inbox.
 
 - *"What's on my calendar tomorrow?"*
 - *"Schedule a 30-minute coffee with Sam on Thursday at 3pm."*
@@ -32,13 +32,13 @@ Once you've connected Google (one-time OAuth — see [`google_setup.md`](google_
 - *"Did Lisa email me about the lease this week?"*
 - *"Summarize the unread mail from my landlord."*
 
-Calendar events are created, moved, and cancelled only after you confirm. Your **inbox is read-only** — Claudette can search and read mail (sending and drafting aren't built yet), so nothing ever leaves on its own.
+Calendar events are created, moved, and cancelled only after you confirm. Your **inbox is read-only** - Claudette can search and read mail (sending and drafting aren't built yet), so nothing ever leaves on its own.
 
 ---
 
 ## Weather, news, knowledge
 
-These work out of the box; some surface more detail with a free API key (Brave, etc — see [`configuration.md`](configuration.md)).
+These work out of the box; some surface more detail with a free API key (Brave, etc - see [`configuration.md`](configuration.md)).
 
 - *"Is it going to rain in Tel Aviv tonight?"*
 - *"Look up the half-life of cesium-137."*
@@ -52,7 +52,7 @@ These work out of the box; some surface more detail with a free API key (Brave, 
 Press <kbd>Alt</kbd>+<kbd>V</kbd> in the TUI (paste from clipboard), drag an image in, or type `@/path/to/image.png`. Then ask whatever you want about it. Works with any multimodal model you've pulled into Ollama.
 
 - *"What does this error message mean?"* (after pasting a screenshot of a crash)
-- *"Critique this landing page mockup — what would a first-time visitor miss?"*
+- *"Critique this landing page mockup - what would a first-time visitor miss?"*
 - *"Read the text on this receipt and total the line items by category."*
 - *"Is this resume layout typographically balanced?"*
 
@@ -60,7 +60,7 @@ Press <kbd>Alt</kbd>+<kbd>V</kbd> in the TUI (paste from clipboard), drag an ima
 
 ## Voice from your phone
 
-Run `claudette --telegram` on your home PC. Open Telegram on your phone. Send Claudette a voice note from anywhere — it transcribes (Whisper), answers, and talks back (edge-tts) in English or Hebrew.
+Run `claudette --telegram` on your home PC. Open Telegram on your phone. Send Claudette a voice note from anywhere - it transcribes (Whisper), answers, and talks back (edge-tts) in English or Hebrew.
 
 - *"Add tomatoes and basil to the shopping list."* (walking through the supermarket)
 - *"What time does the post office close on Friday?"*
@@ -100,13 +100,13 @@ A real interaction, not a polished demo. Opened Claudette in a checkout of a mid
 
 > *"Where in this codebase is the decision made about when to compact the conversation, and what's the default threshold?"*
 
-Claudette ran `repo_map` to find the concept, read `run.rs` and `run/compaction_policy.rs`, and answered in one pass: the per-turn gate is `maybe_compact_session()` in `run.rs`, and the default threshold is adaptive — half the model's context window (`num_ctx / 2`), floored at 4,000 and capped at 1,000,000 tokens, overridable with `CLAUDETTE_COMPACT_THRESHOLD`. Four tool-assisted steps, no wrong turns — the kind of "explain how X works across these files" question that saves you an afternoon of grepping.
+Claudette ran `repo_map` to find the concept, read `run.rs` and `run/compaction_policy.rs`, and answered in one pass: the per-turn gate is `maybe_compact_session()` in `run.rs`, and the default threshold is adaptive - half the model's context window (`num_ctx / 2`), floored at 4,000 and capped at 1,000,000 tokens, overridable with `CLAUDETTE_COMPACT_THRESHOLD`. Four tool-assisted steps, no wrong turns - the kind of "explain how X works across these files" question that saves you an afternoon of grepping.
 
 ---
 
 ## Briefings, schedules, reminders
 
-- *"Wake me with a briefing every weekday at 7:30 — calendar, top three news headlines, weather."*
+- *"Wake me with a briefing every weekday at 7:30 - calendar, top three news headlines, weather."*
 - *"Remind me to call mom every Sunday at 6pm."*
 - *"Every morning at 8, check if anything's expiring on my Google Drive and tell me."*
 
@@ -116,8 +116,8 @@ Schedules persist across restarts.
 
 ## What if I get stuck?
 
-- `/help` — list every slash command.
-- `claudette --doctor` — diagnose Ollama, models, tokens, permissions.
+- `/help` - list every slash command.
+- `claudette --doctor` - diagnose Ollama, models, tokens, permissions.
 - Plain English works: *"what can you do?"*, *"how do I enable Google calendar?"*, *"why isn't the weather tool working?"*
 
 Open an issue at <https://github.com/mrdushidush/claudette/issues> if something genuinely doesn't behave.

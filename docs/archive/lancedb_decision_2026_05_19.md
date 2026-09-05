@@ -1,8 +1,8 @@
-# LanceDB rich memory — decision record
+# LanceDB rich memory - decision record
 
 **Date:** 2026-05-19
 **Phase:** 8 of `docs/archive/sprint_import_2026_05_19.md`
-**Status:** **NOT NOW** — `recall.rs` + `antipatterns.rs` Jaccard cover the use case at v0.5.x scale. Re-evaluate when Phase 6 bench produces evidence that flat embeddings can't keep up.
+**Status:** **NOT NOW** - `recall.rs` + `antipatterns.rs` Jaccard cover the use case at v0.5.x scale. Re-evaluate when Phase 6 bench produces evidence that flat embeddings can't keep up.
 
 ## Question
 
@@ -13,13 +13,13 @@ Should claudette add LanceDB as an opt-in `--memory=rich` feature flag, lifted f
 stealthsambaV2 paired LanceDB with petgraph and an antipattern-auto-detection loop. The combined system gives you:
 
 1. **Embedding-grade similarity** instead of Jaccard token overlap. Better recall on paraphrased failures (`"the parser crashed"` vs `"failed to parse"`).
-2. **Cross-mission corpus retrieval** — find precedents from prior missions at planning time.
+2. **Cross-mission corpus retrieval** - find precedents from prior missions at planning time.
 3. **Graph edges** (petgraph) encoding dependencies + history so the planner can see *why* a similar mission worked.
-4. **Persisted vector index** — fast reload at startup; today claudette's `recall.rs` rebuilds embeddings into RAM.
+4. **Persisted vector index** - fast reload at startup; today claudette's `recall.rs` rebuilds embeddings into RAM.
 
 ## What claudette has today (post-Phase 7)
 
-- `recall.rs` (committed 2026-05-14, extended 2026-05-15 — see [[project-recall-embedding-probe-gap-fix]]): nomic-embed-text via Ollama, flat-file persistence under `~/.claudette/recall/`, sticky-disable + async indexer + `/recall reprobe` for mid-session recovery. Production-ready.
+- `recall.rs` (committed 2026-05-14, extended 2026-05-15 - see [[project-recall-embedding-probe-gap-fix]]): nomic-embed-text via Ollama, flat-file persistence under `~/.claudette/recall/`, sticky-disable + async indexer + `/recall reprobe` for mid-session recovery. Production-ready.
 - `antipatterns.rs` (committed 2026-05-19, Phase 7): captures forge failures, clusters by Jaccard, graduates rules into the system-prompt overlay.
 
 This stack covers the **antipattern feedback loop** end-to-end without LanceDB. The Jaccard similarity is empirically good enough at the scale claudette runs at today (single user, < 1000 missions / month).
@@ -58,7 +58,7 @@ When three consecutive entries show miss-rate > 20%, flip the decision and open 
 
 ## References
 
-- [[project-recall-embedding-probe-gap-fix]] — claudette's current embedding stack
-- [[project-import-sweep-2026-05-19]] §3.1 — original Tier-2 entry justifying the deferral
-- `docs/archive/sprint_import_2026_05_19.md` Phase 8 — sprint plan slot
-- `docs/archive/import_sweep_2026_05_19.md` §5 — Hadar-touched code restriction (lift ideas, not code)
+- [[project-recall-embedding-probe-gap-fix]] - claudette's current embedding stack
+- [[project-import-sweep-2026-05-19]] §3.1 - original Tier-2 entry justifying the deferral
+- `docs/archive/sprint_import_2026_05_19.md` Phase 8 - sprint plan slot
+- `docs/archive/import_sweep_2026_05_19.md` §5 - Hadar-touched code restriction (lift ideas, not code)

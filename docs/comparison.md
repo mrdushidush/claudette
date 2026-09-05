@@ -2,7 +2,7 @@
 
 _As of July 2026._
 
-"Open claw" ≈ **opencode** (SST) — the most-cited open-source alternative to Claude Code. This doc
+"Open claw" ≈ **opencode** (SST) - the most-cited open-source alternative to Claude Code. This doc
 compares Claudette against opencode and the other leading open-source AI coding / agent tools so
 we're honest about what Claudette is, what it isn't, and where it has room to grow.
 
@@ -22,7 +22,7 @@ we're honest about what Claudette is, what it isn't, and where it has room to gr
 ### 1. A coding agent that's also a full personal assistant
 opencode, Aider, Cline, Continue are coding agents and nothing else. Claudette's coding core
 (files, search, repo-map, tests, `git`/`github`, and the `--forge`
-Planner→Coder→Verifier pipeline) is first-class — and it ships alongside a deep assistant toolset
+Planner→Coder→Verifier pipeline) is first-class - and it ships alongside a deep assistant toolset
 no other tool here carries: `calendar` (Google Calendar CRUD + RSVP), `schedule` (proactive
 reminders + recurring briefings), `gmail` (read-only with `<email>` provenance wrapping),
 `facts` (Wikipedia / Open-Meteo weather), and `telegram` (voice-capable bot interface). 20 opt-in
@@ -38,7 +38,7 @@ Claudette's entire architecture assumes Ollama on localhost and no network for t
 supports 75+ models but its docs and defaults lean cloud. Aider works with any LLM but most users
 run Claude / OpenAI. OpenHands runs local but the impressive SWE-bench numbers require Claude 4.5.
 Cline + Continue do local Ollama well but their marketing showcases cloud models. Claudette has
-**no cloud brain path** — if Ollama's down, the bot reports a friendly error.
+**no cloud brain path** - if Ollama's down, the bot reports a friendly error.
 
 ### 4. Built for an 8 GB GPU
 The tiered-brain system (`qwen3.5:4b` → escalate to `qwen3.5:9b` on stuck signals) is an explicit
@@ -55,21 +55,21 @@ Distribution simplicity: Claudette ≈ opencode >> Aider > Cline / Continue > Op
 
 - **Raw coding benchmark performance**: OpenHands at 53%+ SWE-bench Verified is the current king.
   Claudette deliberately doesn't publish a SWE-bench number. Its in-repo harnesses measure a
-  *different, easier* thing — **tool-loop reliability** (does the model drive the tools to a
-  verifier-confirmed build/test/ground-truth result on short, mostly single-file tasks): 82–100%
-  on the 50-task battery depending on the local model (measured 2026-07-11 — see
+  *different, easier* thing - **tool-loop reliability** (does the model drive the tools to a
+  verifier-confirmed build/test/ground-truth result on short, mostly single-file tasks): 82-100%
+  on the 50-task battery depending on the local model (measured 2026-07-11 - see
   [MODEL-COMPARISON.md](../runs/eval-2026-05-29/battery/MODEL-COMPARISON.md)), 94% on the
   100-prompt Brain100 set. That is not task resolution on real
-  multi-file repo issues and is **not comparable** to a SWE-bench score — treat it as a regression
+  multi-file repo issues and is **not comparable** to a SWE-bench score - treat it as a regression
   signal across models, not a coding-skill ranking.
 - **IDE integration**: Cline + Continue are inside VS Code. Claudette doesn't ship an editor
   plugin.
-- **Autocomplete**: Continue and Cursor-style tab completion aren't Claudette's model at all —
+- **Autocomplete**: Continue and Cursor-style tab completion aren't Claudette's model at all -
   it's agent-turn-based.
 - **Model breadth**: opencode's 75+ model selector is more flexible than Claudette's "Ollama-only"
   default (though Claudette can be pointed at any Ollama-compatible endpoint).
 - **Ecosystem size**: Aider's 39K GitHub stars and 4.1M installs dwarfs everything else here.
-  Claudette is 70+ commits past v0.1.0 and newly public — no user base yet.
+  Claudette is 70+ commits past v0.1.0 and newly public - no user base yet.
 
 ## Honest positioning
 
@@ -77,13 +77,13 @@ Claudette is the only tool in this list designed around **personal use on commod
 a messaging-app interface**. For pure coding work on a beefy box, OpenHands or Aider will get you
 further. For editor-embedded flow, Cline or Continue. For a general-purpose agent you can voice-note
 from the bus stop and that runs entirely on your own 8 GB GPU with no subscription and no
-telemetry — nothing else in the open-source space is aiming at exactly that slot.
+telemetry - nothing else in the open-source space is aiming at exactly that slot.
 
 ## Sources
 
 - [opencode.ai](https://opencode.ai/)
 - [OpenCode: Open-source AI Coding Agent Competing with Claude Code and Copilot (InfoQ)](https://www.infoq.com/news/2026/02/opencode-coding-agent/)
-- [Aider — AI Pair Programming in Your Terminal](https://aider.chat/)
+- [Aider - AI Pair Programming in Your Terminal](https://aider.chat/)
 - [OpenHands (openhands.dev)](https://openhands.dev/)
 - [OpenHands Review 2026 (Nurevoflow)](https://nurevoflow.com/ai-builds/openhands)
 - [Cline GitHub](https://github.com/cline/cline)

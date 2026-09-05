@@ -78,7 +78,7 @@ Everything Claudette persists lives under `~/.claudette/` (resolved by
 | `CLAUDETTE.MD` | you | User memory, injected as background information. 800-char cap; `/reload` re-reads it. |
 | `recall.sqlite` | the async indexer | Cross-session semantic memory (local embeddings, 50k-row FIFO). Tool calls and results are deliberately **not** indexed. |
 | `transcript/actions.jsonl` | every *mutating* tool call | ReadOnly calls are never logged. Backs `/undo` and `/diff`. |
-| `trash/` | deletes and overwrites | Timestamped originals — the restore source for `/undo`. |
+| `trash/` | deletes and overwrites | Timestamped originals - the restore source for `/undo`. |
 | `notes/*.md` | `note_create` | One hand-editable markdown file per note. |
 | `todos.json` | the todo tools | Also live-editable from the TUI Todos tab. |
 | `missions/` | `mission_start` | Brownfield clones + `active_mission.json`. Non-ephemeral missions survive a restart. |
@@ -96,15 +96,15 @@ Everything Claudette persists lives under `~/.claudette/` (resolved by
 
 20 groups, ~80 tools total (added Quality, Semantic, Vision, Clipboard; collapsed 18 lesser-used tools into polymorphic merges + outright drops; retired the Code group with the codet coder sidecar). Schema cost: ~840 chars (~210 tokens) on every turn until the model enables a group; the full 20-group surface is ~34 KB if every group is loaded at once.
 
-The `gmail`, `calendar`, and `telegram` groups are compiled **only** into an `integrations` build (`cargo install claudette --features integrations`); the default coding-only binary omits them entirely — see [Install](../README.md#install).
+The `gmail`, `calendar`, and `telegram` groups are compiled **only** into an `integrations` build (`cargo install claudette --features integrations`); the default coding-only binary omits them entirely - see [Install](../README.md#install).
 
 | Group | Tools | What it does |
 |-------|-------|--------------|
 | **core** (always on) | 3 | `enable_tools` (the meta-tool), `get_current_time`, `load_workspace_rules` |
-| `notes` | 4 | Personal notes — `note_create` (upsert), list, read, delete |
-| `todos` | 4 | Todo list — add, list, set status, delete |
+| `notes` | 4 | Personal notes - `note_create` (upsert), list, read, delete |
+| `todos` | 4 | Todo list - add, list, set status, delete |
 | `files` | 3 | `read_file`, `write_file`, `list_dir` |
-| `meta` | 1 | `get_capabilities` — config, tool inventory, limits |
+| `meta` | 1 | `get_capabilities` - config, tool inventory, limits |
 | `git` | 9 | status, diff, log, add, commit, branch, checkout, push, clone |
 | `ide` | 3 | Open in editor (`code`), reveal in file manager, open URL in browser |
 | `search` | 5 | `repo_map`, `grep_search`, `glob_search`, `web_search` (Brave), `web_fetch` |
@@ -112,13 +112,13 @@ The `gmail`, `calendar`, and `telegram` groups are compiled **only** into an `in
 | `facts` | 2 | `wikipedia` (summary/search), `weather` (Open-Meteo) |
 | `registry` | 2 | `crate_info` (crates.io), `npm_info` (npmjs) |
 | `github` | 15 | PRs (status, view, fork, create), issues (inbox, get, create, comment, list-repo), code search, **brownfield missions** (start, state, submit), `forge_tail` |
-| `telegram` | 1 | `tg_send` — bot messaging (text or photo). **`integrations` build only.** |
+| `telegram` | 1 | `tg_send` - bot messaging (text or photo). **`integrations` build only.** |
 | `calendar` | 4 | Google Calendar: list / create / update / delete events (RSVP via update). **`integrations` build only.** |
 | `schedule` | 4 | Proactive reminders: one-shot + recurring schedules that fire prompts back at you |
-| `gmail` | 4 | Gmail (read-only): list, search, read, list labels — with `<email>` provenance wrapping. **`integrations` build only.** |
+| `gmail` | 4 | Gmail (read-only): list, search, read, list labels - with `<email>` provenance wrapping. **`integrations` build only.** |
 | `recall` | 1 | Cross-session memory: semantic search over past conversation turns (`recall <query>`) |
 | `quality` | 3 | `run_tests`, `diagnostics` (cargo check / clippy / tsc / mypy / ruff), `apply_patch` (atomic multi-file unified diff) |
-| `semantic` | 1 | `semantic_grep` — workspace search with token-overlap ranking (fuzzier than grep) |
+| `semantic` | 1 | `semantic_grep` - workspace search with token-overlap ranking (fuzzier than grep) |
 | `vision` | 2 | `screenshot_capture` (PNG to `~/.claudette/files/`), `image_describe` (needs a VLM loaded in LM Studio) |
 | `clipboard` | 2 | `clipboard_read`, `clipboard_write` (text only, 1 MB cap) |
 
@@ -126,11 +126,11 @@ The `gmail`, `calendar`, and `telegram` groups are compiled **only** into an `in
 
 `run_forge_mission` (in `run.rs`) orchestrates five phases against the active brownfield mission:
 
-1. **Planner** — tool-less brain turn (`Role::Planner` from `~/.claudettes-forge/models.toml`) decomposes the user's request into a 3–5 step numbered plan, prepended to the Coder's input.
-2. **Coder (round 0)** — full forge runtime (`files`, `search`, `git`, `advanced`, `github` groups enabled) with `should_submit=false`. Brain commits its change but the system prompt forbids `mission_submit`/`git_push`.
-3. **Verifier** — tool-less brain turn (`Role::Verifier`) reads `git diff HEAD` and emits one-line JSON: `{"score": <1-10>, "pass": <bool>, "feedback": "<reason>"}`. Resilient to code fences and trailing prose.
-4. **Fix-loop** — if `pass=false` and `round < MAX_FIX_ROUNDS` (3), re-runs the Coder with the Verifier's feedback prepended to the prompt.
-5. **Submitter** — final Coder turn with `should_submit=true` that just calls `mission_submit`. PR opens here, never earlier.
+1. **Planner** - tool-less brain turn (`Role::Planner` from `~/.claudettes-forge/models.toml`) decomposes the user's request into a 3-5 step numbered plan, prepended to the Coder's input.
+2. **Coder (round 0)** - full forge runtime (`files`, `search`, `git`, `advanced`, `github` groups enabled) with `should_submit=false`. Brain commits its change but the system prompt forbids `mission_submit`/`git_push`.
+3. **Verifier** - tool-less brain turn (`Role::Verifier`) reads `git diff HEAD` and emits one-line JSON: `{"score": <1-10>, "pass": <bool>, "feedback": "<reason>"}`. Resilient to code fences and trailing prose.
+4. **Fix-loop** - if `pass=false` and `round < MAX_FIX_ROUNDS` (3), re-runs the Coder with the Verifier's feedback prepended to the prompt.
+5. **Submitter** - final Coder turn with `should_submit=true` that just calls `mission_submit`. PR opens here, never earlier.
 
 Persona overlay: `personas/codex7.md` is baked into the binary via `include_str!` and parsed at startup. Its `voice` one-liner + backstory prose are appended to the forge-mode system prompt so the brain adopts a consistent style.
 
@@ -142,10 +142,10 @@ Persona overlay: `personas/codex7.md` is baked into the binary via `include_str!
 
 ## Coding standards
 
-- `#![forbid(unsafe_code)]` in the crate root — no unsafe.
+- `#![forbid(unsafe_code)]` in the crate root - no unsafe.
 - Clippy pedantic is on workspace-wide. Allow-list lives in `Cargo.toml` and covers ergonomic exceptions.
 - `#[must_use]` on any function returning a non-trivial value.
-- No `panic!` in production paths — every `Result` returns a typed error. Panics are only acceptable inside `#[cfg(test)] mod tests` blocks.
+- No `panic!` in production paths - every `Result` returns a typed error. Panics are only acceptable inside `#[cfg(test)] mod tests` blocks.
 - Tests that mutate environment variables must acquire `crate::test_env_lock()` to avoid parallel-test races.
 
 ## Adding a new tool

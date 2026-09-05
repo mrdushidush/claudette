@@ -12,13 +12,13 @@ binary has no cloud code, so it errors with a one-line reinstall hint instead.
 |------|--------|
 | `--resume`, `-r` | Continue the most recent saved session. |
 | `--telegram`, `-t` | **(integrations)** Run as a Telegram bot (needs `TELEGRAM_BOT_TOKEN`). |
-| `--tui` | **(experimental)** Launch the fullscreen TUI. Demo-only — known rendering rough edges; the REPL is the supported daily driver. |
+| `--tui` | **(experimental)** Launch the fullscreen TUI. Demo-only - known rendering rough edges; the REPL is the supported daily driver. |
 | `--setup` | Guided first-run wizard: detect the backend, read your VRAM, offer to pull the fitting brain, then run a closing `--doctor` pass. Needs a TTY; refused under `--offline`. |
 | `--doctor` | Run the diagnostic probes (backend reachable, brain pulled, recall embeddings, build toolchains, OAuth, voice, secrets dir) and exit. Each failure prints a copy-paste `↳ fix:` line. Non-zero exit if any probe hard-failed. |
 | `--offline` | Enforced air-gap: hard-block every outbound call except your local model server and loopback. `bash` / `bash_background` are refused wholesale. See [PRIVACY.md](../PRIVACY.md). |
 | `--faceless` | Drop the persona overlay (Eva in assistant mode, CodeX-7 for the forge Coder). Same surface as `CLAUDETTE_FACELESS=1`. |
 | `--forge "<prompt>"` | Run the autonomous forge pipeline: Planner → Coder → Verifier → fix-loop → Submitter, with a real build+test gate every round. Uses the active brownfield mission, or bootstraps an ephemeral one in the current repo when there is none. You approve the plan and the full diff before any PR opens. |
-| `--research [focus]` | Unattended read-only review of the repo you are in: fresh conversation per 2–3-file batch, findings checkpointed under `~/.claudette/research/`, HIGH/MEDIUM findings verified, final `REPORT.md`. Forces offline; re-run the same command to resume. Trailing words become an optional focus hint. See [research.md](research.md). |
+| `--research [focus]` | Unattended read-only review of the repo you are in: fresh conversation per 2-3-file batch, findings checkpointed under `~/.claudette/research/`, HIGH/MEDIUM findings verified, final `REPORT.md`. Forces offline; re-run the same command to resume. Trailing words become an optional focus hint. See [research.md](research.md). |
 | `--chat <id>` | Restrict Telegram bot to a specific chat ID. Repeatable, or set `CLAUDETTE_TELEGRAM_CHAT` to a comma-separated list. The bot **default-denies** when no allowlist is provided. |
 | `--chat any` | Explicit accept-all: serve every incoming Telegram chat. Required to start the bot with no allowlist. Prints a loud warning. |
 | `--auth-google [scope]` | **(integrations)** Run the loopback OAuth flow. Scope is `calendar` (default) or `gmail`. Stores tokens under `~/.claudette/secrets/`. |
@@ -46,7 +46,7 @@ collapsed).
 | `Ctrl+C` | Abandon the current line, keep the session. |
 | `Ctrl+D` | On an empty line, leave the REPL. Mid-line it does nothing. |
 
-When stdin or stderr isn't a terminal — piped input, CI, the eval battery —
+When stdin or stderr isn't a terminal - piped input, CI, the eval battery -
 the editor steps aside and input is read plainly, so scripted use is
 unchanged.
 
@@ -104,7 +104,7 @@ half-delivered prompt. The block is not added to `~/.claudette/repl_history`.
 
 ## Telegram-mode slash commands
 
-Telegram handles a small, explicit set: `/start`, `/status`, `/compact`, `/clear`, plus the Telegram-only commands below. Anything else you type with a leading slash — including `/help`, `/save`, and `/load` — is **not** a command here; it falls through to the model as ordinary text. `/exit` and the destructive DangerFullAccess commands are blocked.
+Telegram handles a small, explicit set: `/start`, `/status`, `/compact`, `/clear`, plus the Telegram-only commands below. Anything else you type with a leading slash - including `/help`, `/save`, and `/load` - is **not** a command here; it falls through to the model as ordinary text. `/exit` and the destructive DangerFullAccess commands are blocked.
 
 Four additional commands are **Telegram-only** (they have no effect in the REPL or TUI):
 
@@ -124,16 +124,16 @@ Four additional commands are **Telegram-only** (they have no effect in the REPL 
 | **DangerFullAccess** | Prompts `[y/N]` every time | bash, edit_file, git add/commit/push/checkout, cross-org PRs |
 
 `write_file` is `WorkspaceWrite` when it creates a file and `DangerFullAccess` when
-the target already exists — overwriting a file is an edit, so it prompts and shows a
+the target already exists - overwriting a file is an edit, so it prompts and shows a
 diff of what would be lost. Every completed file write also prints a `▸` line naming
 the file and its size change, so unattended runs leave a trail.
 
-The REPL prompter is interactive. The TUI shows a confirmation modal over the chat — `y` allows; `n`, `Esc`, or `Enter` denies (deny is the default); long inputs scroll with `↑`/`↓` and are never truncated. Telegram bot denies DangerFullAccess by default (no TTY to confirm with).
+The REPL prompter is interactive. The TUI shows a confirmation modal over the chat - `y` allows; `n`, `Esc`, or `Enter` denies (deny is the default); long inputs scroll with `↑`/`↓` and are never truncated. Telegram bot denies DangerFullAccess by default (no TTY to confirm with).
 
 ## Sessions and auto-compaction
 
 - **Autosave** after every REPL turn to `~/.claudette/sessions/last.json`.
 - **Resume** with `--resume` or `-r`.
 - **Named sessions** via `/save <name>` and `/load <name>` (stored at `~/.claudette/sessions/<name>.json`).
-- **Auto-compaction** triggers adaptively at half the active brain's `num_ctx` by default (clamped to `[4000, 1000000]` estimated tokens), so a real 16K–128K window compacts before it overflows — pin an exact trigger via `CLAUDETTE_COMPACT_THRESHOLD=12000`. When it fires, it summarises old turns, keeps recent ones verbatim, and preserves tool-result anchoring.
+- **Auto-compaction** triggers adaptively at half the active brain's `num_ctx` by default (clamped to `[4000, 1000000]` estimated tokens), so a real 16K-128K window compacts before it overflows - pin an exact trigger via `CLAUDETTE_COMPACT_THRESHOLD=12000`. When it fires, it summarises old turns, keeps recent ones verbatim, and preserves tool-result anchoring.
 - **Sliding-window truncator** acts as a safety net inside the API client.

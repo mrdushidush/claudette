@@ -2,7 +2,7 @@
 
 Symptom-first. Find the line that matches what you saw, not the subsystem
 it came from. Most issues are the local model backend (LM Studio / Ollama)
-not having the model loaded — Claudette drives **one** local model and is at
+not having the model loaded - Claudette drives **one** local model and is at
 the mercy of how your backend schedules it.
 
 When in doubt, run `claudette --doctor` first: it checks the backend URL,
@@ -19,7 +19,7 @@ Each links to the full entry below.
 |---------|--------------|---------|
 | `claudette: command not found` right after install | the install dir isn't on your `PATH` | [command not found](#claudette-command-not-found-after-install) |
 | Everything errors: "connection refused" / backend unreachable | Ollama (or LM Studio) isn't running | [backend not running](#the-backend-isnt-running) |
-| The very first prompt hangs 1–3 minutes, then answers | cold model load — normal, not a hang | [first-prompt hang](#the-first-prompt-hangs-for-13-minutes-then-answers) |
+| The very first prompt hangs 1-3 minutes, then answers | cold model load - normal, not a hang | [first-prompt hang](#the-first-prompt-hangs-for-13-minutes-then-answers) |
 | `/recall` warns about `/v1/embeddings HTTP 501` | no embedding model loaded; recall is optional | [recall 501](#recall-returns-v1embeddings-http-501-or-400) |
 | `--telegram` / `--auth-google` / `--briefing` just print install commands | you have the lean build; those need the full flavor | [lean build](#telegram--google--briefing-print-an-install-command-instead-of-running) |
 
@@ -28,7 +28,7 @@ Each links to the full entry below.
 ## The backend isn't running
 
 **Cause:** Claudette drives a model server you run yourself. If Ollama or LM
-Studio isn't up, every turn fails at the first request — there is no cloud
+Studio isn't up, every turn fails at the first request - there is no cloud
 fallback to quietly paper over it.
 
 **Fixes:**
@@ -36,7 +36,7 @@ fallback to quietly paper over it.
   desktop installs), then confirm the brain is present with `ollama list`.
 - **LM Studio:** open **Developer → Local Server**, hit **Start**, and load a
   model. Claudette needs `OLLAMA_HOST=http://localhost:1234` and
-  `CLAUDETTE_OPENAI_COMPAT=1` to talk to it — see
+  `CLAUDETTE_OPENAI_COMPAT=1` to talk to it - see
   [configuration.md](configuration.md).
 - Either way, `claudette --doctor` names which backend it probed and at what
   URL; the red row carries a copy-paste `↳ fix:` command.
@@ -48,19 +48,19 @@ fallback to quietly paper over it.
 **Cause:** you're on the **lean** build. The cloud integrations (Telegram,
 Gmail, Google Calendar, voice, morning briefing) reach third-party services, so
 they are deliberately not compiled into the default coding-only binary. Nothing
-is broken — the flag is telling you what to install.
+is broken - the flag is telling you what to install.
 
 **Fixes:**
 - Grab the prebuilt **full** flavor:
   `CLAUDETTE_FLAVOR=full curl -fsSL …/install.sh | sh`
   (Windows: `$env:CLAUDETTE_FLAVOR='full'; iwr -useb …/install.ps1 | iex`).
 - With a Rust toolchain: `cargo install claudette --features integrations`.
-- Staying lean is a valid choice — the coding agent and the air-gap are all in
+- Staying lean is a valid choice - the coding agent and the air-gap are all in
   the default build.
 
 ---
 
-## The first prompt hangs for 1–3 minutes, then answers
+## The first prompt hangs for 1-3 minutes, then answers
 
 **Cause:** the backend evicted the model (idle TTL) or never loaded it, so
 your first request pays a cold **load + full prompt-processing** pass. On a
@@ -78,7 +78,7 @@ your first request pays a cold **load + full prompt-processing** pass. On a
 - In **Ollama**, set `OLLAMA_KEEP_ALIVE` to keep the model warm.
 
 A repeated 3-minute pause on *every* turn (not just the first) usually means
-the backend is unloading between turns — fix the TTL, don't blame Claudette.
+the backend is unloading between turns - fix the TTL, don't blame Claudette.
 
 ---
 
@@ -109,12 +109,12 @@ separate from your chat model. `501` / `400` means the backend has no
 embedding model loaded at the endpoint Claudette probed.
 
 **Fixes:**
-- Load an embedding model — `nomic-embed-text` is the default Claudette
-  probes for — in LM Studio (or `ollama pull nomic-embed-text`).
+- Load an embedding model - `nomic-embed-text` is the default Claudette
+  probes for - in LM Studio (or `ollama pull nomic-embed-text`).
 - Then recover the disabled-for-this-session recall without restarting:
   run `/recall reprobe`. Recall sticky-disables itself after a failed probe
   so it doesn't retry on every turn; `reprobe` clears that latch.
-- Recall is **optional** — if you don't want embeddings, ignore the warning;
+- Recall is **optional** - if you don't want embeddings, ignore the warning;
   everything else works without it.
 
 ---
@@ -123,7 +123,7 @@ embedding model loaded at the endpoint Claudette probed.
 
 **Cause:** a keyed integration (Brave web search, GitHub, Google, Telegram)
 is missing its token/key. The tool refuses rather than making a half-formed
-call — by design, nothing reaches the network until you've supplied the key.
+call - by design, nothing reaches the network until you've supplied the key.
 
 **Fixes:**
 - Run `claudette --doctor` and read the **tokens** section: it lists each
@@ -147,15 +147,15 @@ for that session. See [power-user.md](power-user.md#disabling-network-paths).
 
 The binary installed but isn't on your `PATH`. The installer prints the
 directory it dropped the binary in (typically `~/.local/bin` or
-`~/.cargo/bin`) — add that to `PATH`, or run the prebuilt binary by full
+`~/.cargo/bin`) - add that to `PATH`, or run the prebuilt binary by full
 path. See [quickstart.md](quickstart.md).
 
 ---
 
 ## Still stuck?
 
-- `claudette --doctor` — backend, model, toolchains, egress posture.
-- `CLAUDETTE_SKIP_OLLAMA_PROBE=1 RUST_LOG=debug claudette …` — verbose startup
+- `claudette --doctor` - backend, model, toolchains, egress posture.
+- `CLAUDETTE_SKIP_OLLAMA_PROBE=1 RUST_LOG=debug claudette …` - verbose startup
   if the problem is at launch.
 - For the model's own reasoning while it works, `lms log stream` (LM Studio).
 - Open an issue with the `--doctor` output and the exact error line:

@@ -1,4 +1,4 @@
-# Sprint plan — `import_2026_05_19`
+# Sprint plan - `import_2026_05_19`
 
 **Goal:** Land the Tier-1 import set from `docs/archive/import_sweep_2026_05_19.md` into claudette, then fold the `claudettes-forge` scaffold and archive it. After this sprint sequence, only claudette ships.
 
@@ -19,14 +19,14 @@
 | 5. CTO chat agent | Medium | New layer above forge | Phase 2 |
 | 6. SWE-bench + A/B bench | Medium-high | New `bench` crate | Phase 3 (best-round) for fair scoring |
 | 7. Antipattern auto-detection | Medium | `forge/` + `memory.rs` | Phase 6 (needs failure corpus) |
-| 8. LanceDB rich memory (decision) | — | TBD | Phase 7 evidence |
+| 8. LanceDB rich memory (decision) | - | TBD | Phase 7 evidence |
 | 9. Fold claudettes-forge + archive | Low | Cleanup | All prior phases |
 
 Phases 1-4 can interleave with normal claudette work; 5-7 each warrant a dedicated focus block.
 
 ---
 
-## Phase 1 — TUI lifts (paste / typewriter / Space Invaders)
+## Phase 1 - TUI lifts (paste / typewriter / Space Invaders)
 
 **Scope:**
 
@@ -37,8 +37,8 @@ Phases 1-4 can interleave with normal claudette work; 5-7 each warrant a dedicat
 **Wire-up:**
 
 - `tui.rs` input handler: on bracketed-paste event with len > 500, route to `PasteFile::try_store`; show preview in the input bar; on submit, replace with `retrieve()`.
-- `tui/render.rs`: optional typewriter renderer for streamed code-fenced blocks — feature-flag via `--tui-typewriter` flag at first, default-on after one shipping cycle.
-- New slash `/space` (and possibly `/play`) launches the Space Invaders modal — handled in `commands.rs`, dispatched as a `TuiEvent::Game(SpaceGame::new())`.
+- `tui/render.rs`: optional typewriter renderer for streamed code-fenced blocks - feature-flag via `--tui-typewriter` flag at first, default-on after one shipping cycle.
+- New slash `/space` (and possibly `/play`) launches the Space Invaders modal - handled in `commands.rs`, dispatched as a `TuiEvent::Game(SpaceGame::new())`.
 
 **Touch list:**
 
@@ -54,19 +54,19 @@ Phases 1-4 can interleave with normal claudette work; 5-7 each warrant a dedicat
 - `cargo test -p claudette tui::paste tui::typewriter` green.
 - Manual: paste >500 chars shows preview; submitting sends the full text. Typewriter visibly animates a code fence. `/space` opens the game; `q` or `Esc` closes it back to chat.
 
-**Out of scope:** Snake easter egg (explicitly dropped per `import_sweep_2026_05_19.md` §5). Model-registry header strip (Tier-2 deferred). Tacticode 3-panel layout swap (Phase 9 or later — claudette's 5-tab layout is the current target).
+**Out of scope:** Snake easter egg (explicitly dropped per `import_sweep_2026_05_19.md` §5). Model-registry header strip (Tier-2 deferred). Tacticode 3-panel layout swap (Phase 9 or later - claudette's 5-tab layout is the current target).
 
 **Rough effort:** Half a day.
 
 ---
 
-## Phase 2 — Personas system + Eva
+## Phase 2 - Personas system + Eva
 
 **Scope:**
 
 - Copy `D:\dev\claudettes-forge\personas\{codex7,sentinel9,cto,eva}.md` → `personas/` at workspace root of claudette (i.e. `D:\dev\claudette\personas\`).
 - Lift `claudettes-forge/crates/core/src/personas.rs` (500 LOC, 17 tests) → `crates/claudette/src/personas.rs`. Adjust imports (`crate::types::Role` → claudette's role enum or a new module).
-- Add `Role` enum mirroring the personas file's role values (`assistant`, `planner`, `router`, `coder`, `test_coder`, `verifier`, `surgical_coder`, `cto`). Existing claudette forge has Planner/Coder/Verifier; lift adds Assistant/CTO/Router/TestCoder/SurgicalCoder as forward-compat — wire only Assistant + Coder + Verifier + CTO initially.
+- Add `Role` enum mirroring the personas file's role values (`assistant`, `planner`, `router`, `coder`, `test_coder`, `verifier`, `surgical_coder`, `cto`). Existing claudette forge has Planner/Coder/Verifier; lift adds Assistant/CTO/Router/TestCoder/SurgicalCoder as forward-compat - wire only Assistant + Coder + Verifier + CTO initially.
 - Wire `Persona.backstory + examples` into system-prompt assembly:
   - In `prompt.rs`: when assembling the assistant system prompt, look up Eva, prepend backstory + first 3 examples.
   - In `forge/mod.rs`: when assembling Coder / Verifier prompts, look up CodeX-7 / Sentinel-9, prepend.
@@ -81,7 +81,7 @@ Phases 1-4 can interleave with normal claudette work; 5-7 each warrant a dedicat
 - Edit: `crates/claudette/src/forge/mod.rs` to inject CodeX-7 / Sentinel-9 / CTO into role prompts.
 - Edit: `crates/claudette/src/main.rs` for the `--faceless` CLI flag + env.
 - Edit: `crates/claudette/src/lib.rs` (mod declaration).
-- Edit: `Cargo.toml` if `toml` isn't already a dep at the claudette-crate level (it is — used by `model_config.rs`).
+- Edit: `Cargo.toml` if `toml` isn't already a dep at the claudette-crate level (it is - used by `model_config.rs`).
 
 **Success criteria:**
 
@@ -91,13 +91,13 @@ Phases 1-4 can interleave with normal claudette work; 5-7 each warrant a dedicat
 - `CLAUDETTE_FACELESS=1` strips persona content from prompts (verified by test).
 - `cargo build` clean. `cargo clippy -- -D warnings` clean. `cargo fmt --check` clean.
 
-**Out of scope:** Hot reload of personas (§14 explicitly: restart required). Custom personas in user override beyond filename overlap (no namespacing). Voice tone modulation (separate Voice phase). Eva persona expanded — already shipped in claudettes-forge as `status = "loaded"`.
+**Out of scope:** Hot reload of personas (§14 explicitly: restart required). Custom personas in user override beyond filename overlap (no namespacing). Voice tone modulation (separate Voice phase). Eva persona expanded - already shipped in claudettes-forge as `status = "loaded"`.
 
 **Rough effort:** 1-2 days.
 
 ---
 
-## Phase 3 — Forge best-round restore + smart stopping
+## Phase 3 - Forge best-round restore + smart stopping
 
 **Scope:**
 
@@ -110,12 +110,12 @@ The current `forge/mod.rs` Verifier loop scores each round but doesn't track the
 
 **Source patterns:**
 
-- `D:\dev\clawForge\crates\forge\src\mission.rs` (2005 LOC) — extract the round-tracking and best-round restore logic. **Solo-authored life-hacker phase, so safe to lift code per §14.5.** Verify with `git log` if unsure.
+- `D:\dev\clawForge\crates\forge\src\mission.rs` (2005 LOC) - extract the round-tracking and best-round restore logic. **Solo-authored life-hacker phase, so safe to lift code per §14.5.** Verify with `git log` if unsure.
 - Smart-stopping logic also documented in BCF learning #12 (regen always degrades).
 
 **Touch list:**
 
-- Edit: `crates/claudette/src/forge/mod.rs` — round state + score tracking + restore.
+- Edit: `crates/claudette/src/forge/mod.rs` - round state + score tracking + restore.
 - New tests under `crates/claudette/src/forge/` exercising: (a) two declining rounds → break + restore; (b) monotonic improvement → finish on threshold; (c) flat scores → continue to max-rounds-then-stop.
 - Possibly edit `forge/types.rs` for a `RoundReport` struct.
 
@@ -131,9 +131,9 @@ The current `forge/mod.rs` Verifier loop scores each round but doesn't track the
 
 ---
 
-## Phase 4 — 5-tier permissions upgrade
+## Phase 4-5-tier permissions upgrade
 
-**Re-scoped finding:** Claudette **already has** the 5-tier `PermissionMode` enum (`runtime/permissions.rs:3-10`) covering ReadOnly / WorkspaceWrite / DangerFullAccess / Prompt / Allow. The original report assumed claudette only had 3 tiers — that's stale.
+**Re-scoped finding:** Claudette **already has** the 5-tier `PermissionMode` enum (`runtime/permissions.rs:3-10`) covering ReadOnly / WorkspaceWrite / DangerFullAccess / Prompt / Allow. The original report assumed claudette only had 3 tiers - that's stale.
 
 **What `claudettes-forge` adds beyond what claudette has:**
 
@@ -144,18 +144,18 @@ The current `forge/mod.rs` Verifier loop scores each round but doesn't track the
 | Operation-level types (`Operation::{ReadFile, WriteFile, Execute, Network, Other}`) | ❌ | ✅ Present | **Lift as v2 surface** |
 | `AuthOutcome::{Allowed, Denied(reason), PromptRequired(op)}` | Has equivalent (`PermissionOutcome` + `PermissionPromptDecision`) | ✅ Cleaner naming | Consider rename |
 | Tool-name suggestion heuristic (`suggest_for`, Levenshtein etc.) | ✅ | ❌ | Keep claudette's |
-| `max_tier()` cap on policy | ❌ | ✅ | **Lift — cheap safety** |
+| `max_tier()` cap on policy | ❌ | ✅ | **Lift - cheap safety** |
 
 **Actual work:**
 
 - Add `Operation` enum + adapt `PermissionPolicy::authorize` to optionally take an `Operation`. Default tool-name lookup remains primary; operation-level becomes available for new tools.
-- Add `max_tier()` cap to `PermissionPolicy` — refuses dispatch of a tool requiring `DangerFullAccess` when the session is configured `WorkspaceWrite`-max.
+- Add `max_tier()` cap to `PermissionPolicy` - refuses dispatch of a tool requiring `DangerFullAccess` when the session is configured `WorkspaceWrite`-max.
 - Document in `docs/decisions.md` (or a new `docs/AD-permissions.md`).
 
 **Touch list:**
 
-- Edit: `crates/claudette/src/runtime/permissions.rs` — add `Operation` enum, `max_tier()` method, possibly rename outcome variants.
-- Edit: every tool call site that wants the operation-level guard (file_ops / shell / web_search / etc.) — do this opportunistically, not as a blanket migration.
+- Edit: `crates/claudette/src/runtime/permissions.rs` - add `Operation` enum, `max_tier()` method, possibly rename outcome variants.
+- Edit: every tool call site that wants the operation-level guard (file_ops / shell / web_search / etc.) - do this opportunistically, not as a blanket migration.
 - Add unit tests for `max_tier` enforcement.
 
 **Success criteria:**
@@ -170,20 +170,20 @@ The current `forge/mod.rs` Verifier loop scores each round but doesn't track the
 
 ---
 
-## Phase 5 — CTO chat agent
+## Phase 5 - CTO chat agent
 
 **Scope:**
 
-A strategic-loop agent that sits above the forge pipeline. Distinct from CodeX-7 (the coder) — CTO frames the *mission* itself: clarifies scope, decomposes into milestones, decides when to invoke forge vs hand back to the user.
+A strategic-loop agent that sits above the forge pipeline. Distinct from CodeX-7 (the coder) - CTO frames the *mission* itself: clarifies scope, decomposes into milestones, decides when to invoke forge vs hand back to the user.
 
 **Sources (idea-only lift; solo-or-godfather code OK):**
 
-- `D:\dev\clawForge\crates\forge\src\cto.rs` — small file, 10-native-tools pattern, 5-iter cap.
-- `D:\dev\agent-battle-command-center\packages\agents\src\agents\cto.py` — godfather, solo, intact tree.
+- `D:\dev\clawForge\crates\forge\src\cto.rs` - small file, 10-native-tools pattern, 5-iter cap.
+- `D:\dev\agent-battle-command-center\packages\agents\src\agents\cto.py` - godfather, solo, intact tree.
 
 **Surface:**
 
-- `/cto <mission>` slash command — opens a sub-conversation framed as CTO with persona injection (Phase 2 prerequisite).
+- `/cto <mission>` slash command - opens a sub-conversation framed as CTO with persona injection (Phase 2 prerequisite).
 - `claudette cto <mission>` CLI subcommand for one-shot strategic decomposition (writes a milestone plan to a file).
 - History persisted to `~/.claudette/cto-sessions/<id>.jsonl`.
 - 10 tools allowed (subset of full tool registry): notes / todos / file_ops / web_search / forge invocation / git / github / calendar / gmail / shell with WorkspaceWrite-only.
@@ -206,12 +206,12 @@ A strategic-loop agent that sits above the forge pipeline. Distinct from CodeX-7
 
 ---
 
-## Phase 6 — Bench harness (SWE-bench + A/B + multi-template)
+## Phase 6 - Bench harness (SWE-bench + A/B + multi-template)
 
 **Scope (big phase, may split into 6a + 6b):**
 
-- **6a — SWE-bench runner.** Lift `D:\dev\clawForge\crates\forge\src\{swebench.rs (725), swebench_eval.rs (87), swebench_tools.rs (293)}`. Wire as `claudette bench swe --fixture <path>` subcommand. Outputs JSON.
-- **6b — Multi-template + A/B.** Build 10-template fixture set (storefront / arcade / portfolio / restaurant / dashboard / csv-analytics / log-parser / rms-scheduler / dns-parser / markdown-converter / task-queue / config-merger). A/B knobs:
+- **6a - SWE-bench runner.** Lift `D:\dev\clawForge\crates\forge\src\{swebench.rs (725), swebench_eval.rs (87), swebench_tools.rs (293)}`. Wire as `claudette bench swe --fixture <path>` subcommand. Outputs JSON.
+- **6b - Multi-template + A/B.** Build 10-template fixture set (storefront / arcade / portfolio / restaurant / dashboard / csv-analytics / log-parser / rms-scheduler / dns-parser / markdown-converter / task-queue / config-merger). A/B knobs:
   - `--ab qa` runs each mission twice: WITH-QA verifier, WITHOUT-QA.
   - `--ab url` runs each mission twice: WITH-URL reference, WITHOUT.
   - `--ab determinism` runs each mission twice on the same model + temp, compares outputs.
@@ -222,14 +222,14 @@ A strategic-loop agent that sits above the forge pipeline. Distinct from CodeX-7
 - Option A: new `crates/claudette-bench/` workspace member (matches `claudettes-forge` plan).
 - Option B: under `crates/claudette/src/bench/` as a module.
 
-Recommend **Option B** initially — keeps claudette a single crate per its current shape. Promote to a workspace member only if bench grows beyond ~1500 LOC.
+Recommend **Option B** initially - keeps claudette a single crate per its current shape. Promote to a workspace member only if bench grows beyond ~1500 LOC.
 
 **Touch list:**
 
 - New: `crates/claudette/src/bench/{mod,swebench,templates,ab}.rs`.
 - New: fixture corpus under `bench/fixtures/`.
 - Edit: `main.rs` for `bench` subcommand tree.
-- Edit: `Cargo.toml` for any new bench-only deps (probably none — reuse existing).
+- Edit: `Cargo.toml` for any new bench-only deps (probably none - reuse existing).
 
 **Success criteria:**
 
@@ -237,13 +237,13 @@ Recommend **Option B** initially — keeps claudette a single crate per its curr
 - `claudette bench ab qa --templates 3` runs 3 templates × 2 modes and writes a comparison summary.
 - Round-3-e2e methodology (`project_e2e_sweep_2026_05_16_round3.md`) is reproducible via this harness.
 
-**Out of scope:** Cross-machine result aggregation. CI-runnable benches (separate effort — needs runner sizing).
+**Out of scope:** Cross-machine result aggregation. CI-runnable benches (separate effort - needs runner sizing).
 
 **Rough effort:** 1-2 weeks (this is the biggest phase).
 
 ---
 
-## Phase 7 — Antipattern auto-detection
+## Phase 7 - Antipattern auto-detection
 
 **Scope:**
 
@@ -251,11 +251,11 @@ Closes the godfather "self-evolving few-shots" aspirational loop with a corpus-g
 
 - Failed forge missions write a structured `failure.json` into `~/.claudette/failures/<mission-id>/`.
 - Field: `{pattern: <hashed root cause>, count: <occurrences>, examples: [...], graduated: bool, graduation_rule: Option<String>}`.
-- On each new failure, similarity-search the corpus (use existing `recall.rs` embeddings — already in claudette).
+- On each new failure, similarity-search the corpus (use existing `recall.rs` embeddings - already in claudette).
 - When ≥3 failures within a similarity threshold (e.g. cosine ≥ 0.85) and `graduated == false`: auto-graduate a hard rule into the Engineer prompt overlay (the prompt assembly checks `~/.claudette/antipatterns/active.toml` and appends graduated rules).
 - Graduated rules can be reviewed / demoted via `/antipattern list` and `/antipattern demote <id>` slashes.
 
-**Depends on Phase 6** because we need a way to test that "X causes failures, Y rule prevents them" — bench is the controlled environment.
+**Depends on Phase 6** because we need a way to test that "X causes failures, Y rule prevents them" - bench is the controlled environment.
 
 **Touch list:**
 
@@ -275,9 +275,9 @@ Closes the godfather "self-evolving few-shots" aspirational loop with a corpus-g
 
 ---
 
-## Phase 8 — LanceDB rich memory (decision)
+## Phase 8 - LanceDB rich memory (decision)
 
-Not a build phase yet — a **decision phase** triggered by Phase 6/7 evidence.
+Not a build phase yet - a **decision phase** triggered by Phase 6/7 evidence.
 
 **Decision criteria (revisit after Phase 7 lands):**
 
@@ -290,7 +290,7 @@ Not a build phase yet — a **decision phase** triggered by Phase 6/7 evidence.
 
 ---
 
-## Phase 9 — Fold claudettes-forge → claudette + archive
+## Phase 9 - Fold claudettes-forge → claudette + archive
 
 **Scope:**
 
@@ -299,14 +299,14 @@ Once Phases 1-7 land, claudettes-forge has no remaining unique value (verified b
 **Steps:**
 
 1. **Audit gaps.** Diff `D:\dev\claudettes-forge\crates\*` against the new modules in claudette. Flag anything not yet lifted.
-2. **Lift docs.** Copy `claudettes-forge/docs/{architecture.md, decisions.md, sprints/*}` into `claudette/docs/` — adapt naming as needed. Preserve the sprint history.
+2. **Lift docs.** Copy `claudettes-forge/docs/{architecture.md, decisions.md, sprints/*}` into `claudette/docs/` - adapt naming as needed. Preserve the sprint history.
 3. **Tag the scaffold.** `cd D:\dev\claudettes-forge && git tag archive-2026-XX-XX && git push --tags`.
 4. **README** the scaffold: short note pointing at claudette as the live product.
 5. **Memory update.** Mark `claudettes-forge` as superseded in claudette's MEMORY.md.
 
 **Touch list:**
 
-- New: `claudette/docs/architecture.md` (may already exist — diff first).
+- New: `claudette/docs/architecture.md` (may already exist - diff first).
 - Edit: `claudettes-forge/README.md` to point at claudette.
 - New git tag in claudettes-forge.
 
@@ -315,7 +315,7 @@ Once Phases 1-7 land, claudettes-forge has no remaining unique value (verified b
 - All claudettes-forge tests pass on the tagged commit.
 - README points at claudette.
 - Memory index notes the supersession.
-- No code is deleted from claudettes-forge in-place — it stays as a frozen reference.
+- No code is deleted from claudettes-forge in-place - it stays as a frozen reference.
 
 **Rough effort:** Half a day after Phase 7.
 
@@ -336,7 +336,7 @@ Every phase ships with:
 
 ## What can ship in parallel
 
-- Phase 1 + Phase 4 are independent — can be one commit each in the same session.
+- Phase 1 + Phase 4 are independent - can be one commit each in the same session.
 - Phase 2 must land before Phase 5.
 - Phase 3 must land before Phase 6 (we want best-round restore active when bench runs A/B).
 - Phase 6 must land before Phase 7 (need failure corpus).
@@ -349,7 +349,7 @@ Every phase ships with:
 ## Open decision points (block-cutting these before Phase 5+ starts)
 
 1. **CTO persona vs CTO agent distinction.** Phase 2 lifts the CTO *persona* (markdown file). Phase 5 lifts the CTO *agent* (chat loop). Are they the same surface? Recommend: persona supplies the system prompt; the agent supplies the tool budget + iteration cap. Phase 5 confirms.
-2. **`/space` vs `/play space`.** §14 I5 said "Just Space Invaders easter egg — redesign." Single command `/space` recommended for discoverability.
+2. **`/space` vs `/play space`.** §14 I5 said "Just Space Invaders easter egg - redesign." Single command `/space` recommended for discoverability.
 3. **Bench fixtures shipped in-repo or downloaded on demand?** §11 corpora are large. Recommend: in-repo for the 10-template baseline (small); SWE-bench fixtures downloaded on first run.
 4. **claudettes-forge final disposition.** Tag + freeze (Phase 9 plan), or delete the GitHub repo entirely? Recommend tag + freeze for history.
 
@@ -357,12 +357,12 @@ Every phase ships with:
 
 ## Phase status (live)
 
-- [ ] Phase 1 — TUI lifts
-- [ ] Phase 2 — Personas + Eva
-- [ ] Phase 3 — Best-round restore + smart stopping
-- [ ] Phase 4 — 5-tier perms upgrade (re-scoped: claudette already has 5-tier; only Operation enum + max_tier remain)
-- [ ] Phase 5 — CTO chat agent
-- [ ] Phase 6 — Bench harness (SWE-bench + A/B + multi-template)
-- [ ] Phase 7 — Antipattern auto-detection
-- [ ] Phase 8 — LanceDB decision (deferred to after Phase 7)
-- [ ] Phase 9 — Fold claudettes-forge + archive
+- [ ] Phase 1 - TUI lifts
+- [ ] Phase 2 - Personas + Eva
+- [ ] Phase 3 - Best-round restore + smart stopping
+- [ ] Phase 4-5-tier perms upgrade (re-scoped: claudette already has 5-tier; only Operation enum + max_tier remain)
+- [ ] Phase 5 - CTO chat agent
+- [ ] Phase 6 - Bench harness (SWE-bench + A/B + multi-template)
+- [ ] Phase 7 - Antipattern auto-detection
+- [ ] Phase 8 - LanceDB decision (deferred to after Phase 7)
+- [ ] Phase 9 - Fold claudettes-forge + archive

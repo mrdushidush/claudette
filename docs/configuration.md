@@ -2,7 +2,7 @@
 
 All variables are optional; defaults are shown. Set them in your shell environment, or at `~/.claudette/.env` (the canonical persistent location).
 
-Claudette intentionally does **not** auto-load `.env` from the current working directory or its parents — that would let a shared project smuggle `OLLAMA_HOST`, `GITHUB_TOKEN`, etc. into the agent without the user noticing. For per-project overrides, use `direnv` or `source path/to/.env` before invoking.
+Claudette intentionally does **not** auto-load `.env` from the current working directory or its parents - that would let a shared project smuggle `OLLAMA_HOST`, `GITHUB_TOKEN`, etc. into the agent without the user noticing. For per-project overrides, use `direnv` or `source path/to/.env` before invoking.
 
 ## Installer (`install.sh` / `install.ps1`)
 
@@ -10,7 +10,7 @@ These are read by the one-line install scripts, not by the binary itself:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `CLAUDETTE_FLAVOR` | `lean` | `full` downloads the prebuilt `--features integrations` binary (Telegram, Gmail, Calendar, voice, morning briefing) instead of the lean coding-only one — no Rust toolchain needed. |
+| `CLAUDETTE_FLAVOR` | `lean` | `full` downloads the prebuilt `--features integrations` binary (Telegram, Gmail, Calendar, voice, morning briefing) instead of the lean coding-only one - no Rust toolchain needed. |
 | `CLAUDETTE_VERSION` | latest | Pin a release version, e.g. `0.16.0`. |
 | `CLAUDETTE_INSTALL_DIR` | `~/.local/bin` (Unix) / `%LOCALAPPDATA%\Programs\claudette` (Windows) | Install location. |
 | `CLAUDETTE_NO_MODIFY_PATH` | unset | (Unix only) Set to anything to suppress the PATH hint. |
@@ -24,23 +24,23 @@ These are read by the one-line install scripts, not by the binary itself:
 | `CLAUDETTE_OFFLINE` | unset | Set to `1` (or pass `--offline`) to **enforce the air-gap**: hard-block every outbound network call except the local model backend + loopback. See [Enforced offline mode](#enforced-offline-mode---offline) below. |
 | `CLAUDETTE_MODEL` | `qwen3.5:4b` (Auto preset) | Brain model override. See [Recommended brain](#recommended-brain) below for how to switch. |
 | `CLAUDETTE_NUM_CTX` | `16384` | Brain context window in tokens. |
-| `CLAUDETTE_NUM_PREDICT` | `6144` | Max output tokens per request. **Reasoning brains need more than you'd think:** models that stream a separate thinking channel spend it out of this same budget, and an open-ended coding turn can burn 8K+ tokens reasoning before writing a single word of answer. If a turn aborts with `produced no content ... finish_reason=length`, this is the knob — `16384` is a good starting point on a 60K+ window. |
-| `CLAUDETTE_COMPACT_THRESHOLD` | `num_ctx / 2` (adaptive) | Auto-compaction trigger (estimated tokens). Unset → half the active brain's `num_ctx`, clamped to `[4000, 1000000]`, so a real 16K–128K window compacts *before* it overflows. Pin an exact value like `12000` to override; the `1000000` cap is only the ceiling for enormous windows. |
-| `CLAUDETTE_SOFT_COMPACT_THRESHOLD` | unset | Optional intermediate compaction tier. Fires below the hard threshold and preserves 12 recent messages instead of 4 — useful on long real-world sessions with 35B+ brains where you want gentler compaction before the hard `num_ctx / 2` threshold fires. Set e.g. `200000`. |
+| `CLAUDETTE_NUM_PREDICT` | `6144` | Max output tokens per request. **Reasoning brains need more than you'd think:** models that stream a separate thinking channel spend it out of this same budget, and an open-ended coding turn can burn 8K+ tokens reasoning before writing a single word of answer. If a turn aborts with `produced no content ... finish_reason=length`, this is the knob - `16384` is a good starting point on a 60K+ window. |
+| `CLAUDETTE_COMPACT_THRESHOLD` | `num_ctx / 2` (adaptive) | Auto-compaction trigger (estimated tokens). Unset → half the active brain's `num_ctx`, clamped to `[4000, 1000000]`, so a real 16K-128K window compacts *before* it overflows. Pin an exact value like `12000` to override; the `1000000` cap is only the ceiling for enormous windows. |
+| `CLAUDETTE_SOFT_COMPACT_THRESHOLD` | unset | Optional intermediate compaction tier. Fires below the hard threshold and preserves 12 recent messages instead of 4 - useful on long real-world sessions with 35B+ brains where you want gentler compaction before the hard `num_ctx / 2` threshold fires. Set e.g. `200000`. |
 | `CLAUDETTE_MAX_ITERATIONS` | `40` | Per-turn (model → tool → result) loop ceiling. Lower it (e.g. `15`) to fail-fast on small-model spirals; raise it for legitimate long tool chains. |
 | `CLAUDETTE_SESSION` | `~/.claudette/sessions/last.json` | Override the session file path. |
 | `CLAUDETTE_MEMORY` | `~/.claudette/CLAUDETTE.MD` | Override the path Claudette loads user-memory from. |
 | `CLAUDETTE_OPENAI_COMPAT` | unset | Set to `1` to talk to an OpenAI-compatible server (LM Studio, vLLM, llama.cpp's `--api`) instead of native Ollama. Brain calls switch to `/v1/chat/completions`; recall embeddings switch to `/v1/embeddings`. `OLLAMA_HOST` doubles as the compat-server URL. |
 | `CLAUDETTE_SKIP_OLLAMA_PROBE` | unset | Set to `1` to skip the Ollama startup probe (CI / offline). |
-| `CLAUDETTE_SKIP_LM_STUDIO_PROBE` | unset | Set to `1` to skip the LM Studio probe (only used when `CLAUDETTE_OPENAI_COMPAT=1`). The probe checks `/v1/models` returns a non-empty model list — set this if you load models post-launch. |
-| `CLAUDETTE_FALLBACK_BRAIN_MODEL` | `qwen3.5:9b` (Auto preset) | Brain to escalate to on stuck signals. Escalation is **skipped** — with a one-line notice — when this resolves to the same model as the brain, or when the backend isn't already serving it. That guard matters on LM Studio: loading a second model there evicts the one you deliberately loaded, so Claudette will not do it behind your back mid-turn. Set it empty (`CLAUDETTE_FALLBACK_BRAIN_MODEL=`) or use `/preset fast` to turn the tiered brain off entirely. |
-| `CLAUDETTE_FACELESS` | unset | Set to `1` (or pass `--faceless`) to drop the persona overlay — Eva in assistant mode, CodeX-7 for the forge Coder. Identity strings only; no effect on tools or permissions. |
+| `CLAUDETTE_SKIP_LM_STUDIO_PROBE` | unset | Set to `1` to skip the LM Studio probe (only used when `CLAUDETTE_OPENAI_COMPAT=1`). The probe checks `/v1/models` returns a non-empty model list - set this if you load models post-launch. |
+| `CLAUDETTE_FALLBACK_BRAIN_MODEL` | `qwen3.5:9b` (Auto preset) | Brain to escalate to on stuck signals. Escalation is **skipped** - with a one-line notice - when this resolves to the same model as the brain, or when the backend isn't already serving it. That guard matters on LM Studio: loading a second model there evicts the one you deliberately loaded, so Claudette will not do it behind your back mid-turn. Set it empty (`CLAUDETTE_FALLBACK_BRAIN_MODEL=`) or use `/preset fast` to turn the tiered brain off entirely. |
+| `CLAUDETTE_FACELESS` | unset | Set to `1` (or pass `--faceless`) to drop the persona overlay - Eva in assistant mode, CodeX-7 for the forge Coder. Identity strings only; no effect on tools or permissions. |
 | `CLAUDETTE_WORKSPACE` | unset | Extra read roots outside `$HOME`, colon-separated on Unix, semicolon-separated on Windows. Example: `D:\dev\claudette` for developing Claudette itself. Reads under `$HOME` and under a `$HOME`-rooted CWD are always allowed regardless. |
 
 ### Recommended brain
 
-Which model to run — the measured per-GPU tier table, scores, load commands, and the
-CPU-only path — lives on one canonical page:
+Which model to run - the measured per-GPU tier table, scores, load commands, and the
+CPU-only path - lives on one canonical page:
 [`hardware.md`](hardware.md#which-model-for-which-gpu-measured). The shipping default
 is `qwen3.5:4b` (runs anywhere); on a **16 GB GPU with LM Studio** the measured best
 is the byteshape MTP quant of qwen3.6-35b. Switching to it is three env vars:
@@ -56,20 +56,20 @@ Rollback if it misbehaves: `CLAUDETTE_MODEL=qwen3.6-35b-a3b@q3_k_xl` (the previo
 
 ### Backend quirks: LM Studio variant suffix
 
-LM Studio exposes models with a `@<quant>` suffix in `/v1/models` — for example `qwen3.6-35b-a3b@q3_k_xl` rather than the bare `qwen3.6-35b-a3b`. If you set `CLAUDETTE_MODEL=qwen3.6-35b-a3b` (bare id) against LM Studio, the server treats it as an unknown id, attempts a JIT-load for a different variant, and (when VRAM is tight) returns HTTP 400 `{"error":"Model is unloaded."}`. **Use the exact id from `lms ps` or `/v1/models`** when targeting LM Studio — e.g. `CLAUDETTE_MODEL=qwen3.6-35b-a3b@q3_k_xl`. llama.cpp's `llama-server` (and the MTP fork) ignores the `model` field entirely since it only has one loaded, so the bare id works there.
+LM Studio exposes models with a `@<quant>` suffix in `/v1/models` - for example `qwen3.6-35b-a3b@q3_k_xl` rather than the bare `qwen3.6-35b-a3b`. If you set `CLAUDETTE_MODEL=qwen3.6-35b-a3b` (bare id) against LM Studio, the server treats it as an unknown id, attempts a JIT-load for a different variant, and (when VRAM is tight) returns HTTP 400 `{"error":"Model is unloaded."}`. **Use the exact id from `lms ps` or `/v1/models`** when targeting LM Studio - e.g. `CLAUDETTE_MODEL=qwen3.6-35b-a3b@q3_k_xl`. llama.cpp's `llama-server` (and the MTP fork) ignores the `model` field entirely since it only has one loaded, so the bare id works there.
 
 ### Backend quirks: streaming on the OpenAI-compat path
 
 Under `CLAUDETTE_OPENAI_COMPAT=1` the brain request sends `stream: true`, so the
 server replies with Server-Sent Events (`text/event-stream`) and claudette
-renders tokens as they arrive instead of waiting for the whole reply — the same
+renders tokens as they arrive instead of waiting for the whole reply - the same
 behaviour as the native Ollama path. It also sets `stream_options.include_usage`,
 which asks the server to append a final chunk carrying the real
 `prompt_tokens`/`completion_tokens`; LM Studio honours this, and servers that
 don't recognise the option simply ignore it (token counts then show as `0`).
 If a server ignores `stream: true` and returns a single JSON object (no SSE
 framing), claudette detects the non-SSE `Content-Type` and transparently parses
-it as a non-streaming response — so an older or minimal backend still works,
+it as a non-streaming response - so an older or minimal backend still works,
 just without token-by-token output.
 
 ### Backend quirks: brain and embeddings share `OLLAMA_HOST`
@@ -78,14 +78,14 @@ Both the brain (`/v1/chat/completions`) and recall (`/v1/embeddings`) resolve to
 
 ### Enforced offline mode (`--offline` / `CLAUDETTE_OFFLINE`)
 
-`--offline` (or `CLAUDETTE_OFFLINE=1`) turns claudette's local-first *posture* into an *enforced* air-gap. With it on, every outbound network call is checked against an allow-list and anything not on it is hard-blocked with a uniform error — `blocked by offline mode (--offline / CLAUDETTE_OFFLINE)…` — whether the call would have been made via reqwest or by spawning a subprocess.
+`--offline` (or `CLAUDETTE_OFFLINE=1`) turns claudette's local-first *posture* into an *enforced* air-gap. With it on, every outbound network call is checked against an allow-list and anything not on it is hard-blocked with a uniform error - `blocked by offline mode (--offline / CLAUDETTE_OFFLINE)…` - whether the call would have been made via reqwest or by spawning a subprocess.
 
-- **Allowed:** the resolved model backend host (`OLLAMA_HOST`, even a LAN box you opted into with `CLAUDETTE_ALLOW_REMOTE_OLLAMA=1` — matched at the host level, so any port on that box is reachable) and loopback (`localhost`, `127.0.0.0/8`, `::1`). The brain, recall embeddings, and local vision keep working.
+- **Allowed:** the resolved model backend host (`OLLAMA_HOST`, even a LAN box you opted into with `CLAUDETTE_ALLOW_REMOTE_OLLAMA=1` - matched at the host level, so any port on that box is reachable) and loopback (`localhost`, `127.0.0.0/8`, `::1`). The brain, recall embeddings, and local vision keep working.
 - **Blocked:** `web_search` / `web_fetch`, `gmail_*` / `calendar_*` / `--auth-google`, `wikipedia`, `weather`, the `gh_*` GitHub tools, `tg_send`, remote `git_push` / `git_clone`, the brownfield `mission_start` clone and `mission_submit` push, and text-to-speech (edge-tts).
-- **Refused wholesale:** `bash` / `bash_background`. A raw shell command can reach the network in ways no allow-list can inspect (`curl`, `scp`, `python -c`, `nc`), and a denylist of those leaks by construction — so under `--offline` the shell tools are refused entirely. Keep coding offline with the structured tools (`edit_file`, search, local `git_*`, the build/test runners).
-- **`--offline` + `--telegram`** is refused at startup — the Telegram bridge is a cloud relay (`api.telegram.org`) and can't run air-gapped.
+- **Refused wholesale:** `bash` / `bash_background`. A raw shell command can reach the network in ways no allow-list can inspect (`curl`, `scp`, `python -c`, `nc`), and a denylist of those leaks by construction - so under `--offline` the shell tools are refused entirely. Keep coding offline with the structured tools (`edit_file`, search, local `git_*`, the build/test runners).
+- **`--offline` + `--telegram`** is refused at startup - the Telegram bridge is a cloud relay (`api.telegram.org`) and can't run air-gapped.
 
-Inspect the live allow-list with `claudette --offline --doctor` — the **egress / air-gap** section prints exactly what's reachable and notes that the Google-OAuth live probe is skipped (it can't run offline).
+Inspect the live allow-list with `claudette --offline --doctor` - the **egress / air-gap** section prints exactly what's reachable and notes that the Google-OAuth live probe is skipped (it can't run offline).
 
 Two layers enforce it: an HTTP-layer guard in the reqwest path checks the destination host of every in-process request, and a dispatch-layer guard refuses tools that reach the network through a subprocess where the HTTP guard can't see the destination. The host-matching logic lives in [`src/egress.rs`](../crates/claudette/src/egress.rs).
 
@@ -93,7 +93,7 @@ Two layers enforce it: an HTTP-layer guard in the reqwest path checks the destin
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `CLAUDETTE_MAX_FIX_ROUNDS` | `3` | Cap on Coder→Verifier fix-loop rounds in `--forge`. Default 3 is the empirical sweet spot for local 8b coders. Raise to 4–6 if you've pinned a stronger Verifier model and want it to keep pushing back. Clamped at 10. |
+| `CLAUDETTE_MAX_FIX_ROUNDS` | `3` | Cap on Coder→Verifier fix-loop rounds in `--forge`. Default 3 is the empirical sweet spot for local 8b coders. Raise to 4-6 if you've pinned a stronger Verifier model and want it to keep pushing back. Clamped at 10. |
 | `CLAUDETTE_FORGE_ABORT_WINDOW_SECS` | `3` | Grace window (seconds) to Ctrl-C out of a forge run before it starts working. Set `0` to skip the pause in CI / scripted runs. Clamped at 30. |
 
 ## Deep research (`--research`)
@@ -101,15 +101,15 @@ Two layers enforce it: an HTTP-layer guard in the reqwest path checks the destin
 `--research` runs an unattended, read-only review loop over the target repo
 (`CLAUDETTE_WORKSPACE`, else the git toplevel). The read-only and offline
 guarantees are enforced at the permission layer, not by prompt: the runtime is
-capped at a hard `ReadOnly` tier — every write / exec / network tool is denied
-at dispatch, before any prompter — and the run forces `--offline`. Findings are
+capped at a hard `ReadOnly` tier - every write / exec / network tool is denied
+at dispatch, before any prompter - and the run forces `--offline`. Findings are
 checkpointed under `~/.claudette/research/`, so an interrupted run resumes.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `CLAUDETTE_RESEARCH_DIR` | `~/.claudette/research/<repo>-<date>/` | Output directory override for `--research` (used as-is; must be outside the target tree). |
 | `CLAUDETTE_RESEARCH_MAX_BATCHES` | unlimited | Stop a `--research` run after N batches (smoke tests / partial runs). |
-| `CLAUDETTE_RESEARCH_BATCH_FILES` | `3` | Max files per review batch (clamped `1`–`8`). |
+| `CLAUDETTE_RESEARCH_BATCH_FILES` | `3` | Max files per review batch (clamped `1` - `8`). |
 | `CLAUDETTE_RESEARCH_RETRY_SKIPPED` | unset | `1` on a `--research` resume re-queues previously skipped batches (flake recovery / validation). |
 | `CLAUDETTE_RESEARCH_RECOVER_CMD` | unset | Driver-side shell command run once per backend sick-episode during `--research` (e.g. `lms unload --all`); the model never sees it. |
 | `CLAUDETTE_RESEARCH_EXCLUDE` | unset | Comma-separated paths/directory names to skip in a `--research` run, on top of the built-in `docs/archive` default. Bare names (e.g. `harmony.rs`) match at any depth; paths with a slash (e.g. `docs/archive`) match that subtree only. |
@@ -118,11 +118,11 @@ checkpointed under `~/.claudette/research/`, so an interrupted run resumes.
 
 | Variable | Purpose |
 |----------|---------|
-| `BRAVE_API_KEY` | Brave Search API key — required for `web_search`. |
-| `GITHUB_TOKEN` | GitHub PAT — required for the `github` tool group. Falls back to `CLAUDETTE_GITHUB_TOKEN` if unset. |
-| `TELEGRAM_BOT_TOKEN` | Bot token from `@BotFather` — required for `--telegram`. Falls back to `CLAUDETTE_TELEGRAM_TOKEN` if unset. |
+| `BRAVE_API_KEY` | Brave Search API key - required for `web_search`. |
+| `GITHUB_TOKEN` | GitHub PAT - required for the `github` tool group. Falls back to `CLAUDETTE_GITHUB_TOKEN` if unset. |
+| `TELEGRAM_BOT_TOKEN` | Bot token from `@BotFather` - required for `--telegram`. Falls back to `CLAUDETTE_TELEGRAM_TOKEN` if unset. |
 | `CLAUDETTE_TELEGRAM_CHAT` | Comma-separated chat-ID allowlist for the Telegram bot (same as repeating `--chat`). The bot default-denies when no allowlist is set. |
-| `CLAUDETTE_GOOGLE_CLIENT_ID` | Google OAuth client ID — required for `--auth-google` + the Calendar / Gmail tool groups. Falls back to `GOOGLE_CLIENT_ID`, or to `~/.claudette/secrets/google_oauth_client.json`. |
+| `CLAUDETTE_GOOGLE_CLIENT_ID` | Google OAuth client ID - required for `--auth-google` + the Calendar / Gmail tool groups. Falls back to `GOOGLE_CLIENT_ID`, or to `~/.claudette/secrets/google_oauth_client.json`. |
 | `CLAUDETTE_GOOGLE_CLIENT_SECRET` | Google OAuth client secret. Same fallback chain as the client ID. |
 
 All tokens also support file-based fallback: save them to `~/.claudette/secrets/<name>.token` (for example `github.token`, `telegram.token`, `brave.token`). Environment variables win over files when both are present.
@@ -154,7 +154,7 @@ All tokens also support file-based fallback: save them to `~/.claudette/secrets/
 
 ## Permission bypass (use with care)
 
-These each **remove a confirmation gate**. They exist for unattended/CI runs and power users who know the trade-off — setting them weakens the per-tool permission model, so prefer `--offline` + scoped tokens over blanket bypass when you can.
+These each **remove a confirmation gate**. They exist for unattended/CI runs and power users who know the trade-off - setting them weakens the per-tool permission model, so prefer `--offline` + scoped tokens over blanket bypass when you can.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
@@ -183,7 +183,7 @@ Opt-in syntax/type check that runs after a successful `write_file`, `edit_file`,
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `CLAUDETTE_POST_EDIT_CHECK` | unset (off) | Set to `1`, `true`, `yes`, or `on` (case-insensitive) to enable post-edit checks. The feature does nothing unless explicitly enabled — the default is OFF, so every byte of behaviour is unchanged when unset. |
+| `CLAUDETTE_POST_EDIT_CHECK` | unset (off) | Set to `1`, `true`, `yes`, or `on` (case-insensitive) to enable post-edit checks. The feature does nothing unless explicitly enabled - the default is OFF, so every byte of behaviour is unchanged when unset. |
 | `CLAUDETTE_CHECK_CMD` | auto-detected | Custom check command string. Tokens are split on whitespace; the first token is the program, the rest are arguments. Any argument containing `{file}` gets replaced by the edited file's path. If no token contained `{file}`, the file path is appended as one extra final argument. Set to an empty string to force auto-detection even when the variable exists. |
 | `CLAUDETTE_CHECK_TIMEOUT_SECS` | `10` | Timeout in seconds for the check command. Clamped to `[1, 120]`. A timed-out check is silently skipped (treated as success). |
 | `CLAUDETTE_CHECK_MAX_ROUNDS` | `2` | Per-file per-turn cap on appended check-failure output. Clamped to `[1, 10]`. When the cap is exceeded for a file in a single turn, further failures are summarized with a one-line notice instead of repeating the full output. |
@@ -199,7 +199,7 @@ Opt-in syntax/type check that runs after a successful `write_file`, `edit_file`,
 
 **Notes:**
 
-- Success (exit 0) appends nothing to the tool result — only failures surface output.
+- Success (exit 0) appends nothing to the tool result - only failures surface output.
 - The whole feature is a no-op under `--offline` / `CLAUDETTE_OFFLINE=1`.
 - `apply_patch` is excluded from v1 because it touches multiple files; only single-file writes (`write_file`, `edit_file`, `apply_diff`) trigger checks.
 
@@ -209,4 +209,4 @@ Opt-in wire-level pass that, under context pressure, replaces the bodies of *sta
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `CLAUDETTE_EVICT_TOOL_OUTPUT` | unset (off) | Set to `1`, `true`, `yes`, or `on` (case-insensitive) to evict stale tool-result bodies once the estimated prompt exceeds 60% of `num_ctx`, or set an integer `10`–`90` to pick the trigger percentage directly. Anything else is treated as OFF (fail-closed). Results under 512 chars and already-evicted stubs are never touched. |
+| `CLAUDETTE_EVICT_TOOL_OUTPUT` | unset (off) | Set to `1`, `true`, `yes`, or `on` (case-insensitive) to evict stale tool-result bodies once the estimated prompt exceeds 60% of `num_ctx`, or set an integer `10` - `90` to pick the trigger percentage directly. Anything else is treated as OFF (fail-closed). Results under 512 chars and already-evicted stubs are never touched. |
