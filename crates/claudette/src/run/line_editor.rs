@@ -817,7 +817,10 @@ mod tests {
     fn a_plain_piped_line_is_unchanged_by_the_sentinel_path() {
         // Including its trailing newline: the REPL trims, and the old
         // behaviour is what every existing piped caller was built against.
-        assert_eq!(line_of(piped("write a haiku\n").unwrap()), "write a haiku\n");
+        assert_eq!(
+            line_of(piped("write a haiku\n").unwrap()),
+            "write a haiku\n"
+        );
     }
 
     #[test]
@@ -862,8 +865,12 @@ mod tests {
 
     #[test]
     fn exit_inside_a_block_is_content_not_a_command() {
-        let got =
-            line_of(piped(&format!("{MULTILINE_OPEN}\nexit\nquit\n{MULTILINE_CLOSE}\n")).unwrap());
+        let got = line_of(
+            piped(&format!(
+                "{MULTILINE_OPEN}\nexit\nquit\n{MULTILINE_CLOSE}\n"
+            ))
+            .unwrap(),
+        );
         assert_eq!(got, "exit\nquit");
     }
 
@@ -910,7 +917,10 @@ mod tests {
             interactive: false,
         };
         ed.push_history("first\nsecond");
-        assert!(ed.history.is_empty(), "a block would corrupt the history file");
+        assert!(
+            ed.history.is_empty(),
+            "a block would corrupt the history file"
+        );
         ed.push_history("plain");
         assert_eq!(ed.history, hist(&["plain"]));
     }
