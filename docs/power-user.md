@@ -1,6 +1,6 @@
 # Power-user guide
 
-If you're already comfortable with Ollama / LM Studio and want the cheat-sheet view of every knob — this page is for you. For the categorized reference, see [`configuration.md`](configuration.md).
+If you're already comfortable with Ollama / LM Studio and want the cheat-sheet view of every knob - this page is for you. For the categorized reference, see [`configuration.md`](configuration.md).
 
 ---
 
@@ -26,7 +26,7 @@ export CLAUDETTE_SKIP_LM_STUDIO_PROBE=1
 
 ## Pinning a brain (no preset gymnastics)
 
-Scores, speeds, and the full per-GPU tier table live on the canonical model page —
+Scores, speeds, and the full per-GPU tier table live on the canonical model page -
 [`hardware.md`](hardware.md#which-model-for-which-gpu-measured). The pinning mechanics:
 
 ```bash
@@ -41,7 +41,7 @@ export CLAUDETTE_MODEL=byteshape/qwen3.6-35b-a3b-mtp
 # export CLAUDETTE_FALLBACK_BRAIN_MODEL=qwen3.5:9b   # ignored unless Auto preset
 ```
 
-> An `@<quant>` suffix (e.g. `@q3_k_xl`) is needed only when multiple quants of the same model are on disk — LM Studio picks the smallest match otherwise. With a single quant downloaded, the bare id works. Load the byteshape champion with its MTP flags for full speed — command in [`hardware.md`](hardware.md#loading-the-16-gb-champion-lm-studio).
+> An `@<quant>` suffix (e.g. `@q3_k_xl`) is needed only when multiple quants of the same model are on disk - LM Studio picks the smallest match otherwise. With a single quant downloaded, the bare id works. Load the byteshape champion with its MTP flags for full speed - command in [`hardware.md`](hardware.md#loading-the-16-gb-champion-lm-studio).
 
 Or in `~/.claudette/.env` for persistence across sessions.
 
@@ -61,7 +61,7 @@ To skip the Auto-preset dance entirely (no fallback, no stuck-signal escalation)
 export CLAUDETTE_MAX_FIX_ROUNDS=4                # default 3, clamped at 10
 ```
 
-The default of 3 is tuned for local 8b coder models. If you've routed Verifier to a stronger model via `~/.claudettes-forge/models.toml`, raising this often pays off — the Verifier catches subtler defects and the Coder still has room to fix them. Above 6 you're usually fighting a context-budget problem, not a quality problem.
+The default of 3 is tuned for local 8b coder models. If you've routed Verifier to a stronger model via `~/.claudettes-forge/models.toml`, raising this often pays off - the Verifier catches subtler defects and the Coder still has room to fix them. Above 6 you're usually fighting a context-budget problem, not a quality problem.
 
 Per-role model routing lives in `~/.claudettes-forge/models.toml`:
 
@@ -99,15 +99,15 @@ export CLAUDETTE_SOFT_COMPACT_THRESHOLD=12000    # earlier "preserve 12 turns" c
 export CLAUDETTE_MAX_ITERATIONS=80               # per-turn tool-call ceiling
 ```
 
-The default compaction threshold is adaptive — half the active brain's `num_ctx` (clamped to `[4000, 1000000]`) — so a real 16K–128K window compacts before it overflows. The `1M` value is only the upper cap for enormous windows. Set `CLAUDETTE_COMPACT_THRESHOLD` explicitly to pin a specific trigger (e.g. two-thirds of your `num_ctx`) instead of the `num_ctx / 2` default.
+The default compaction threshold is adaptive - half the active brain's `num_ctx` (clamped to `[4000, 1000000]`) - so a real 16K-128K window compacts before it overflows. The `1M` value is only the upper cap for enormous windows. Set `CLAUDETTE_COMPACT_THRESHOLD` explicitly to pin a specific trigger (e.g. two-thirds of your `num_ctx`) instead of the `num_ctx / 2` default.
 
 ---
 
 ## Disabling network paths
 
-The blunt instrument is the master flag — **`claudette --offline`** (or `CLAUDETTE_OFFLINE=1`), shipped in v0.8.9. It enforces the air-gap: every outbound call except the local model backend + loopback is hard-blocked, in both the in-process HTTP path and any subprocess (`git`, `gh`, edge-tts). The raw `bash` / `bash_background` tools — the one egress vector no allow-list can inspect — are refused **wholesale** under `--offline` (use the structured tools to keep coding). Inspect the live allow-list with `claudette --offline --doctor`, and see [Enforced offline mode](configuration.md#enforced-offline-mode---offline) in `configuration.md` for the full block/allow list. This is the recommended way to go dark.
+The blunt instrument is the master flag - **`claudette --offline`** (or `CLAUDETTE_OFFLINE=1`), shipped in v0.8.9. It enforces the air-gap: every outbound call except the local model backend + loopback is hard-blocked, in both the in-process HTTP path and any subprocess (`git`, `gh`, edge-tts). The raw `bash` / `bash_background` tools - the one egress vector no allow-list can inspect - are refused **wholesale** under `--offline` (use the structured tools to keep coding). Inspect the live allow-list with `claudette --offline --doctor`, and see [Enforced offline mode](configuration.md#enforced-offline-mode---offline) in `configuration.md` for the full block/allow list. This is the recommended way to go dark.
 
-For finer-grained control — disabling one outbound path while leaving the rest live — unset the relevant token instead of flipping the master flag:
+For finer-grained control - disabling one outbound path while leaving the rest live - unset the relevant token instead of flipping the master flag:
 
 | Outbound | How to disable |
 |----------|----------------|
@@ -124,7 +124,7 @@ Plus the existing safety check:
 export CLAUDETTE_ALLOW_REMOTE_OLLAMA=1           # silence the non-loopback warning
 ```
 
-…which is the *opposite* — you set this only when you've consciously pointed `OLLAMA_HOST` somewhere remote and you want the warning to stop firing.
+…which is the *opposite* - you set this only when you've consciously pointed `OLLAMA_HOST` somewhere remote and you want the warning to stop firing.
 
 ---
 
@@ -149,19 +149,19 @@ Always start with:
 claudette --doctor
 ```
 
-It prints: Ollama probe (or LM Studio probe), every `CLAUDETTE_*` env var that's set (values not redacted — they're config, not secrets), every tokenized integration's status, and which models are pulled. The output is roughly two screens; grep it for the symptom.
+It prints: Ollama probe (or LM Studio probe), every `CLAUDETTE_*` env var that's set (values not redacted - they're config, not secrets), every tokenized integration's status, and which models are pulled. The output is roughly two screens; grep it for the symptom.
 
 Common confusions:
 
 - **"Tool X returned not_configured"** → check the relevant token env var in `--doctor` output.
 - **"Brain answered but never called the tool"** → tool group probably not enabled; the model should call `enable_tools(group)` first. Open the TUI's Tools tab to see what groups are active.
-- **"Forge keeps retrying"** → check `CLAUDETTE_MAX_FIX_ROUNDS` and the Verifier model — a weak Verifier can reject indefinitely.
+- **"Forge keeps retrying"** → check `CLAUDETTE_MAX_FIX_ROUNDS` and the Verifier model - a weak Verifier can reject indefinitely.
 
 ---
 
 ## Read also
 
-- [`configuration.md`](configuration.md) — every env var, categorized.
-- [`architecture.md`](architecture.md) — module layout, tool-group contract, forge pipeline.
-- [`forge.md`](forge.md) — Planner/Coder/Verifier pipeline, `models.toml`, mission resumption.
-- [`../PRIVACY.md`](../PRIVACY.md) — every outbound network call, enumerated.
+- [`configuration.md`](configuration.md) - every env var, categorized.
+- [`architecture.md`](architecture.md) - module layout, tool-group contract, forge pipeline.
+- [`forge.md`](forge.md) - Planner/Coder/Verifier pipeline, `models.toml`, mission resumption.
+- [`../PRIVACY.md`](../PRIVACY.md) - every outbound network call, enumerated.

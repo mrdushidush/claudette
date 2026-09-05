@@ -1,4 +1,4 @@
-# Import Sweep — D:\dev + D:\dev\abcc_projects → claudette
+# Import Sweep - D:\dev + D:\dev\abcc_projects → claudette
 
 **Date:** 2026-05-19
 **Goal:** Inventory every importable feature/pattern from sibling projects so claudette can absorb the best of the family and the rest can be archived. After this sweep, only claudette ships.
@@ -7,14 +7,14 @@ This sweep builds on `D:\dev\abcc_projects\abcc_projects\PROJECT_REVIEW.md` (the
 
 ## How this report is organized
 
-- **§1 — Already-in-claudette confirmation.** What the existing review flagged as wanted that is now live (so we don't double-count).
-- **§2 — Tier-1 imports.** High-value features absent in claudette today, ready for direct port.
-- **§3 — Tier-2 imports.** Worthwhile but bigger lift or design questions remain.
-- **§4 — Tier-3 (consider).** Low-priority, niche, or duplicative.
-- **§5 — Hard PASS.** Things the review/memory flagged as anti-patterns or superseded.
-- **§6 — Per-project verdict.** What survives the sweep from each source repo.
+- **§1 - Already-in-claudette confirmation.** What the existing review flagged as wanted that is now live (so we don't double-count).
+- **§2 - Tier-1 imports.** High-value features absent in claudette today, ready for direct port.
+- **§3 - Tier-2 imports.** Worthwhile but bigger lift or design questions remain.
+- **§4 - Tier-3 (consider).** Low-priority, niche, or duplicative.
+- **§5 - Hard PASS.** Things the review/memory flagged as anti-patterns or superseded.
+- **§6 - Per-project verdict.** What survives the sweep from each source repo.
 
-`PROJECT_REVIEW.md` is the upstream reference for abcc_projects/ details — this doc layers on top, doesn't duplicate it.
+`PROJECT_REVIEW.md` is the upstream reference for abcc_projects/ details - this doc layers on top, doesn't duplicate it.
 
 ---
 
@@ -69,9 +69,9 @@ These are well-defined features that already exist in working code (in a sibling
 | | |
 |---|---|
 | What | First-class persona system: CodeX-7 (coder), Sentinel-9 (QA), CTO (strategic), Eva (assistant). Default-on, `--faceless` flag to disable, user-defined personas from `.claudette/personas/*.md` drop-in. |
-| Source — best impl | `D:\dev\claudettes-forge\personas\*.md` (already written: codex7, sentinel9, cto, eva) + `crates/core/src/personas.rs` (500 LOC loader) |
+| Source - best impl | `D:\dev\claudettes-forge\personas\*.md` (already written: codex7, sentinel9, cto, eva) + `crates/core/src/personas.rs` (500 LOC loader) |
 | Verbatim backstory source | `D:\dev\agent-battle-command-center\packages\agents\src\agents\{coder,qa}.py` (godfather, intact tree) |
-| Tacticode preserved copy | (was `Archive/tacticode/.../personas/codex7.py` per review — note: §14.5 says tacticode is solo so safe to lift) |
+| Tacticode preserved copy | (was `Archive/tacticode/.../personas/codex7.py` per review - note: §14.5 says tacticode is solo so safe to lift) |
 | Effort | Small. Personas files exist, loader exists, just needs wiring into claudette's runtime/prompt assembly. |
 | Why now | Per §14 user locked "all personas from day 1, default-on, `--faceless` flag." This is one of the explicit clean-room decisions and it's already half-built in claudettes-forge. |
 
@@ -80,9 +80,9 @@ These are well-defined features that already exist in working code (in a sibling
 | | |
 |---|---|
 | What | `ReadOnly` / `WorkspaceWrite` / `DangerFullAccess` / `Prompt` / `Allow` with `PermissionPolicy::authorize()` trait + swappable `PermissionPrompter`. Richer than claudette's current 3-tier. |
-| Source — best impl | `D:\dev\claudettes-forge\crates\core\src\permissions.rs` (489 LOC, ready) |
+| Source - best impl | `D:\dev\claudettes-forge\crates\core\src\permissions.rs` (489 LOC, ready) |
 | Original | `claw-code` upstream fork (per review §5) |
-| Effort | Medium. Need to replace claudette's existing 3-tier in `runtime/permissions.rs` carefully — every tool call site checks this. |
+| Effort | Medium. Need to replace claudette's existing 3-tier in `runtime/permissions.rs` carefully - every tool call site checks this. |
 | Why now | §14 J1 locked this in. The clean code is already written in claudettes-forge; lifting saves 1-2 days. |
 
 ### 2.3 SWE-bench runner
@@ -90,7 +90,7 @@ These are well-defined features that already exist in working code (in a sibling
 | | |
 |---|---|
 | What | ReAct agent loop with 7 tools, eval reports, resumable. Best-in-family benchmark harness. |
-| Source — best impl | `D:\dev\clawForge\crates\forge\src\swebench.rs` (725 LOC) + `swebench_eval.rs` (87) + `swebench_tools.rs` (293) |
+| Source - best impl | `D:\dev\clawForge\crates\forge\src\swebench.rs` (725 LOC) + `swebench_eval.rs` (87) + `swebench_tools.rs` (293) |
 | Effort | Medium. Self-contained module. Wire as `claudette bench swe` subcommand. |
 | Why now | The MTP benchmark (5-16) is sized for small fixtures; SWE-bench gives an industry-standard yardstick for forge mode's regression tracking. |
 
@@ -110,16 +110,16 @@ These are well-defined features that already exist in working code (in a sibling
 | What | Strategic-conversation agent above the forge pipeline. 10 native tools, iteration cap, history persistence, mission-control framing. |
 | Source | `D:\dev\clawForge\crates\forge\src\cto.rs` (size present, sub-300 LOC) + abcc `packages/agents/src/agents/cto.py` |
 | Effort | Medium. Personas + CTO agent overlap; can be one effort. |
-| Why now | Distinct from CodeX-7 (coder) — CTO is the strategic-loop hat for big missions. With forge mode shipped, this is the next natural layer. |
+| Why now | Distinct from CodeX-7 (coder) - CTO is the strategic-loop hat for big missions. With forge mode shipped, this is the next natural layer. |
 
 ### 2.6 Antipattern auto-detection (failure → prompt-injection feedback loop)
 
 | | |
 |---|---|
 | What | When 3 failures hit ≥70% similarity, a hard rule auto-graduates into the Engineer prompt. Closed feedback loop. Example: stealthsambaV2 Hotfix #12 sqlx-macro ban was auto-discovered. |
-| Source | stealthsambaV2 (Hadar-touched — lift the *idea*, not code, per §14.5) |
+| Source | stealthsambaV2 (Hadar-touched - lift the *idea*, not code, per §14.5) |
 | Effort | Medium. Needs a similarity comparator + a hot-prompt overlay. Claudette's memory.rs has the substrate. |
-| Why now | This is the single most-distinctive emergent-knowledge pattern in the family. None of the sibling projects shipped it functioning end-to-end (review notes godfather's "self-evolving few-shots" was aspirational — opportunity to *complete* an aspiration). |
+| Why now | This is the single most-distinctive emergent-knowledge pattern in the family. None of the sibling projects shipped it functioning end-to-end (review notes godfather's "self-evolving few-shots" was aspirational - opportunity to *complete* an aspiration). |
 
 ### 2.7 Best-round restore + smart stopping
 
@@ -152,7 +152,7 @@ These are well-defined features that already exist in working code (in a sibling
 
 | | |
 |---|---|
-| What | §14 I5 said "Just Space Invaders easter egg — redesign. Snake dropped." User wants this. |
+| What | §14 I5 said "Just Space Invaders easter egg - redesign. Snake dropped." User wants this. |
 | Source | `D:\dev\claudettes-forge\crates\tui\src\space.rs` (388 LOC) |
 | Effort | Small. |
 | Why now | Cheap morale win; the user explicitly called it out as wanted. |
@@ -163,7 +163,7 @@ These are well-defined features that already exist in working code (in a sibling
 
 ### 3.1 LanceDB + petgraph rich memory (`--memory=rich`)
 
-- Sourced from stealthsambaV2 (Hadar-touched — lift *idea*, not code).
+- Sourced from stealthsambaV2 (Hadar-touched - lift *idea*, not code).
 - §14 H1 + G4 deferred to v0.2 of the rewrite. Claudette already has `recall.rs` embeddings (lighter). Decision: keep file-backed default; LanceDB only if forge missions outgrow flat recall.
 - **Defer until:** evidence that recall/embeddings can't carry the load.
 
@@ -193,7 +193,7 @@ These are well-defined features that already exist in working code (in a sibling
 
 ### 3.6 MCP server surface
 
-- `clawforge-mcp` exists (`D:\dev\clawForge\crates\clawforge-mcp\src\` — protocol.rs + server.rs).
+- `clawforge-mcp` exists (`D:\dev\clawForge\crates\clawforge-mcp\src\` - protocol.rs + server.rs).
 - §14 O3 deferred. Adoption signal is low (review §6).
 - **Defer indefinitely** unless an external integration asks.
 
@@ -211,7 +211,7 @@ These are well-defined features that already exist in working code (in a sibling
 ### 3.9 Hardware monitor tab
 
 - `D:\dev\clawForge\crates\forge\src\hardware.rs` (273 LOC). HW tab in TUI (CPU/RAM/VRAM/thermal live).
-- Claudette TUI has 5 tabs (Chat/Tools/Notes/Todos/HW per review §10). **Confirm if HW tab is functional or a stub** — if stub, port from clawForge.
+- Claudette TUI has 5 tabs (Chat/Tools/Notes/Todos/HW per review §10). **Confirm if HW tab is functional or a stub** - if stub, port from clawForge.
 
 ### 3.10 `pipeline_api` HTTP surface
 
@@ -220,7 +220,7 @@ These are well-defined features that already exist in working code (in a sibling
 
 ### 3.11 Self-healing module
 
-- `D:\dev\clawForge\crates\forge\src\self_healing.rs` (164 LOC). What exactly it self-heals isn't visible from the filename — needs deeper read.
+- `D:\dev\clawForge\crates\forge\src\self_healing.rs` (164 LOC). What exactly it self-heals isn't visible from the filename - needs deeper read.
 - **Investigate before porting.**
 
 ### 3.12 Swarm mode (parallel multi-agent vote)
@@ -237,7 +237,7 @@ These are well-defined features that already exist in working code (in a sibling
 - `algo-trading-bot/algoarb/dex/{pact,tinyman}.py` (Algorand DEXes), `algoarb/folks/` (Folks Finance lending), `algoarb/amm_math/{constant_product,price_impact}.py`, `algoarb/risk/{circuit_breaker,size_optimizer,validator}.py`.
 - `sui-arb-bot/suiarb/dex/` (Sui DEXes).
 - `base-liquidator/baseliq/` (Base chain liquidation).
-- Claudette already has `tools/markets.rs` with TradingView + Algorand Vestige. **Niche.** Could extend `markets` to add Sui + Base if the user trades there, but the bots are Python — not a code port, more like API knowledge to encode in tool descriptions.
+- Claudette already has `tools/markets.rs` with TradingView + Algorand Vestige. **Niche.** Could extend `markets` to add Sui + Base if the user trades there, but the bots are Python - not a code port, more like API knowledge to encode in tool descriptions.
 - **Defer** unless user wants claudette to actively monitor/execute trades (vs the current "look up prices" scope).
 
 ### 4.2 ABCC api/services TypeScript library
@@ -259,7 +259,7 @@ These are well-defined features that already exist in working code (in a sibling
 
 ### 4.5 Landing page template
 
-- `D:\dev\landing_page_grok\battleclaw-landing\` — Astro + Tailwind landing page. Useful when claudette gets a real marketing page; not code to port.
+- `D:\dev\landing_page_grok\battleclaw-landing\` - Astro + Tailwind landing page. Useful when claudette gets a real marketing page; not code to port.
 - **Defer until launch motion.**
 
 ### 4.6 Publicators-monitor
@@ -269,12 +269,12 @@ These are well-defined features that already exist in working code (in a sibling
 
 ### 4.7 Battle-claw skill definition
 
-- `D:\dev\battle-claw\SKILL.md` + `clawhub.json`. Looks like a Claude Code Skill definition — for the Skill system, not Claudette code.
+- `D:\dev\battle-claw\SKILL.md` + `clawhub.json`. Looks like a Claude Code Skill definition - for the Skill system, not Claudette code.
 - **Reference only.**
 
 ### 4.8 Stealthforge_tests
 
-- `D:\dev\stealthforge_tests\testing\` — overflow test folder from sambaV2. Per §11 it overlaps with `stealthsambaV2`. Useful as a corpus snapshot for benchmarking; not for code lift.
+- `D:\dev\stealthforge_tests\testing\` - overflow test folder from sambaV2. Per §11 it overlaps with `stealthsambaV2`. Useful as a corpus snapshot for benchmarking; not for code lift.
 - **Reference only.**
 
 ---
@@ -285,7 +285,7 @@ These are well-defined features that already exist in working code (in a sibling
 |---|---|
 | litellm / CrewAI / MCP gateway | §14 D1: native SDKs only. Direct provider HTTP. |
 | Snake easter egg | §14 I5: explicitly dropped. Space Invaders only. |
-| Self-evolving few-shots (auto-append solutions ≥8) | §14 H5: dropped, "never load-bearing." Review §12.3 confirms it was aspirational — never implemented. |
+| Self-evolving few-shots (auto-append solutions ≥8) | §14 H5: dropped, "never load-bearing." Review §12.3 confirms it was aspirational - never implemented. |
 | Antipattern auto-detection in v0.1 | §14 H2: deferred. (But noted Tier-1 since claudette has shipped past v0.1; reconsider.) |
 | Multi-service docker-compose stack | §14 baseline: single binary. |
 | Tokio everywhere | §10 + §13.2: claudette stayed single-threaded + blocking; works fine for an assistant. |
@@ -304,11 +304,11 @@ What survives the sweep from each source repo, and whether it can be archived af
 |---|---|---|---|---|
 | **claudettes-forge** | `D:\dev\claudettes-forge\` | Active scaffold; partial overlap with claudette | Personas + 5-tier permissions + paste.rs + typewriter.rs + space.rs (Space Invaders) + Eva persona MD | **Keep** as the rewrite-in-progress; copy the lifted modules **into claudette**, decide later if rewrite continues independently or folds back. |
 | **clawForge (life-hacker)** | `D:\dev\clawForge\` | Predecessor of claudette, superseded | SWE-bench (swebench.rs / _eval / _tools), benchmark.rs harness, hardware.rs HW tab, mission.rs best-round restore, cto.rs, self_healing.rs (investigate), pipeline_api.rs (defer) | **Archive after Tier-1/2 ports land.** |
-| **battle-command-forge** (top-3 ship candidate per review) | not at D:\dev\ — only at abcc_projects/ Archive/ | Reference | 5-in-1 critique call, `__init__.py` sanitization, content-aware fence extraction, venv-per-project verifier, surgical fix-pass discipline | **Keep as ship candidate** per user plan; don't archive until shipped. |
-| **agent-battle-command-center (godfather)** | `D:\dev\agent-battle-command-center\` (intact) | Already public (25 stars). Solo. | CodeX-7 + Sentinel-9 verbatim agents, audio .wav banks (192 files), service patterns (humanEscalation, trainingData), 3s/8s rest timing constants | **Don't archive** — already public; just reference for lifts. |
+| **battle-command-forge** (top-3 ship candidate per review) | not at D:\dev\ - only at abcc_projects/ Archive/ | Reference | 5-in-1 critique call, `__init__.py` sanitization, content-aware fence extraction, venv-per-project verifier, surgical fix-pass discipline | **Keep as ship candidate** per user plan; don't archive until shipped. |
+| **agent-battle-command-center (godfather)** | `D:\dev\agent-battle-command-center\` (intact) | Already public (25 stars). Solo. | CodeX-7 + Sentinel-9 verbatim agents, audio .wav banks (192 files), service patterns (humanEscalation, trainingData), 3s/8s rest timing constants | **Don't archive** - already public; just reference for lifts. |
 | **battleclawclean** | `D:\dev\battleclawclean\` | v2 clean snapshot. Hadar-touched. | Patterns only (3-layer shell, validators) | **Archive.** |
 | **battleclaw-forge-main** | `D:\dev\battleclaw-forge-main\` | Mar-8 MVP-readiness snapshot. Hadar-touched. | Double-Context Phase-0 gambit *pattern* | **Archive.** |
-| **algo-trading-bot** | `D:\dev\algo-trading-bot\` | Solo Python | Niche — markets API knowledge only; defer | **Keep** if user still trades; archive otherwise. |
+| **algo-trading-bot** | `D:\dev\algo-trading-bot\` | Solo Python | Niche - markets API knowledge only; defer | **Keep** if user still trades; archive otherwise. |
 | **sui-arb-bot** | `D:\dev\sui-arb-bot\` | Solo Python | Niche; defer | Same as above. |
 | **base-liquidator** | `D:\dev\base-liquidator\` | Solo Python | Niche; defer | Same. |
 | **battle-claw** | `D:\dev\battle-claw\` | Skill definition only | SKILL.md as reference | **Archive.** |
@@ -328,12 +328,12 @@ If the user agrees with the Tier-1 set, the natural sprint order minimizes risk:
 2. **Paste-to-tempfile + typewriter + Space Invaders** (§2.9, §2.10). One PR. TUI-only, low blast radius.
 3. **Best-round restore + smart stopping** (§2.7). One PR in forge. Direct safety upgrade.
 4. **Double-Context Phase-0 gambit** (§2.8). Small follow-up to forge fix-loop.
-5. **5-tier permissions** (§2.2). Touches every tool call site — schedule deliberately, one PR with full test sweep.
+5. **5-tier permissions** (§2.2). Touches every tool call site - schedule deliberately, one PR with full test sweep.
 6. **CTO chat agent** (§2.5). Builds on personas being live.
-7. **SWE-bench runner** (§2.3) + **Multi-template bench + A/B** (§2.4) — bench crate. Two PRs, can land in either order.
-8. **Antipattern auto-detection** (§2.6) — closes the feedback loop. Land after bench is live (so we have real failure data to test against).
+7. **SWE-bench runner** (§2.3) + **Multi-template bench + A/B** (§2.4) - bench crate. Two PRs, can land in either order.
+8. **Antipattern auto-detection** (§2.6) - closes the feedback loop. Land after bench is live (so we have real failure data to test against).
 
-Tier-2 items (LanceDB rich memory, Independence reviewer, voice banks, etc.) are decision-points, not ports — gather data from §1-§7 first.
+Tier-2 items (LanceDB rich memory, Independence reviewer, voice banks, etc.) are decision-points, not ports - gather data from §1-§7 first.
 
 ---
 
@@ -344,7 +344,7 @@ Per the user's directive ("after this massive sweep we will focus only on claude
 - **claudette** stays the live product line.
 - **claudettes-forge** (the parallel rewrite scaffold) becomes either: (a) folded back into claudette by lifting its scaffolded modules and abandoning the standalone repo, or (b) kept frozen as the "v2 architecture sketch" but no new work.
 - **clawForge / life-hacker / battleclawclean / battleclaw-forge-main / battle-claw** → archive after lifts.
-- **battle-command-forge / ABCC godfather** → keep around as already-public ship candidates per §14 — but the user said "focus only on claudette" so these likely freeze too unless re-launched.
+- **battle-command-forge / ABCC godfather** → keep around as already-public ship candidates per §14 - but the user said "focus only on claudette" so these likely freeze too unless re-launched.
 - **Trading bots** → user's call; orthogonal to coding-agent work.
 
 Recommend the user pick: **(a) fold claudettes-forge into claudette now**, or **(b) leave claudettes-forge frozen and absorb just the §2 Tier-1 modules into claudette**. Either way, the result is "claudette only."
@@ -354,9 +354,9 @@ Recommend the user pick: **(a) fold claudettes-forge into claudette now**, or **
 ## 9. Cross-reference to memory
 
 This sweep extends:
-- `project_audience_expansion_2026_05_15.md` — installer/show-me/PRIVACY already shipped.
-- `project_e2e_sweep_2026_05_16_round3.md` — all 9 surfaces GREEN; this sweep targets *new* features, not gaps in shipped ones.
-- `project_tui_sweep_2026_05_17.md` — §7 safety GREEN; §8 compaction + §9 edges still pending and are higher priority than the Tier-1 imports here.
-- `project_forge_mode_shipped.md` — forge v0a/b/c live; §2.5 CTO + §2.6 antipattern + §2.7 best-round restore are the natural next forge upgrades.
+- `project_audience_expansion_2026_05_15.md` - installer/show-me/PRIVACY already shipped.
+- `project_e2e_sweep_2026_05_16_round3.md` - all 9 surfaces GREEN; this sweep targets *new* features, not gaps in shipped ones.
+- `project_tui_sweep_2026_05_17.md` - §7 safety GREEN; §8 compaction + §9 edges still pending and are higher priority than the Tier-1 imports here.
+- `project_forge_mode_shipped.md` - forge v0a/b/c live; §2.5 CTO + §2.6 antipattern + §2.7 best-round restore are the natural next forge upgrades.
 
 The single largest insight: **PROJECT_REVIEW.md (Apr 2026) already triaged the abcc_projects/ tree; this sweep only adds what that doc didn't see** (the D:\dev top-level repos + claudette's post-Apr evolution).

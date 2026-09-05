@@ -1,13 +1,13 @@
-# Claudette TUI — 50-prompt feature sweep (2026-05-16)
+# Claudette TUI-50-prompt feature sweep (2026-05-16)
 
 Type each prompt at the TUI input. The **Expect** line is what should appear / what
 to watch for. Pause between sections if you want to inspect state.
 
-Recommended setup: start fresh — `claudette --tui` from a clean shell, qwen3.6 brain.
+Recommended setup: start fresh - `claudette --tui` from a clean shell, qwen3.6 brain.
 
 ---
 
-## §1 — Core slash dispatcher (1–10)
+## §1 - Core slash dispatcher (1-10)
 
 1. `/help`
    **Expect:** full slash-command list including the 23 we shipped (help, clear, compact, sessions, save, load, status, cost, tools, model, memory, reload, capabilities, validate, agents, preset, brain, coder, models, recall, brownfield, forge, exit).
@@ -41,7 +41,7 @@ Recommended setup: start fresh — `claudette --tui` from a clean shell, qwen3.6
 
 ---
 
-## §2 — Preset & model switching (11–15)
+## §2 - Preset & model switching (11-15)
 
 11. `/preset fast`
     **Expect:** swaps to fast preset bundle, rebuild banner.
@@ -60,7 +60,7 @@ Recommended setup: start fresh — `claudette --tui` from a clean shell, qwen3.6
 
 ---
 
-## §3 — Brain natural-language, no tools (16–20)
+## §3 - Brain natural-language, no tools (16-20)
 
 16. `What is 17 * 23, and explain the steps you used.`
     **Expect:** 391. Watch for `add_numbers` not being called (removed from schema).
@@ -72,14 +72,14 @@ Recommended setup: start fresh — `claudette --tui` from a clean shell, qwen3.6
     **Expect:** 5 items, no hallucinated stdlib names.
 
 19. `What time is it right now?`
-    **Expect:** **calls `get_current_time` tool** — confirms tool-routing still fires for trivial asks.
+    **Expect:** **calls `get_current_time` tool** - confirms tool-routing still fires for trivial asks.
 
 20. `Without using any tools, summarize what you remember about this project.`
     **Expect:** mentions claudette / forge / qwen3.6 from CLAUDETTE.md context.
 
 ---
 
-## §4 — Tool use: files / search / git / todos / facts (21–28)
+## §4 - Tool use: files / search / git / todos / facts (21-28)
 
 21. `Create a file at scratch/hello.txt containing the single line "hello from tui sweep" and confirm it exists.`
     **Expect:** file tool writes, then reads back to verify. Check disk.
@@ -107,7 +107,7 @@ Recommended setup: start fresh — `claudette --tui` from a clean shell, qwen3.6
 
 ---
 
-## §5 — Recall & cross-session memory (29–33)
+## §5 - Recall & cross-session memory (29-33)
 
 29. `/save tui-sweep-mid`
     **Expect:** snapshot saved.
@@ -126,7 +126,7 @@ Recommended setup: start fresh — `claudette --tui` from a clean shell, qwen3.6
 
 ---
 
-## §6 — Codet / code generation (34–38)
+## §6 - Codet / code generation (34-38)
 
 34. `Write a tiny Rust function fn slugify(input: &str) -> String that lowercases and replaces runs of non-alphanumeric chars with a single dash. Return just the function and one unit test.`
     **Expect:** codet path or brain-direct; compiles in isolation.
@@ -145,7 +145,7 @@ Recommended setup: start fresh — `claudette --tui` from a clean shell, qwen3.6
 
 ---
 
-## §7 — Forge / brownfield / mission (39–44)
+## §7 - Forge / brownfield / mission (39-44)
 
 > Forge needs an active mission. We'll use a throwaway target.
 
@@ -156,7 +156,7 @@ Recommended setup: start fresh — `claudette --tui` from a clean shell, qwen3.6
     **Expect:** now shows active mission with target + marker.
 
 41. `/forge add a README.md with a one-line description "tiny repo used for claudette TUI sweep"`
-    **Expect:** Planner → Coder → Verifier loop. Watch the reload classifier (c6c5969 fix) — should NOT thrash. Verifier diffs against base SHA.
+    **Expect:** Planner → Coder → Verifier loop. Watch the reload classifier (c6c5969 fix) - should NOT thrash. Verifier diffs against base SHA.
 
 42. `Run forge again with a smaller ask: /forge add a .gitignore that ignores target/`
     **Expect:** second round-trip; mission_submit refuses if tree is clean.
@@ -169,7 +169,7 @@ Recommended setup: start fresh — `claudette --tui` from a clean shell, qwen3.6
 
 ---
 
-## §8 — Compaction / context stress (45–47)
+## §8 - Compaction / context stress (45-47)
 
 45. `Paste the entire content of crates/claudette/src/commands.rs into the chat and summarize it.`
     **Expect:** large input → compaction may trigger; tier-aware log; no model-reload panic (post-v0.4.0 fix). If model reload is needed, the 750ms backoff retry should kick in.
@@ -182,12 +182,12 @@ Recommended setup: start fresh — `claudette --tui` from a clean shell, qwen3.6
 
 ---
 
-## §9 — Edge cases & robustness (48–50)
+## §9 - Edge cases & robustness (48-50)
 
 48. `/validate ~/.claudette/files/userClass.py` (or any path you don't have)
     **Expect:** graceful "file not found" or validation report; no panic.
 
-49. (Attach an image — drag a PNG/JPG into TUI) `What's in this image?`
+49. (Attach an image - drag a PNG/JPG into TUI) `What's in this image?`
     **Expect:** vision tool fires if model supports it; otherwise graceful refusal. Compaction should evict older image bytes if multiple images sent (per evict_older_image_bytes fix).
 
 50. `/load tui-sweep-001` then `/exit`

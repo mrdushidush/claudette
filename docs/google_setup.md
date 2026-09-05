@@ -5,7 +5,7 @@
 > human-in-the-browser to create the OAuth client. The steps below are
 > in order; do them once and Claudette uses the same credentials for
 > Calendar and Gmail going forward. If a step looks unfamiliar, the
-> screenshot of Google's UI on that step is the source of truth — they
+> screenshot of Google's UI on that step is the source of truth - they
 > rename buttons every couple of years.
 
 Claudette talks to Google Calendar (and, later, Gmail) using your own OAuth
@@ -29,8 +29,8 @@ charge for this; you're using your own quota.
 
 Navigation → **APIs & Services → Library**. Search and enable:
 
-- **Google Calendar API** — required for the `calendar` tool group.
-- **Gmail API** — required for the `gmail` tool group (phase 4 onward).
+- **Google Calendar API** - required for the `calendar` tool group.
+- **Gmail API** - required for the `gmail` tool group (phase 4 onward).
   Read-only access only in v0.2.0; compose/send arrives in a later release.
 
 ## 3. Configure the OAuth consent screen
@@ -39,12 +39,12 @@ Navigation → **APIs & Services → OAuth consent screen**.
 
 1. **User Type**: choose **External**. (Internal requires a Workspace org.)
 2. Fill in the required fields:
-   - App name: `Claudette` (or whatever you like — only you will see it)
+   - App name: `Claudette` (or whatever you like - only you will see it)
    - User support email: your email
    - Developer contact email: your email
 3. **Scopes**: leave empty for now. Claudette requests scopes dynamically.
 4. **Test users**: add the Google account you want Claudette to act on
-   behalf of (probably your own). This is essential — in Testing mode only
+   behalf of (probably your own). This is essential - in Testing mode only
    listed test users can complete the flow.
 5. **Publishing status**: leave as **Testing**. This avoids Google's app
    verification process entirely. Testing mode supports up to 100 test
@@ -54,19 +54,19 @@ Navigation → **APIs & Services → OAuth consent screen**.
 
 Navigation → **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
 
-- **Application type**: **Desktop app**. (Do NOT pick "Web application" —
+- **Application type**: **Desktop app**. (Do NOT pick "Web application" -
   that requires a fixed redirect URI registered in the console, while
   Claudette's loopback server picks a random free port each run.)
 - **Name**: `Claudette local` (arbitrary).
 
 Click **Create**. Google shows a dialog with the `client_id` and `client_secret`.
-Keep this open — you need both strings in the next step.
+Keep this open - you need both strings in the next step.
 
 ## 5. Give Claudette the client credentials
 
 Pick ONE of these. Env vars take precedence if both are set.
 
-### Option A — environment variables (recommended for shell users)
+### Option A - environment variables (recommended for shell users)
 
 ```sh
 export CLAUDETTE_GOOGLE_CLIENT_ID="1234567890-abc...apps.googleusercontent.com"
@@ -79,7 +79,7 @@ they persist across shells. The file format is a plain `KEY=VALUE` per line.
 Short-form names (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) also work, but
 the `CLAUDETTE_` prefix avoids collisions with other tools.
 
-### Option B — JSON file
+### Option B - JSON file
 
 Write `~/.claudette/secrets/google_oauth_client.json`:
 
@@ -126,7 +126,7 @@ Either command:
    gmail), and closes the server.
 
 If the browser doesn't open automatically, copy the URL Claudette prints and
-paste it into your browser yourself — the flow still completes.
+paste it into your browser yourself - the flow still completes.
 
 Refresh tokens stay valid until you revoke them. You only rerun
 `--auth-google <scope>` if Google invalidates the token (rare) or you
@@ -140,7 +140,7 @@ Inside Claudette (REPL or Telegram):
 
 Claudette should call `enable_tools(calendar)` then `calendar_list_events`
 and respond with your real events. If you get `not authenticated`, the
-token file is missing — rerun `claudette --auth-google`.
+token file is missing - rerun `claudette --auth-google`.
 
 ## Revoking access
 
@@ -171,7 +171,7 @@ screen in Testing mode with your account as a test user).
 and recreate it as Desktop.
 
 **`response missing refresh_token`.** Happens when you re-authorize with an
-already-granted account — Google only returns a refresh token on the very
+already-granted account - Google only returns a refresh token on the very
 first consent. Visit <https://myaccount.google.com/permissions>, revoke
 Claudette, then rerun `--auth-google`.
 

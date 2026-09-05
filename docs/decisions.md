@@ -1,21 +1,21 @@
 # Architecture Decisions
 
 > [!WARNING]
-> **HISTORICAL — planning-era design doc, NOT the shipped architecture.**
-> These ADs were written in April 2026 for the `claudettes-forge` predecessor and describe a design that was largely *not* built. They are kept for provenance only. For how claudette actually works today, read **[`architecture.md`](architecture.md)** — it is the source of truth.
+> **HISTORICAL - planning-era design doc, NOT the shipped architecture.**
+> These ADs were written in April 2026 for the `claudettes-forge` predecessor and describe a design that was largely *not* built. They are kept for provenance only. For how claudette actually works today, read **[`architecture.md`](architecture.md)** - it is the source of truth.
 >
 > Specifically, the following claims below are **fiction relative to the shipped product**:
-> - **AD-1 / AD-2** — claudette is a **single-crate** workspace (`crates/claudette`), not six crates. There is no `claudette-verify` binary or `claudettes-forge-verifier` crate. Forge is invoked as `claudette --forge "<prompt>"`, not `claudettes-forge forge <mission>`.
-> - **AD-3** — **claudette has no cloud provider.** It is local-only / air-gapped and drives one local model (LM Studio or Ollama). The "Anthropic Claude as the only cloud option" never shipped; see [`../PRIVACY.md`](../PRIVACY.md) and `src/egress.rs`.
-> - **AD-4 / AD-7** — the real forge loop is a Coder → Verifier (with an optional CTO decomposition) cycle, **not** the 7-stage `Router → Planner → Coder → TestCoder → Verifier → SurgicalCoder → Gate` pipeline. There is no `--gate-threshold`, `--pro`, or `pipeline.gate_threshold` config.
-> - **AD-5** — permissions are **three-tier** (see `architecture.md`), not the 5-tier `ReadOnly/WorkspaceWrite/DangerFullAccess/Prompt/Allow` model, and there is **no platform sandboxing** (`sandbox-exec`/`bwrap`) — that module was removed in the 2026-06 dead-code cleanup.
-> - **AD-6** — MSRV is **1.88** and clippy/pedantic apply to the single crate; the "seven-crate workspace" framing is moot.
+> - **AD-1 / AD-2** - claudette is a **single-crate** workspace (`crates/claudette`), not six crates. There is no `claudette-verify` binary or `claudettes-forge-verifier` crate. Forge is invoked as `claudette --forge "<prompt>"`, not `claudettes-forge forge <mission>`.
+> - **AD-3** - **claudette has no cloud provider.** It is local-only / air-gapped and drives one local model (LM Studio or Ollama). The "Anthropic Claude as the only cloud option" never shipped; see [`../PRIVACY.md`](../PRIVACY.md) and `src/egress.rs`.
+> - **AD-4 / AD-7** - the real forge loop is a Coder → Verifier (with an optional CTO decomposition) cycle, **not** the 7-stage `Router → Planner → Coder → TestCoder → Verifier → SurgicalCoder → Gate` pipeline. There is no `--gate-threshold`, `--pro`, or `pipeline.gate_threshold` config.
+> - **AD-5** - permissions are **three-tier** (see `architecture.md`), not the 5-tier `ReadOnly/WorkspaceWrite/DangerFullAccess/Prompt/Allow` model, and there is **no platform sandboxing** (`sandbox-exec`/`bwrap`) - that module was removed in the 2026-06 dead-code cleanup.
+> - **AD-6** - MSRV is **1.88** and clippy/pedantic apply to the single crate; the "seven-crate workspace" framing is moot.
 
 Convention: AD-N sequential. Each captures *problem → options → decision → consequences*. Nice-to-have documentation for load-bearing choices; readers can go straight from "why does it work this way" to the rationale without asking.
 
 ---
 
-## AD-1 — Multi-crate cargo workspace (2026-04-22)
+## AD-1 - Multi-crate cargo workspace (2026-04-22)
 
 **Problem.** Single-crate vs workspace-with-member-crates vs polyrepo for the v0.1 structure.
 
@@ -37,12 +37,12 @@ Convention: AD-N sequential. Each captures *problem → options → decision →
 **Consequences.**
 
 - Slightly heavier boilerplate (a Cargo.toml per crate).
-- At v0.0.1 several crates are near-empty (intentional — they get filled over Sprints 1-5).
+- At v0.0.1 several crates are near-empty (intentional - they get filled over Sprints 1-5).
 - Crate names use `claudettes-forge-<role>` prefix so we can publish individual crates to crates.io without collisions. The main binary stays as `claudettes-forge`.
 
 ---
 
-## AD-2 — Assistant + forge in one binary (2026-04-22)
+## AD-2 - Assistant + forge in one binary (2026-04-22)
 
 **Problem.** Ship two products (claudette-style secretary + BCF-style coder) or one product with two modes?
 
@@ -62,7 +62,7 @@ Convention: AD-N sequential. Each captures *problem → options → decision →
 
 ---
 
-## AD-3 — Ollama-first at v0.1, Anthropic added v0.2 (2026-04-22)
+## AD-3 - Ollama-first at v0.1, Anthropic added v0.2 (2026-04-22)
 
 **Problem.** Default provider policy.
 
@@ -81,7 +81,7 @@ Convention: AD-N sequential. Each captures *problem → options → decision →
 
 ---
 
-## AD-4 — 7-stage forge pipeline with surgical-by-default fix-loop (2026-04-22)
+## AD-4-7-stage forge pipeline with surgical-by-default fix-loop (2026-04-22)
 
 **Problem.** Stage count for forge-mode pipeline.
 
@@ -89,18 +89,18 @@ Convention: AD-N sequential. Each captures *problem → options → decision →
 
 **Rationale.**
 
-- stealthsambaV2's 10-stage added Spec-Fidelity (3b) and Independence (8) as separate stages — both useful concepts but deferred as opt-ins rather than always-on baseline.
-- BCF's 9-stage included Security + Critique + CTO — folded into Gate's checklist.
+- stealthsambaV2's 10-stage added Spec-Fidelity (3b) and Independence (8) as separate stages - both useful concepts but deferred as opt-ins rather than always-on baseline.
+- BCF's 9-stage included Security + Critique + CTO - folded into Gate's checklist.
 - Surgical > regen is the strongest convergent learning in the family ("full regen always degrades score," BCF learning #12). Default enforces the empirically-correct behaviour.
 
 **Consequences.**
 
 - `--pro` flag could eventually add Security / Critique / CTO / Independence stages back as additional stages (post-v0.2).
-- Double-Context Phase-0 is a Coder-stage internal behaviour, not a separate stage — keeps the stage count honest at 7.
+- Double-Context Phase-0 is a Coder-stage internal behaviour, not a separate stage - keeps the stage count honest at 7.
 
 ---
 
-## AD-5 — 5-tier permissions model from claw-code (2026-04-22)
+## AD-5-5-tier permissions model from claw-code (2026-04-22)
 
 **Problem.** Permission tier count.
 
@@ -118,22 +118,22 @@ Convention: AD-N sequential. Each captures *problem → options → decision →
 
 ---
 
-## AD-6 — Toolchain + lint baseline (2026-04-24, pre-Sprint-3 audit)
+## AD-6 - Toolchain + lint baseline (2026-04-24, pre-Sprint-3 audit)
 
 **Problem.** Three separate toolchain/hygiene choices surfaced during the pre-Sprint-3 audit and needed explicit spec before starting Sprint 3:
 
-1. **MSRV was fictional.** `rust-version = "1.75"` had been in the workspace `Cargo.toml` since scaffolding, but `reqwest 0.12` (Sprint 1 session 4) transitively pulls `indexmap 2.14` which requires `edition2024` — unavailable before Rust 1.85. Anyone actually trying to build on 1.75 hit `feature edition2024 is required` before a single line of our code ran.
+1. **MSRV was fictional.** `rust-version = "1.75"` had been in the workspace `Cargo.toml` since scaffolding, but `reqwest 0.12` (Sprint 1 session 4) transitively pulls `indexmap 2.14` which requires `edition2024` - unavailable before Rust 1.85. Anyone actually trying to build on 1.75 hit `feature edition2024 is required` before a single line of our code ran.
 2. **Clippy pedantic was claimed workspace-wide, applied to `core` only.** Sprint 2 exit criteria said "Clippy pedantic green". Only `crates/core/src/lib.rs` has `#![warn(clippy::pedantic)]`; the other six crates run default clippy. Sprint 2 shipped with an unacknowledged quality gap.
 3. **No line-ending enforcement.** A fresh `git clone` on Windows (`core.autocrlf=true` is the Git-for-Windows default) turned committed LF files into CRLF, which broke the persona frontmatter parser silently. Working trees with Write-tool-written files masked the bug.
 
 **Options considered.**
 
-- (a) Leave MSRV at 1.75, document it as aspirational. Rejected — declaring a MSRV that cannot build is a bug magnet for contributors.
-- (b) Bump MSRV to the highest stable (1.95). Rejected — gratuitous; excludes users on recent-but-not-bleeding-edge toolchains for no concrete gain.
+- (a) Leave MSRV at 1.75, document it as aspirational. Rejected - declaring a MSRV that cannot build is a bug magnet for contributors.
+- (b) Bump MSRV to the highest stable (1.95). Rejected - gratuitous; excludes users on recent-but-not-bleeding-edge toolchains for no concrete gain.
 - (c) Bump to the honest minimum (1.85, forced by `edition2024` in the dep tree). **Selected** for MSRV.
-- (d) Bump to 1.87 to regain `u64::is_multiple_of`. Rejected — buys back one convenience method at the cost of two extra Rust versions of buffer; the `% == 0` alternative is already in place with a scoped `#[allow]`.
-- (e) Accept the Sprint 2 claim and silently tighten only when it breaks. Rejected for clippy — the gap was real, and Sprint 3 is the right moment to correct it before another crate lands with relaxed lints.
-- (f) Rely on parser robustness alone (CRLF-tolerant frontmatter) without `.gitattributes`. Rejected — we want both belts and braces; future parsers shouldn't have to repeat the CRLF-normalise workaround.
+- (d) Bump to 1.87 to regain `u64::is_multiple_of`. Rejected - buys back one convenience method at the cost of two extra Rust versions of buffer; the `% == 0` alternative is already in place with a scoped `#[allow]`.
+- (e) Accept the Sprint 2 claim and silently tighten only when it breaks. Rejected for clippy - the gap was real, and Sprint 3 is the right moment to correct it before another crate lands with relaxed lints.
+- (f) Rely on parser robustness alone (CRLF-tolerant frontmatter) without `.gitattributes`. Rejected - we want both belts and braces; future parsers shouldn't have to repeat the CRLF-normalise workaround.
 
 **Decision.**
 
@@ -149,14 +149,14 @@ Convention: AD-N sequential. Each captures *problem → options → decision →
 
 **Consequences.**
 
-- Users on Rust 1.75–1.84 cannot build. In practice this is zero users: Sprint 1 and 2 never actually worked on those versions.
-- Sprint 3 carries a pre-flight "enable pedantic on tui/binary/forge/verifier/integrations/bench, fix warnings" item before any new feature work. Budget ~2–4 hours; most of the warnings are `must_use`, `cast_possible_truncation`, `too_many_lines`, and parameter-passing-style nits.
-- Contributors with existing clones on `core.autocrlf=true` may see a one-time bulk re-checkout when `.gitattributes` lands — `git rm --cached -r . && git checkout .` after a pull resynchronises line endings. Documented in Sprint 3 onboarding notes.
+- Users on Rust 1.75-1.84 cannot build. In practice this is zero users: Sprint 1 and 2 never actually worked on those versions.
+- Sprint 3 carries a pre-flight "enable pedantic on tui/binary/forge/verifier/integrations/bench, fix warnings" item before any new feature work. Budget ~2-4 hours; most of the warnings are `must_use`, `cast_possible_truncation`, `too_many_lines`, and parameter-passing-style nits.
+- Contributors with existing clones on `core.autocrlf=true` may see a one-time bulk re-checkout when `.gitattributes` lands - `git rm --cached -r . && git checkout .` after a pull resynchronises line endings. Documented in Sprint 3 onboarding notes.
 - This ADR supersedes the Sprint 2 hard constraint "MSRV is 1.75" (historical record kept intact in `docs/sprints/sprint_02_tui.md`).
 
 ---
 
-## AD-7 — Forge pipeline architecture + benchmarking-driven gate (2026-04-24, Sprint 3 kickoff)
+## AD-7 - Forge pipeline architecture + benchmarking-driven gate (2026-04-24, Sprint 3 kickoff)
 
 **Problem.** Sprint 3 kickoff surfaced five choices that shape the `forge` crate port from BCF-ABCC. Making them implicitly during mid-checklist commits would fragment the decision history; batching into one ADR lets Sonnet start at step 1 without re-litigating.
 
@@ -168,16 +168,16 @@ Convention: AD-N sequential. Each captures *problem → options → decision →
 
 **Options considered.**
 
-- (1a) Keep AD-4 literal — Coder → TestCoder. **Selected** per user preference 2026-04-24: TestCoder validates the produced code against a richer specification, rather than writing tests-first against a plan.
-- (1b) Reorder to TDD — TestCoder → Coder. Rejected for Sprint 3; carries the BCF-ABCC empirical advantage (+1.7 points in the 10-mission stress test) but trades against AD-4 continuity. Revisit via AD-8 if Sprint 3 benchmarks show an unrecoverable gap.
-- (2a) Gate = single structured-JSON LLM call — security verdict + 5-score critique + CTO verdict + score in one call. **Selected**. Matches BCF-ABCC learning #5 ("single critique call > 5 parallel calls, Ollama is sequential anyway"). Cost + latency win is material with Ollama.
+- (1a) Keep AD-4 literal - Coder → TestCoder. **Selected** per user preference 2026-04-24: TestCoder validates the produced code against a richer specification, rather than writing tests-first against a plan.
+- (1b) Reorder to TDD - TestCoder → Coder. Rejected for Sprint 3; carries the BCF-ABCC empirical advantage (+1.7 points in the 10-mission stress test) but trades against AD-4 continuity. Revisit via AD-8 if Sprint 3 benchmarks show an unrecoverable gap.
+- (2a) Gate = single structured-JSON LLM call - security verdict + 5-score critique + CTO verdict + score in one call. **Selected**. Matches BCF-ABCC learning #5 ("single critique call > 5 parallel calls, Ollama is sequential anyway"). Cost + latency win is material with Ollama.
 - (2b) Gate = three internal sub-stages. Rejected for v0.2; escalation path if (2a) produces flaky judgements under benchmark.
 - (3a) Keep pipeline sync. **Selected**. Sprint 2 worker demonstrates the pattern works; no pipeline stage has concurrent I/O that async would help (Ollama is sequential, fix-pass loop is sequential, stages are sequential).
 - (3b) Introduce tokio to the `forge` crate. Rejected. Cross-crate async adoption is a workspace-wide concurrency retrofit and deserves its own AD; the bridge-layer complexity to reach into sync `core` primitives adds more surface than the net ergonomic gain.
 - (4a) Extend `models.toml` with optional fields (`context_size`, `max_predict`, `pipeline.gate_threshold`, `pipeline.gate_preset`). Backwards-compatible; missing fields get defaults logged. **Selected**.
-- (4b) Break schema and require migration. Rejected — Sprint 2 files keep working, migration deferred to v0.3 if a cleanup pass justifies it.
-- (5a) Hardcode 9.2 threshold. Rejected — BCF-ABCC data shows this is unreachable on all-local model sets.
-- (5b) Hardcode a lower threshold (e.g. 7.5). Rejected — numbers without the data behind them invite bikeshedding; benchmarking should drive the value.
+- (4b) Break schema and require migration. Rejected - Sprint 2 files keep working, migration deferred to v0.3 if a cleanup pass justifies it.
+- (5a) Hardcode 9.2 threshold. Rejected - BCF-ABCC data shows this is unreachable on all-local model sets.
+- (5b) Hardcode a lower threshold (e.g. 7.5). Rejected - numbers without the data behind them invite bikeshedding; benchmarking should drive the value.
 - (5c) Make threshold config-driven with a sensible default (8.0 per user "good enough to ship" bar) + preset for aspirational-mode. **Selected**.
 
 **Decisions.**
@@ -185,7 +185,7 @@ Convention: AD-N sequential. Each captures *problem → options → decision →
 1. **Pipeline order follows AD-4 literal:** `Router → Planner → Coder → TestCoder → Verifier → SurgicalCoder → Gate`. TestCoder runs *after* Coder and validates against a test plan produced by Planner.
 2. **Gate is a single LLM call** returning structured JSON with security verdict, 5-score critique (DEV/ARCH/TEST/SEC/DOCS), CTO verdict, and final score `critique_avg * 0.4 + verifier_score * 0.6`.
 3. **Pipeline stays sync.** No `tokio`, `async fn`, or `.await` in any Sprint 3 delta. `std::thread::spawn` + `std::sync::mpsc` is the concurrency primitive. Cross-crate tokio adoption is deferred indefinitely; if it ever lands it gets its own AD.
-4. **`models.toml` schema gains optional fields:** per-role `context_size` + `max_predict`; workspace-level `pipeline.gate_threshold` + `pipeline.gate_preset`. Files written for Sprint 2 continue to load — missing fields log a one-line defaults notice. Role mapping from pipeline stage: Router→`complexity`, Planner→`architect`, Coder→`coder`, TestCoder→`tester`, SurgicalCoder→`fix_coder`, Gate→`critique`. Verifier is deterministic code, not an LLM role.
+4. **`models.toml` schema gains optional fields:** per-role `context_size` + `max_predict`; workspace-level `pipeline.gate_threshold` + `pipeline.gate_preset`. Files written for Sprint 2 continue to load - missing fields log a one-line defaults notice. Role mapping from pipeline stage: Router→`complexity`, Planner→`architect`, Coder→`coder`, TestCoder→`tester`, SurgicalCoder→`fix_coder`, Gate→`critique`. Verifier is deterministic code, not an LLM role.
 5. **Quality gate threshold is config-driven.** Default: **8.0** (ship-worthy per user). Override via `models.toml::pipeline.gate_threshold` or CLI `--gate-threshold`. Preset `aspirational` enables BCF-ABCC's 9.2/8.5/8.0 Campbell-tier ladder. The default value is subject to post-Sprint-3 bench-tuning on local-only and local+cloud runs; moving the default is a follow-up commit, not a re-opening of Sprint 3.
 
 **Rationale.**
@@ -193,7 +193,7 @@ Convention: AD-N sequential. Each captures *problem → options → decision →
 - **AD-4 literal ordering** maintains decision continuity with the original design intent. The BCF-ABCC TDD advantage is real but unfortunately tangled with using Opus as tester; isolating the ordering effect from the model-quality effect is itself a benchmarking task that happens *after* Sprint 3 ships. If the isolated ordering effect is large, AD-8 reorders cleanly.
 - **Single Gate call** extends the BCF-ABCC learning "single critique call > 5 parallel calls" from the internal critique panel to the whole gate stage. Cheaper, faster, and the LLM can self-consistently score across the dimensions (a pattern BCF-ABCC learning #5 already validates).
 - **Sync discipline** preserves the bug-free concurrency model Sprint 2 shipped. Mixing sync and async crate boundaries creates footguns (blocking a tokio runtime, starving a pool, async-in-sync context panics). Staying sync avoids all of them for zero pipeline-semantics loss.
-- **Schema extension over break** is the usual safer move; Sprint 2 `models.toml` was only in the wild for two days, but the discipline is worth establishing early — downstream files (user-written configs) should always be readable by later versions.
+- **Schema extension over break** is the usual safer move; Sprint 2 `models.toml` was only in the wild for two days, but the discipline is worth establishing early - downstream files (user-written configs) should always be readable by later versions.
 - **Config-driven gate** separates algorithm from policy. The algorithm is "score vs threshold"; the threshold is empirical. Hardcoding either 9.2 (BCF default) or 7.5 (local-only average) builds in an opinion the data hasn't been run yet to justify.
 
 **Consequences.**

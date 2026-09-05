@@ -1,14 +1,14 @@
 # Deploy Claudette on a server
 
-The fastest way to put Claudette on a small VPS, a Raspberry Pi, or a home server: use the bundled `docker/docker-compose.yml`. Run every `docker compose` command below from the `docker/` directory — the build context is set to the repo root, so the image still builds from the full source tree. It brings up Ollama + Claudette together, runs Claudette in Telegram-bot mode, and keeps everything on local disk volumes.
+The fastest way to put Claudette on a small VPS, a Raspberry Pi, or a home server: use the bundled `docker/docker-compose.yml`. Run every `docker compose` command below from the `docker/` directory - the build context is set to the repo root, so the image still builds from the full source tree. It brings up Ollama + Claudette together, runs Claudette in Telegram-bot mode, and keeps everything on local disk volumes.
 
-This is the "Telegram bot on a tower at home" use case — talk to Claudette from your phone, all data stays in your house.
+This is the "Telegram bot on a tower at home" use case - talk to Claudette from your phone, all data stays in your house.
 
 ---
 
 ## What you'll need
 
-- A Linux host with Docker + Compose installed. Raspberry Pi 5 (4–8 GB), Hetzner CX21, DigitalOcean droplet, or an old desktop all work fine.
+- A Linux host with Docker + Compose installed. Raspberry Pi 5 (4-8 GB), Hetzner CX21, DigitalOcean droplet, or an old desktop all work fine.
 - A Telegram bot token from [@BotFather](https://t.me/BotFather). Free, 60 seconds.
 - ~3 GB free disk (Ollama image + Claudette image + one small brain).
 - ~2 GB RAM headroom (the smallest brain is ~1.2 GB resident; the rest is overhead).
@@ -55,7 +55,7 @@ You should see Claudette announce it's polling Telegram. Open Telegram on your p
 | $5 VPS (1 GB) | `qwen2.5:0.5b` | ~700 MB | Tight but works |
 | $10 VPS (2 GB) | `qwen2.5:1.5b` | ~1.4 GB | Comfortable |
 | $20 VPS / old desktop (4 GB+) | `qwen2.5:3b` | ~2.5 GB | Visibly smarter |
-| Anything with a GPU | `qwen3.5:4b` | ~3.4 GB VRAM | Switch to GPU-passthrough — see below |
+| Anything with a GPU | `qwen3.5:4b` | ~3.4 GB VRAM | Switch to GPU-passthrough - see below |
 
 Pin the brain in your compose `environment:` block:
 
@@ -87,7 +87,7 @@ services:
 
 You'll need [`nvidia-container-toolkit`](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) on the host. With it, the same `qwen3.5:4b` you'd run locally fits and is dramatically faster.
 
-ROCm (AMD) and Metal (macOS) work too — Ollama documents the relevant flags. Outside the scope of this doc.
+ROCm (AMD) and Metal (macOS) work too - Ollama documents the relevant flags. Outside the scope of this doc.
 
 ---
 
@@ -174,6 +174,6 @@ Install Claudette with the one-line installer first: `curl -fsSL https://raw.git
 
 ## Privacy note
 
-By default Claudette warns at startup when `OLLAMA_HOST` points anywhere except loopback — a safety reminder that "your prompts are about to leave the local machine." Inside docker-compose, the bridge-network hostname `ollama` is not loopback even though it's effectively local, so the bundled `docker-compose.yml` sets `CLAUDETTE_ALLOW_REMOTE_OLLAMA=1` to acknowledge the configuration and silence the warning. **Only set this when you actually understand the topology** — it's the same env var that would silence the warning if Ollama were on a different host across the open internet.
+By default Claudette warns at startup when `OLLAMA_HOST` points anywhere except loopback - a safety reminder that "your prompts are about to leave the local machine." Inside docker-compose, the bridge-network hostname `ollama` is not loopback even though it's effectively local, so the bundled `docker-compose.yml` sets `CLAUDETTE_ALLOW_REMOTE_OLLAMA=1` to acknowledge the configuration and silence the warning. **Only set this when you actually understand the topology** - it's the same env var that would silence the warning if Ollama were on a different host across the open internet.
 
 For the full inventory of what leaves the machine and when, see [`../PRIVACY.md`](../PRIVACY.md).
