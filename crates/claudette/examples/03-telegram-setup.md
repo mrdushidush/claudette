@@ -6,7 +6,7 @@ local agent with voice in and voice out.
 
 ## Prerequisites
 
-- Claudette built and on `PATH` (see main [`README.md`](../README.md)).
+- Claudette built and on `PATH` (see main [`README.md`](../../../README.md)).
 - Ollama running locally with your chosen models pulled.
 - A Telegram account.
 
@@ -90,7 +90,7 @@ Bot:    You have 3 events scheduled this week:
 ```
 
 (This assumes you've already authorised the Calendar scope — see
-[`../docs/google_setup.md`](../docs/google_setup.md).)
+[`docs/google_setup.md`](../../../docs/google_setup.md).)
 
 ## 5. Restricting to specific chats
 

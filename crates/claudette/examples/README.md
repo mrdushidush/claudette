@@ -1,7 +1,7 @@
 # Examples
 
 Short, scenario-focused walkthroughs to complement the main
-[`README.md`](../README.md). Each file stands on its own — pick the
+[`README.md`](../../../README.md). Each file stands on its own — pick the
 one that matches what you want to do.
 
 Most examples include real output captured from Claudette running the
@@ -21,7 +21,7 @@ hardware, Ollama version, and model temperature.
 
 - All example commands assume Claudette is built and on `PATH`. If
   you haven't done that yet, follow the build steps in the main
-  [`README.md`](../README.md#quick-start).
+  [`README.md`](../../../README.md#quick-start).
 - Output blocks are tagged `▸` for tool invocations and `⚡` for the
   per-turn usage footer — both are exactly what Claudette prints.
 - Where a transcript shows a Telegram chat ID, it's always a

@@ -15,7 +15,7 @@ prior discussion; feature proposals work best as an issue first.
 Rust. Single binary, one local model (LM Studio or Ollama), four
 interfaces (REPL, one-shot, TUI, Telegram bot). It also carries a
 personal-assistant surface (notes, calendar, voice), but the coding
-agent is the core. See [`docs/comparison.md`](docs/comparison.md) for
+agent is the core. See [`docs/comparison.md`](../docs/comparison.md) for
 where Claudette sits relative to other agents.
 
 **What Claudette isn't going to become:** a hosted SaaS, a plugin
@@ -32,7 +32,7 @@ cargo build --release
 ```
 
 You'll need Ollama running locally for any end-to-end testing. See
-[`docs/hardware.md`](docs/hardware.md) for model requirements.
+[`docs/hardware.md`](../docs/hardware.md) for model requirements.
 
 ## Before you open a PR
 
@@ -89,7 +89,7 @@ existing history is the style guide.
    covering a known failure mode (missing parameter, invalid JSON,
    boundary condition).
 
-Document the group in [`docs/architecture.md`](docs/architecture.md)'s
+Document the group in [`docs/architecture.md`](../docs/architecture.md)'s
 "Tool groups" table so users can discover it.
 
 ## Adding a new tool group — permission tier

@@ -138,5 +138,5 @@ Brain100 pass rate is **not the same** as SWE-bench. The harness is
 pattern-matching on short-horizon tool-using prompts; SWE-bench is
 real task resolution on real repos. Claudette's 94% here doesn't
 translate to a 94% SWE-bench number (and we haven't run SWE-bench
-yet). See [`../docs/comparison.md`](../docs/comparison.md) for how
+yet). See [`docs/comparison.md`](../../../docs/comparison.md) for how
 Claudette positions against SWE-agent tooling.
