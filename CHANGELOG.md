@@ -10,13 +10,15 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-05
+
 ### Security
 
 - **`--offline` no longer leaks the conversation to `$HTTP_PROXY`.**
   `egress::is_allowed_host` vetted the host in the URL, but reqwest defaults to
   `auto_sys_proxy: true` and hyper-util's proxy matcher has no loopback bypass,
   so a loopback URL passed the guard and the socket still went to the system
-  proxy — carrying the whole system prompt and conversation with it, while the
+  proxy - carrying the whole system prompt and conversation with it, while the
   "offline mode" banner was on screen. This also silently broke the *default*
   posture: on any machine with a corporate proxy, traffic meant for the local
   model backend was routed off-box. Proxy use is now decided per-request
@@ -24,7 +26,7 @@ bumps are non-breaking bugfixes only.
 
 - **Dev-dependency advisories cleared in the VS Code extension** (`fast-uri`,
   `js-yaml`, `brace-expansion`, `linkify-it` and others in
-  `editor/vscode/package-lock.json`). Build-time only — the shipped Rust binary
+  `editor/vscode/package-lock.json`). Build-time only - the shipped Rust binary
   never depended on them.
 
 ### Added
@@ -40,8 +42,8 @@ bumps are non-breaking bugfixes only.
   `<<<CLAUDETTE-PROMPT` opens a block that runs as **one turn** when a line
   reading exactly `CLAUDETTE-PROMPT>>>` closes it. Without this, piped input is
   one line per turn, so a prompt containing newlines silently became several
-  turns — with a blank line skipped and a line reading `exit` ending the
-  session — and there was no other way in (`Event::Paste` strips newlines and
+  turns - with a blank line skipped and a line reading `exit` ending the
+  session - and there was no other way in (`Event::Paste` strips newlines and
   only fires under raw mode, one-shot carries newlines on argv but has no
   permission prompter, and no slash command reads a file into a turn). Line
   endings inside a block are normalised to `\n`, blank lines are kept, an
@@ -55,7 +57,7 @@ bumps are non-breaking bugfixes only.
   so stale archived docs stay out of reviews. Excluded files are recorded in
   `manifest.json` and counted in the `FINDINGS.md` header, not silently dropped.
   A run also warns at startup about files dense with chat-template control
-  tokens (e.g. `api/harmony.rs`), which reliably provoke content-less batches —
+  tokens (e.g. `api/harmony.rs`), which reliably provoke content-less batches -
   exclude them if the flake cost isn't worth the coverage.
 
 ### Fixed
@@ -69,19 +71,19 @@ bumps are non-breaking bugfixes only.
   `"   "` or `"\n"` trimmed to `""` and matched any blank line; and an
   already-correctly-indented `after` was rebased onto itself, rewriting the
   interior of multi-line string literals and heredocs and changing a string's
-  runtime value. The rule is now **align or refuse** — an `after` already at the
+  runtime value. The rule is now **align or refuse** - an `after` already at the
   window's indent is spliced verbatim, and an indent that cannot be related to
   the block's anchor is an error rather than an invention.
 
 - **`/undo` was a no-op after `apply_diff`, `apply_patch` or `edit_file`.**
   `snapshot_to_trash` had two production call sites; the three editors wrote to
   a tmp file and renamed, leaving no pre-image, so `/undo` silently did nothing
-  and suggested `/undo one` — which then restored an unrelated older file.
+  and suggested `/undo one` - which then restored an unrelated older file.
   All three now snapshot fail-closed: no pre-image, no write.
 
 - **`write_file` could overwrite an existing file with no prompt.** It was
-  registered `WorkspaceWrite`, so replacing an existing file was auto-allowed —
-  no `[y/N]`, no preview — while every other edit tool sits at
+  registered `WorkspaceWrite`, so replacing an existing file was auto-allowed -
+  no `[y/N]`, no preview - while every other edit tool sits at
   `DangerFullAccess`. Overwriting an existing file is an edit and is now gated
   like one, with a diff preview showing what would be **lost** and the
   line/byte delta. `write_file`, `edit_file` and `apply_patch` also now log
@@ -110,13 +112,13 @@ bumps are non-breaking bugfixes only.
   install has no `~/.claudette/models.toml`, so every new user got
   `fallback_brain = qwen3.5:9b`; three consecutive tool errors were enough to
   issue a request for a model the server does not have loaded, and LM Studio
-  JIT-loaded it — evicting the 13.6 GB model the user deliberately loaded. The
+  JIT-loaded it - evicting the 13.6 GB model the user deliberately loaded. The
   tiered design assumed Ollama on a small card and was never re-checked against
   the LM Studio path.
 
 - **Unknown flags are rejected instead of sent to the model.** `parse_args`
   pushed any unrecognised token into the prompt, so `claudette --setpu` printed
-  a chatty reply instead of an error — a typo in the first command the README
+  a chatty reply instead of an error - a typo in the first command the README
   tells a new user to run looked like the tool working. Unknown flag-shaped
   args now exit 2 with a Levenshtein "did you mean", after `--help`/`--version`
   and before any subsystem. `--` ends flag parsing so a prompt may still start
@@ -124,8 +126,8 @@ bumps are non-breaking bugfixes only.
 
 ### Docs
 
-- **README leads with the Q56 benchmark** — 16 configs, 36 full runs, hidden
-  tests, no LLM judge — rather than with the agent.
+- **README leads with the Q56 benchmark** - 16 configs, 36 full runs, hidden
+  tests, no LLM judge - rather than with the agent.
 - **First-run drift corrected** in the paths a new user actually walks.
 - **Repo root tidied** so the README is reachable; `CODE_OF_CONDUCT.md`,
   `CONTRIBUTING.md` and the issue/PR templates now live under `.github/`.
@@ -2463,7 +2465,8 @@ Initial public release of Claudette as a standalone repository.
 
 ---
 
-[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/mrdushidush/claudette/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/mrdushidush/claudette/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/mrdushidush/claudette/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/mrdushidush/claudette/compare/v0.14.0...v0.15.0
