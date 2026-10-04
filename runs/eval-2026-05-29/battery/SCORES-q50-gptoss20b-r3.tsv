@@ -1,0 +1,56 @@
+Q01	rust	implement-spec	PASS	9s	EC=0	recall=na	PASS — all 6 hidden slug tests passed
+Q02	rust	boundary	PASS	8s	EC=0	recall=na	PASS — all 6 hidden lower_bound tests passed
+Q03	rust	bugfix	FAIL	16s	EC=0	recall=na	FAIL — hidden tests failed: zero_people_no_panic --- FAILED thread 'zero_people_no_panic' (1124) panicked at src\lib.rs:6:16: test result: FAILED. 5 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s error: test failed, to rerun pass `--test hidden_gate` 
+Q04	rust	refactor	PASS	14s	EC=0	recall=na	PASS — all 5 hidden parse_int_list tests passed
+Q05	rust	error-handling	FAIL	11s	EC=0	recall=na	FAIL — hidden tests failed: blank_lines_skipped --- FAILED thread 'blank_lines_skipped' (16868) panicked at tests\hidden_gate.rs:8:36: assertion `left == right` failed test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s 
+Q06	rust	implement-spec	PASS	7s	EC=0	recall=na	PASS — all hidden int_to_roman tests passed
+Q07	rust	api-misuse	PASS	14s	EC=0	recall=na	PASS — all 5 hidden word_frequencies tests passed
+Q08	rust	multi-file	FAIL	9s	EC=0	recall=na	FAIL — hidden tests failed: 
+Q09	rust	boundary	FAIL	11s	EC=0	recall=na	FAIL — hidden tests failed: 
+Q10	rust	implement-spec	PASS	17s	EC=0	recall=na	PASS — all hidden ipv4 tests passed
+Q11	rust	concurrency	FAIL	6s	EC=0	recall=na	FAIL — hidden tests failed: 
+Q12	rust	perf	FAIL	3s	EC=1	recall=na	FAIL — hidden tests failed: large_input_must_be_fast --- FAILED thread 'large_input_must_be_fast' (15664) panicked at tests\hidden_gate.rs:15:5: too slow (11.536831s); needs a roughly-linear approach test result: FAILED. 5 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.54s 
+Q13	python	implement-spec	PASS	7s	EC=0	recall=na	PASS — all hidden CSV tests passed
+Q14	python	bugfix	PASS	11s	EC=1	recall=na	PASS — all hidden deep_merge tests passed
+Q15	python	error-handling	PASS	15s	EC=0	recall=na	PASS — all hidden retry tests passed
+Q16	python	boundary	FAIL	3s	EC=1	recall=na	FAIL — hidden tests failed: >       assert paginate([1, 2, 3, 4], 2) == [[1, 2], [3, 4]] E       assert [[1, 2], [3, 4], []] == [[1, 2], [3, 4]] hidden_gate_test.py:6: AssertionError >       assert paginate([], 3) == [] 
+Q17	python	perf	FAIL	9s	EC=0	recall=na	FAIL — hidden tests failed: =================================== ERRORS ==================================== ____________________ ERROR collecting hidden_gate_test.py _____________________ C:\Users\david\AppData\Local\Programs\Python\Python314\Lib\site-packages\_pytest\assertion\rewrite.py:188: in exec_module E   SyntaxError: 'return' outside function 
+Q18	python	api-misuse	PASS	13s	EC=0	recall=na	PASS — buckets are independent per call
+Q19	python	implement-spec	PASS	14s	EC=0	recall=na	PASS — all hidden size-format tests passed
+Q20	python	refactor	PASS	9s	EC=0	recall=na	PASS — keeps falsy-but-present values, drops only None
+Q21	python	multi-file	PASS	6s	EC=0	recall=na	PASS — tax applied on subtotal, no per-item drift
+Q22	python	concurrency	FAIL	3s	EC=1	recall=na	FAIL — hidden tests failed: >       assert c.get() == 8 * 5000 E       assert 5416 == (8 * 5000) hidden_gate_test.py:15: AssertionError FAILED hidden_gate_test.py::test_concurrent_increments_not_lost - assert 5416... 
+Q23	python	boundary	PASS	15s	EC=0	recall=na	PASS — all hidden parse_ranges tests passed
+Q24	python	implement-spec	PASS	6s	EC=0	recall=na	PASS — all hidden word_wrap tests passed
+Q25	python	api-misuse	PASS	20s	EC=0	recall=na	PASS — cent totals are exact
+Q26	js	implement-spec	PASS	26s	EC=0	recall=na	PASS — all hidden deepEqual tests passed
+Q27	js	bugfix	FAIL	3s	EC=1	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: default depth 1 
+Q28	js	boundary	FAIL	11s	EC=0	recall=na	FAIL — hidden tests failed: SyntaxError: Unexpected end of input 
+Q29	js	error-handling	FAIL	3s	EC=1	recall=na	FAIL — hidden tests failed: TypeError: Cannot read properties of undefined (reading 'y') 
+Q30	js	api-misuse	PASS	10s	EC=0	recall=na	PASS — all hidden sortNumbers tests passed
+Q31	js	implement-spec	PASS	10s	EC=0	recall=na	PASS — all hidden groupBy tests passed
+Q32	js	perf	FAIL	7s	EC=1	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: too slow: 5063ms (needs a linear approach) 
+Q33	js	refactor	PASS	8s	EC=0	recall=na	PASS — all hidden average tests passed
+Q34	js	multi-file	FAIL	4s	EC=1	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: user overrides scalar 
+Q35	ts	implement-spec	FAIL	3s	EC=1	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: repeated key 
+Q36	ts	bugfix	PASS	16s	EC=0	recall=na	PASS — all hidden deepClone tests passed
+Q37	ts	boundary	FAIL	10s	EC=0	recall=na	FAIL — hidden tests failed: SyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]: Return statement is not allowed here 
+Q38	ts	error-handling	FAIL	3s	EC=1	recall=na	FAIL — hidden tests failed: SyntaxError: Expected property name or '}' in JSON at position 1 (line 1 column 2) 
+Q39	ts	api-misuse	PASS	6s	EC=0	recall=na	PASS — all hidden makeGrid tests passed
+Q40	ts	implement-spec	FAIL	3s	EC=1	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: args passed through 
+Q41	ts	perf	PASS	11s	EC=0	recall=na	PASS — correct and fast on large input
+Q42	ts	refactor	PASS	8s	EC=0	recall=na	PASS — all hidden isPalindrome tests passed
+Q43	shell	bugfix	PASS	27s	EC=0	recall=na	PASS — line counts correct with and without trailing newline
+Q44	shell	implement-spec	PASS	15s	EC=0	recall=na	PASS — frequency tally sorted, case-folded, whitespace-split
+Q45	shell	bugfix	FAIL	7s	EC=0	recall=na	FAIL — expected [code1
+Q46	shell	boundary	FAIL	32s	EC=0	recall=na	FAIL — range 8..100: expected [8
+Q47	shell	error-handling	FAIL	8s	EC=0	recall=na	FAIL — 10/2 expected 5 got ''
+Q48	shell	api-misuse	PASS	10s	EC=0	recall=na	PASS — arguments joined with commas, spaces preserved
+Q49	shell	multi-file	FAIL	5s	EC=1	recall=na	FAIL — expected [hello
+Q50	shell	implement-spec	PASS	12s	EC=0	recall=na	PASS — extracts Nth comma field, handles missing/empty fields
+Q51	python	implement-spec	PASS	8s	EC=0	recall=na	PASS — all hidden parse_duration tests passed
+Q52	rust	implement-spec	FAIL	7s	EC=1	recall=na	FAIL — hidden tests failed: capacity_zero_never_panics --- FAILED overwrites_oldest --- FAILED capacity_one --- FAILED exactly_full --- FAILED 
+Q53	js	implement-spec	FAIL	37s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: simple 
+Q54	python	implement-spec	PASS	9s	EC=0	recall=na	PASS — all hidden topological_sort tests passed
+Q55	ts	implement-spec	PASS	14s	EC=0	recall=na	PASS — all hidden mergeIntervals tests passed
+Q56	rust	implement-spec	PASS	9s	EC=0	recall=na	PASS — all hidden compare_versions tests passed

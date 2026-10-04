@@ -1,0 +1,1 @@
+Refactor `keep_present` in solution.py to be cleaner and more Pythonic. It filters a list down to the values that are actually present — that is, it should drop the None entries and keep everything else, preserving order. Keep the existing test passing.

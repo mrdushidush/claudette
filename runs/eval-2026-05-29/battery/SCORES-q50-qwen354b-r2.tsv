@@ -1,0 +1,56 @@
+Q01	rust	implement-spec	FAIL	79s	EC=1	recall=na	FAIL — hidden tests failed: error[E0308]: mismatched types 
+Q02	rust	boundary	PASS	20s	EC=0	recall=na	PASS — all 6 hidden lower_bound tests passed
+Q03	rust	bugfix	FAIL	34s	EC=1	recall=na	FAIL — hidden tests failed: error[E0277]: the type `[u64]` cannot be indexed by `u64` 
+Q04	rust	refactor	FAIL	24s	EC=0	recall=na	FAIL — hidden tests failed: empty_input --- FAILED thread 'empty_input' (18072) panicked at src\lib.rs:5:42: test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s error: test failed, to rerun pass `--test hidden_gate` 
+Q05	rust	error-handling	FAIL	47s	EC=0	recall=na	FAIL — hidden tests failed: blank_lines_skipped --- FAILED thread 'blank_lines_skipped' (15416) panicked at tests\hidden_gate.rs:8:36: assertion `left == right` failed test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s 
+Q06	rust	implement-spec	PASS	22s	EC=0	recall=na	PASS — all hidden int_to_roman tests passed
+Q07	rust	api-misuse	FAIL	177s	EC=1	recall=na	FAIL — hidden tests failed: error[E0631]: type mismatch in closure arguments error[E0631]: type mismatch in closure arguments 
+Q08	rust	multi-file	FAIL	58s	EC=1	recall=na	FAIL — hidden tests failed: chained_subtraction --- FAILED all_subtraction --- FAILED mixed_precedence_and_sub --- FAILED long_subtraction_chain --- FAILED 
+Q09	rust	boundary	PASS	47s	EC=1	recall=na	PASS — all hidden RLE tests passed
+Q10	rust	implement-spec	PASS	29s	EC=1	recall=na	PASS — all hidden ipv4 tests passed
+Q11	rust	concurrency	FAIL	26s	EC=0	recall=na	FAIL — hidden tests failed: concurrent_increments_are_not_lost --- FAILED thread 'concurrent_increments_are_not_lost' (19356) panicked at tests\hidden_gate.rs:20:5: assertion `left == right` failed   left: 44724 
+Q12	rust	perf	PASS	24s	EC=0	recall=na	PASS — correct and fast on large input
+Q13	python	implement-spec	FAIL	27s	EC=0	recall=na	FAIL — hidden tests failed: =================================== ERRORS ==================================== ____________________ ERROR collecting hidden_gate_test.py _____________________ C:\Users\david\AppData\Local\Programs\Python\Python314\Lib\site-packages\_pytest\assertion\rewrite.py:188: in exec_module E   SyntaxError: unterminated string literal (detected at line 8) 
+Q14	python	bugfix	PASS	26s	EC=1	recall=na	PASS — all hidden deep_merge tests passed
+Q15	python	error-handling	PASS	19s	EC=0	recall=na	PASS — all hidden retry tests passed
+Q16	python	boundary	FAIL	33s	EC=1	recall=na	FAIL — hidden tests failed: >       assert paginate([1, 2, 3, 4], 2) == [[1, 2], [3, 4]] E       assert [[1, 2], [3, 4], []] == [[1, 2], [3, 4]] hidden_gate_test.py:6: AssertionError >       assert paginate([], 3) == [] 
+Q17	python	perf	PASS	29s	EC=1	recall=na	PASS — correct and fast on large input
+Q18	python	api-misuse	PASS	26s	EC=0	recall=na	PASS — buckets are independent per call
+Q19	python	implement-spec	FAIL	25s	EC=1	recall=na	FAIL — hidden tests failed: >       assert human_readable_size(1500) == "1.5 KB" E       AssertionError: assert '1.46484375 KB' == '1.5 KB' hidden_gate_test.py:14: AssertionError >       assert human_readable_size(1048576) == "1.0 MB" 
+Q20	python	refactor	PASS	33s	EC=1	recall=na	PASS — keeps falsy-but-present values, drops only None
+Q21	python	multi-file	PASS	35s	EC=1	recall=na	PASS — tax applied on subtotal, no per-item drift
+Q22	python	concurrency	PASS	43s	EC=1	recall=na	PASS — concurrent increments not lost
+Q23	python	boundary	PASS	31s	EC=1	recall=na	PASS — all hidden parse_ranges tests passed
+Q24	python	implement-spec	PASS	51s	EC=0	recall=na	PASS — all hidden word_wrap tests passed
+Q25	python	api-misuse	FAIL	22s	EC=1	recall=na	FAIL — hidden tests failed: >       assert total_cents(["5"]) == 500 E           ValueError: not enough values to unpack (expected 2, got 1) solution.py:6: ValueError FAILED hidden_gate_test.py::test_integer_dollar_string - ValueError: not enou... 
+Q26	js	implement-spec	FAIL	27s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: array vs object 
+Q27	js	bugfix	FAIL	39s	EC=1	recall=na	FAIL — hidden tests failed: export function flatten(arr, depth = 1) {\n  let result = [];\n  for (const item of arr) {\n    if (Array.isArray(item)) {\n      // If depth is Infinity or we haven't reached the limit yet\n      if (depth === Infinity || depth > 0) {\n        result = result.concat(flatten(item, depth - 1));\n      } else {\n        // At max depth, push array as-is\n        result.push(item);\n      }\n    } else {\n      result.push(item);\n    }\n  }\n  return result;\n} SyntaxError: Invalid or unexpected token 
+Q28	js	boundary	PASS	22s	EC=0	recall=na	PASS — all hidden chunk tests passed
+Q29	js	error-handling	FAIL	31s	EC=1	recall=na	FAIL — hidden tests failed: TypeError: Cannot read properties of undefined (reading 'y') 
+Q30	js	api-misuse	PASS	19s	EC=0	recall=na	PASS — all hidden sortNumbers tests passed
+Q31	js	implement-spec	PASS	15s	EC=0	recall=na	PASS — all hidden groupBy tests passed
+Q32	js	perf	PASS	29s	EC=0	recall=na	PASS — correct and fast on large input
+Q33	js	refactor	PASS	19s	EC=0	recall=na	PASS — all hidden average tests passed
+Q34	js	multi-file	FAIL	63s	EC=1	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: user overrides scalar 
+Q35	ts	implement-spec	FAIL	37s	EC=1	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: repeated key 
+Q36	ts	bugfix	PASS	36s	EC=1	recall=na	PASS — all hidden deepClone tests passed
+Q37	ts	boundary	PASS	21s	EC=0	recall=na	PASS — all hidden range tests passed
+Q38	ts	error-handling	PASS	25s	EC=0	recall=na	PASS — all hidden safeJsonParse tests passed
+Q39	ts	api-misuse	PASS	17s	EC=0	recall=na	PASS — all hidden makeGrid tests passed
+Q40	ts	implement-spec	FAIL	41s	EC=1	recall=na	FAIL — hidden tests failed: TypeError: Cannot read properties of undefined (reading 'add')     at EventEmitter.once (file:///D:/dev/claudette/runs/eval-2026-05-29/battery/work/Q40/solution.ts:54:20) 
+Q41	ts	perf	FAIL	34s	EC=1	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: too slow: 1645ms (needs a linear approach) 
+Q42	ts	refactor	PASS	18s	EC=0	recall=na	PASS — all hidden isPalindrome tests passed
+Q43	shell	bugfix	PASS	36s	EC=1	recall=na	PASS — line counts correct with and without trailing newline
+Q44	shell	implement-spec	PASS	20s	EC=0	recall=na	PASS — frequency tally sorted, case-folded, whitespace-split
+Q45	shell	bugfix	PASS	22s	EC=0	recall=na	PASS — comments and blank lines stripped, inline # kept
+Q46	shell	boundary	PASS	33s	EC=0	recall=na	PASS — inclusive line range correct including edges
+Q47	shell	error-handling	PASS	16s	EC=1	recall=na	PASS — divides correctly and handles zero divisor cleanly
+Q48	shell	api-misuse	PASS	20s	EC=0	recall=na	PASS — arguments joined with commas, spaces preserved
+Q49	shell	multi-file	PASS	45s	EC=1	recall=na	PASS — normalize strips both ends, keeps internal spacing
+Q50	shell	implement-spec	PASS	14s	EC=0	recall=na	PASS — extracts Nth comma field, handles missing/empty fields
+Q51	python	implement-spec	FAIL	31s	EC=1	recall=na	FAIL — hidden tests failed: >       assert parse_duration("1h 30m") == 5400         Raises ValueError for invalid input.             raise ValueError("Input must be a string")                 raise ValueError(f"Invalid character at position {i}") 
+Q52	rust	implement-spec	FAIL	102s	EC=1	recall=na	FAIL — hidden tests failed: error[E0507]: cannot move out of index of `Vec<T>` 
+Q53	js	implement-spec	FAIL	62s	EC=1	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: simple 
+Q54	python	implement-spec	FAIL	58s	EC=1	recall=na	FAIL — hidden tests failed: >       assert topological_sort({"b": ["a"], "c": ["b"]}) == ["a", "b", "c"]         before it). Returns a list of all nodes in dependency order, or None if the E       KeyError: 'a' solution.py:16: KeyError 
+Q55	ts	implement-spec	PASS	22s	EC=0	recall=na	PASS — all hidden mergeIntervals tests passed
+Q56	rust	implement-spec	FAIL	23s	EC=1	recall=na	FAIL — hidden tests failed: shorter_is_zero_padded --- FAILED thread 'shorter_is_zero_padded' (18304) panicked at tests\hidden_gate.rs:12:5: assertion `left == right` failed test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s 

@@ -4,7 +4,10 @@
 # through the real tool loop -> verify -> record PASS/FAIL + elapsed + recall.
 # usage: bash run_battery.sh [id-prefix]   (e.g. "A", "I", "B3" — empty = all)
 set -u
-BAT="/d/dev/claudette/runs/eval-2026-05-29/battery"
+# Battery home = this script's own directory, so the harness runs from any
+# clone on any box. Override with BATTERY_HOME only if you have relocated the
+# corpus away from the scripts.
+BAT="${BATTERY_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 # Binary: default to the cargo-installed claudette on PATH. The freshly-built
 # target/release exe is blocked by Windows Application Control (WDAC) on this box
 # and pops a per-launch dialog; the PATH binary is already approved and is the
@@ -45,7 +48,17 @@ echo "[battery] model=$CLAUDETTE_MODEL  ctx=$CLAUDETTE_NUM_CTX  tag='${TAG:-<non
 # repo), so regenerate it on demand from the live tree if missing.
 if [ ! -d "$BAT/fixtures/bigrepo/src" ]; then
   echo "[setup] regenerating fixtures/bigrepo from the live repo..."
-  REPO="/d/dev/claudette"
+  # The battery lives at <repo>/runs/eval-2026-05-29/battery, so the repo root
+  # is three levels up. Verified before use: a relocated corpus (or a partial
+  # clone) must fail loudly here rather than silently build a truncated fixture
+  # that would change what I1-I8 measure.
+  REPO="${BATTERY_REPO:-$(cd "$BAT/../../.." && pwd)}"
+  if [ ! -d "$REPO/crates/claudette/src" ]; then
+    echo "[setup] ERROR: cannot locate the claudette source tree from $BAT" >&2
+    echo "[setup]   looked for: $REPO/crates/claudette/src" >&2
+    echo "[setup]   set BATTERY_REPO=/path/to/claudette and re-run." >&2
+    exit 1
+  fi
   mkdir -p "$BAT/fixtures/bigrepo"
   cp -r "$REPO/crates/claudette/src" "$BAT/fixtures/bigrepo/src"
   cp -r "$REPO/docs" "$BAT/fixtures/bigrepo/docs"
@@ -118,3 +131,25 @@ echo "================ SUMMARY ================"
 p=$(grep -cP '\tPASS\t' "$SCORES"); f=$(grep -cP '\tFAIL' "$SCORES"); t=$(wc -l < "$SCORES")
 echo "PASS=$p  FAIL/other=$((t-p))  total=$t"
 [ "$t" -gt 0 ] && echo "aggregate: $(awk "BEGIN{printf \"%.1f%%\", 100*$p/$t}")"
+# Total wall-clock. 2026-07-25: `probe_speed.sh` tok/s does NOT predict this — a config
+# that probed FASTER (73 vs 70 tok/s) ran 2.5x slower here, because the battery is
+# dominated by prompt processing, not generation. Report it on every run.
+[ "$t" -gt 0 ] && awk -F'\t' '{gsub(/s/,"",$5); s+=$5} END{printf "wall-clock: %dm%02ds (avg %ds/task)\n", s/60, s%60, s/NR}' "$SCORES"
+
+# Record the runtime config this run was ACTUALLY measured under (KV cache type, ctx,
+# parallel, VRAM, claudette build). Q50.md listed these as "held constant" but nothing
+# verified them, and the KV type silently flipped to f16 — invalidating comparisons that
+# nobody knew were invalid. Appended to RUNMETA.tsv, keyed by tag.
+#
+# Deliberately at the END, not the start: the model JIT-loads on the first task, so a
+# probe at t=0 reports `na`. Best-effort — never fail a completed run over metadata.
+if [ -f "$BAT/probe_runtime_config.sh" ]; then
+  RUNMETA="$BAT/RUNMETA.tsv"
+  if row="$(BATTERY_TAG="$TAG" bash "$BAT/probe_runtime_config.sh" "${TAG:-<none>}" 2>/dev/null)"; then
+    printf '%s\n' "$row" >> "$RUNMETA"
+    printf '%s' "$row" | awk -F'\t' -v f="$(basename "$RUNMETA")" \
+      '{printf "runtime config -> %s: ctx=%s kv=%s/%s parallel=%s vram=%sMiB %s\n", f, $4, $6, $7, $5, $9, $10}'
+  else
+    echo "[warn] runtime-config probe failed; RUNMETA.tsv not updated for tag '${TAG:-<none>}'"
+  fi
+fi
