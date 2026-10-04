@@ -10,6 +10,16 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Docs
+
+- **The Q56 results now live on `main`.** The replication package
+  (`runs/eval-2026-05-29/battery/`: the 16-row table, `RESULTS-q56.csv`, every
+  run's failure list, the hidden verifiers and reference solutions) was only on
+  the `battery/q50-quality-corpus` branch, and the README's three links into it
+  pointed there. They now point at `main`, so the evidence no longer depends on a
+  side branch staying put. Only the battery directory came across; the branch's
+  other changes stay on the branch.
+
 ## [0.18.0] - 2026-09-05
 
 ### Security

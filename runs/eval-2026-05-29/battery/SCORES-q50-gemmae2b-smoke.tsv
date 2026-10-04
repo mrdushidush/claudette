@@ -1,0 +1,5 @@
+Q01	rust	implement-spec	FAIL	29s	EC=0	recall=na	FAIL — hidden tests failed: 
+Q13	python	implement-spec	FAIL	18s	EC=0	recall=na	FAIL — hidden tests failed: >       assert parse_csv_line('a,"b,c",d') == ["a", "b,c", "d"] E       assert ['a', '"b', 'c"', 'd'] == ['a', 'b,c', 'd'] hidden_gate_test.py:9: AssertionError >       assert parse_csv_line('"she said ""hi"""') == ['she said "hi"'] 
+Q26	js	implement-spec	FAIL	15s	EC=0	recall=na	FAIL — hidden tests failed: SyntaxError: The requested module './solution.mjs' does not provide an export named 'deepEqual' 
+Q35	ts	implement-spec	PASS	28s	EC=0	recall=na	PASS — all hidden parseQueryString tests passed
+Q43	shell	bugfix	FAIL	18s	EC=0	recall=na	FAIL — input a\\nb\\nc: expected 3, got '2'

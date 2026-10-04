@@ -1,0 +1,56 @@
+Q01	rust	implement-spec	FAIL	15s	EC=0	recall=na	FAIL — hidden tests failed: error[E0432]: unresolved import `unicode_segmentation` error[E0599]: no method named `graphemes` found for reference `&str` in the current scope 
+Q02	rust	boundary	PASS	17s	EC=0	recall=na	PASS — all 6 hidden lower_bound tests passed
+Q03	rust	bugfix	FAIL	46s	EC=0	recall=na	FAIL — hidden tests failed: zero_people_no_panic --- FAILED thread 'zero_people_no_panic' (1548) panicked at src\lib.rs:6:22: test result: FAILED. 5 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s error: test failed, to rerun pass `--test hidden_gate` 
+Q04	rust	refactor	FAIL	15s	EC=0	recall=na	FAIL — hidden tests failed: empty_input --- FAILED thread 'empty_input' (13360) panicked at src\lib.rs:5:48: test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s error: test failed, to rerun pass `--test hidden_gate` 
+Q05	rust	error-handling	FAIL	19s	EC=0	recall=na	FAIL — hidden tests failed: blank_lines_skipped --- FAILED thread 'blank_lines_skipped' (2768) panicked at tests\hidden_gate.rs:8:36: assertion `left == right` failed test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s 
+Q06	rust	implement-spec	PASS	20s	EC=0	recall=na	PASS — all hidden int_to_roman tests passed
+Q07	rust	api-misuse	FAIL	19s	EC=0	recall=na	FAIL — hidden tests failed: empty_text --- FAILED splits_on_punctuation_and_newlines --- FAILED thread 'empty_text' (9828) panicked at tests\hidden_gate.rs:19:5: assertion `left == right` failed 
+Q08	rust	multi-file	PASS	53s	EC=0	recall=na	PASS — all hidden evaluator tests passed
+Q09	rust	boundary	PASS	50s	EC=0	recall=na	PASS — all hidden RLE tests passed
+Q10	rust	implement-spec	PASS	20s	EC=0	recall=na	PASS — all hidden ipv4 tests passed
+Q11	rust	concurrency	PASS	15s	EC=0	recall=na	PASS — concurrent increments not lost
+Q12	rust	perf	PASS	21s	EC=0	recall=na	PASS — correct and fast on large input
+Q13	python	implement-spec	FAIL	24s	EC=0	recall=na	FAIL — hidden tests failed: >       assert parse_csv_line('"she said ""hi"""') == ['she said "hi"'] E       assert ['she said hi'] == ['she said "hi"'] hidden_gate_test.py:12: AssertionError >       assert parse_csv_line("a,b,") == ["a", "b", ""] 
+Q14	python	bugfix	PASS	20s	EC=0	recall=na	PASS — all hidden deep_merge tests passed
+Q15	python	error-handling	PASS	15s	EC=0	recall=na	PASS — all hidden retry tests passed
+Q16	python	boundary	PASS	20s	EC=0	recall=na	PASS — all hidden paginate tests passed
+Q17	python	perf	PASS	15s	EC=0	recall=na	PASS — correct and fast on large input
+Q18	python	api-misuse	PASS	15s	EC=0	recall=na	PASS — buckets are independent per call
+Q19	python	implement-spec	PASS	21s	EC=0	recall=na	PASS — all hidden size-format tests passed
+Q20	python	refactor	PASS	12s	EC=0	recall=na	PASS — keeps falsy-but-present values, drops only None
+Q21	python	multi-file	PASS	24s	EC=0	recall=na	PASS — tax applied on subtotal, no per-item drift
+Q22	python	concurrency	PASS	16s	EC=0	recall=na	PASS — concurrent increments not lost
+Q23	python	boundary	PASS	19s	EC=0	recall=na	PASS — all hidden parse_ranges tests passed
+Q24	python	implement-spec	FAIL	23s	EC=0	recall=na	FAIL — hidden tests failed: >       assert word_wrap("the quick brown fox", 9) == "the quick\nbrown fox" E       AssertionError: assert '\nthe\nquick\nbrown\nfox' == 'the quick\nbrown fox' hidden_gate_test.py:6: AssertionError >       assert word_wrap("a supercalifragilistic b", 5) == "a\nsupercalifragilistic\nb" 
+Q25	python	api-misuse	FAIL	13s	EC=0	recall=na	FAIL — hidden tests failed: >       assert total_cents(["5"]) == 500 E           ValueError: not enough values to unpack (expected 2, got 1) solution.py:6: ValueError FAILED hidden_gate_test.py::test_integer_dollar_string - ValueError: not enou... 
+Q26	js	implement-spec	FAIL	4s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: key order 
+Q27	js	bugfix	PASS	15s	EC=0	recall=na	PASS — all hidden flatten tests passed
+Q28	js	boundary	PASS	15s	EC=0	recall=na	PASS — all hidden chunk tests passed
+Q29	js	error-handling	PASS	14s	EC=0	recall=na	PASS — all hidden safeGet tests passed
+Q30	js	api-misuse	PASS	10s	EC=0	recall=na	PASS — all hidden sortNumbers tests passed
+Q31	js	implement-spec	PASS	10s	EC=0	recall=na	PASS — all hidden groupBy tests passed
+Q32	js	perf	PASS	14s	EC=0	recall=na	PASS — correct and fast on large input
+Q33	js	refactor	PASS	12s	EC=0	recall=na	PASS — all hidden average tests passed
+Q34	js	multi-file	PASS	20s	EC=0	recall=na	PASS — all hidden config-merge tests passed
+Q35	ts	implement-spec	FAIL	24s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: split on first = only 
+Q36	ts	bugfix	PASS	17s	EC=0	recall=na	PASS — all hidden deepClone tests passed
+Q37	ts	boundary	PASS	17s	EC=0	recall=na	PASS — all hidden range tests passed
+Q38	ts	error-handling	PASS	15s	EC=0	recall=na	PASS — all hidden safeJsonParse tests passed
+Q39	ts	api-misuse	PASS	11s	EC=0	recall=na	PASS — all hidden makeGrid tests passed
+Q40	ts	implement-spec	FAIL	23s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: same listener added twice fires twice 
+Q41	ts	perf	PASS	13s	EC=0	recall=na	PASS — correct and fast on large input
+Q42	ts	refactor	PASS	12s	EC=0	recall=na	PASS — all hidden isPalindrome tests passed
+Q43	shell	bugfix	PASS	17s	EC=0	recall=na	PASS — line counts correct with and without trailing newline
+Q44	shell	implement-spec	FAIL	12s	EC=0	recall=na	FAIL — input the\ cat\ the\ DOG\ the\ cat: expected [3 the
+Q45	shell	bugfix	FAIL	10s	EC=0	recall=na	FAIL — expected [code1
+Q46	shell	boundary	FAIL	13s	EC=0	recall=na	FAIL — range 5..3: expected [] got [5]
+Q47	shell	error-handling	PASS	14s	EC=0	recall=na	PASS — divides correctly and handles zero divisor cleanly
+Q48	shell	api-misuse	PASS	11s	EC=0	recall=na	PASS — arguments joined with commas, spaces preserved
+Q49	shell	multi-file	PASS	18s	EC=0	recall=na	PASS — normalize strips both ends, keeps internal spacing
+Q50	shell	implement-spec	PASS	9s	EC=0	recall=na	PASS — extracts Nth comma field, handles missing/empty fields
+Q51	python	implement-spec	FAIL	18s	EC=0	recall=na	FAIL — hidden tests failed: >       assert parse_duration("1h 30m") == 5400 >           raise ValueError(f'Invalid duration format: {s}') E           ValueError: Invalid duration format: 1h 30m solution.py:11: ValueError 
+Q52	rust	implement-spec	FAIL	122s	EC=0	recall=na	FAIL — hidden tests failed: capacity_one --- FAILED capacity_zero_never_panics --- FAILED overwrites_oldest --- FAILED wraps_multiple_times --- FAILED 
+Q53	js	implement-spec	PASS	110s	EC=0	recall=na	PASS — all hidden parseCsv tests passed
+Q54	python	implement-spec	PASS	17s	EC=0	recall=na	PASS — all hidden topological_sort tests passed
+Q55	ts	implement-spec	PASS	18s	EC=0	recall=na	PASS — all hidden mergeIntervals tests passed
+Q56	rust	implement-spec	PASS	19s	EC=0	recall=na	PASS — all hidden compare_versions tests passed

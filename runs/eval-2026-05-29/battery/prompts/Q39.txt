@@ -1,0 +1,1 @@
+The `makeGrid(rows, cols)` function in solution.ts builds a 2D grid of zeros. It looks right at a glance, but all the rows are actually the same array — so setting grid[0][0] = 5 also changes grid[1][0]. Fix it so each row is an independent array and cells can be set without affecting other rows. You can check the basics with `node test_basic.ts`; keep it passing.

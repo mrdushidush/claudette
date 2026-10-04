@@ -1,0 +1,5 @@
+Q01	rust	implement-spec	PASS	30s	EC=0	recall=na	PASS — all 6 hidden slug tests passed
+Q13	python	implement-spec	PASS	51s	EC=0	recall=na	PASS — all hidden CSV tests passed
+Q26	js	implement-spec	PASS	78s	EC=0	recall=na	PASS — all hidden deepEqual tests passed
+Q35	ts	implement-spec	FAIL	101s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: split on first = only 
+Q43	shell	bugfix	FAIL	309s	EC=0	recall=na	FAIL — input a\\nb\\nc: expected 3, got '2'

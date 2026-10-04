@@ -1,0 +1,56 @@
+Q01	rust	implement-spec	PASS	36s	EC=0	recall=na	PASS — all 6 hidden slug tests passed
+Q02	rust	boundary	PASS	56s	EC=0	recall=na	PASS — all 6 hidden lower_bound tests passed
+Q03	rust	bugfix	PASS	81s	EC=0	recall=na	PASS — all 6 hidden split_bill tests passed
+Q04	rust	refactor	PASS	53s	EC=0	recall=na	PASS — all 5 hidden parse_int_list tests passed
+Q05	rust	error-handling	FAIL	32s	EC=0	recall=na	FAIL — hidden tests failed: blank_lines_skipped --- FAILED thread 'blank_lines_skipped' (6656) panicked at tests\hidden_gate.rs:8:36: assertion `left == right` failed test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s 
+Q06	rust	implement-spec	PASS	34s	EC=0	recall=na	PASS — all hidden int_to_roman tests passed
+Q07	rust	api-misuse	PASS	51s	EC=0	recall=na	PASS — all 5 hidden word_frequencies tests passed
+Q08	rust	multi-file	PASS	105s	EC=0	recall=na	PASS — all hidden evaluator tests passed
+Q09	rust	boundary	FAIL	54s	EC=0	recall=na	FAIL — hidden tests failed: singletons --- FAILED thread 'singletons' (16588) panicked at tests\hidden_gate.rs:4:27: assertion `left == right` failed test result: FAILED. 6 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s 
+Q10	rust	implement-spec	PASS	131s	EC=0	recall=na	PASS — all hidden ipv4 tests passed
+Q11	rust	concurrency	PASS	120s	EC=0	recall=na	PASS — concurrent increments not lost
+Q12	rust	perf	PASS	91s	EC=0	recall=na	PASS — correct and fast on large input
+Q13	python	implement-spec	FAIL	47s	EC=0	recall=na	FAIL — hidden tests failed: >       assert parse_csv_line('a,"",c') == ["a", "", "c"] E       assert ['a', '"', 'c'] == ['a', '', 'c'] hidden_gate_test.py:18: AssertionError FAILED hidden_gate_test.py::test_quoted_empty_field - assert ['a', '"', 'c'] ... 
+Q14	python	bugfix	FAIL	47s	EC=0	recall=na	FAIL — hidden tests failed: >       assert deep_merge({"k": 1}, {"k": 2}) == {"k": 2} E       AssertionError: assert {'k': 1} == {'k': 2} hidden_gate_test.py:6: AssertionError >       assert deep_merge(a, b) == {"cfg": {"x": 1, "y": 3, "z": 4}} 
+Q15	python	error-handling	PASS	55s	EC=0	recall=na	PASS — all hidden retry tests passed
+Q16	python	boundary	PASS	42s	EC=0	recall=na	PASS — all hidden paginate tests passed
+Q17	python	perf	PASS	47s	EC=0	recall=na	PASS — correct and fast on large input
+Q18	python	api-misuse	PASS	51s	EC=0	recall=na	PASS — buckets are independent per call
+Q19	python	implement-spec	PASS	90s	EC=0	recall=na	PASS — all hidden size-format tests passed
+Q20	python	refactor	FAIL	36s	EC=0	recall=na	FAIL — hidden tests failed: >       assert keep_present([0, 1, 2]) == [0, 1, 2] E       assert [1, 2] == [0, 1, 2] hidden_gate_test.py:9: AssertionError >       assert keep_present(["", "a"]) == ["", "a"] 
+Q21	python	multi-file	PASS	102s	EC=0	recall=na	PASS — tax applied on subtotal, no per-item drift
+Q22	python	concurrency	PASS	42s	EC=0	recall=na	PASS — concurrent increments not lost
+Q23	python	boundary	FAIL	12s	EC=0	recall=na	FAIL — hidden tests failed: >       assert parse_ranges("1-3") == [1, 2, 3] E       assert [1, 2] == [1, 2, 3] hidden_gate_test.py:6: AssertionError >       assert parse_ranges("1-3,5,8-10") == [1, 2, 3, 5, 8, 9, 10] 
+Q24	python	implement-spec	FAIL	67s	EC=0	recall=na	FAIL — hidden tests failed: >       assert word_wrap("a supercalifragilistic b", 5) == "a\nsupercalifragilistic\nb" E       AssertionError: assert 'a\nsupercalifragilistic\n b' == 'a\nsupercalifragilistic\nb' hidden_gate_test.py:9: AssertionError >       assert word_wrap("hello   world", 20) == "hello world" 
+Q25	python	api-misuse	PASS	44s	EC=0	recall=na	PASS — cent totals are exact
+Q26	js	implement-spec	PASS	59s	EC=0	recall=na	PASS — all hidden deepEqual tests passed
+Q27	js	bugfix	PASS	53s	EC=0	recall=na	PASS — all hidden flatten tests passed
+Q28	js	boundary	PASS	52s	EC=0	recall=na	PASS — all hidden chunk tests passed
+Q29	js	error-handling	PASS	45s	EC=0	recall=na	PASS — all hidden safeGet tests passed
+Q30	js	api-misuse	PASS	38s	EC=0	recall=na	PASS — all hidden sortNumbers tests passed
+Q31	js	implement-spec	PASS	45s	EC=0	recall=na	PASS — all hidden groupBy tests passed
+Q32	js	perf	PASS	43s	EC=0	recall=na	PASS — correct and fast on large input
+Q33	js	refactor	PASS	31s	EC=0	recall=na	PASS — all hidden average tests passed
+Q34	js	multi-file	PASS	55s	EC=0	recall=na	PASS — all hidden config-merge tests passed
+Q35	ts	implement-spec	FAIL	46s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: split on first = only 
+Q36	ts	bugfix	PASS	43s	EC=0	recall=na	PASS — all hidden deepClone tests passed
+Q37	ts	boundary	PASS	41s	EC=0	recall=na	PASS — all hidden range tests passed
+Q38	ts	error-handling	PASS	66s	EC=0	recall=na	PASS — all hidden safeJsonParse tests passed
+Q39	ts	api-misuse	PASS	40s	EC=0	recall=na	PASS — all hidden makeGrid tests passed
+Q40	ts	implement-spec	PASS	44s	EC=0	recall=na	PASS — all hidden EventEmitter tests passed
+Q41	ts	perf	PASS	36s	EC=0	recall=na	PASS — correct and fast on large input
+Q42	ts	refactor	PASS	36s	EC=0	recall=na	PASS — all hidden isPalindrome tests passed
+Q43	shell	bugfix	FAIL	318s	EC=0	recall=na	FAIL — input a\\nb\\nc\\n: expected 3, got '4'
+Q44	shell	implement-spec	PASS	35s	EC=0	recall=na	PASS — frequency tally sorted, case-folded, whitespace-split
+Q45	shell	bugfix	PASS	21s	EC=0	recall=na	PASS — comments and blank lines stripped, inline # kept
+Q46	shell	boundary	FAIL	42s	EC=0	recall=na	FAIL — range 5..3: expected [] got [5]
+Q47	shell	error-handling	PASS	49s	EC=0	recall=na	PASS — divides correctly and handles zero divisor cleanly
+Q48	shell	api-misuse	PASS	38s	EC=0	recall=na	PASS — arguments joined with commas, spaces preserved
+Q49	shell	multi-file	PASS	31s	EC=0	recall=na	PASS — normalize strips both ends, keeps internal spacing
+Q50	shell	implement-spec	PASS	29s	EC=0	recall=na	PASS — extracts Nth comma field, handles missing/empty fields
+Q51	python	implement-spec	FAIL	46s	EC=0	recall=na	FAIL — hidden tests failed: >       assert parse_duration("1h 30m") == 5400             raise ValueError("Empty duration string")             raise ValueError(f"Invalid duration format: {s}") >           raise ValueError(f"Invalid duration format: {s}") 
+Q52	rust	implement-spec	FAIL	271s	EC=0	recall=na	FAIL — hidden tests failed: capacity_zero_never_panics --- FAILED thread 'capacity_zero_never_panics' (17036) panicked at src\lib.rs:35:58: test result: FAILED. 6 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s error: test failed, to rerun pass `--test hidden_gate` 
+Q53	js	implement-spec	PASS	104s	EC=0	recall=na	PASS — all hidden parseCsv tests passed
+Q54	python	implement-spec	FAIL	30s	EC=0	recall=na	FAIL — hidden tests failed: >       assert topological_sort({"b": ["a"], "c": ["b"]}) == ["a", "b", "c"] E       AssertionError: assert None == ['a', 'b', 'c'] E        +  where None = topological_sort({'b': ['a'], 'c': ['b']}) hidden_gate_test.py:6: AssertionError 
+Q55	ts	implement-spec	PASS	45s	EC=0	recall=na	PASS — all hidden mergeIntervals tests passed
+Q56	rust	implement-spec	PASS	108s	EC=0	recall=na	PASS — all hidden compare_versions tests passed

@@ -23,7 +23,7 @@ Three results that are worth your time even if you never install this:
 - **The error bar belongs to the model, not the benchmark.** Across three identical consecutive runs, `gpt-oss-20b` swung **8 points** (40, 38, 32) while `gemma-4-e2b` was bit-for-bit identical (31, 31, 31). Weakness does not cause variance - the *failure mode* does. A single-run benchmark number is not a result.
 - **Public leaderboards anti-correlate here.** LiveCodeBench v6 rates gemma 77.1 and qwen 80.4; on this corpus they score 55/56 and 50/56. Use leaderboards to decide what to download, never to predict what happens inside your own harness.
 
-**[→ Full 16-row table, method, and the replication package](https://github.com/mrdushidush/claudette/tree/battery/q50-quality-corpus/runs/eval-2026-05-29/battery#readme)** · **[all 36 runs as CSV, with every run's failure list](https://github.com/mrdushidush/claudette/blob/battery/q50-quality-corpus/runs/eval-2026-05-29/battery/RESULTS-q56.csv)**
+**[→ Full 16-row table, method, and the replication package](https://github.com/mrdushidush/claudette/tree/main/runs/eval-2026-05-29/battery#readme)** · **[all 36 runs as CSV, with every run's failure list](https://github.com/mrdushidush/claudette/blob/main/runs/eval-2026-05-29/battery/RESULTS-q56.csv)**
 
 The corpus, the hidden verifiers and the reference solutions are **all public** - so the numbers are checkable, and so Q56 carries a stated **contamination date of 2026-07-25**. Every model benchmarked was released before it. Benching a model we haven't covered needs no Rust and is the single most useful way to contribute.
 
@@ -151,7 +151,7 @@ lms load "qwen3.6-35b-a3b-mtp@iq3_s" -c 65536 --parallel 1 \
 
 ⚠️ **The installer default is `qwen3.5:4b`, which scores 33/56** - `gemma-4-e4b` scores 42 at a comparable footprint. The default is what `install` pulls today because it is a one-command Ollama pull that runs anywhere; if you have LM Studio and 5 GiB spare, run gemma-4-e4b instead.
 
-Full method, replication package and every run's failure list → **[the Q56 battery README](https://github.com/mrdushidush/claudette/tree/battery/q50-quality-corpus/runs/eval-2026-05-29/battery#readme)**. Older tool-loop-reliability tables (the superseded, now-saturated 50-task battery) → [MODEL-COMPARISON.md](runs/eval-2026-05-29/battery/MODEL-COMPARISON.md) + [CHAMPION-DOSSIER.md](runs/eval-2026-05-29/battery/CHAMPION-DOSSIER.md). How to choose for your hardware (VRAM residency, KV-cache settings, MTP, runtime pitfalls) → [docs/hardware.md](docs/hardware.md).
+Full method, replication package and every run's failure list → **[the Q56 battery README](https://github.com/mrdushidush/claudette/tree/main/runs/eval-2026-05-29/battery#readme)**. Older tool-loop-reliability tables (the superseded, now-saturated 50-task battery) → [MODEL-COMPARISON.md](runs/eval-2026-05-29/battery/MODEL-COMPARISON.md) + [CHAMPION-DOSSIER.md](runs/eval-2026-05-29/battery/CHAMPION-DOSSIER.md). How to choose for your hardware (VRAM residency, KV-cache settings, MTP, runtime pitfalls) → [docs/hardware.md](docs/hardware.md).
 
 Runs on 8 GB VRAM or plain CPU; 16 GB for the 35B brain. Footprint details → [docs/hardware.md](docs/hardware.md).
 
@@ -193,7 +193,7 @@ cargo build --release -p claudette
 
 Where Claudette is headed, and where help is most welcome:
 
-- **Broaden Q56 coverage.** Benchmark more local models so `--doctor` can recommend the best fit for any GPU. Benching a model we haven't covered is the single most useful contribution - [no Rust required](https://github.com/mrdushidush/claudette/labels/good%20first%20issue). The three highest-value runs right now: a **cross-session replicate** (three runs in one sitting, a fourth the next day), a **second high-variance model**, and **KV q8 vs f16 on a card where the model is not VRAM-resident** - details in [the battery README](https://github.com/mrdushidush/claudette/tree/battery/q50-quality-corpus/runs/eval-2026-05-29/battery#contributing-a-row).
+- **Broaden Q56 coverage.** Benchmark more local models so `--doctor` can recommend the best fit for any GPU. Benching a model we haven't covered is the single most useful contribution - [no Rust required](https://github.com/mrdushidush/claudette/labels/good%20first%20issue). The three highest-value runs right now: a **cross-session replicate** (three runs in one sitting, a fourth the next day), a **second high-variance model**, and **KV q8 vs f16 on a card where the model is not VRAM-resident** - details in [the battery README](https://github.com/mrdushidush/claudette/tree/main/runs/eval-2026-05-29/battery#contributing-a-row).
 - **A leaner core.** Fold the overlapping edit tools into one canonical `edit_file` and keep trimming the dependency tree, for a smaller, faster single binary.
 - **Small-model reliability.** Keep hardening the agent loop against tool-call spirals so the 4B / 8 GB default stays dependable.
 - **More reach.** Editor integrations and deployment recipes (Pi / VPS / home-server) beyond today's VS Code extension and docker-compose.

@@ -1,0 +1,5 @@
+Q01	rust	implement-spec	FAIL	37s	EC=0	recall=na	FAIL — hidden tests failed: already_a_slug_is_stable --- FAILED thread 'already_a_slug_is_stable' (20168) panicked at tests\hidden_gate.rs:7:41: assertion `left == right` failed test result: FAILED. 5 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s 
+Q13	python	implement-spec	PASS	203s	EC=0	recall=na	PASS — all hidden CSV tests passed
+Q26	js	implement-spec	PASS	159s	EC=0	recall=na	PASS — all hidden deepEqual tests passed
+Q35	ts	implement-spec	PASS	70s	EC=0	recall=na	PASS — all hidden parseQueryString tests passed
+Q43	shell	bugfix	PASS	187s	EC=0	recall=na	PASS — line counts correct with and without trailing newline

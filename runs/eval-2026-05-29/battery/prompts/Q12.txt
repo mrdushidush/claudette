@@ -1,0 +1,1 @@
+The `has_duplicate_within_k` function in src/lib.rs works, but it's far too slow on large inputs — for big arrays with a large window `k` it grinds to a halt because it's doing nested scanning. Make it efficient (it should run in roughly linear time regardless of how big `k` is) while keeping its behavior exactly the same. The existing test must still pass.

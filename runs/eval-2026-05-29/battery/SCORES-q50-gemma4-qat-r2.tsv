@@ -1,0 +1,56 @@
+Q01	rust	implement-spec	PASS	49s	EC=0	recall=na	PASS — all 6 hidden slug tests passed
+Q02	rust	boundary	PASS	48s	EC=0	recall=na	PASS — all 6 hidden lower_bound tests passed
+Q03	rust	bugfix	PASS	64s	EC=0	recall=na	PASS — all 6 hidden split_bill tests passed
+Q04	rust	refactor	PASS	94s	EC=0	recall=na	PASS — all 5 hidden parse_int_list tests passed
+Q05	rust	error-handling	PASS	106s	EC=0	recall=na	PASS — all 5 hidden parse_kv tests passed
+Q06	rust	implement-spec	PASS	22s	EC=0	recall=na	PASS — all hidden int_to_roman tests passed
+Q07	rust	api-misuse	PASS	50s	EC=0	recall=na	PASS — all 5 hidden word_frequencies tests passed
+Q08	rust	multi-file	PASS	90s	EC=0	recall=na	PASS — all hidden evaluator tests passed
+Q09	rust	boundary	PASS	112s	EC=0	recall=na	PASS — all hidden RLE tests passed
+Q10	rust	implement-spec	PASS	52s	EC=0	recall=na	PASS — all hidden ipv4 tests passed
+Q11	rust	concurrency	FAIL	144s	EC=0	recall=na	FAIL — hidden tests failed: concurrent_increments_are_not_lost --- FAILED thread 'concurrent_increments_are_not_lost' (4908) panicked at tests\hidden_gate.rs:20:5: assertion `left == right` failed   left: 34143 
+Q12	rust	perf	PASS	222s	EC=0	recall=na	PASS — correct and fast on large input
+Q13	python	implement-spec	PASS	85s	EC=0	recall=na	PASS — all hidden CSV tests passed
+Q14	python	bugfix	PASS	105s	EC=0	recall=na	PASS — all hidden deep_merge tests passed
+Q15	python	error-handling	PASS	85s	EC=0	recall=na	PASS — all hidden retry tests passed
+Q16	python	boundary	PASS	50s	EC=0	recall=na	PASS — all hidden paginate tests passed
+Q17	python	perf	PASS	51s	EC=0	recall=na	PASS — correct and fast on large input
+Q18	python	api-misuse	PASS	38s	EC=0	recall=na	PASS — buckets are independent per call
+Q19	python	implement-spec	PASS	54s	EC=0	recall=na	PASS — all hidden size-format tests passed
+Q20	python	refactor	PASS	76s	EC=0	recall=na	PASS — keeps falsy-but-present values, drops only None
+Q21	python	multi-file	PASS	51s	EC=0	recall=na	PASS — tax applied on subtotal, no per-item drift
+Q22	python	concurrency	PASS	35s	EC=0	recall=na	PASS — concurrent increments not lost
+Q23	python	boundary	PASS	316s	EC=0	recall=na	PASS — all hidden parse_ranges tests passed
+Q24	python	implement-spec	PASS	105s	EC=0	recall=na	PASS — all hidden word_wrap tests passed
+Q25	python	api-misuse	PASS	75s	EC=0	recall=na	PASS — cent totals are exact
+Q26	js	implement-spec	PASS	73s	EC=0	recall=na	PASS — all hidden deepEqual tests passed
+Q27	js	bugfix	PASS	94s	EC=0	recall=na	PASS — all hidden flatten tests passed
+Q28	js	boundary	PASS	35s	EC=0	recall=na	PASS — all hidden chunk tests passed
+Q29	js	error-handling	PASS	62s	EC=0	recall=na	PASS — all hidden safeGet tests passed
+Q30	js	api-misuse	PASS	33s	EC=0	recall=na	PASS — all hidden sortNumbers tests passed
+Q31	js	implement-spec	PASS	19s	EC=0	recall=na	PASS — all hidden groupBy tests passed
+Q32	js	perf	PASS	39s	EC=0	recall=na	PASS — correct and fast on large input
+Q33	js	refactor	PASS	36s	EC=0	recall=na	PASS — all hidden average tests passed
+Q34	js	multi-file	PASS	95s	EC=0	recall=na	PASS — all hidden config-merge tests passed
+Q35	ts	implement-spec	PASS	92s	EC=0	recall=na	PASS — all hidden parseQueryString tests passed
+Q36	ts	bugfix	PASS	71s	EC=0	recall=na	PASS — all hidden deepClone tests passed
+Q37	ts	boundary	PASS	52s	EC=0	recall=na	PASS — all hidden range tests passed
+Q38	ts	error-handling	PASS	92s	EC=0	recall=na	PASS — all hidden safeJsonParse tests passed
+Q39	ts	api-misuse	PASS	63s	EC=0	recall=na	PASS — all hidden makeGrid tests passed
+Q40	ts	implement-spec	PASS	65s	EC=0	recall=na	PASS — all hidden EventEmitter tests passed
+Q41	ts	perf	PASS	41s	EC=0	recall=na	PASS — correct and fast on large input
+Q42	ts	refactor	PASS	26s	EC=0	recall=na	PASS — all hidden isPalindrome tests passed
+Q43	shell	bugfix	PASS	26s	EC=0	recall=na	PASS — line counts correct with and without trailing newline
+Q44	shell	implement-spec	PASS	42s	EC=0	recall=na	PASS — frequency tally sorted, case-folded, whitespace-split
+Q45	shell	bugfix	PASS	83s	EC=0	recall=na	PASS — comments and blank lines stripped, inline # kept
+Q46	shell	boundary	FAIL	70s	EC=0	recall=na	FAIL — range 5..3: expected [] got [5]
+Q47	shell	error-handling	PASS	20s	EC=0	recall=na	PASS — divides correctly and handles zero divisor cleanly
+Q48	shell	api-misuse	PASS	25s	EC=0	recall=na	PASS — arguments joined with commas, spaces preserved
+Q49	shell	multi-file	PASS	23s	EC=0	recall=na	PASS — normalize strips both ends, keeps internal spacing
+Q50	shell	implement-spec	PASS	169s	EC=0	recall=na	PASS — extracts Nth comma field, handles missing/empty fields
+Q51	python	implement-spec	PASS	63s	EC=0	recall=na	PASS — all hidden parse_duration tests passed
+Q52	rust	implement-spec	PASS	154s	EC=0	recall=na	PASS — all hidden RingBuffer tests passed
+Q53	js	implement-spec	PASS	549s	EC=0	recall=na	PASS — all hidden parseCsv tests passed
+Q54	python	implement-spec	PASS	82s	EC=0	recall=na	PASS — all hidden topological_sort tests passed
+Q55	ts	implement-spec	PASS	25s	EC=0	recall=na	PASS — all hidden mergeIntervals tests passed
+Q56	rust	implement-spec	PASS	37s	EC=0	recall=na	PASS — all hidden compare_versions tests passed
