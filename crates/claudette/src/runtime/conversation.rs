@@ -2234,7 +2234,7 @@ mod tests {
         let api = CapSpiralApi::new(vec![AssistantEvent::MessageStop]);
         let (mut runtime, _executed) = cap_test_runtime(api, 8);
         let _ = runtime.run_turn("spiral", None);
-        assert!(runtime.api_client.nudged_calls.is_empty());
+        assert_eq!(runtime.api_client.nudged_calls, [] as [usize; 0]);
     }
 
     #[test]

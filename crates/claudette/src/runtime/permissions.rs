@@ -501,7 +501,7 @@ mod tests {
         // and Levenshtein distance to all of them exceeds 3. The expected
         // behavior is empty — caller layers a group-aware hinter on top.
         let policy = standard_policy();
-        assert!(policy.suggest_for("facts", 5).is_empty());
+        assert_eq!(policy.suggest_for("facts", 5), [] as [String; 0]);
     }
 
     #[test]
@@ -515,7 +515,7 @@ mod tests {
     #[test]
     fn suggest_for_zero_max_returns_empty() {
         let policy = standard_policy();
-        assert!(policy.suggest_for("note_update", 0).is_empty());
+        assert_eq!(policy.suggest_for("note_update", 0), [] as [String; 0]);
     }
 
     #[test]

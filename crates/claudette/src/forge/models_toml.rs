@@ -286,7 +286,7 @@ mod tests {
         let map = ModelMap::from_file(&path).expect("missing file should not error");
         let (kind, name) = map.resolve(Role::Assistant).expect("assistant has default");
         assert_eq!(kind, ProviderKind::Ollama);
-        assert!(!name.is_empty());
+        assert_ne!(name, "");
     }
 
     #[test]

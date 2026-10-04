@@ -839,8 +839,8 @@ mod tests {
     fn auth_context_scopes_are_distinct() {
         let cal = AuthContext::Calendar.scopes();
         let gmail = AuthContext::GmailRead.scopes();
-        assert!(!cal.is_empty());
-        assert!(!gmail.is_empty());
+        assert_ne!(cal, [] as [&str; 0]);
+        assert_ne!(gmail, [] as [&str; 0]);
         assert_ne!(cal, gmail);
         // Defence in depth: phase 4 must NOT request gmail.send.
         for s in gmail {

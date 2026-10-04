@@ -1041,7 +1041,7 @@ mod tests {
         // run produced a chatty model reply instead of an error.
         let a = parse_args_clean(&["--setpu".into()]);
         assert_eq!(a.unknown_flags, vec!["--setpu".to_string()]);
-        assert!(a.prompt_words.is_empty());
+        assert_eq!(a.prompt_words, [] as [String; 0]);
         assert!(!a.setup);
     }
 
@@ -1052,7 +1052,7 @@ mod tests {
         assert!(suggest_flags("--offlin").contains(&"--offline"));
         assert!(suggest_flags("--docter").contains(&"--doctor"));
         // Nothing close enough: better to say nothing than to guess wildly.
-        assert!(suggest_flags("--zzzzzzzzzzzz").is_empty());
+        assert_eq!(suggest_flags("--zzzzzzzzzzzz"), [] as [&str; 0]);
     }
 
     #[test]
@@ -1061,7 +1061,7 @@ mod tests {
         // genuinely starts with a dash is still reachable.
         let a = parse_args_clean(&["--".into(), "--tui".into(), "means".into()]);
         assert!(!a.tui, "--tui after -- is prompt text, not a flag");
-        assert!(a.unknown_flags.is_empty());
+        assert_eq!(a.unknown_flags, [] as [String; 0]);
         assert_eq!(
             a.prompt_words,
             vec!["--tui".to_string(), "means".to_string()]
@@ -1121,7 +1121,7 @@ mod tests {
     fn parse_args_resume_short() {
         let a = parse_args(&["-r".into()]);
         assert!(a.resume);
-        assert!(a.prompt_words.is_empty());
+        assert_eq!(a.prompt_words, [] as [String; 0]);
     }
 
     #[test]
@@ -1135,7 +1135,7 @@ mod tests {
     fn parse_args_telegram_mode() {
         let a = parse_args(&["--telegram".into()]);
         assert!(a.telegram);
-        assert!(a.prompt_words.is_empty());
+        assert_eq!(a.prompt_words, [] as [String; 0]);
     }
 
     #[test]
@@ -1198,7 +1198,7 @@ mod tests {
         let a = parse_args_clean(&["--telegram".into(), "--chat".into(), "any".into()]);
         assert!(a.telegram);
         assert!(a.allow_any_chat);
-        assert!(a.chat_ids.is_empty());
+        assert_eq!(a.chat_ids, [] as [i64; 0]);
     }
 
     #[test]
@@ -1217,7 +1217,7 @@ mod tests {
         std::env::set_var("CLAUDETTE_TELEGRAM_CHAT", "ANY");
         let a = parse_args(&["--telegram".into()]);
         assert!(a.allow_any_chat);
-        assert!(a.chat_ids.is_empty());
+        assert_eq!(a.chat_ids, [] as [i64; 0]);
         match prev {
             Some(v) => std::env::set_var("CLAUDETTE_TELEGRAM_CHAT", v),
             None => std::env::remove_var("CLAUDETTE_TELEGRAM_CHAT"),
@@ -1249,7 +1249,7 @@ mod tests {
         assert!(a.auth_google);
         assert!(!a.auth_google_revoke);
         assert_eq!(a.auth_google_scope, None);
-        assert!(a.prompt_words.is_empty());
+        assert_eq!(a.prompt_words, [] as [String; 0]);
     }
 
     #[test]
@@ -1270,7 +1270,7 @@ mod tests {
         let a = parse_args(&["--auth-google".into(), "gmail".into()]);
         assert!(a.auth_google);
         assert_eq!(a.auth_google_scope.as_deref(), Some("gmail"));
-        assert!(a.prompt_words.is_empty());
+        assert_eq!(a.prompt_words, [] as [String; 0]);
     }
 
     #[cfg(not(feature = "integrations"))]
@@ -1334,7 +1334,7 @@ mod tests {
         let a = parse_args(&["--setup".into()]);
         assert!(a.setup);
         assert!(!a.doctor);
-        assert!(a.prompt_words.is_empty());
+        assert_eq!(a.prompt_words, [] as [String; 0]);
     }
 
     #[test]
@@ -1342,7 +1342,7 @@ mod tests {
         let a = parse_args(&["--help".into()]);
         assert!(a.help);
         assert!(!a.version);
-        assert!(a.prompt_words.is_empty());
+        assert_eq!(a.prompt_words, [] as [String; 0]);
     }
 
     #[test]
