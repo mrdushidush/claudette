@@ -32,7 +32,6 @@ pub type TextCallback = Box<dyn Fn(&str) + Send + Sync>;
 /// callback used by the REPL. Lives here (and not in `run.rs`) so other
 /// callers — tests, future TUIs — can pick it up without re-implementing
 /// the flush dance.
-#[must_use]
 pub fn stdout_text_callback() -> TextCallback {
     Box::new(|delta: &str| {
         use std::io::Write;
@@ -54,7 +53,6 @@ pub fn stdout_text_callback() -> TextCallback {
 /// Convenience constructor for forwarding text deltas to the TUI via a
 /// sync channel. Each delta fires one `TuiEvent::Token`. Used by the TUI
 /// worker thread instead of the REPL's stdout callback.
-#[must_use]
 pub fn tui_text_callback(
     tx: std::sync::mpsc::SyncSender<crate::tui_events::TuiEvent>,
 ) -> TextCallback {
@@ -87,7 +85,6 @@ pub fn telegram_stream_reset() {
 /// Callback for Telegram mode: appends deltas to the shared stream buffer
 /// and also mirrors them to stdout so the server terminal still shows the
 /// model's output as it streams.
-#[must_use]
 pub fn telegram_text_callback() -> TextCallback {
     Box::new(|delta: &str| {
         use std::io::Write;
@@ -1983,7 +1980,7 @@ mod tests {
     #[test]
     fn truncate_empty_input_returns_empty() {
         let kept = truncate_to_budget(Vec::new(), 1000);
-        assert!(kept.is_empty());
+        assert_eq!(kept, [] as [serde_json::Value; 0]);
     }
 
     #[test]

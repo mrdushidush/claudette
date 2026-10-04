@@ -1780,7 +1780,7 @@ mod tests {
             cwd: Some(PathBuf::from("/home/u/projects/x")),
             workspace: Vec::new(),
         };
-        assert!(roots.startup_diagnostics().is_empty());
+        assert_eq!(roots.startup_diagnostics(), [] as [String; 0]);
     }
 
     #[test]
@@ -1812,7 +1812,7 @@ mod tests {
             cwd: Some(PathBuf::from("/var/run/x")),
             workspace: vec![PathBuf::from("/var/run/x")],
         };
-        assert!(roots.startup_diagnostics().is_empty());
+        assert_eq!(roots.startup_diagnostics(), [] as [String; 0]);
     }
 
     #[test]

@@ -951,7 +951,10 @@ mod tests {
     #[test]
     fn flags_eval_but_not_retrieval() {
         assert!(rules(&scan_diff(&diff(&["  eval(payload);"], "a.js"))).contains(&"code-eval"));
-        assert!(rules(&scan_diff(&diff(&["  doRetrieval(x);"], "a.js"))).is_empty());
+        assert_eq!(
+            rules(&scan_diff(&diff(&["  doRetrieval(x);"], "a.js"))),
+            [] as [&str; 0]
+        );
     }
 
     #[test]
@@ -978,11 +981,13 @@ mod tests {
                 .contains(&"insecure-yaml")
         );
         // SafeLoader present → no finding.
-        assert!(rules(&scan_diff(&diff(
-            &["    cfg = yaml.load(text, Loader=yaml.SafeLoader)"],
-            "x.py"
-        )))
-        .is_empty());
+        assert_eq!(
+            rules(&scan_diff(&diff(
+                &["    cfg = yaml.load(text, Loader=yaml.SafeLoader)"],
+                "x.py"
+            ))),
+            [] as [&str; 0]
+        );
     }
 
     #[test]
@@ -1013,16 +1018,20 @@ mod tests {
             rules(&scan_diff(&diff(&["  password = \"hunter2pass\""], "x.py")))
                 .contains(&"hardcoded-secret")
         );
-        assert!(rules(&scan_diff(&diff(
-            &["  password = os.environ['PW']"],
-            "x.py"
-        )))
-        .is_empty());
-        assert!(rules(&scan_diff(&diff(
-            &["  api_key = \"your_key_here\""],
-            "x.py"
-        )))
-        .is_empty());
+        assert_eq!(
+            rules(&scan_diff(&diff(
+                &["  password = os.environ['PW']"],
+                "x.py"
+            ))),
+            [] as [&str; 0]
+        );
+        assert_eq!(
+            rules(&scan_diff(&diff(
+                &["  api_key = \"your_key_here\""],
+                "x.py"
+            ))),
+            [] as [&str; 0]
+        );
     }
 
     #[test]
@@ -1033,18 +1042,20 @@ mod tests {
         )))
         .contains(&"sql-injection"));
         // Parameterized %s form must NOT be flagged (it is the safe pattern).
-        assert!(rules(&scan_diff(&diff(
-            &["  cur.execute(\"SELECT * FROM t WHERE id = %s\", (id,))"],
-            "x.py"
-        )))
-        .is_empty());
+        assert_eq!(
+            rules(&scan_diff(&diff(
+                &["  cur.execute(\"SELECT * FROM t WHERE id = %s\", (id,))"],
+                "x.py"
+            ))),
+            [] as [&str; 0]
+        );
     }
 
     #[test]
     fn only_added_lines_are_scanned() {
         // A removed line containing eval must be ignored.
         let d = "--- a/x.js\n+++ b/x.js\n@@ -1,2 +1,1 @@\n-eval(old);\n+safe();\n";
-        assert!(scan_diff(d).is_empty());
+        assert_eq!(scan_diff(d), [] as [Finding; 0]);
     }
 
     #[test]
@@ -1081,11 +1092,13 @@ mod tests {
         )))
         .contains(&"ssti"));
         // A static template render is the safe pattern.
-        assert!(rules(&scan_diff(&diff(
-            &["    return render_template('page.html', name=name)"],
-            "app.py"
-        )))
-        .is_empty());
+        assert_eq!(
+            rules(&scan_diff(&diff(
+                &["    return render_template('page.html', name=name)"],
+                "app.py"
+            ))),
+            [] as [&str; 0]
+        );
     }
 
     #[test]
@@ -1103,11 +1116,13 @@ mod tests {
             );
         }
         // Verification left on must NOT flag.
-        assert!(rules(&scan_diff(&diff(
-            &["  r = requests.get(url, verify=True)"],
-            "x.py"
-        )))
-        .is_empty());
+        assert_eq!(
+            rules(&scan_diff(&diff(
+                &["  r = requests.get(url, verify=True)"],
+                "x.py"
+            ))),
+            [] as [&str; 0]
+        );
     }
 
     #[test]
@@ -1118,11 +1133,13 @@ mod tests {
         )))
         .contains(&"xxe"));
         // Default (entities not resolved) must NOT flag.
-        assert!(rules(&scan_diff(&diff(
-            &["  parser = etree.XMLParser(resolve_entities=False)"],
-            "x.py"
-        )))
-        .is_empty());
+        assert_eq!(
+            rules(&scan_diff(&diff(
+                &["  parser = etree.XMLParser(resolve_entities=False)"],
+                "x.py"
+            ))),
+            [] as [&str; 0]
+        );
     }
 
     #[test]
@@ -1148,7 +1165,10 @@ mod tests {
         )))
         .contains(&"weak-cipher"));
         // SHA-256 is fine.
-        assert!(rules(&scan_diff(&diff(&["  h = hashlib.sha256(data)"], "x.py"))).is_empty());
+        assert_eq!(
+            rules(&scan_diff(&diff(&["  h = hashlib.sha256(data)"], "x.py"))),
+            [] as [&str; 0]
+        );
     }
 
     #[test]
@@ -1173,26 +1193,34 @@ mod tests {
     #[test]
     fn request_sinks_without_user_input_do_not_flag() {
         // A static URL / route / path must NOT trip the user-input heuristics.
-        assert!(rules(&scan_diff(&diff(
-            &["  r = requests.get('https://api.example.com/health')"],
-            "app.py"
-        )))
-        .is_empty());
-        assert!(rules(&scan_diff(&diff(
-            &["  return redirect(url_for('home'))"],
-            "app.py"
-        )))
-        .is_empty());
-        assert!(rules(&scan_diff(&diff(
-            &["  p = path.join(__dirname, 'static')"],
-            "a.js"
-        )))
-        .is_empty());
-        assert!(rules(&scan_diff(&diff(
-            &["  with open('config.json') as f:"],
-            "app.py"
-        )))
-        .is_empty());
+        assert_eq!(
+            rules(&scan_diff(&diff(
+                &["  r = requests.get('https://api.example.com/health')"],
+                "app.py"
+            ))),
+            [] as [&str; 0]
+        );
+        assert_eq!(
+            rules(&scan_diff(&diff(
+                &["  return redirect(url_for('home'))"],
+                "app.py"
+            ))),
+            [] as [&str; 0]
+        );
+        assert_eq!(
+            rules(&scan_diff(&diff(
+                &["  p = path.join(__dirname, 'static')"],
+                "a.js"
+            ))),
+            [] as [&str; 0]
+        );
+        assert_eq!(
+            rules(&scan_diff(&diff(
+                &["  with open('config.json') as f:"],
+                "app.py"
+            ))),
+            [] as [&str; 0]
+        );
     }
 
     #[test]

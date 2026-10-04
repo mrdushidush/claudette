@@ -717,7 +717,7 @@ mod tests {
     fn mime_walker_returns_empty_on_empty_payload() {
         let msg = json!({ "payload": { "mimeType": "application/octet-stream" } });
         let (body, html_only) = extract_plain_body(&msg);
-        assert!(body.is_empty());
+        assert_eq!(body, "");
         assert!(!html_only);
     }
 

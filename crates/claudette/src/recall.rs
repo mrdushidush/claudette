@@ -944,9 +944,9 @@ mod tests {
     fn empty_query_returns_empty_results() {
         let mut store = RecallStore::open_in_memory(Box::new(HashEmbedder::new())).expect("open");
         store.index(Role::User, "hello").unwrap();
-        assert!(store.query("", 5).unwrap().is_empty());
-        assert!(store.query("   ", 5).unwrap().is_empty());
-        assert!(store.query("hello", 0).unwrap().is_empty());
+        assert_eq!(store.query("", 5).unwrap(), [] as [RecallHit; 0]);
+        assert_eq!(store.query("   ", 5).unwrap(), [] as [RecallHit; 0]);
+        assert_eq!(store.query("hello", 0).unwrap(), [] as [RecallHit; 0]);
     }
 
     #[test]

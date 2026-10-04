@@ -1861,7 +1861,7 @@ mod tests {
         assert_eq!(manifest.files[2].lines, 2);
 
         // Cargo.lock and photo.png should be filtered out (not in skipped).
-        assert!(manifest.skipped.is_empty());
+        assert_eq!(manifest.skipped, [] as [SkippedFile; 0]);
 
         cleanup(&dir);
     }
@@ -1872,8 +1872,8 @@ mod tests {
             parse_exclude_list("docs/archive, plans ,,src\\x/"),
             vec!["docs/archive", "plans", "src/x"]
         );
-        assert!(parse_exclude_list("").is_empty());
-        assert!(parse_exclude_list("  , ").is_empty());
+        assert_eq!(parse_exclude_list(""), [] as [String; 0]);
+        assert_eq!(parse_exclude_list("  , "), [] as [String; 0]);
     }
 
     #[test]
@@ -2665,7 +2665,7 @@ ok";
         assert_eq!(parsed.findings.len(), 1);
         assert_eq!(parsed.findings[0].file, "src/math.rs");
         assert_eq!(parsed.findings[0].line, Some(6));
-        assert!(parsed.dropped.is_empty());
+        assert_eq!(parsed.dropped, [] as [String; 0]);
 
         cleanup(&dir);
     }

@@ -938,8 +938,8 @@ mod tests {
     #[test]
     fn extract_model_names_returns_empty_on_unknown_shape() {
         let body = json!({ "unexpected": [] });
-        assert!(extract_model_names(&body, false).is_empty());
-        assert!(extract_model_names(&body, true).is_empty());
+        assert_eq!(extract_model_names(&body, false), [] as [String; 0]);
+        assert_eq!(extract_model_names(&body, true), [] as [String; 0]);
     }
 
     #[test]
