@@ -19,6 +19,9 @@ It also ships **[Q56](#-q56-which-local-model-is-actually-worth-running)** - a h
 # 1. Install (prebuilt binary, SHA256-verified)
 curl -fsSL https://raw.githubusercontent.com/mrdushidush/claudette/main/install.sh | sh   # Linux / macOS
 iwr -useb https://raw.githubusercontent.com/mrdushidush/claudette/main/install.ps1 | iex  # Windows (PowerShell)
+#    or with a package manager:
+brew install mrdushidush/tap/claudette                                                    # macOS / Linux
+scoop bucket add mrdushidush https://github.com/mrdushidush/scoop-bucket; scoop install mrdushidush/claudette   # Windows
 
 # 2. Pull the default local brain (3.4 GB, one-time — install Ollama from ollama.com first)
 ollama pull qwen3.5:4b
