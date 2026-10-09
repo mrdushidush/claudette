@@ -1,8 +1,33 @@
 # Contributing to Claudette
 
-Thanks for taking an interest. Claudette is a solo-maintainer project;
-contributions are welcome but reviewed as time allows — please be
-patient, and don't treat a delayed response as disinterest.
+Thanks for taking an interest. Claudette is a solo-maintainer project,
+so review time is the scarce resource. The rules below exist so that your
+time is never wasted on a PR that was never going to be read.
+
+## Your first contribution in 30 minutes
+
+```bash
+git clone https://github.com/mrdushidush/claudette && cd claudette   # Rust stable; no GPU, no model
+cargo test -p claudette --lib repomap                                # a fast test loop to start from
+```
+
+1. Pick an issue labelled
+   [`pr-welcome`](https://github.com/mrdushidush/claudette/labels/pr-welcome)
+   and comment "taking this". A claim lapses after 14 days without a
+   draft PR, so nobody sits on an issue.
+2. Make the change the issue names, add its test, and run the three
+   checks under [Before you open a PR](#before-you-open-a-pr).
+3. Open the PR with `Closes #N`. You get a first reply by the next Friday.
+
+## How PRs get reviewed
+
+- **Outside PRs are reviewed on Fridays, up to three a week, oldest first.**
+- **Issues labelled `pr-welcome` are pre-approved:** send the PR without
+  asking. Everything else starts as an issue.
+- **Over 200 changed lines, or outside the issue's scope:** closed with a
+  note, not reviewed. Split it, or open an issue first.
+- **You keep the merge.** If your PR needs a fix, I ask you for it, or
+  push it to your branch; I never rewrite your PR as my own.
 
 ## Before you start
 
@@ -19,7 +44,8 @@ agent is the core. See [`docs/comparison.md`](../docs/comparison.md) for
 where Claudette sits relative to other agents.
 
 **What Claudette isn't going to become:** a hosted SaaS, a plugin
-marketplace, a VS Code extension, a multi-cloud-provider abstraction.
+marketplace, a multi-cloud-provider abstraction. (The small VS Code
+extension under `editor/vscode/` stays a thin client of the binary.)
 Proposals in those directions will be politely declined — the whole
 point is to stay small and local.
 
@@ -31,7 +57,8 @@ cd claudette
 cargo build --release
 ```
 
-You'll need Ollama running locally for any end-to-end testing. See
+The unit and integration tests need no model and no GPU. You'll need
+Ollama or LM Studio running locally only for end-to-end testing; see
 [`docs/hardware.md`](../docs/hardware.md) for model requirements.
 
 ## Before you open a PR
@@ -77,14 +104,16 @@ existing history is the style guide.
 
 ## Adding a new tool
 
-1. Add a JSON schema entry to the relevant `src/tools/<group>.rs` (or
-   create a new group if none fits).
+1. Add a JSON schema entry to the relevant
+   `crates/claudette/src/tools/<group>.rs` (or create a new group if
+   none fits).
 2. Add a handler `run_my_tool(input: &str) -> Result<String, String>`
    in the same module.
 3. Wire it into the `dispatch` match at the top of the module.
 4. For a new group: add a `ToolGroup` variant in
-   `src/tool_groups.rs`, register the group's schemas and dispatcher
-   in `src/tools.rs` (follow the 21 existing groups as templates).
+   `crates/claudette/src/tool_groups.rs`, register the group's schemas
+   and dispatcher in `crates/claudette/src/tools.rs` (follow the
+   existing groups as templates).
 5. Add at least one unit test covering the happy path and one
    covering a known failure mode (missing parameter, invalid JSON,
    boundary condition).
@@ -94,7 +123,7 @@ Document the group in [`docs/architecture.md`](../docs/architecture.md)'s
 
 ## Adding a new tool group — permission tier
 
-Every tool has a permission tier in `src/tool_groups.rs`:
+Every tool has a permission tier in `crates/claudette/src/tool_groups.rs`:
 
 - **ReadOnly** — auto-allowed. Pure reads, no side effects.
 - **WorkspaceWrite** — auto-allowed. Writes stay under
