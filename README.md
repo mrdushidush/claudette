@@ -9,7 +9,9 @@ It also ships **[Q56](#-q56-which-local-model-is-actually-worth-running)** - a h
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Air-gap: enforced](https://img.shields.io/badge/air--gap-enforced-success.svg)](#-air-gapped-and-enforced)
 
-<!-- TODO(onboarding 1.3): the hero GIF goes here once recorded (failing test -> fix -> cargo gate green -> PR opened) - scripts/record-demo.md has the shot list. -->
+![A failing pytest run; claudette --forge plans the fix, asks before each edit and each command, passes its own test gate with 2 tests passing, and the tests pass on the branch it committed to](docs/images/claudette-forge-demo.gif)
+
+*A real run on a 16 GB card (qwen3.6-35b-a3b, LM Studio) against a two-test toy repo. It took about 50 s; pauses where the screen didn't change are trimmed.*
 
 ## Get started in 2 minutes
 
