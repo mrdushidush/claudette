@@ -1,0 +1,27 @@
+name: Dependabot auto-merge
+
+# Patch-level dependabot PRs merge themselves once every required check on
+# main passes. Minor and major updates still wait for a human. Nothing here
+# bypasses branch protection: `gh pr merge --auto` only queues the merge,
+# and GitHub performs it when the required checks are green.
+on: pull_request
+
+# Only what queueing a merge needs. A fork PR never gets a write token, and
+# the `if:` below skips every PR dependabot did not open.
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    name: queue patch updates for merge
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.repository == 'mrdushidush/claudette'
+    runs-on: ubuntu-latest
+    steps:
+      - id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98  # v3.1.0
+      - if: steps.meta.outputs.update-type == 'version-update:semver-patch'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
