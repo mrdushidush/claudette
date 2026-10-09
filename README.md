@@ -2,37 +2,16 @@
 
 **An air-gapped AI coding agent in one Rust binary - run it `--offline` and your code physically cannot leave the machine.** It drives a model *you* run locally through [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai/); there is no cloud-brain code in the binary at all.
 
-It also ships **[Q56](#-start-here-q56-a-hidden-test-benchmark-for-local-coding-models)** - a hidden-test benchmark that measures which local model is actually worth running, with no LLM judge anywhere in the loop.
+It also ships **[Q56](#-q56-which-local-model-is-actually-worth-running)** - a hidden-test benchmark that measures which local model is actually worth running, with no LLM judge anywhere in the loop.
 
 [![Crates.io](https://img.shields.io/crates/v/claudette.svg)](https://crates.io/crates/claudette)
 [![CI](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml/badge.svg)](https://github.com/mrdushidush/claudette/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Air-gap: enforced](https://img.shields.io/badge/air--gap-enforced-success.svg)](#-air-gapped-and-enforced)
 
----
+![A failing pytest run; claudette --forge plans the fix, asks before each edit and each command, passes its own test gate with 2 tests passing, and the tests pass on the branch it committed to](docs/images/claudette-forge-demo.gif)
 
-## 📊 Start here: Q56, a hidden-test benchmark for local coding models
-
-Before the agent - **the measurement.** Claudette ships with a 56-task coding benchmark whose grading a model cannot talk its way through: the fixture it sees carries only happy-path tests, and at grade time a verifier injects **hidden reviewer tests** and builds them against whatever the model actually left on disk. Pass/fail is `cargo test`, `pytest` and `node`. **There is no LLM judge** - LLM judges inflate.
-
-**16 model configurations · 36 full runs · one RTX 5060 Ti 16 GB · every held-constant recorded, not assumed.**
-
-Three results that are worth your time even if you never install this:
-
-- **A 7.5B model beat a 24B.** `gemma-4-e4b` (7.5B, 4.97 GiB) scored **42/56**, above `devstral-small-2-24b` (40) and `gpt-oss-20b` (38). Three runs each, non-overlapping ranges. Size buys nothing between 7.5B and 12B - and that plateau has hard cliffs on both sides.
-- **The error bar belongs to the model, not the benchmark.** Across three identical consecutive runs, `gpt-oss-20b` swung **8 points** (40, 38, 32) while `gemma-4-e2b` was bit-for-bit identical (31, 31, 31). Weakness does not cause variance - the *failure mode* does. A single-run benchmark number is not a result.
-- **Public leaderboards anti-correlate here.** LiveCodeBench v6 rates gemma 77.1 and qwen 80.4; on this corpus they score 55/56 and 50/56. Use leaderboards to decide what to download, never to predict what happens inside your own harness.
-
-**[→ Full 16-row table, method, and the replication package](https://github.com/mrdushidush/claudette/tree/main/runs/eval-2026-05-29/battery#readme)** · **[all 36 runs as CSV, with every run's failure list](https://github.com/mrdushidush/claudette/blob/main/runs/eval-2026-05-29/battery/RESULTS-q56.csv)**
-
-The corpus, the hidden verifiers and the reference solutions are **all public** - so the numbers are checkable, and so Q56 carries a stated **contamination date of 2026-07-25**. Every model benchmarked was released before it. Benching a model we haven't covered needs no Rust and is the single most useful way to contribute.
-
----
-
-<!-- TODO(onboarding 1.3): swap for docs/images/forge-demo.gif once recorded - scripts/record-demo.md has the shot list. -->
-![Claudette editing her own repo, clearing the cargo gate, and opening a real pull request - all on a local model, offline](docs/images/claudette-ships-pr.png)
-
-*Claudette in her own repo on a local 35B model - editing the code, clearing the full `cargo fmt` / `clippy` / `cargo test` gate, then opening a genuine pull request. No cloud; nothing leaves the machine.*
+*A real run on a 16 GB card (qwen3.6-35b-a3b, LM Studio) against a two-test toy repo. It took about 50 s; pauses where the screen didn't change are trimmed.*
 
 ## Get started in 2 minutes
 
@@ -40,6 +19,9 @@ The corpus, the hidden verifiers and the reference solutions are **all public** 
 # 1. Install (prebuilt binary, SHA256-verified)
 curl -fsSL https://raw.githubusercontent.com/mrdushidush/claudette/main/install.sh | sh   # Linux / macOS
 iwr -useb https://raw.githubusercontent.com/mrdushidush/claudette/main/install.ps1 | iex  # Windows (PowerShell)
+#    or with a package manager:
+brew install mrdushidush/tap/claudette                                                    # macOS / Linux
+scoop bucket add mrdushidush https://github.com/mrdushidush/scoop-bucket; scoop install mrdushidush/claudette   # Windows
 
 # 2. Pull the default local brain (3.4 GB, one-time — install Ollama from ollama.com first)
 ollama pull qwen3.5:4b
@@ -52,6 +34,24 @@ claudette "hello — what can you do?"
 ```
 
 **Pick your path:** 🛠️ **Local coding agent** → [first-success.md#coding](docs/first-success.md#coding) · 🏠 **Private assistant + Telegram** → [first-success.md#assistant](docs/first-success.md#assistant) · 🔒 **Maximum privacy (`--offline`)** → [first-success.md#airgap](docs/first-success.md#airgap)
+
+---
+
+## 📊 Q56: which local model is actually worth running?
+
+Claudette ships a 56-task coding benchmark with **hidden reviewer tests**: the model sees only happy-path tests, then a verifier builds hidden ones against whatever it left on disk. Pass/fail is `cargo test`, `pytest` and `node` - **there is no LLM judge.** 16 model configurations, 36 full runs, one RTX 5060 Ti 16 GB.
+
+- **A 7.5B model beat a 24B.** `gemma-4-e4b` scored **42/56**, above `devstral-small-2-24b` (40) and `gpt-oss-20b` (38), three runs each.
+- **The error bar belongs to the model.** `gpt-oss-20b` swung **8 points** across three identical runs; `gemma-4-e2b` was bit-for-bit identical.
+- **Public leaderboards anti-correlate here.** LiveCodeBench v6 ranks qwen above gemma; on Q56, gemma leads 55 to 50.
+
+**[→ Full 16-row table, method and the replication package](https://github.com/mrdushidush/claudette/tree/main/runs/eval-2026-05-29/battery#readme)** · [the table for your GPU, below](#-which-model-should-i-run)
+
+---
+
+![Claudette editing her own repo, clearing the cargo gate, and opening a real pull request - all on a local model, offline](docs/images/claudette-ships-pr.png)
+
+*Claudette in her own repo on a local 35B model - editing the code, clearing the full `cargo fmt` / `clippy` / `cargo test` gate, then opening a genuine pull request. No cloud; nothing leaves the machine.*
 
 ---
 
@@ -74,7 +74,7 @@ cargo install claudette        # needs a Rust toolchain
 **Want the cloud integrations** (Telegram bot, Gmail, Google Calendar, voice in/out, morning briefing)? They reach third-party services, so they are **not** in the default coding-only build. No Rust toolchain? Grab the prebuilt **full** flavor:
 
 ```sh
-CLAUDETTE_FLAVOR=full curl -fsSL https://raw.githubusercontent.com/mrdushidush/claudette/main/install.sh | sh   # Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/mrdushidush/claudette/main/install.sh | CLAUDETTE_FLAVOR=full sh   # Linux / macOS
 $env:CLAUDETTE_FLAVOR='full'; iwr -useb https://raw.githubusercontent.com/mrdushidush/claudette/main/install.ps1 | iex  # Windows
 ```
 
@@ -115,7 +115,7 @@ Claudette is developed *with* Claudette. She runs her own Forge pipeline against
 
 ## 🏅 Which model should I run?
 
-Answered by [the Q56 benchmark above](#-start-here-q56-a-hidden-test-benchmark-for-local-coding-models), not by a leaderboard. `claudette --doctor` reads your VRAM and names the model that fits your GPU, with the load command.
+Answered by [the Q56 benchmark above](#-q56-which-local-model-is-actually-worth-running), not by a leaderboard. `claudette --doctor` reads your VRAM and names the model that fits your GPU, with the load command.
 
 *Measured on Q56 · RTX 5060 Ti 16 GB · Windows 11 · LM Studio. Held constant on every row: ctx 32768, KV cache q8_0, one parallel session, identical agent binary. Sizes are the measured GGUF in GiB.*
 
@@ -149,7 +149,9 @@ lms load "qwen3.6-35b-a3b-mtp@iq3_s" -c 65536 --parallel 1 \
 
 **What a Q56 score is - and isn't.** It grades *first-shot code quality on unstated correctness traps*: the degenerate input, the falsy-vs-absent distinction, the boundary the prompt implies but never enumerates. It is **not** a SWE-bench-style task-resolution number and is **not comparable** to one. It is also **short-horizon** - iteration depth is p50 = 4, and the harness runs with auto-approve, so it cannot see context compaction, prefix-cache behaviour, model escalation or permission handling. The top of the range is saturating at 55/56.
 
-⚠️ **The installer default is `qwen3.5:4b`, which scores 33/56** - `gemma-4-e4b` scores 42 at a comparable footprint. The default is what `install` pulls today because it is a one-command Ollama pull that runs anywhere; if you have LM Studio and 5 GiB spare, run gemma-4-e4b instead.
+⚠️ **The quick-start default is `qwen3.5:4b`, and its Q8 build scores 33/56** - `gemma-4-e4b` scores 42 at a comparable footprint. The Q4 build that `ollama pull qwen3.5:4b` fetches has not been run on Q56. The default is what the quick start pulls today because it is a one-command Ollama pull that runs anywhere; if you have LM Studio and 5 GiB spare, run gemma-4-e4b instead.
+
+The corpus, the hidden verifiers and the reference solutions are **all public** - so the numbers are checkable, and so Q56 carries a stated **contamination date of 2026-07-25**. Every model benchmarked was released before it. A single-run number is not a result: **[all 36 runs as CSV, with every run's failure list](https://github.com/mrdushidush/claudette/blob/main/runs/eval-2026-05-29/battery/RESULTS-q56.csv)**. Benching a model we haven't covered needs no Rust and is the single most useful way to contribute.
 
 Full method, replication package and every run's failure list → **[the Q56 battery README](https://github.com/mrdushidush/claudette/tree/main/runs/eval-2026-05-29/battery#readme)**. Older tool-loop-reliability tables (the superseded, now-saturated 50-task battery) → [MODEL-COMPARISON.md](runs/eval-2026-05-29/battery/MODEL-COMPARISON.md) + [CHAMPION-DOSSIER.md](runs/eval-2026-05-29/battery/CHAMPION-DOSSIER.md). How to choose for your hardware (VRAM residency, KV-cache settings, MTP, runtime pitfalls) → [docs/hardware.md](docs/hardware.md).
 
@@ -204,7 +206,16 @@ Newcomer-friendly tasks carry the [`good first issue`](https://github.com/mrdush
 
 ## Contributing
 
-Bugs and PRs welcome - see [CONTRIBUTING.md](.github/CONTRIBUTING.md). Conventional Commits (`feat:`, `fix:`, `docs:`, …). Security issues go through the private advisory flow in [SECURITY.md](.github/SECURITY.md), not a public issue. Contributions are dual-licensed MIT OR Apache-2.0.
+Issues labelled [`pr-welcome`](https://github.com/mrdushidush/claudette/labels/pr-welcome) are pre-approved: send the PR without asking first. Outside PRs are reviewed on Fridays, up to three a week, oldest first; anything else starts as an issue. The details, and a first contribution in 30 minutes: [CONTRIBUTING.md](.github/CONTRIBUTING.md). Conventional Commits (`feat:`, `fix:`, `docs:`, …). Security issues go through the private advisory flow in [SECURITY.md](.github/SECURITY.md), not a public issue. Contributions are dual-licensed MIT OR Apache-2.0.
+
+## The family
+
+| Repo | What it is |
+|---|---|
+| **claudette** (this repo) | **Use it today:** the air-gapped agent, and Q56 |
+| [abcc](https://github.com/mrdushidush/abcc) | **What's next:** a board for coding jobs - a local model tries each one in a scratch worktree, and your real tests decide whether it lands. Pre-alpha |
+| [abcc-research](https://github.com/mrdushidush/abcc-research) | **The evidence:** every measurement behind both, numbered and correctable |
+| [agent-battle-command-center](https://github.com/mrdushidush/agent-battle-command-center) | Where it started: v1, TypeScript, RTS-style UI. Stable, in maintenance |
 
 ## License
 

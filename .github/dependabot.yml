@@ -1,17 +1,18 @@
-# Dependabot keeps cargo and GitHub Actions deps current.
+# Dependabot keeps cargo, GitHub Actions and the VS Code extension's npm deps current.
 #
-# Cargo minor/patch are grouped into a single PR per week; majors come
-# as separate PRs because they tend to need code changes. Actions are
-# pinned by SHA in workflows (see ci.yml), so dependabot will rewrite
-# the SHA + version comment together when it opens a PR.
+# Monthly, and grouped: minor/patch updates for each ecosystem arrive as one
+# PR a month instead of a PR per package, so the PR tab stays readable. Majors
+# still come as separate PRs because they tend to need code changes. Patch-level
+# PRs merge themselves once CI is green (.github/workflows/dependabot-automerge.yml).
+# Actions are pinned by SHA in workflows (see ci.yml), so dependabot rewrites the
+# SHA + version comment together when it opens a PR.
 version: 2
 
 updates:
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "06:00"
       timezone: "UTC"
     open-pull-requests-limit: 5
@@ -29,8 +30,7 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "06:00"
       timezone: "UTC"
     open-pull-requests-limit: 5
@@ -40,14 +40,18 @@ updates:
     labels:
       - "dependencies"
       - "ci"
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
 
   # The VS Code extension's npm subtree was on security-alert life-support
   # (only cargo + actions were scheduled). Keep it patched on the same cadence.
   - package-ecosystem: "npm"
     directory: "/editor/vscode"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "monthly"
       time: "06:00"
       timezone: "UTC"
     open-pull-requests-limit: 5

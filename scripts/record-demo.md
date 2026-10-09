@@ -1,8 +1,19 @@
-# Recording the hero demo GIF (`docs/images/forge-demo.gif`)
+# Recording the hero demo GIF
 
-Shot list + exact commands for the 30–45 second recording that replaces the
-static PNG at the top of the README. Target: **< 5 MB**, terminal-only, no
-narration, readable at README column width.
+Shot list + exact commands for the 30–45 second recording at the top of the
+README. Target: **< 5 MB**, terminal-only, no narration, readable at README
+column width.
+
+**The current GIF** (`docs/images/claudette-forge-demo.gif`, 2026-10-09) is a
+simpler take than the shot list below: a two-test Python repo with one failing
+test, `claudette --forge "test_punctuation fails. Fix slugify so the tests pass;
+do not edit the tests."`, a `y` at each permission prompt, then `git switch -;
+python -m pytest -q` (forge commits to its own branch and puts you back on
+`main`). Recorded on Windows with vhs into PNG frames, encoded with ffmpeg, and
+idle stretches over 1.6 s cut down to 1.6 s. Two things that cost retakes: the
+permission prompt takes a single key, so a scripted `y` must not be followed by
+Enter (Enter answers the next prompt with No); and forge's test gate only finds
+pytest when the repo has a `pyproject.toml`.
 
 ## Setup (before recording)
 
