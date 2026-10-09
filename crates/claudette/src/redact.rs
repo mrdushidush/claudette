@@ -58,6 +58,19 @@ fn rules() -> &'static [(Regex, &'static str)] {
             (r(r"\bAKIA[0-9A-Z]{16}\b"), "<redacted:aws-key>"),
             // Google OAuth access tokens.
             (r(r"\bya29\.[A-Za-z0-9._-]{20,}"), "<redacted:google-token>"),
+            // Google OAuth *refresh* tokens — the long-lived half of the pair
+            // claudette stores in `secrets/google_oauth.json` (roast SEC-04).
+            (r(r"\b1//[A-Za-z0-9_-]{20,}"), "<redacted:google-token>"),
+            // Google OAuth client secrets (`secrets/google_oauth_client.json`).
+            (
+                r(r"\bGOCSPX-[A-Za-z0-9_-]{20,}"),
+                "<redacted:google-client-secret>",
+            ),
+            // Telegram bot tokens: `<bot id>:<35 chars>` (`secrets/telegram.token`).
+            (
+                r(r"\b[0-9]{8,10}:[A-Za-z0-9_-]{35}\b"),
+                "<redacted:telegram-token>",
+            ),
             // OpenAI-style and other `sk-`/`sk-proj-` API keys.
             (
                 r(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}"),
@@ -98,6 +111,22 @@ fn rules() -> &'static [(Regex, &'static str)] {
             (
                 r(r"(?i)\b(x-api-key|x-auth-token|private-token|api[_-]?key)(\s*[:=]\s*)[^\s<]\S*"),
                 "${1}${2}<redacted:header-secret>",
+            ),
+            // Environment-variable assignments whose NAME says secret:
+            // `BRAVE_API_KEY=…`, `GITHUB_TOKEN=…`, `AWS_SECRET_ACCESS_KEY=…`.
+            // The rule above cannot see these: `\b` needs a word boundary
+            // before `api`, and `_` is a word character, so `BRAVE_API_KEY`
+            // never matched (roast SEC-04). Upper-case names only, so prose
+            // like "the token: …" is left alone.
+            (
+                r(r"\b([A-Z][A-Z0-9_]*_(?:API_KEY|KEY|TOKEN|SECRET|PASSWORD))(\s*=\s*)[^\s<]\S*"),
+                "${1}${2}<redacted:env-secret>",
+            ),
+            // The AWS *secret* key has no prefix of its own; it is found by the
+            // field that carries it, in `~/.aws/credentials` style.
+            (
+                r(r"(?i)\b(aws_secret_access_key)(\s*[:=]\s*)[^\s<]\S*"),
+                "${1}${2}<redacted:aws-secret>",
             ),
         ]
     })
@@ -259,5 +288,75 @@ mod tests {
             twice, once,
             "re-redacting already-masked text must be stable"
         );
+    }
+
+    // Roast SEC-04: the secrets claudette itself stores or reads used to
+    // come out of `redact` unchanged.
+    fn gone(input: &str, secret: &str) {
+        let out = redact(input);
+        assert!(
+            !out.contains(secret),
+            "survived redaction: {input:?} -> {out:?}"
+        );
+        assert!(out.contains("<redacted"), "no marker left in {out:?}");
+    }
+
+    #[test]
+    fn masks_telegram_bot_token() {
+        gone(
+            "token 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw0 saved",
+            "AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw0",
+        );
+    }
+
+    #[test]
+    fn masks_google_refresh_token() {
+        gone(
+            r#"{"refresh_token": "1//0gWXYZabcdefghijklmnopqrstuvwxyz0123456789"}"#,
+            "0gWXYZabcdefghijklmnopqrstuvwxyz0123456789",
+        );
+    }
+
+    #[test]
+    fn masks_google_client_secret() {
+        gone(
+            r#"{"client_secret": "GOCSPX-AbCdEfGhIjKlMnOpQrStUvWxYz12"}"#,
+            "AbCdEfGhIjKlMnOpQrStUvWxYz12",
+        );
+    }
+
+    #[test]
+    fn masks_env_var_secrets() {
+        gone(
+            "BRAVE_API_KEY=BSAabcdefghijklmnopqrstuvwxyz12345",
+            "BSAabcdefghijklmnopqrstuvwxyz12345",
+        );
+        gone(
+            "GITHUB_TOKEN=opaque0123456789abcdefOPAQUE",
+            "opaque0123456789abcdefOPAQUE",
+        );
+    }
+
+    #[test]
+    fn masks_aws_secret_access_key() {
+        gone(
+            "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        );
+        gone(
+            "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        );
+    }
+
+    #[test]
+    fn new_rules_leave_ordinary_text_alone() {
+        for clean in [
+            "commit 3fdfefe12289b63b42e0502f516d41a1f8c59eed at 12:30:45",
+            "the token: is refreshed daily, see docs/auth.md",
+            "let key = map.get(&name);",
+        ] {
+            assert_eq!(redact(clean), clean, "clean text was changed");
+        }
     }
 }
