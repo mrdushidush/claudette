@@ -749,6 +749,10 @@ mod tests {
         };
         let outcome = prompt_mode_policy().authorize("read_file", "{}", Some(&mut prompter));
         assert_eq!(outcome, PermissionOutcome::Allow);
-        assert!(prompter.seen.is_empty(), "asked about a read");
+        assert_eq!(
+            prompter.seen,
+            [] as [PermissionRequest; 0],
+            "asked about a read"
+        );
     }
 }
