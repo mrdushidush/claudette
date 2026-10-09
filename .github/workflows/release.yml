@@ -176,7 +176,7 @@ jobs:
       # ci.yml) still holds; here the privilege makes pinning the action *code*
       # worth the manual refresh. `toolchain:` is now a required input because
       # the SHA ref can't carry the branch-name channel selection. (roast 2026-06-30)
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067  # v1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f  # v1
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16  # v2.9.1
