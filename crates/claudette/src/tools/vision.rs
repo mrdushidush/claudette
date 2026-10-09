@@ -303,7 +303,7 @@ mod tests {
     #[test]
     fn build_screenshot_command_returns_non_empty_program() {
         let (program, args, _kept) = build_screenshot_command("/tmp/test.png");
-        assert!(!program.is_empty());
-        assert!(!args.is_empty());
+        assert_ne!(program, "");
+        assert_ne!(args, [] as [&str; 0]);
     }
 }

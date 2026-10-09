@@ -635,7 +635,7 @@ mod tests {
     #[test]
     fn registry_starts_with_only_core() {
         let reg = ToolRegistry::new();
-        assert!(reg.enabled_groups().is_empty());
+        assert_eq!(reg.enabled_groups(), [] as [ToolGroup; 0]);
         // Core: enable_tools (synthesised) + get_current_time +
         // load_workspace_rules. Everything else (notes, todos, files, code,
         // meta, search, etc.) must be enabled on demand. `describe_group`

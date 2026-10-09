@@ -1,0 +1,1 @@
+I'm building a small blog engine and I need a `slugify` function for turning post titles into URL slugs — for example "My First Post!" should become "my-first-post". Implement it in src/lib.rs. There are a couple of tests in there already showing the shape I want. Make sure it produces clean slugs for whatever titles people throw at it.

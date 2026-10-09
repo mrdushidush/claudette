@@ -1,0 +1,1 @@
+The `firstDuplicate` function in solution.ts returns the first value that appears a second time as you scan the array left to right (or null if there are no duplicates). It works but it's quadratic and crawls on large inputs. Make it run in roughly linear time while keeping the exact same behavior. You can check the basics with `node test_basic.ts`; keep it passing.

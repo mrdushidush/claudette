@@ -422,7 +422,7 @@ mod tests {
         // fresh home there is genuinely no file, so we can assert emptiness
         // outright instead of the old "doesn't panic" hedge.
         crate::with_temp_home(|_home| {
-            assert!(load_chat_ids().is_empty());
+            assert_eq!(load_chat_ids(), [] as [i64; 0]);
         });
     }
 

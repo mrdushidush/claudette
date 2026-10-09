@@ -796,7 +796,7 @@ mod tests {
     fn missing_history_file_loads_empty_rather_than_failing() {
         let path = std::env::temp_dir().join("claudette-nonexistent-history-file");
         let _ = std::fs::remove_file(&path);
-        assert!(load_history(&path).is_empty());
+        assert_eq!(load_history(&path), [] as [String; 0]);
     }
 
     // --- piped input: the multi-line prompt path ---

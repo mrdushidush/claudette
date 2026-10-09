@@ -1,0 +1,5 @@
+Q01	rust	implement-spec	FAIL	110s	EC=1	recall=na	FAIL — hidden tests failed: trim_and_strip_punct --- FAILED collapse_separator_runs --- FAILED thread 'trim_and_strip_punct' (2556) panicked at tests\hidden_gate.rs:4:37: assertion `left == right` failed 
+Q13	python	implement-spec	FAIL	28s	EC=1	recall=na	FAIL — hidden tests failed: >       assert parse_csv_line('a,"b,c",d') == ["a", "b,c", "d"] E       AssertionError: assert ['a', 'b,c', 'b,c', 'd'] == ['a', 'b,c', 'd'] hidden_gate_test.py:9: AssertionError >       assert parse_csv_line('"she said ""hi"""') == ['she said "hi"'] 
+Q26	js	implement-spec	PASS	27s	EC=0	recall=na	PASS — all hidden deepEqual tests passed
+Q35	ts	implement-spec	FAIL	44s	EC=1	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: plus is space 
+Q43	shell	bugfix	PASS	17s	EC=0	recall=na	PASS — line counts correct with and without trailing newline

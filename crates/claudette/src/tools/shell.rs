@@ -940,7 +940,7 @@ mod tests {
         git(&["commit", "-qm", "init"]);
 
         // Clean tree → guard allows the reset.
-        assert!(git_tracked_dirty(&dir).is_empty());
+        assert_eq!(git_tracked_dirty(&dir), [] as [String; 0]);
         assert!(destructive_git_guard("git reset --hard", &dir).is_ok());
 
         // Dirty tree → guard refuses and names the file.

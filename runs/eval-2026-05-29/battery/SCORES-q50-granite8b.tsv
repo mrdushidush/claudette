@@ -1,0 +1,56 @@
+Q01	rust	implement-spec	FAIL	20s	EC=0	recall=na	FAIL — hidden tests failed: error[E0282]: type annotations needed error[E0308]: mismatched types 
+Q02	rust	boundary	PASS	25s	EC=0	recall=na	PASS — all 6 hidden lower_bound tests passed
+Q03	rust	bugfix	FAIL	18s	EC=0	recall=na	FAIL — hidden tests failed: error[E0277]: the type `[u64]` cannot be indexed by `u64` 
+Q04	rust	refactor	FAIL	19s	EC=0	recall=na	FAIL — hidden tests failed: error[E0308]: mismatched types 
+Q05	rust	error-handling	FAIL	17s	EC=0	recall=na	FAIL — hidden tests failed: blank_lines_skipped --- FAILED thread 'blank_lines_skipped' (14944) panicked at tests\hidden_gate.rs:8:36: assertion `left == right` failed test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s 
+Q06	rust	implement-spec	FAIL	25s	EC=0	recall=na	FAIL — hidden tests failed: 
+Q07	rust	api-misuse	FAIL	152s	EC=0	recall=na	FAIL — hidden tests failed: 
+Q08	rust	multi-file	FAIL	58s	EC=0	recall=na	FAIL — hidden tests failed: error[E0004]: non-exhaustive patterns: `&Token::Num(_)`, `&Token::Star` and `&Token::Slash` not covered 
+Q09	rust	boundary	PASS	28s	EC=0	recall=na	PASS — all hidden RLE tests passed
+Q10	rust	implement-spec	FAIL	21s	EC=0	recall=na	FAIL — hidden tests failed: error[E0765]: unterminated double quote string 
+Q11	rust	concurrency	FAIL	14s	EC=0	recall=na	FAIL — hidden tests failed: 
+Q12	rust	perf	FAIL	21s	EC=0	recall=na	FAIL — hidden tests failed: just_over_k --- FAILED thread 'just_over_k' (2480) panicked at tests\hidden_gate.rs:4:28: assertion failed: !has_duplicate_within_k(&[1, 2, 3, 1], 2) test result: FAILED. 5 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s 
+Q13	python	implement-spec	PASS	24s	EC=0	recall=na	PASS — all hidden CSV tests passed
+Q14	python	bugfix	PASS	15s	EC=0	recall=na	PASS — all hidden deep_merge tests passed
+Q15	python	error-handling	PASS	34s	EC=0	recall=na	PASS — all hidden retry tests passed
+Q16	python	boundary	PASS	12s	EC=0	recall=na	PASS — all hidden paginate tests passed
+Q17	python	perf	PASS	13s	EC=0	recall=na	PASS — correct and fast on large input
+Q18	python	api-misuse	PASS	10s	EC=0	recall=na	PASS — buckets are independent per call
+Q19	python	implement-spec	FAIL	14s	EC=0	recall=na	FAIL — hidden tests failed: >       assert human_readable_size(1024) == "1.0 KB" E       AssertionError: assert '1.0 MB' == '1.0 KB' hidden_gate_test.py:10: AssertionError >       assert human_readable_size(1500) == "1.5 KB" 
+Q20	python	refactor	PASS	15s	EC=0	recall=na	PASS — keeps falsy-but-present values, drops only None
+Q21	python	multi-file	PASS	15s	EC=0	recall=na	PASS — tax applied on subtotal, no per-item drift
+Q22	python	concurrency	FAIL	12s	EC=0	recall=na	FAIL — hidden tests failed: =================================== ERRORS ==================================== ____________________ ERROR collecting hidden_gate_test.py _____________________ C:\Users\david\AppData\Local\Programs\Python\Python314\Lib\site-packages\_pytest\assertion\rewrite.py:188: in exec_module E   IndentationError: unexpected indent 
+Q23	python	boundary	PASS	15s	EC=0	recall=na	PASS — all hidden parse_ranges tests passed
+Q24	python	implement-spec	PASS	15s	EC=0	recall=na	PASS — all hidden word_wrap tests passed
+Q25	python	api-misuse	FAIL	11s	EC=0	recall=na	FAIL — hidden tests failed: >       assert total_cents(["1.00", "2.00"]) == 300 E           ValueError: invalid literal for int() with base 10: '' solution.py:7: ValueError >       assert total_cents(["5"]) == 500 
+Q26	js	implement-spec	FAIL	17s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: NaN equals NaN 
+Q27	js	bugfix	FAIL	62s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: default depth 1 
+Q28	js	boundary	FAIL	11s	EC=0	recall=na	FAIL — hidden tests failed: SyntaxError: Unexpected token 'export' 
+Q29	js	error-handling	PASS	17s	EC=0	recall=na	PASS — all hidden safeGet tests passed
+Q30	js	api-misuse	FAIL	8s	EC=0	recall=na	FAIL — hidden tests failed: SyntaxError: Unexpected token 'export' 
+Q31	js	implement-spec	PASS	10s	EC=0	recall=na	PASS — all hidden groupBy tests passed
+Q32	js	perf	PASS	12s	EC=0	recall=na	PASS — correct and fast on large input
+Q33	js	refactor	PASS	9s	EC=0	recall=na	PASS — all hidden average tests passed
+Q34	js	multi-file	FAIL	16s	EC=0	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: user overrides scalar 
+Q35	ts	implement-spec	FAIL	17s	EC=0	recall=na	FAIL — hidden tests failed: SyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]: Expression expected 
+Q36	ts	bugfix	FAIL	17s	EC=0	recall=na	FAIL — hidden tests failed: SyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]: 'import', and 'export' cannot be used outside of module code 
+Q37	ts	boundary	PASS	11s	EC=0	recall=na	PASS — all hidden range tests passed
+Q38	ts	error-handling	FAIL	15s	EC=0	recall=na	FAIL — hidden tests failed:   if (!text) return { ok: false, error: "Input is empty" }; SyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]: 'import', and 'export' cannot be used outside of module code 
+Q39	ts	api-misuse	PASS	9s	EC=0	recall=na	PASS — all hidden makeGrid tests passed
+Q40	ts	implement-spec	PASS	24s	EC=0	recall=na	PASS — all hidden EventEmitter tests passed
+Q41	ts	perf	PASS	28s	EC=0	recall=na	PASS — correct and fast on large input
+Q42	ts	refactor	FAIL	14s	EC=0	recall=na	FAIL — hidden tests failed: SyntaxError [ERR_INVALID_TYPESCRIPT_SYNTAX]: Return statement is not allowed here 
+Q43	shell	bugfix	FAIL	12s	EC=0	recall=na	FAIL — input a\\nb\\nc\\n: expected 3, got '0
+Q44	shell	implement-spec	FAIL	15s	EC=0	recall=na	FAIL — input the\ cat\ the\ DOG\ the\ cat: expected [3 the
+Q45	shell	bugfix	FAIL	12s	EC=0	recall=na	FAIL — expected [code1
+Q46	shell	boundary	FAIL	15s	EC=0	recall=na	FAIL — range 8..100: expected [8
+Q47	shell	error-handling	PASS	11s	EC=0	recall=na	PASS — divides correctly and handles zero divisor cleanly
+Q48	shell	api-misuse	PASS	10s	EC=0	recall=na	PASS — arguments joined with commas, spaces preserved
+Q49	shell	multi-file	PASS	15s	EC=0	recall=na	PASS — normalize strips both ends, keeps internal spacing
+Q50	shell	implement-spec	PASS	10s	EC=0	recall=na	PASS — extracts Nth comma field, handles missing/empty fields
+Q51	python	implement-spec	FAIL	25s	EC=0	recall=na	FAIL — hidden tests failed: >       assert parse_duration("1h 30m") == 5400         Units are h (hours), m (minutes), s (seconds). Accepts multiple units in any order, e.g. "90s", "1h30m", "2h 15m 5s". Raises ValueError for invalid input. >           raise ValueError(f'Invalid duration format: {s!r}') E           ValueError: Invalid duration format: '1h 30m' 
+Q52	rust	implement-spec	FAIL	25s	EC=0	recall=na	FAIL — hidden tests failed: capacity_zero_never_panics --- FAILED capacity_one --- FAILED overwrites_oldest --- FAILED exactly_full --- FAILED 
+Q53	js	implement-spec	FAIL	179s	EC=1	recall=na	FAIL — hidden tests failed: SyntaxError: Invalid or unexpected token 
+Q54	python	implement-spec	FAIL	16s	EC=0	recall=na	FAIL — hidden tests failed: >       assert topological_sort({"b": ["a"], "c": ["b"]}) == ["a", "b", "c"]         before it). Returns a list of all nodes in dependency order, or None if the E               KeyError: 'a' solution.py:18: KeyError 
+Q55	ts	implement-spec	PASS	12s	EC=0	recall=na	PASS — all hidden mergeIntervals tests passed
+Q56	rust	implement-spec	FAIL	38s	EC=0	recall=na	FAIL — hidden tests failed: error[E0004]: non-exhaustive patterns: `(None, Some(Err(_)))` and `(Some(Err(_)), None)` not covered 

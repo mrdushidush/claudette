@@ -1,0 +1,33 @@
+Q01	rust	implement-spec	FAIL	182s	EC=1	recall=na	FAIL — hidden tests failed: already_a_slug_is_stable --- FAILED digits_preserved --- FAILED collapse_separator_runs --- FAILED trim_and_strip_punct --- FAILED 
+Q02	rust	boundary	PASS	19s	EC=0	recall=na	PASS — all 6 hidden lower_bound tests passed
+Q03	rust	bugfix	FAIL	34s	EC=1	recall=na	FAIL — hidden tests failed: error[E0277]: the type `[u64]` cannot be indexed by `u64` 
+Q04	rust	refactor	FAIL	26s	EC=1	recall=na	FAIL — hidden tests failed: empty_input --- FAILED thread 'empty_input' (9712) panicked at src\lib.rs:5:42: test result: FAILED. 4 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s error: test failed, to rerun pass `--test hidden_gate` 
+Q05	rust	error-handling	FAIL	19s	EC=0	recall=na	FAIL — hidden tests failed: 
+Q06	rust	implement-spec	PASS	24s	EC=0	recall=na	PASS — all hidden int_to_roman tests passed
+Q07	rust	api-misuse	FAIL	169s	EC=1	recall=na	FAIL — hidden tests failed: error[E0631]: type mismatch in closure arguments error[E0631]: type mismatch in closure arguments 
+Q08	rust	multi-file	FAIL	38s	EC=1	recall=na	FAIL — hidden tests failed: all_subtraction --- FAILED mixed_precedence_and_sub --- FAILED chained_subtraction --- FAILED single_subtraction --- FAILED 
+Q09	rust	boundary	PASS	48s	EC=1	recall=na	PASS — all hidden RLE tests passed
+Q10	rust	implement-spec	PASS	56s	EC=0	recall=na	PASS — all hidden ipv4 tests passed
+Q11	rust	concurrency	FAIL	27s	EC=0	recall=na	FAIL — hidden tests failed: concurrent_increments_are_not_lost --- FAILED thread 'concurrent_increments_are_not_lost' (9892) panicked at tests\hidden_gate.rs:20:5: assertion `left == right` failed   left: 33757 
+Q12	rust	perf	FAIL	91s	EC=1	recall=na	FAIL — hidden tests failed: just_over_k --- FAILED k_zero_never_matches --- FAILED thread 'just_over_k' (6052) panicked at tests\hidden_gate.rs:4:28: assertion failed: !has_duplicate_within_k(&[1, 2, 3, 1], 2) 
+Q13	python	implement-spec	FAIL	46s	EC=1	recall=na	FAIL — hidden tests failed: =================================== ERRORS ==================================== ____________________ ERROR collecting hidden_gate_test.py _____________________ C:\Users\david\AppData\Local\Programs\Python\Python314\Lib\site-packages\_pytest\assertion\rewrite.py:188: in exec_module E   SyntaxError: unterminated string literal (detected at line 10) 
+Q14	python	bugfix	PASS	27s	EC=1	recall=na	PASS — all hidden deep_merge tests passed
+Q15	python	error-handling	PASS	23s	EC=0	recall=na	PASS — all hidden retry tests passed
+Q16	python	boundary	FAIL	34s	EC=1	recall=na	FAIL — hidden tests failed: >       assert paginate([1, 2, 3, 4], 2) == [[1, 2], [3, 4]] E       assert [[1, 2], [3, 4], []] == [[1, 2], [3, 4]] hidden_gate_test.py:6: AssertionError >       assert paginate([], 3) == [] 
+Q17	python	perf	PASS	23s	EC=1	recall=na	PASS — correct and fast on large input
+Q18	python	api-misuse	PASS	27s	EC=0	recall=na	PASS — buckets are independent per call
+Q19	python	implement-spec	FAIL	30s	EC=1	recall=na	FAIL — hidden tests failed: >       assert human_readable_size(1500) == "1.5 KB" E       AssertionError: assert '1.46484375 KB' == '1.5 KB' hidden_gate_test.py:14: AssertionError >       assert human_readable_size(1048576) == "1.0 MB" 
+Q20	python	refactor	PASS	35s	EC=1	recall=na	PASS — keeps falsy-but-present values, drops only None
+Q21	python	multi-file	PASS	30s	EC=1	recall=na	PASS — tax applied on subtotal, no per-item drift
+Q22	python	concurrency	PASS	25s	EC=1	recall=na	PASS — concurrent increments not lost
+Q23	python	boundary	FAIL	32s	EC=1	recall=na	FAIL — hidden tests failed: >       assert parse_ranges("1-3") == [1, 2, 3] E       assert [1, 2] == [1, 2, 3] hidden_gate_test.py:6: AssertionError >       assert parse_ranges("1-3,5,8-10") == [1, 2, 3, 5, 8, 9, 10] 
+Q24	python	implement-spec	PASS	27s	EC=1	recall=na	PASS — all hidden word_wrap tests passed
+Q25	python	api-misuse	FAIL	20s	EC=1	recall=na	FAIL — hidden tests failed: >       assert total_cents(["5"]) == 500 E           ValueError: not enough values to unpack (expected 2, got 1) solution.py:6: ValueError FAILED hidden_gate_test.py::test_integer_dollar_string - ValueError: not enou... 
+Q26	js	implement-spec	PASS	30s	EC=0	recall=na	PASS — all hidden deepEqual tests passed
+Q27	js	bugfix	FAIL	41s	EC=1	recall=na	FAIL — hidden tests failed: AssertionError [ERR_ASSERTION]: depth 0 
+Q28	js	boundary	PASS	20s	EC=0	recall=na	PASS — all hidden chunk tests passed
+Q29	js	error-handling	FAIL	25s	EC=1	recall=na	FAIL — hidden tests failed: TypeError: Cannot read properties of undefined (reading 'y') 
+Q30	js	api-misuse	PASS	17s	EC=0	recall=na	PASS — all hidden sortNumbers tests passed
+Q31	js	implement-spec	PASS	16s	EC=0	recall=na	PASS — all hidden groupBy tests passed
+Q32	js	perf	FAIL	51s	EC=1	recall=na	FAIL — hidden tests failed: ReferenceError: result is not defined 
+Q33	js	refactor	PASS	19s	EC=0	recall=na	PASS — all hidden average tests passed

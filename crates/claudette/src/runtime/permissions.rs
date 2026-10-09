@@ -280,7 +280,14 @@ impl PermissionPolicy {
             };
         }
 
-        if current_mode == PermissionMode::Allow || current_mode >= required_mode {
+        // `Prompt` is a session-control mode, not a privilege tier above
+        // `DangerFullAccess`: the derived `Ord` puts it there, so `>=` alone
+        // would allow every tool without ever asking (roast EDIT-10). It
+        // allows read-only tools and asks about everything else.
+        if current_mode == PermissionMode::Allow
+            || (current_mode == PermissionMode::Prompt && required_mode == PermissionMode::ReadOnly)
+            || (current_mode != PermissionMode::Prompt && current_mode >= required_mode)
+        {
             return PermissionOutcome::Allow;
         }
 
@@ -501,7 +508,7 @@ mod tests {
         // and Levenshtein distance to all of them exceeds 3. The expected
         // behavior is empty — caller layers a group-aware hinter on top.
         let policy = standard_policy();
-        assert!(policy.suggest_for("facts", 5).is_empty());
+        assert_eq!(policy.suggest_for("facts", 5), [] as [String; 0]);
     }
 
     #[test]
@@ -515,7 +522,7 @@ mod tests {
     #[test]
     fn suggest_for_zero_max_returns_empty() {
         let policy = standard_policy();
-        assert!(policy.suggest_for("note_update", 0).is_empty());
+        assert_eq!(policy.suggest_for("note_update", 0), [] as [String; 0]);
     }
 
     #[test]
@@ -687,5 +694,65 @@ mod tests {
                 None => std::env::remove_var("CLAUDETTE_WORKSPACE"),
             }
         });
+    }
+
+    // Roast EDIT-10: `Prompt` sorts above `DangerFullAccess` in the derived
+    // `Ord`, so as the active mode it used to allow every tool unasked.
+    fn prompt_mode_policy() -> PermissionPolicy {
+        PermissionPolicy::new(PermissionMode::Prompt)
+            .with_tool_requirement("read_file", PermissionMode::ReadOnly)
+            .with_tool_requirement("write_file", PermissionMode::WorkspaceWrite)
+            .with_tool_requirement("bash", PermissionMode::DangerFullAccess)
+    }
+
+    #[test]
+    fn prompt_mode_asks_before_a_dangerous_tool_and_honours_a_no() {
+        let mut prompter = RecordingPrompter {
+            seen: Vec::new(),
+            allow: false,
+        };
+        let outcome = prompt_mode_policy().authorize("bash", "rm -rf build", Some(&mut prompter));
+        assert!(
+            matches!(outcome, PermissionOutcome::Deny { .. }),
+            "got {outcome:?}"
+        );
+        assert_eq!(prompter.seen.len(), 1);
+        assert_eq!(prompter.seen[0].tool_name, "bash");
+    }
+
+    #[test]
+    fn prompt_mode_asks_before_a_write_and_honours_a_yes() {
+        let mut prompter = RecordingPrompter {
+            seen: Vec::new(),
+            allow: true,
+        };
+        let outcome = prompt_mode_policy().authorize("write_file", "{}", Some(&mut prompter));
+        assert_eq!(outcome, PermissionOutcome::Allow);
+        assert_eq!(prompter.seen.len(), 1);
+        assert_eq!(prompter.seen[0].tool_name, "write_file");
+    }
+
+    #[test]
+    fn prompt_mode_with_no_prompter_denies_instead_of_allowing() {
+        let outcome = prompt_mode_policy().authorize("bash", "echo hi", None);
+        assert!(
+            matches!(outcome, PermissionOutcome::Deny { .. }),
+            "got {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn prompt_mode_still_allows_read_only_tools_without_asking() {
+        let mut prompter = RecordingPrompter {
+            seen: Vec::new(),
+            allow: false,
+        };
+        let outcome = prompt_mode_policy().authorize("read_file", "{}", Some(&mut prompter));
+        assert_eq!(outcome, PermissionOutcome::Allow);
+        assert_eq!(
+            prompter.seen,
+            [] as [PermissionRequest; 0],
+            "asked about a read"
+        );
     }
 }

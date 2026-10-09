@@ -10,6 +10,49 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-10-09
+
+### Security
+
+- **`Prompt` as the active permission mode no longer allows every tool.**
+  `PermissionMode` derives `Ord` in declaration order, which puts `Prompt` above
+  `DangerFullAccess`, and `authorize` allowed whenever the active mode was at
+  least the tool's requirement - so with `Prompt` active, `bash` and every edit
+  tool were allowed without the prompter ever being asked, and a session with no
+  prompter allowed instead of denying. `Prompt` now allows read-only tools and
+  asks about everything else. Nothing selects `Prompt` today, so this closes the
+  hole before anything opens it.
+
+- **`semantic_grep` no longer reads `.env` into the model's context.** Its
+  directory walker skipped every dotfile except one: it carved out `.env`, so a
+  project's API keys, tokens and passwords were read and handed to the model.
+  `.env` is now skipped like every other dotfile.
+
+- **Redaction now masks the secrets Claudette itself stores.** Telegram bot
+  tokens, Google OAuth refresh tokens and client secrets (`GOCSPX-`), the AWS
+  secret access key, and environment assignments such as `BRAVE_API_KEY=` and
+  `GITHUB_TOKEN=` all came out of `redact` unchanged; each now has a rule. The
+  existing `api_key` backstop never matched inside `BRAVE_API_KEY`, because `_`
+  is a word character and the rule needed a word boundary before `api`.
+
+- **rustls 0.23.45** (RUSTSEC-2026-0285: TLS 1.3 handshake messages accepted
+  across encryption-level boundaries), with rustls-webpki 0.103.15, and **lru
+  0.18.5** (RUSTSEC-2026-0253, an unsound `LruCache::pop()`).
+
+- **Dev-dependency advisories cleared in the VS Code extension** (`undici`,
+  `js-yaml`, `brace-expansion`, `markdown-it`, `fast-uri`, `qs`). Build-time
+  only - nothing here ships in the `.vsix`.
+
+### Docs
+
+- **The Q56 results now live on `main`.** The replication package
+  (`runs/eval-2026-05-29/battery/`: the 16-row table, `RESULTS-q56.csv`, every
+  run's failure list, the hidden verifiers and reference solutions) was only on
+  the `battery/q50-quality-corpus` branch, and the README's three links into it
+  pointed there. They now point at `main`, so the evidence no longer depends on a
+  side branch staying put. Only the battery directory came across; the branch's
+  other changes stay on the branch.
+
 ## [0.18.0] - 2026-09-05
 
 ### Security
@@ -2465,7 +2508,8 @@ Initial public release of Claudette as a standalone repository.
 
 ---
 
-[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/mrdushidush/claudette/compare/v0.18.1...HEAD
+[0.18.1]: https://github.com/mrdushidush/claudette/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/mrdushidush/claudette/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/mrdushidush/claudette/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/mrdushidush/claudette/compare/v0.15.0...v0.16.0

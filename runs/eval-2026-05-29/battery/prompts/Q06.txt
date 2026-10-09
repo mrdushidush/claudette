@@ -1,0 +1,1 @@
+Implement `int_to_roman` in src/lib.rs. It converts an integer between 1 and 3999 into its Roman numeral string — for example 4 is "IV" and 58 is "LVIII". The two tests in the file show the shape. It needs to produce correct numerals across the whole range.

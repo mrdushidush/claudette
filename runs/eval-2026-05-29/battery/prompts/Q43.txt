@@ -1,0 +1,1 @@
+The script solution.sh counts how many lines it reads from stdin, but it's off by one when the input doesn't end with a newline — the last unterminated line gets missed. Fix it so the count is correct whether or not the input ends in a newline (an empty input should count as 0 lines). Run it like: printf 'a\nb\nc' | bash solution.sh
