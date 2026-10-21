@@ -91,7 +91,6 @@ Prefer not to pipe curl into a shell? Grab a [prebuilt release](https://github.c
 | **REPL** | `claudette` | Conversational shell; autosaves every turn |
 | **One-shot** | `claudette "..."` | Print a reply and exit; pipe-friendly |
 | **Deep research** | `claudette --research` | Unattended read-only repo audit → verified findings + `REPORT.md`; forces `--offline` |
-| **TUI** _(experimental)_ | `claudette --tui` | Demo-only fullscreen UI, 5 tabs; known rendering rough edges - the REPL is the daily driver |
 | **Telegram** | `claudette --telegram` | Voice-capable chat from your phone |
 | **VS Code** | [`editor/vscode/`](editor/vscode/README.md) | Send a selection or the open file to Claudette without leaving the editor |
 

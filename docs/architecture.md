@@ -58,10 +58,6 @@ src/
 ├── status.rs         — REPL activity spinner (TTY-only)
 ├── image_attach.rs   — Image attachment handling for multimodal turns
 ├── diff_preview.rs   — Colored unified diff for the [y/N] edit gate
-├── tui.rs            — Ratatui TUI app, 5 tabs, render loop
-├── tui_events.rs     — TUI event enums (worker ↔ render channel)
-├── tui_executor.rs   — ToolExecutor wrapper that fires TUI events
-├── tui_worker.rs     — Worker thread that owns the ConversationRuntime
 └── personas.rs       — Persona loader (the bundled Eva persona; `--faceless` drops it)
 ```
 
@@ -79,7 +75,7 @@ Everything Claudette persists lives under `~/.claudette/` (resolved by
 | `transcript/actions.jsonl` | every *mutating* tool call | ReadOnly calls are never logged. Backs `/undo` and `/diff`. |
 | `trash/` | deletes and overwrites | Timestamped originals - the restore source for `/undo`. |
 | `notes/*.md` | `note_create` | One hand-editable markdown file per note. |
-| `todos.json` | the todo tools | Also live-editable from the TUI Todos tab. |
+| `todos.json` | the todo tools | Plain JSON. |
 | `missions/` | `mission_start` | Brownfield clones + `active_mission.json`. Non-ephemeral missions survive a restart. |
 | `research/<repo>-<date>/` | `--research` | Manifest, progress, findings, `REPORT.md`. Resumable. |
 | `secrets/*.token` | OAuth + token storage | `0600` on Unix, ACL-tightened on Windows. |

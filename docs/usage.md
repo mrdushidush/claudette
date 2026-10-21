@@ -12,7 +12,6 @@ binary has no cloud code, so it errors with a one-line reinstall hint instead.
 |------|--------|
 | `--resume`, `-r` | Continue the most recent saved session. |
 | `--telegram`, `-t` | **(integrations)** Run as a Telegram bot (needs `TELEGRAM_BOT_TOKEN`). |
-| `--tui` | **(experimental)** Launch the fullscreen TUI. Demo-only - known rendering rough edges; the REPL is the supported daily driver. |
 | `--setup` | Guided first-run wizard: detect the backend, read your VRAM, offer to pull the fitting brain, then run a closing `--doctor` pass. Needs a TTY; refused under `--offline`. |
 | `--doctor` | Run the diagnostic probes (backend reachable, brain pulled, recall embeddings, build toolchains, OAuth, voice, secrets dir) and exit. Each failure prints a copy-paste `↳ fix:` line. Non-zero exit if any probe hard-failed. |
 | `--offline` | Enforced air-gap: hard-block every outbound call except your local model server and loopback. `bash` / `bash_background` are refused wholesale. See [PRIVACY.md](../PRIVACY.md). |
@@ -69,7 +68,7 @@ an ordinary prompt line. Line endings inside the block are normalised to `\n`,
 and blank lines are kept. A block that never closes is an error rather than a
 half-delivered prompt. The block is not added to `~/.claudette/repl_history`.
 
-## Slash commands (REPL + TUI)
+## Slash commands (REPL)
 
 ```
 /help                Show this list.
@@ -104,7 +103,7 @@ half-delivered prompt. The block is not added to `~/.claudette/repl_history`.
 
 Telegram handles a small, explicit set: `/start`, `/status`, `/compact`, `/clear`, plus the Telegram-only commands below. Anything else you type with a leading slash - including `/help`, `/save`, and `/load` - is **not** a command here; it falls through to the model as ordinary text. `/exit` and the destructive DangerFullAccess commands are blocked.
 
-Four additional commands are **Telegram-only** (they have no effect in the REPL or TUI):
+Four additional commands are **Telegram-only** (they have no effect in the REPL):
 
 ```
 /start               Greeting + what this bot can do.
@@ -126,7 +125,7 @@ the target already exists - overwriting a file is an edit, so it prompts and sho
 diff of what would be lost. Every completed file write also prints a `▸` line naming
 the file and its size change, so unattended runs leave a trail.
 
-The REPL prompter is interactive. The TUI shows a confirmation modal over the chat - `y` allows; `n`, `Esc`, or `Enter` denies (deny is the default); long inputs scroll with `↑`/`↓` and are never truncated. Telegram bot denies DangerFullAccess by default (no TTY to confirm with).
+The REPL prompter is interactive: `y` allows, `n` (or `Esc` / `Enter`) denies, and any other text is taken as an instruction for the model instead; the full tool input is shown, never truncated. Telegram bot denies DangerFullAccess by default (no TTY to confirm with).
 
 ## Sessions and auto-compaction
 

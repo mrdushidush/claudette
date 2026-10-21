@@ -1,10 +1,8 @@
 # Show me - what can I actually ask Claudette?
 
-You don't need to learn a command syntax. Open Claudette (REPL, TUI, or Telegram) and type or speak in plain English. These are real prompts that work today.
+You don't need to learn a command syntax. Open Claudette (REPL or Telegram) and type or speak in plain English. These are real prompts that work today.
 
 If you haven't installed yet, see the [one-line installer in the README](../README.md#install).
-
-![Claudette TUI](images/claudette-tui.png)
 
 ---
 
@@ -49,7 +47,7 @@ These work out of the box; some surface more detail with a free API key (Brave, 
 
 ## Drop in a screenshot
 
-Press <kbd>Alt</kbd>+<kbd>V</kbd> in the TUI (paste from clipboard), drag an image in, or type `@/path/to/image.png`. Then ask whatever you want about it. Works with any multimodal model you've pulled into Ollama.
+Drag an image into the REPL, or type `@/path/to/image.png`. Then ask whatever you want about it. Works with any multimodal model you've pulled into Ollama.
 
 - *"What does this error message mean?"* (after pasting a screenshot of a crash)
 - *"Critique this landing page mockup - what would a first-time visitor miss?"*
