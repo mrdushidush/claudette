@@ -2080,6 +2080,9 @@ mod tests {
 
     #[test]
     fn list_dir_classifies_file_and_subdir_correctly() {
+        // Other tests swap HOME/USERPROFILE to a temp dir under this lock;
+        // without it, list_dir can see the swapped HOME and refuse the path.
+        let _guard = crate::test_env_lock();
         // Regression for the Windows reparse-point bug: build a fresh dir
         // containing one real file and one real subdirectory, then verify
         // list_dir returns them with the correct `type` (not "unknown" or
@@ -2333,8 +2336,8 @@ mod tests {
         assert!(cleaned.contains("after"));
     }
 
-    // Git-group tests (extract_stat_number_*, git_commit_empty_message_triggers_auto,
-    // reject_destructive_blocks_force) live in src/tools/git.rs.
+    // Git-group tests (extract_stat_number_*, reject_destructive_blocks_force)
+    // live in src/tools/git.rs.
 
     // Telegram-group tests (tg_*, telegram_token) live in src/tools/telegram.rs.
 

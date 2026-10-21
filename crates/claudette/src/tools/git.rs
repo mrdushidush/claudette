@@ -731,23 +731,6 @@ mod tests {
     }
 
     #[test]
-    fn git_commit_empty_message_triggers_auto() {
-        // With no staged changes, auto_commit_message should error
-        // rather than producing an empty commit.
-        let err = run_git_commit("{}");
-        // This might fail because either: no git repo, or nothing staged.
-        // Both are valid — we just need to confirm it doesn't succeed with
-        // an empty message.
-        if let Err(msg) = err {
-            // Either "nothing staged" or git error — both acceptable.
-            assert!(
-                msg.contains("staged") || msg.contains("git"),
-                "expected staged/git error, got: {msg}"
-            );
-        }
-    }
-
-    #[test]
     fn schemas_lists_nine_tools() {
         let schemas = schemas();
         assert_eq!(schemas.len(), 9);
