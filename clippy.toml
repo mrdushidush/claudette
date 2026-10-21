@@ -1,0 +1,13 @@
+# This file exists to make the standard this repository already holds itself to
+# legible to tooling, rather than to change it.
+#
+# `.github/workflows/ci.yml` has run `cargo clippy --all-targets -- -D warnings`
+# on every push for as long as there has been a CI, so clippy has always been a
+# merge requirement here. But a merge requirement written only in a workflow
+# file is invisible to anything that is not GitHub Actions: an agent harness
+# grading a change before it is proposed has no way to discover it, and will
+# report a tree as passing that CI would reject minutes later.
+#
+# The settings below are empty on purpose. Every lint stays exactly where it
+# was; what changes is that the requirement is now declared in the repository
+# rather than only in the pipeline that enforces it.
