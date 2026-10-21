@@ -12,9 +12,9 @@ impl TokenUsage {
     #[must_use]
     pub fn total_tokens(self) -> u32 {
         self.input_tokens
-            + self.output_tokens
-            + self.cache_creation_input_tokens
-            + self.cache_read_input_tokens
+            .saturating_add(self.output_tokens)
+            .saturating_add(self.cache_creation_input_tokens)
+            .saturating_add(self.cache_read_input_tokens)
     }
 }
 
@@ -42,11 +42,23 @@ impl UsageTracker {
     }
 
     pub fn record(&mut self, usage: TokenUsage) {
-        self.cumulative.input_tokens += usage.input_tokens;
-        self.cumulative.output_tokens += usage.output_tokens;
-        self.cumulative.cache_creation_input_tokens += usage.cache_creation_input_tokens;
-        self.cumulative.cache_read_input_tokens += usage.cache_read_input_tokens;
-        self.turns += 1;
+        self.cumulative.input_tokens = self
+            .cumulative
+            .input_tokens
+            .saturating_add(usage.input_tokens);
+        self.cumulative.output_tokens = self
+            .cumulative
+            .output_tokens
+            .saturating_add(usage.output_tokens);
+        self.cumulative.cache_creation_input_tokens = self
+            .cumulative
+            .cache_creation_input_tokens
+            .saturating_add(usage.cache_creation_input_tokens);
+        self.cumulative.cache_read_input_tokens = self
+            .cumulative
+            .cache_read_input_tokens
+            .saturating_add(usage.cache_read_input_tokens);
+        self.turns = self.turns.saturating_add(1);
     }
 
     #[must_use]
@@ -108,5 +120,25 @@ mod tests {
         let tracker = UsageTracker::from_session(&session);
         assert_eq!(tracker.turns(), 1);
         assert_eq!(tracker.cumulative_usage().total_tokens(), 8);
+    }
+
+    #[test]
+    fn saturates_at_u32_max() {
+        let mut tracker = UsageTracker::new();
+        tracker.record(TokenUsage {
+            input_tokens: u32::MAX,
+            output_tokens: u32::MAX,
+            cache_creation_input_tokens: u32::MAX,
+            cache_read_input_tokens: u32::MAX,
+        });
+        tracker.record(TokenUsage {
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_creation_input_tokens: 1,
+            cache_read_input_tokens: 1,
+        });
+        let cu = tracker.cumulative_usage();
+        assert_eq!(cu.input_tokens, u32::MAX);
+        assert_eq!(cu.total_tokens(), u32::MAX);
     }
 }
