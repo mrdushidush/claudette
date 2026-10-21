@@ -149,7 +149,6 @@ const TRACKED_VARS: &[&str] = &[
     "CLAUDETTE_NUM_CTX",
     "CLAUDETTE_NUM_PREDICT",
     "CLAUDETTE_MAX_ITERATIONS",
-    "CLAUDETTE_MAX_FIX_ROUNDS",
     "CLAUDETTE_SESSION",
     "CLAUDETTE_WORKSPACE",
     // Compaction & resilience
@@ -232,7 +231,7 @@ fn redact_for_display(var: &str, val: &str) -> String {
 /// Capability / guard overrides — the knobs that loosen Claudette's safe
 /// defaults. Surfaced as their own
 /// section so `claudette --doctor` can answer "why did it auto-approve / bypass
-/// the git guard / read a secret / skip the forge review" at a glance. The flat
+/// the git guard / read a secret" at a glance. The flat
 /// env list buried these, so an active override was effectively invisible.
 /// (roast 2026-06-30 Theme C — the `doctor_lists_every_safety_override` test
 /// keeps this in sync with the knobs the runtime actually honours.)
@@ -242,13 +241,6 @@ const SAFETY_VARS: &[&str] = &[
     "CLAUDETTE_ALLOW_DESTRUCTIVE_GIT",
     "CLAUDETTE_ALLOW_SECRET_READS",
     "CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE",
-    // Forge gates — each one relaxes a submit-time safety check.
-    "CLAUDETTE_FORGE_AUTO_APPROVE",
-    "CLAUDETTE_FORGE_SECURITY_OVERRIDE",
-    "CLAUDETTE_FORGE_SUBMIT_ON_FAIL",
-    "CLAUDETTE_FORGE_ALLOW_DIRTY",
-    "CLAUDETTE_FORGE_NO_BUILD_CHECK",
-    "CLAUDETTE_FORGE_NO_REVIEW",
 ];
 
 /// Show which safety/capability overrides are currently set, and to what. We
@@ -511,11 +503,9 @@ pub(crate) fn model_present(names: &[String], wanted: &str) -> bool {
 
 // ─── Build toolchains ─────────────────────────────────────────────────────
 //
-// forge runs the project's real build + test suite (cargo check/test, go
-// build/test, pytest, npm test) inside the Verifier. Missing a toolchain is the
-// #1 silent reason "forge says it passed but nothing actually compiled". This
-// section probes each toolchain and, when one is missing, prints a copy-paste
-// install command for the current OS.
+// `run_tests` and `diagnostics` run the project's own toolchain (cargo, go,
+// pytest, npm). This section probes each toolchain and, when one is missing,
+// prints a copy-paste install command for the current OS.
 
 /// One build-toolchain probe. `bins` is tried in order (first hit wins) so a
 /// platform that ships `python3` but not `python` still resolves.
@@ -538,7 +528,7 @@ const TOOLCHAINS: &[Toolchain] = &[
         key: "git",
         bins: &["git"],
         version_arg: "--version",
-        why: "missions + forge: clone, commit, push, open PRs",
+        why: "the git tools and missions: status, diff, commit, clone",
         required: true,
     },
     Toolchain {
@@ -546,7 +536,7 @@ const TOOLCHAINS: &[Toolchain] = &[
         key: "rust",
         bins: &["cargo"],
         version_arg: "--version",
-        why: "forge build/test gate on Rust repos (cargo check / cargo test)",
+        why: "run_tests and diagnostics on Rust repos (cargo test / cargo check)",
         required: false,
     },
     Toolchain {
@@ -554,7 +544,7 @@ const TOOLCHAINS: &[Toolchain] = &[
         key: "python",
         bins: &["python", "python3"],
         version_arg: "--version",
-        why: "the pytest forge gate",
+        why: "run_tests on Python repos (pytest)",
         required: false,
     },
     Toolchain {
@@ -562,7 +552,7 @@ const TOOLCHAINS: &[Toolchain] = &[
         key: "node",
         bins: &["node"],
         version_arg: "--version",
-        why: "the npm forge gate",
+        why: "run_tests on Node repos (npm test)",
         required: false,
     },
     Toolchain {
@@ -570,7 +560,7 @@ const TOOLCHAINS: &[Toolchain] = &[
         key: "go",
         bins: &["go"],
         version_arg: "version",
-        why: "forge build/test gate on Go repos (go build / go test)",
+        why: "run_tests on Go repos (go test)",
         required: false,
     },
 ];
@@ -862,8 +852,8 @@ mod tests {
     fn doctor_lists_every_safety_override() {
         // roast 2026-06-30 Theme C: doctor claimed to surface the CLAUDETTE_*
         // config but its env list omitted every capability/guard override, so
-        // an active loosening (auto-approve, secret reads, a bypassed forge
-        // gate) was invisible during triage. Each override below MUST stay in
+        // an active loosening (auto-approve, secret reads) was invisible
+        // during triage. Each override below MUST stay in
         // the dedicated `safety overrides` section. Add any NEW guard/capability
         // knob here and to `SAFETY_VARS` — this test fails until you do.
         const EXPECTED: &[&str] = &[
@@ -871,12 +861,6 @@ mod tests {
             "CLAUDETTE_ALLOW_DESTRUCTIVE_GIT",
             "CLAUDETTE_ALLOW_SECRET_READS",
             "CLAUDETTE_WEB_FETCH_ALLOW_PRIVATE",
-            "CLAUDETTE_FORGE_AUTO_APPROVE",
-            "CLAUDETTE_FORGE_SECURITY_OVERRIDE",
-            "CLAUDETTE_FORGE_SUBMIT_ON_FAIL",
-            "CLAUDETTE_FORGE_ALLOW_DIRTY",
-            "CLAUDETTE_FORGE_NO_BUILD_CHECK",
-            "CLAUDETTE_FORGE_NO_REVIEW",
         ];
         for var in EXPECTED {
             assert!(
@@ -1033,8 +1017,8 @@ mod tests {
 
     #[test]
     fn git_is_the_only_required_toolchain() {
-        // Missions/forge can't function without git; the language toolchains
-        // are only needed when you forge in that language, so they warn.
+        // The git tools can't function without git; the language toolchains
+        // are only needed for run_tests in that language, so they warn.
         let required: Vec<&str> = TOOLCHAINS
             .iter()
             .filter(|t| t.required)
