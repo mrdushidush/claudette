@@ -22,8 +22,8 @@
 //!   $env:GITHUB_TOKEN = (gh auth token); $env:CLAUDETTE_REAL_PR = "1"
 //!   cargo run --example forge_e2e -- run
 
-use claudette::forge::personas::load_personas;
 use claudette::forge::types::{ModelMap, Role};
+use claudette::personas::load_personas;
 use claudette::tools::dispatch_tool;
 use claudette::{run_forge_mission, SessionOptions};
 use serde_json::{json, Value};
