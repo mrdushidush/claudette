@@ -43,7 +43,10 @@ pub fn run_command_with_timeout(
     cwd: Option<&Path>,
 ) -> CommandResult {
     let mut cmd = Command::new(program);
-    cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null());
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }
@@ -176,5 +179,21 @@ mod tests {
         assert!(!result.timed_out, "should not time out: {result:?}");
         assert!(result.success, "child should exit 0: {result:?}");
         assert_eq!(result.stdout.len(), 200_000);
+    }
+
+    #[test]
+    fn stdin_is_null() {
+        let body = "import sys; sys.stdout.write(str(len(sys.stdin.read())))";
+        let result = run_command_with_timeout("python", &["-c", body], 5, None);
+        if !result.success
+            && result.exit_code.is_none()
+            && result.stderr.starts_with("failed to spawn")
+        {
+            eprintln!("skipping: python not on PATH");
+            return;
+        }
+        assert!(!result.timed_out, "should not time out: {result:?}");
+        assert!(result.success, "child should exit 0: {result:?}");
+        assert_eq!(result.stdout.trim(), "0", "stdin must be null");
     }
 }
