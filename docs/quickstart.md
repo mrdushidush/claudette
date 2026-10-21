@@ -5,7 +5,7 @@ bottom - every step says what success looks like, and where to look if you
 don't see it:
 
 > ☐ installed → ☐ `--setup` all green → ☐ first conversation → ☐ first
-> coding one-shot → ☐ Forge on a repo → ☐ *(optional)* Telegram
+> coding one-shot → ☐ a first fix → ☐ *(optional)* Telegram
 
 ## ☐ 1. Install (2 min)
 
@@ -108,18 +108,22 @@ claudette "map this repo and explain the module layout in five bullets"
 grounded summary of *your actual code* - not generic filler. That's the coding
 core (files, search, tests) working; it's pre-enabled in any repo.
 
-## ☐ 5. Forge on a repo (5-10 min)
+## ☐ 5. A first fix (5 min)
 
-Forge is the autonomous Planner → Coder → Verifier pipeline - the build/test
-gate means a diff that doesn't compile or breaks a test can't pass. Follow the
-copy-paste recipe in
-[first-success.md#coding](first-success.md#coding), or the full walkthrough
-[below](#forge-hands-off-code-changes-with-a-review-gate).
+Open the REPL in a repo with a failing test and ask for the fix:
 
-**You should see:** phases stream (`forge: planner` → `coder` → `build + test`
-→ `verifier … pass=true`), ending in a verified commit on an isolated
-`claudette-mission/*` branch (local repo) or a `[y/N]` review gate before a PR
-(GitHub repo).
+```bash
+cd ~/code/your-project
+claudette
+> the test_parse_duration test fails. Fix the code so it passes; do not edit the test.
+```
+
+Claudette reads the code, proposes an edit, and runs your tests. Every edit is
+shown as a colored diff and waits for `[y/N]`, and so does every shell
+command. The copy-paste version is [first-success.md#coding](first-success.md#coding).
+
+**You should see:** a diff preview, a `[y/N]` prompt, and after your `y` the
+test passing. Nothing is committed unless you ask for a commit.
 
 ## ☐ 6. *(Optional)* Telegram from your phone
 
@@ -172,78 +176,13 @@ Five tabs across the top - switch with number keys or cycle with `Tab` /
 
 - **Type and press `Enter`** to send (number keys only switch tabs when the
   input box is empty, so you can still type "1pm").
-- **Slash commands work here too** - `/help`, `/brownfield`, `/forge`, `/recall`,
+- **Slash commands work here too** - `/help`, `/brownfield`, `/recall`,
   everything the REPL has.
 - **`Alt+V`** pastes an image or text block into your next message. (Not `Ctrl+V`
   - Windows Terminal and most modern terminals intercept that at the terminal
   level and paste the clipboard's *text* form, so the keypress never reaches
   Claudette.)
 - **`Ctrl+C`** (or `Ctrl+D`) quits.
-
-## Forge: hands-off code changes with a review gate
-
-Forge runs an autonomous **Planner → Coder → Verifier → fix-loop → Submitter**
-pipeline against a git repo. It builds, tests, and ends by opening a PR - and it
-asks for your sign-off before the PR goes out.
-
-### Against a GitHub repo (review gate → PR)
-
-```
-> /brownfield owner/some-repo
-> /forge make the --timeout flag accept fractional seconds
-```
-
-`/brownfield` clones into `~/.claudette/missions/<slug>/` and re-routes file ops
-into the clone. `/forge` runs the pipeline; watch the phases stream past:
-
-```text
-forge: planner                 # localizes the code, writes a short plan
-forge: coder (round 0)         # makes the edit, commits to the mission branch
-forge: build + test            # cargo check / cargo test (py/js/go too)
-forge: verifier   score=9 pass=true
-forge: review — approve before opening the PR
-  ── plan ──
-  ...
-  ── diff ──
-  ...
-  ⚠ Open the PR with these changes? [y/N]
-```
-
-Two things make this trustworthy:
-
-1. **The Verifier actually builds and tests.** Each round it runs the project's
-   real build + test suite in the tree (`cargo check`/`cargo test`,
-   `go build`/`go test`, `pytest`, `npm test`). A diff that doesn't compile or
-   breaks a test can't pass - the failures are fed back to the Coder to fix.
-2. **You QA before the PR ships.** The review gate prints the plan + the full
-   final diff and waits for an explicit `y`. Anything else (including a piped,
-   non-interactive stdin) leaves the commits on the mission branch and opens no
-   PR - re-run `/forge` to continue, or push manually.
-
-### Against a local repo (commits to a branch, no PR)
-
-```bash
-cd ~/code/your-project          # any git repo under $HOME
-claudette --forge "make the --timeout flag accept fractional seconds"
-```
-
-Inside an existing repo with no active mission, Forge auto-bootstraps an
-ephemeral mission at the repo root - no clone, no setup. It runs the same
-build-and-test-verified pipeline, then **commits the result to an isolated
-`claudette-mission/*` branch** and restores your working branch untouched. There
-is no PR (and so no review gate) for a local mission - review the branch with
-`git log` / `git diff`, then `git merge` or `git branch -D` as you see fit.
-
-Useful knobs (all optional):
-
-| Env var | Effect |
-|---------|--------|
-| `CLAUDETTE_FORGE_NO_REVIEW=1` | Skip the human-review gate (fully hands-off PR) |
-| `CLAUDETTE_FORGE_NO_BUILD_CHECK=1` | Skip the build+test gate (slow/networked suites) |
-| `CLAUDETTE_FORGE_TEST_TIMEOUT_SECS=300` | Per-step build/test timeout (default 180) |
-| `CLAUDETTE_FORGE_AUTO_APPROVE=1` | Unattended: auto-approve tool calls **and** skip the review gate |
-
-Full pipeline walkthrough + role-routing: [forge.md](forge.md).
 
 ## More first flows
 
@@ -309,8 +248,7 @@ claudette --briefing --time 08:30 --days weekdays
 
 - [`first-success.md`](first-success.md) - guided copy-paste recipes to a first real win (coding / air-gap / assistant)
 - [`configuration.md`](configuration.md) - every env var, token fallbacks, recall settings
-- [`forge.md`](forge.md) - the full Forge pipeline, review gate, build/test gate, role-routing
 - [`hardware.md`](hardware.md) - VRAM per preset, running a big brain on constrained VRAM
 - [`usage.md`](usage.md) - full CLI flag reference + every slash command
-- [`architecture.md`](architecture.md) - module layout, tool-group contract, forge pipeline
+- [`architecture.md`](architecture.md) - module layout, tool-group contract
 - [`comparison.md`](comparison.md) - honest side-by-side vs. other open-source agents
