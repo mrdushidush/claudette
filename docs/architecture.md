@@ -23,7 +23,7 @@ src/
 ├── run.rs            — Mode dispatch + turn retry; the pieces below were split out of it
 ├── run/              — repl.rs (REPL loop + autosave), runtime_build.rs (every runtime
 │                       builder + the permission policy), compaction_policy.rs (thresholds,
-│                       max_iterations), forge_run.rs (the 5-phase pipeline),
+│                       max_iterations),
 │                       research.rs (deep-research batches), cli_prompter.rs ([y/N] gate),
 │                       recall_index.rs (post-turn indexing + embed probe)
 ├── executor.rs       — AgentToolExecutor: enable_tools meta-tool + dispatch
@@ -50,7 +50,6 @@ src/
 ├── firstrun.rs       — Backend-failure classifier + the post-first-success nudge
 ├── egress.rs         — The `--offline` air-gap guard (in-process HTTP + subprocesses)
 ├── env_config.rs     — Env primitives (home_dir, is_truthy, is_enabled)
-├── security_review.rs — Deterministic added-lines scan for the forge gate (opt-in)
 ├── transcript.rs     — Mutating-action log + trash-backed /undo and /diff
 ├── recall.rs         — Cross-session semantic memory (sqlite + local embeddings)
 ├── missions.rs       — Brownfield mission state + path routing
@@ -63,7 +62,7 @@ src/
 ├── tui_events.rs     — TUI event enums (worker ↔ render channel)
 ├── tui_executor.rs   — ToolExecutor wrapper that fires TUI events
 ├── tui_worker.rs     — Worker thread that owns the ConversationRuntime
-└── forge/            — Forge-mode plumbing (personas, role-map, types) — folded back in v0.5.1
+└── personas.rs       — Persona loader (the bundled Eva persona; `--faceless` drops it)
 ```
 
 ## Storage layout
@@ -111,7 +110,7 @@ The `gmail`, `calendar`, and `telegram` groups are compiled **only** into an `in
 | `advanced` | 7 | `bash` (+ `bash_background` / `bash_status` / `bash_tail`), `edit_file`, `apply_diff`, `ask_user` |
 | `facts` | 2 | `wikipedia` (summary/search), `weather` (Open-Meteo) |
 | `registry` | 2 | `crate_info` (crates.io), `npm_info` (npmjs) |
-| `github` | 15 | PRs (status, view, fork, create), issues (inbox, get, create, comment, list-repo), code search, **brownfield missions** (start, state, submit), `forge_tail` |
+| `github` | 14 | PRs (status, view, fork, create), issues (inbox, get, create, comment, list-repo), code search, **brownfield missions** (start, state, submit) |
 | `telegram` | 1 | `tg_send` - bot messaging (text or photo). **`integrations` build only.** |
 | `calendar` | 4 | Google Calendar: list / create / update / delete events (RSVP via update). **`integrations` build only.** |
 | `schedule` | 4 | Proactive reminders: one-shot + recurring schedules that fire prompts back at you |
@@ -121,18 +120,6 @@ The `gmail`, `calendar`, and `telegram` groups are compiled **only** into an `in
 | `semantic` | 1 | `semantic_grep` - workspace search with token-overlap ranking (fuzzier than grep) |
 | `vision` | 2 | `screenshot_capture` (PNG to `~/.claudette/files/`), `image_describe` (needs a VLM loaded in LM Studio) |
 | `clipboard` | 2 | `clipboard_read`, `clipboard_write` (text only, 1 MB cap) |
-
-## Forge-mode pipeline
-
-`run_forge_mission` (in `run.rs`) orchestrates five phases against the active brownfield mission:
-
-1. **Planner** - tool-less brain turn (`Role::Planner` from `~/.claudettes-forge/models.toml`) decomposes the user's request into a 3-5 step numbered plan, prepended to the Coder's input.
-2. **Coder (round 0)** - full forge runtime (`files`, `search`, `git`, `advanced`, `github` groups enabled) with `should_submit=false`. Brain commits its change but the system prompt forbids `mission_submit`/`git_push`.
-3. **Verifier** - tool-less brain turn (`Role::Verifier`) reads `git diff HEAD` and emits one-line JSON: `{"score": <1-10>, "pass": <bool>, "feedback": "<reason>"}`. Resilient to code fences and trailing prose.
-4. **Fix-loop** - if `pass=false` and `round < MAX_FIX_ROUNDS` (3), re-runs the Coder with the Verifier's feedback prepended to the prompt.
-5. **Submitter** - final Coder turn with `should_submit=true` that just calls `mission_submit`. PR opens here, never earlier.
-
-Persona overlay: `personas/codex7.md` is baked into the binary via `include_str!` and parsed at startup. Its `voice` one-liner + backstory prose are appended to the forge-mode system prompt so the brain adopts a consistent style.
 
 ## Project layout rules
 

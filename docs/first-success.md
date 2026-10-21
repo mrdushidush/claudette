@@ -7,7 +7,7 @@ Want a broader "what can I even ask it?" catalog instead of a guided path? → [
 | Path | You get | Time |
 |------|---------|------|
 | [Safe first steps](#safe) | Notes, todos, weather - fully local | 3 min |
-| [Local coding agent](#coding) | A build-and-test-verified commit on a branch, made by Forge | 10 min |
+| [Local coding agent](#coding) | A change you approved edit by edit, with your tests passing | 10 min |
 | [Maximum privacy](#airgap) | A complete coding session under an enforced air-gap | 10 min |
 | [Private assistant + Telegram](#assistant) | Voice assistant on your phone + morning briefing | 20 min |
 
@@ -33,41 +33,35 @@ what did I write down about the storage closet?
 ---
 
 <a id="coding"></a>
-## 🛠️ Local coding agent (Forge, on any repo of yours)
+## 🛠️ Local coding agent (on any repo of yours)
 
-Forge runs an autonomous **Planner → Coder → Verifier** pipeline. The Verifier actually builds and runs your project's tests each round - a diff that doesn't compile or breaks a test can't pass. No GitHub token needed for this recipe: on a local repo, Forge commits to an isolated branch and never touches your working branch.
+Claudette edits your code in the REPL and asks before every change: each edit is shown as a colored diff and waits for `[y/N]`, and so does every shell command. Reading files and running your tests need no prompt, and nothing is committed unless you ask.
 
 ```sh
 cd ~/code/any-git-repo-you-own      # any git repo under $HOME
-claudette --forge "add a --version flag that prints the package version"
+claudette
+```
+
+Then ask, at the `>` prompt:
+
+```text
+add a --version flag that prints the package version, then run the tests
 ```
 
 (Swap the task for anything small and testable in your project.)
 
-**You should see** the phases stream past:
+**You should see:** Claudette read the relevant files, then stop at a diff preview with `[y/N]`. Press `y` for each edit you want. It then runs your test suite (`cargo test` / `pytest` / `go test` / `npm test`) and reports the result. Type `/exit` when you're done.
 
-```text
-forge: planner                 # localizes the code, writes a short plan
-forge: coder (round 0)         # makes the edit, commits to the mission branch
-forge: build + test            # cargo check / pytest / go test / npm test
-forge: verifier   score=9 pass=true
-forge: changes committed locally at <your repo> (ephemeral/local mission — no
-       GitHub PR target). Review with `git log`/`git diff`, then push + open a
-       PR manually if you want one.
-```
-
-Then inspect and take the win (the branch is named `claudette-mission/<slug>-<timestamp>`):
+Then inspect and take the win:
 
 ```sh
-git branch --list 'claudette-mission/*'   # find the mission branch
-git log --oneline <that-branch>           # the verified commit
-git diff main...<that-branch>             # the full change
-git merge <that-branch>                   # keep it (or git branch -D to toss it)
+git diff                          # the full change, in your working tree
+git commit -am "add --version"    # keep it (or `git checkout -- .` to toss it)
 ```
 
-**Success =** the branch exists, the diff does what you asked, and the build/test gate ran before the commit was made. Your working branch was never touched.
+**Success =** the diff does what you asked, you approved every edit, and the tests pass.
 
-**Next:** point it at a GitHub repo with `/brownfield owner/repo` + `/forge <task>` - that path ends in a real PR behind a plan-and-diff `[y/N]` review gate. Full pipeline: [forge.md](forge.md).
+**Next:** more coding prompts that work are in [show-me.md](show-me.md#code).
 
 ---
 

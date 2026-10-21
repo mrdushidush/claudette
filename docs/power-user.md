@@ -55,40 +55,6 @@ To skip the Auto-preset dance entirely (no fallback, no stuck-signal escalation)
 
 ---
 
-## Forge mode knobs
-
-```bash
-export CLAUDETTE_MAX_FIX_ROUNDS=4                # default 3, clamped at 10
-```
-
-The default of 3 is tuned for local 8b coder models. If you've routed Verifier to a stronger model via `~/.claudettes-forge/models.toml`, raising this often pays off - the Verifier catches subtler defects and the Coder still has room to fix them. Above 6 you're usually fighting a context-budget problem, not a quality problem.
-
-Per-role model routing lives in `~/.claudettes-forge/models.toml`:
-
-```toml
-# Recommended (16 GB GPU, LM Studio): single model for every role — no swap dance.
-[planner]
-model = "byteshape/qwen3.6-35b-a3b-mtp"
-
-[coder]
-model = "byteshape/qwen3.6-35b-a3b-mtp"
-
-[verifier]
-model = "byteshape/qwen3.6-35b-a3b-mtp"
-
-# Or the legacy mixed setup (works on 8 GB VRAM):
-# [planner]
-# model = "qwen3.5:9b"
-# [coder]
-# model = "qwen3-coder:30b"
-# [verifier]
-# model = "qwen3.5:14b"       # stronger Verifier than Coder is a good default
-```
-
-See [`forge.md`](forge.md) for the full pipeline.
-
----
-
 ## Context and compaction tuning
 
 ```bash
@@ -155,13 +121,11 @@ Common confusions:
 
 - **"Tool X returned not_configured"** → check the relevant token env var in `--doctor` output.
 - **"Brain answered but never called the tool"** → tool group probably not enabled; the model should call `enable_tools(group)` first. Open the TUI's Tools tab to see what groups are active.
-- **"Forge keeps retrying"** → check `CLAUDETTE_MAX_FIX_ROUNDS` and the Verifier model - a weak Verifier can reject indefinitely.
 
 ---
 
 ## Read also
 
 - [`configuration.md`](configuration.md) - every env var, categorized.
-- [`architecture.md`](architecture.md) - module layout, tool-group contract, forge pipeline.
-- [`forge.md`](forge.md) - Planner/Coder/Verifier pipeline, `models.toml`, mission resumption.
+- [`architecture.md`](architecture.md) - module layout, tool-group contract.
 - [`../PRIVACY.md`](../PRIVACY.md) - every outbound network call, enumerated.
