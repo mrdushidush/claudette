@@ -24,8 +24,8 @@
 use std::process::ExitCode;
 
 use claudette::{
-    probe_ollama, run_agent, run_agent_repl, run_deep_research, run_forge_mission, theme,
-    try_load_session, workspace_startup_diagnostics, SessionOptions,
+    probe_ollama, run_agent, run_agent_repl, run_deep_research, theme, try_load_session,
+    workspace_startup_diagnostics, SessionOptions,
 };
 use claudette::{ContentBlock, Session};
 // External-cloud integrations: only compiled into an `integrations` build.
@@ -70,12 +70,6 @@ struct CliArgs {
     /// previous "run --telegram and accidentally expose the bot to
     /// anyone who guesses the username" footgun.
     allow_any_chat: bool,
-    /// `--forge`: run the trailing prompt through the forge pipeline
-    /// (v0c: Planner → Coder → Verifier → fix-loop → Submitter, with a real
-    /// build+test gate each round). Uses the active brownfield mission, or
-    /// auto-bootstraps an ephemeral one in the current repo when there is
-    /// none. The prompt text is taken from `prompt_words`.
-    forge: bool,
     /// `--doctor`: run flat diagnostic probes (Ollama reachable, brain
     /// pulled, recall embed model loaded, OAuth tokens valid, voice deps,
     /// secrets dir). Exits before any interactive mode starts. Non-zero
@@ -118,7 +112,6 @@ const KNOWN_FLAGS: &[&str] = &[
     "--briefing",
     "--time",
     "--days",
-    "--forge",
     "--doctor",
     "--setup",
     "--research",
@@ -177,14 +170,6 @@ MODES (pick one; default is interactive REPL):
                          (Chat / Tools / Notes / Todos / HW tabs). Demo-only:
                          has known rendering rough edges (doubled text, tool
                          pane, footer). The REPL is the supported daily driver.
-    --forge \"<prompt>\"   Run the prompt through the autonomous forge pipeline:
-                         Planner -> Coder -> Verifier -> fix-loop -> Submitter.
-                         The Verifier builds and runs the real test suite each
-                         round, so a diff that breaks the build or a test can't
-                         pass. Runs in the active brownfield mission, or
-                         bootstraps a throwaway one in the current repo if
-                         there is none. You approve the plan and the full diff
-                         before any PR opens.
     --research [FOCUS]   Unattended read-only review of the repo (CLAUDETTE_
                          WORKSPACE or the git toplevel). Writes a findings
                          report to ~/.claudette/research/. Forces --offline.
@@ -229,8 +214,7 @@ MISC:
                          Gmail/Calendar, weather/wikipedia, GitHub, and
                          the Telegram bridge; the local brain + recall still
                          work. See `--offline` in --doctor for the allow-list.
-    --faceless           Drop the persona overlay (Eva for the assistant,
-                         CodeX-7 for the forge Coder) and run with a plain,
+    --faceless           Drop the Eva persona overlay and run with a plain,
                          name-free prompt. Same as CLAUDETTE_FACELESS=1.
     --help, -h           Show this help and exit.
     --version, -V        Show the claudette version and exit.
@@ -344,7 +328,6 @@ fn main() -> ExitCode {
         help: _,
         version: _,
         allow_any_chat,
-        forge,
         doctor,
         setup,
         research,
@@ -445,51 +428,6 @@ fn main() -> ExitCode {
         let focus = prompt_args.join(" ");
         return match run_deep_research(&focus) {
             Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!(
-                    "{} {}",
-                    theme::error(theme::ERR_GLYPH),
-                    theme::error(&format!("{e:#}"))
-                );
-                ExitCode::FAILURE
-            }
-        };
-    }
-
-    // ── Forge-mode (single-stage v0a) ─────────────────────────────────
-    // Runs the trailing prompt against the active brownfield mission and
-    // exits when the brain finishes (typically after `mission_submit`
-    // returns). Errors before touching the runtime if no mission is active
-    // or the prompt is empty.
-    if forge {
-        if prompt_args.is_empty() {
-            eprintln!(
-                "{} {}",
-                theme::error(theme::ERR_GLYPH),
-                theme::error(
-                    "--forge requires a prompt. Try: claudette --forge \"fix the parser bug\""
-                )
-            );
-            return ExitCode::FAILURE;
-        }
-        let opts = SessionOptions {
-            resume,
-            autosave: resume,
-        };
-        let prompt = prompt_args.join(" ");
-        return match run_forge_mission(&prompt, opts) {
-            Ok(summary) => {
-                eprintln!();
-                eprintln!(
-                    "{} {}",
-                    theme::BOLT,
-                    theme::info(&format!(
-                        "forge iter={} in={} out={}",
-                        summary.iterations, summary.usage.input_tokens, summary.usage.output_tokens,
-                    ))
-                );
-                ExitCode::SUCCESS
-            }
             Err(e) => {
                 eprintln!(
                     "{} {}",
@@ -705,14 +643,12 @@ fn parse_args(args: &[String]) -> CliArgs {
             "--briefing" => out.briefing = true,
             "--time" => expect = ExpectNext::Time,
             "--days" => expect = ExpectNext::Days,
-            "--forge" => out.forge = true,
             "--doctor" => out.doctor = true,
             "--setup" => out.setup = true,
             "--research" => out.research = true,
             "--faceless" => {
-                // Persona overlay opt-out (Eva for assistant, CodeX-7 for
-                // forge Coder). Set the env var so the secretary prompt
-                // builder picks it up — same surface as
+                // Persona overlay opt-out (Eva). Set the env var so the
+                // secretary prompt builder picks it up — same surface as
                 // `CLAUDETTE_FACELESS=1`.
                 std::env::set_var("CLAUDETTE_FACELESS", "1");
             }
@@ -1376,7 +1312,6 @@ mod tests {
             "--resume",
             "--telegram",
             "--tui",
-            "--forge",
             "--doctor",
             "--setup",
             "--faceless",

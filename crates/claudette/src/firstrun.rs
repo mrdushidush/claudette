@@ -244,7 +244,7 @@ pub(crate) fn first_success_nudge(home: &std::path::Path) -> Option<String> {
         "✨ first reply done — what's next?\n\
          · point it at code — cd into a repo and ask \"explain this codebase\"\n\
          · /help — the full slash-command list\n\
-         · claudette --forge \"<task>\" — the autonomous plan → code → verify pipeline\n\
+         · ask it to fix something — it shows each edit and asks [y/N] first\n\
          · phone/voice assistant (Telegram) — docs/first-success.md#assistant"
             .to_string(),
     )
@@ -339,7 +339,7 @@ mod tests {
     fn nudge_menu_names_every_next_step() {
         crate::with_temp_home(|home| {
             let menu = super::first_success_nudge(home).expect("fresh home fires");
-            for needle in ["/help", "--forge", "first-success.md#assistant"] {
+            for needle in ["/help", "[y/N]", "first-success.md#assistant"] {
                 assert!(menu.contains(needle), "menu missing `{needle}`:\n{menu}");
             }
         });

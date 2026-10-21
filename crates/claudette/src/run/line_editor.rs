@@ -43,7 +43,6 @@ const SLASH_COMMANDS: &[&str] = &[
     "/cost",
     "/diff",
     "/exit",
-    "/forge",
     "/help",
     "/load",
     "/memory",

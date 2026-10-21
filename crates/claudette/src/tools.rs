@@ -44,7 +44,6 @@ mod clipboard;
 mod dialog;
 mod facts;
 pub(crate) mod file_ops;
-mod forge_tail;
 mod fuzzy_apply;
 mod git;
 mod github;
@@ -129,7 +128,6 @@ const GROUPS: &[(SchemasFn, DispatchFn)] = &[
     (dialog::schemas, dialog::dispatch),
     (facts::schemas, facts::dispatch),
     (file_ops::schemas, file_ops::dispatch),
-    (forge_tail::schemas, forge_tail::dispatch),
     (fuzzy_apply::schemas, fuzzy_apply::dispatch),
     (git::schemas, git::dispatch),
     (github::schemas, github::dispatch),
