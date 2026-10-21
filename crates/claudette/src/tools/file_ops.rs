@@ -226,7 +226,7 @@ fn resolve_write_target(path_str: &str) -> Result<std::path::PathBuf, String> {
         // "save README.md here" means the project) → the scratch sandbox
         // (pure personal-assistant default when no workspace is set).
         let base = if crate::missions::active_mission().is_some() {
-            crate::missions::active_cwd()
+            crate::workspace::cwd()
         } else if let Some(ws_cwd) = super::workspace_cwd() {
             ws_cwd
         } else {

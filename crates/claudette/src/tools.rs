@@ -514,7 +514,7 @@ pub(super) fn normalize_path(path: &Path) -> PathBuf {
 //
 // Returns Result purely to keep the call-site `?` ergonomics callers expect
 // (validate_*_path chain `?` from this); after T2 made cwd resolution
-// infallible (active_cwd has a "." fallback) the Err arm is no longer
+// infallible (workspace::cwd has a "." fallback) the Err arm is no longer
 // reachable, but flipping every caller would be churn for no win.
 #[allow(clippy::unnecessary_wraps)]
 fn resolve_input_path(input: &str) -> Result<PathBuf, String> {
@@ -522,7 +522,7 @@ fn resolve_input_path(input: &str) -> Result<PathBuf, String> {
     if expanded.is_absolute() {
         return Ok(normalize_path(&expanded));
     }
-    let cwd_joined = crate::missions::active_cwd().join(&expanded);
+    let cwd_joined = crate::workspace::cwd().join(&expanded);
     let cwd_norm = normalize_path(&cwd_joined);
 
     // F5 fallback: if no mission and cwd-joined misses, try workspace roots.

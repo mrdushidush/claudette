@@ -213,11 +213,9 @@ fn run_bash(input: &str) -> Result<String, String> {
     #[cfg(not(target_os = "windows"))]
     let (program, args) = ("sh", vec!["-c", command]);
 
-    // bash inherits the active-mission cwd (T2): when the brain is
-    // working a brownfield mission, `bash` runs inside that tree so
-    // shell-driven workflows (build, test, scripted edits) stay
-    // self-consistent with git_*. Falls back to process cwd otherwise.
-    let cwd = crate::missions::active_cwd();
+    // bash runs in the same directory as git_*, so shell-driven workflows
+    // (build, test, scripted edits) stay consistent with them.
+    let cwd = crate::workspace::cwd();
     destructive_git_guard(command, &cwd)?;
     let result = run_command_with_timeout(program, &args, 30, Some(&cwd));
 
@@ -553,7 +551,7 @@ fn run_bash_background(input: &str) -> Result<String, String> {
     let cwd = v
         .get("cwd")
         .and_then(Value::as_str)
-        .map_or_else(crate::missions::active_cwd, PathBuf::from);
+        .map_or_else(crate::workspace::cwd, PathBuf::from);
     destructive_git_guard(command, &cwd)?;
 
     ensure_dir(&jobs_dir())?;

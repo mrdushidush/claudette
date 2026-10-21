@@ -127,7 +127,7 @@ fn run_glob_search(input: &str) -> Result<String, String> {
         // another drive (e.g. D:\repo while $HOME is C:\Users\...) was never
         // searched and the brain read decoy files from $HOME instead.
         let base = if crate::missions::active_mission().is_some() {
-            crate::missions::active_cwd()
+            crate::workspace::cwd()
         } else if let Some(root) = default_workspace_root() {
             root
         } else {

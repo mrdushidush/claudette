@@ -93,6 +93,7 @@ pub mod tts;
 // `telegram_mode`, so it rides the same `integrations` gate.
 #[cfg(feature = "integrations")]
 pub mod voice;
+pub mod workspace;
 
 // ── Public re-exports ────────────────────────────────────────────────────
 pub use api::{probe_ollama, resolve_ollama_url, OllamaApiClient};
