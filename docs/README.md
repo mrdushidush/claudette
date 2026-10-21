@@ -4,7 +4,7 @@
 [install](../README.md#get-started-in-2-minutes) →
 [quickstart.md](quickstart.md) →
 [first-success.md](first-success.md) → then pick your path:
-[forge.md](forge.md) for autonomous coding, or
+[show-me.md](show-me.md) for coding prompts that work, or
 [google_setup.md](google_setup.md) + Telegram for the private assistant.
 
 ## Start here
@@ -19,12 +19,11 @@
 - [configuration.md](configuration.md) - every env var and the token lookup order
 - [hardware.md](hardware.md) - the canonical model page: which brain for your GPU, VRAM/RAM/disk, CPU-only mode
 - [troubleshooting.md](troubleshooting.md) - symptom-keyed fixes, day-one failures first
-- [power-user.md](power-user.md) - cheat-sheet view: LM Studio recipe, brain pinning, forge knobs
+- [power-user.md](power-user.md) - cheat-sheet view: LM Studio recipe, brain pinning
 
 ## How it works
 
 - [architecture.md](architecture.md) - module layout, tool-group contract, storage layout
-- [forge.md](forge.md) - the Planner → Coder → Verifier pipeline, brownfield missions, `models.toml`
 - [research.md](research.md) - deep-research mode: the unattended read-only audit loop, its guarantees, output files, resume, knobs
 - [comparison.md](comparison.md) - honest side-by-side vs. opencode / Aider / OpenHands / Cline / Continue
 

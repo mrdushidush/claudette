@@ -152,10 +152,6 @@ is worse.
   --example <name>`. The current set:
   - `brownfield_smoke`, `brownfield_abcc` — exercise mission_* +
     gh_* tools (no brain, real GitHub calls).
-  - `forge_e2e` — drives `run_forge_mission` end to end:
-    Planner → Coder → Verifier → fix-loop → Submit. Subcommands:
-    `probe` (config check, no brain), `run` (live pipeline, opens
-    a real PR if `CLAUDETTE_REAL_PR=1`), `close` (cleanup).
   - `oauth_smoke` — calls `calendar_list_events` + `gmail_list`
     through the dispatcher to verify Google OAuth tokens still
     refresh. Read-only, no brain.

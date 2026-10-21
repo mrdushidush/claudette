@@ -16,8 +16,7 @@ binary has no cloud code, so it errors with a one-line reinstall hint instead.
 | `--setup` | Guided first-run wizard: detect the backend, read your VRAM, offer to pull the fitting brain, then run a closing `--doctor` pass. Needs a TTY; refused under `--offline`. |
 | `--doctor` | Run the diagnostic probes (backend reachable, brain pulled, recall embeddings, build toolchains, OAuth, voice, secrets dir) and exit. Each failure prints a copy-paste `↳ fix:` line. Non-zero exit if any probe hard-failed. |
 | `--offline` | Enforced air-gap: hard-block every outbound call except your local model server and loopback. `bash` / `bash_background` are refused wholesale. See [PRIVACY.md](../PRIVACY.md). |
-| `--faceless` | Drop the persona overlay (Eva in assistant mode, CodeX-7 for the forge Coder). Same surface as `CLAUDETTE_FACELESS=1`. |
-| `--forge "<prompt>"` | Run the autonomous forge pipeline: Planner → Coder → Verifier → fix-loop → Submitter, with a real build+test gate every round. Uses the active brownfield mission, or bootstraps an ephemeral one in the current repo when there is none. You approve the plan and the full diff before any PR opens. |
+| `--faceless` | Drop the Eva persona overlay. Same surface as `CLAUDETTE_FACELESS=1`. |
 | `--research [focus]` | Unattended read-only review of the repo you are in: fresh conversation per 2-3-file batch, findings checkpointed under `~/.claudette/research/`, HIGH/MEDIUM findings verified, final `REPORT.md`. Forces offline; re-run the same command to resume. Trailing words become an optional focus hint. See [research.md](research.md). |
 | `--chat <id>` | Restrict Telegram bot to a specific chat ID. Repeatable, or set `CLAUDETTE_TELEGRAM_CHAT` to a comma-separated list. The bot **default-denies** when no allowlist is provided. |
 | `--chat any` | Explicit accept-all: serve every incoming Telegram chat. Required to start the bot with no allowlist. Prints a loud warning. |
@@ -97,8 +96,7 @@ half-delivered prompt. The block is not added to `~/.claudette/repl_history`.
 /undo one            Restore only the single most recent action.
 /diff                Colored unified diff of what the last turn changed on disk.
 /brownfield <target> Clone a repo and make it the active mission (one-shot).
-/forge <prompt>      Run the forge pipeline against the active mission.
-/mission_exit        Clear the active mission (unblocks /forge after a failed clone).
+/mission_exit        Clear the active mission.
 /exit                Leave the REPL.
 ```
 

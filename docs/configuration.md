@@ -89,11 +89,6 @@ Inspect the live allow-list with `claudette --offline --doctor` - the **egress /
 
 Two layers enforce it: an HTTP-layer guard in the reqwest path checks the destination host of every in-process request, and a dispatch-layer guard refuses tools that reach the network through a subprocess where the HTTP guard can't see the destination. The host-matching logic lives in [`src/egress.rs`](../crates/claudette/src/egress.rs).
 
-## Forge mode
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-
 ## Deep research (`--research`)
 
 `--research` runs an unattended, read-only review loop over the target repo
