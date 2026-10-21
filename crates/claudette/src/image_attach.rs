@@ -6,7 +6,14 @@
 //! `tui.rs` because it's hotkey-driven and only meaningful in raw mode.
 //! Everything that's reusable across both modes lives here.
 
-use crate::tui_events::ImageAttachment;
+/// One image attached to a user turn — base64-encoded payload paired with
+/// its MIME type. Both transports (Ollama `images: [b64,…]` and
+/// OpenAI-compat `image_url` data URLs) consume this directly.
+#[derive(Debug, Clone)]
+pub struct ImageAttachment {
+    pub media_type: String,
+    pub data_b64: String,
+}
 
 const MAX_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 
