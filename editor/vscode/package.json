@@ -1,7 +1,7 @@
 {
     "name": "claudette",
     "displayName": "Claudette",
-    "description": "Run Claudette — the local-first AI secretary — from VS Code. Adds commands for REPL, TUI, forge mode, doctor, and 'ask about selection'.",
+    "description": "Run Claudette — the local-first AI secretary — from VS Code. Adds commands for REPL, TUI, doctor, and 'ask about selection'.",
     "version": "0.1.0",
     "publisher": "mrdushidush",
     "license": "MIT OR Apache-2.0",
@@ -30,7 +30,6 @@
         "onCommand:claudette.doctor",
         "onCommand:claudette.resume",
         "onCommand:claudette.askSelection",
-        "onCommand:claudette.forge"
     ],
     "main": "./out/extension.js",
     "contributes": {
@@ -58,11 +57,6 @@
             {
                 "command": "claudette.askSelection",
                 "title": "Claudette: Ask About Selection",
-                "category": "Claudette"
-            },
-            {
-                "command": "claudette.forge",
-                "title": "Claudette: Forge Mode (Planner → Coder → Verifier on the current repo)",
                 "category": "Claudette"
             }
         ],
