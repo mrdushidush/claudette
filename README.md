@@ -9,9 +9,9 @@ It also ships **[Q56](#-q56-which-local-model-is-actually-worth-running)** - a h
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Air-gap: enforced](https://img.shields.io/badge/air--gap-enforced-success.svg)](#-air-gapped-and-enforced)
 
-![A failing pytest run; claudette --forge plans the fix, asks before each edit and each command, passes its own test gate with 2 tests passing, and the tests pass on the branch it committed to](docs/images/claudette-forge-demo.gif)
+![A REPL session: Claudette shows each edit as a colored diff and waits for y, then runs the cargo gate before anything is committed](docs/images/claudette-diff-gate.png)
 
-*A real run on a 16 GB card (qwen3.6-35b-a3b, LM Studio) against a two-test toy repo. It took about 50 s; pauses where the screen didn't change are trimmed.*
+*A real session on a 16 GB card (qwen3.6-35b-a3b, LM Studio): every edit is previewed as a diff and waits for `[y/N]`, and the build-and-test gate runs before anything lands.*
 
 ## Get started in 2 minutes
 
@@ -105,10 +105,6 @@ Prefer not to pipe curl into a shell? Grab a [prebuilt release](https://github.c
 ### 🔁 She helps build herself
 
 Claudette is developed *with* Claudette. She works from a written spec on a local model, clears the real build-and-test gate (`cargo fmt` / `clippy -D warnings` / `cargo test`), and commits under her own git identity - so she shows up as a [listed contributor on this repo](https://github.com/mrdushidush/claudette/graphs/contributors). A human pushes, reviews and merges every change; nothing lands on `main` unattended. Features shipped this way include `repo_map` C#/Java support, `read_file tail=N`, `grep_search count_only` / `case_sensitive`, and `git_status filter`.
-
-![Claudette previewing a colored diff and running the cargo gate before pushing](docs/images/claudette-diff-gate.png)
-
-*Each edit is previewed as a colored diff at the `[y/N]` gate; she then runs `cargo fmt` / `clippy` / `cargo test` and pushes only when they pass.*
 
 ---
 
