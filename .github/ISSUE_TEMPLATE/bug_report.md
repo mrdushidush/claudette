@@ -8,7 +8,7 @@ labels: ["bug"]
 ## What happened?
 
 <!-- One paragraph. Lead with the observed behavior; include the tool or mode
- (REPL, TUI, Telegram, one-shot) where the issue occurred. -->
+ (REPL, Telegram, one-shot) where the issue occurred. -->
 
 ## What did you expect?
 

@@ -138,7 +138,7 @@ Pull the model once with `ollama pull <model>`. Ollama auto-detects no-GPU and u
 
 **Trade-offs you should know:**
 
-- The 0.5b and 1.5b brains will hallucinate tool-call shapes more often than the 4b. The auto-fix loops catch most of it but you'll occasionally see retries in the TUI's Tools tab.
+- The 0.5b and 1.5b brains will hallucinate tool-call shapes more often than the 4b. The auto-fix loops catch most of it but you'll occasionally see retries in the REPL's tool lines.
 - First-token latency is the noticeable cost - model load time. Keep the same brain hot between turns; the load-time warmup is per-cold-start, not per-turn. The REPL prints a one-time heads-up on the first request of a session so a cold load never reads as a silent hang.
 
 If your machine is too small even for the 0.5b brain, Claudette is the wrong tool - at that point you want a hosted service (ChatGPT, Claude.ai). The whole *point* of Claudette is local inference; there is no cloud fallback.

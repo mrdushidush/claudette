@@ -22,6 +22,12 @@ bumps are non-breaking bugfixes only.
   instead (`claudette`, then type it). Every edit is shown as a diff and waits
   for `[y/N]`, and `run_tests` checks the result. The last release with Forge is
   0.18.1, and the git tag `pre-trim-2026-10` marks the last tree that has it.
+- **The fullscreen TUI (`--tui`).** It was experimental and demo-only; the REPL
+  is the daily driver. The `--tui` flag, the five-tab ratatui interface, its
+  `Alt+V` clipboard paste and the VS Code extension's *Open TUI* command are
+  gone, and the `ratatui` and `image` crates leave the dependency tree.
+  **Migration:** run `claudette` for the REPL; drag an image into it or type
+  `@/path/to/image.png` to attach one. The last release with the TUI is 0.18.1.
 
 ## [0.18.1] - 2026-10-09
 

@@ -2,8 +2,8 @@
 //
 // The extension is a thin wrapper around the `claudette` CLI: commands
 // open an integrated terminal and run the right invocation. This is
-// deliberate — Claudette has its own REPL and TUI, and re-implementing
-// them inside a VS Code WebView would diverge from upstream. The value
+// deliberate — Claudette has its own REPL, and re-implementing
+// it inside a VS Code WebView would diverge from upstream. The value
 // VS Code adds is editor-aware affordances ("ask about this selection")
 // and keybinding-driven access to the CLI without leaving the editor.
 //
@@ -95,10 +95,6 @@ function cmdRepl() {
     runInTerminal(buildCmd([]));
 }
 
-function cmdTui() {
-    runInTerminal(buildCmd(['--tui']));
-}
-
 function cmdDoctor() {
     runInTerminal(buildCmd(['--doctor']));
 }
@@ -163,7 +159,6 @@ async function cmdAskSelection() {
 export function activate(ctx: vscode.ExtensionContext) {
     ctx.subscriptions.push(
         vscode.commands.registerCommand('claudette.repl', cmdRepl),
-        vscode.commands.registerCommand('claudette.tui', cmdTui),
         vscode.commands.registerCommand('claudette.doctor', cmdDoctor),
         vscode.commands.registerCommand('claudette.resume', cmdResume),
         vscode.commands.registerCommand('claudette.askSelection', cmdAskSelection),

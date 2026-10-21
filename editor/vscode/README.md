@@ -7,7 +7,6 @@ Wraps the `claudette` CLI in editor-aware commands. The heavy lifting still happ
 | Command | Default keybinding | What it runs |
 |---------|---------------------|--------------|
 | `Claudette: Open REPL` | — | `claudette` in the integrated terminal |
-| `Claudette: Open TUI` | — | `claudette --tui` |
 | `Claudette: Doctor` | — | `claudette --doctor` |
 | `Claudette: Resume Last Session` | — | `claudette --resume` |
 | `Claudette: Ask About Selection` | `Ctrl+Alt+C` (`Cmd+Alt+C` on macOS) | `claudette "<your question>\n\n<selection>"` |
@@ -40,7 +39,7 @@ That's it — no marketplace required.
 
 ## Why this is a thin wrapper
 
-Claudette has a polished REPL and a fullscreen TUI of its own. Reimplementing either of those inside a VS Code WebView would duplicate work and drift from upstream. The piece an editor extension genuinely owns is selection-aware invocation — you've selected code, you have a question about it, you don't want to manually copy-paste it into another terminal. That's what `Claudette: Ask About Selection` is for, and it's where the extension earns its keep.
+Claudette has a polished REPL of its own. Reimplementing it inside a VS Code WebView would duplicate work and drift from upstream. The piece an editor extension genuinely owns is selection-aware invocation — you've selected code, you have a question about it, you don't want to manually copy-paste it into another terminal. That's what `Claudette: Ask About Selection` is for, and it's where the extension earns its keep.
 
 A future version may add a streaming chat WebView. That requires a structured JSON output mode in Claudette (tracked in the [issues](https://github.com/mrdushidush/claudette/issues)).
 

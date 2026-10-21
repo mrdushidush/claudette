@@ -1,7 +1,7 @@
 {
     "name": "claudette",
     "displayName": "Claudette",
-    "description": "Run Claudette — the local-first AI secretary — from VS Code. Adds commands for REPL, TUI, doctor, and 'ask about selection'.",
+    "description": "Run Claudette — the local-first AI secretary — from VS Code. Adds commands for REPL, doctor, and 'ask about selection'.",
     "version": "0.1.0",
     "publisher": "mrdushidush",
     "license": "MIT OR Apache-2.0",
@@ -26,7 +26,6 @@
     ],
     "activationEvents": [
         "onCommand:claudette.repl",
-        "onCommand:claudette.tui",
         "onCommand:claudette.doctor",
         "onCommand:claudette.resume",
         "onCommand:claudette.askSelection"
@@ -37,11 +36,6 @@
             {
                 "command": "claudette.repl",
                 "title": "Claudette: Open REPL",
-                "category": "Claudette"
-            },
-            {
-                "command": "claudette.tui",
-                "title": "Claudette: Open TUI",
                 "category": "Claudette"
             },
             {
