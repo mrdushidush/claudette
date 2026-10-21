@@ -204,4 +204,25 @@ Convention: AD-N sequential. Each captures *problem → options → decision →
 - **Models.toml migration (D4).** Deprecation-style log line appears for every field defaulted; if the noise becomes a paper cut, suppress after one session or behind a `--quiet` flag. No hard break planned before v0.3.
 - **Bench-driven threshold (D5).** Sprint 3 explicitly does not include the benchmarking work; `bench` crate body lands in Sprint 7. The 8.0 default stands until empirically refuted. The `aspirational` preset gives cloud-only users the BCF ladder on day one.
 
+---
+
+## AD-8 - Forge removed (2026-10-21)
+
+**Problem.** Forge (AD-2, AD-4, AD-7) was the biggest single feature in the
+binary: about 5,200 lines across the pipeline, its role routing, a security
+scan and a build-and-test gate, plus its own docs and knobs. Claudette became
+the flagship project, and the plan for it is a smaller tool rather than a
+bigger one.
+
+**Decision.** Delete Forge outright, after tagging `pre-trim-2026-10` so it can
+be recovered. Coding goes through the REPL, where every edit is previewed as a
+diff and waits for `[y/N]`.
+
+**Consequences.**
+
+- `--forge`, `/forge`, `forge_tail`, `models.toml` role routing, the `codex7`
+  and `cto` personas and the `CLAUDETTE_FORGE_*` knobs no longer exist.
+- The Eva persona loader moved from `forge/personas.rs` to `src/personas.rs`.
+- AD-2's "assistant + forge in one binary", AD-4 and AD-7 now describe removed
+  code; they stay above as history.
 

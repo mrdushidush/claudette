@@ -11,7 +11,6 @@ Wraps the `claudette` CLI in editor-aware commands. The heavy lifting still happ
 | `Claudette: Doctor` | — | `claudette --doctor` |
 | `Claudette: Resume Last Session` | — | `claudette --resume` |
 | `Claudette: Ask About Selection` | `Ctrl+Alt+C` (`Cmd+Alt+C` on macOS) | `claudette "<your question>\n\n<selection>"` |
-| `Claudette: Forge Mode` | — | `claudette --forge "<your prompt>"` |
 
 All commands run inside an integrated terminal named `Claudette` (configurable). The terminal is reused across commands by default — turn that off in settings if you'd rather get a fresh terminal per invocation.
 

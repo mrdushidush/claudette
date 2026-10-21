@@ -44,7 +44,7 @@ function getTerminal(): vscode.Terminal {
     }
 
     // Set the terminal's CWD to the active workspace folder if one is
-    // open — Claudette's mission/forge/recall behavior is anchored on
+    // open — Claudette's mission/recall behavior is anchored on
     // the repo root, and most people would expect commands run via the
     // extension to act on the project that's open.
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -158,30 +158,6 @@ async function cmdAskSelection() {
     runInTerminal(buildCmd([prompt]));
 }
 
-/**
- * Launch forge mode on the current workspace with a prompt the user
- * supplies. Forge auto-bootstraps an ephemeral mission inside a git
- * repo, so this works as long as the workspace is git-initialized.
- */
-async function cmdForge() {
-    const ws = vscode.workspace.workspaceFolders?.[0];
-    if (!ws) {
-        vscode.window.showWarningMessage('Claudette: open a folder first — forge runs against the active workspace.');
-        return;
-    }
-
-    const prompt = await vscode.window.showInputBox({
-        title: 'Claudette: forge mode',
-        prompt: 'Describe the change you want forge to make. It will Plan, Code, and Verify autonomously.',
-        placeHolder: 'e.g. "add a --json flag to the export command that emits NDJSON"',
-    });
-    if (!prompt) {
-        return;
-    }
-
-    runInTerminal(buildCmd(['--forge', prompt]));
-}
-
 // ─── Activation ────────────────────────────────────────────────────────
 
 export function activate(ctx: vscode.ExtensionContext) {
@@ -191,7 +167,6 @@ export function activate(ctx: vscode.ExtensionContext) {
         vscode.commands.registerCommand('claudette.doctor', cmdDoctor),
         vscode.commands.registerCommand('claudette.resume', cmdResume),
         vscode.commands.registerCommand('claudette.askSelection', cmdAskSelection),
-        vscode.commands.registerCommand('claudette.forge', cmdForge),
     );
 
     // Help the user discover commands on first install.

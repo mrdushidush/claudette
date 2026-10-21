@@ -10,6 +10,19 @@ bumps are non-breaking bugfixes only.
 
 ## [Unreleased]
 
+### Removed
+
+- **Forge, the autonomous Planner → Coder → Verifier → Submitter pipeline.**
+  The `--forge` flag, the `/forge` slash command, the `forge_tail` tool,
+  `~/.claudettes-forge/models.toml` role routing, the `codex7`
+  and `cto` personas, the submit-time security scan (`security_review.rs`), and the
+  `CLAUDETTE_FORGE_*` and `CLAUDETTE_MAX_FIX_ROUNDS` knobs are gone, along with
+  `docs/forge.md`, `scripts/forge-smoke.ps1`, the `forge_e2e` example and the VS
+  Code extension's *Forge Mode* command. **Migration:** run the task in the REPL
+  instead (`claudette`, then type it). Every edit is shown as a diff and waits
+  for `[y/N]`, and `run_tests` checks the result. The last release with Forge is
+  0.18.1, and the git tag `pre-trim-2026-10` marks the last tree that has it.
+
 ## [0.18.1] - 2026-10-09
 
 ### Security
