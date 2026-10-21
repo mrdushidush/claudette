@@ -1386,6 +1386,15 @@ mod tests {
             "CLAUDETTE_ZZZ_TEST_NONEXISTENT_ABC_TOKEN", // secrets.rs test sentinel
             "CLAUDETTE_FORGE_X",                        // sample code in a repomap test fixture
             "CLAUDETTE_FORGE_Y",                        // ditto
+            // Forge knob names that live on only as sample strings: in
+            // repomap's test fixtures, and as grep_search's example pattern.
+            "CLAUDETTE_FORGE_ABORT_WINDOW_SECS",
+            "CLAUDETTE_FORGE_ALLOW_DIRTY",
+            "CLAUDETTE_FORGE_AUTO_APPROVE",
+            "CLAUDETTE_FORGE_SECURITY_OVERRIDE",
+            "CLAUDETTE_FORGE_SECURITY_REVIEW",
+            "CLAUDETTE_FORGE_SUBMIT_ON_FAIL",
+            "CLAUDETTE_MAX_FIX_ROUNDS",
         ];
 
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
