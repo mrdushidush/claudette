@@ -96,7 +96,6 @@ Prefer not to pipe curl into a shell? Grab a [prebuilt release](https://github.c
 | **VS Code** | [`editor/vscode/`](editor/vscode/README.md) | Send a selection or the open file to Claudette without leaving the editor |
 
 - **80+ tools across 20 opt-in groups.** The model turns a group on (`enable_tools("git")`) only when it needs it, so the base schema stays ~200 tokens however many tools exist. Point Claudette at a repo and the coding core - files, search, tests - is pre-enabled.
-- **Forge - an autonomous code pipeline.** `claudette --forge "<task>"` runs Planner → Coder → Verifier → fix-loop → Submitter. The Verifier actually builds and runs the tests each round (`cargo`, `go`, `pytest`, `npm`), so a diff that doesn't compile or breaks a test can't pass - and no PR opens until you approve the plan and the full diff. → [docs/forge.md](docs/forge.md)
 - **Deep research - an unattended read-only audit.** `claudette --research` reviews the whole repo in fresh 2-3-file conversations, re-verifies every HIGH/MEDIUM finding, and writes a ranked, triage-ready `REPORT.md`. Read-only is enforced at the permission layer - not by prompt - and the run forces `--offline`. → [docs/research.md](docs/research.md)
 - **Brownfield missions.** `mission_start("owner/repo")` clones a repo, routes file ops into it, and `mission_submit` branches, commits, pushes, and opens the PR - one tool chain.
 - **Also a personal assistant.** Notes, todos, calendar, Gmail, weather, web search, and a Telegram bot with voice in (Whisper) and out (edge-tts, English or Hebrew).
@@ -105,7 +104,7 @@ Prefer not to pipe curl into a shell? Grab a [prebuilt release](https://github.c
 
 ### 🔁 She helps build herself
 
-Claudette is developed *with* Claudette. She runs her own Forge pipeline against this repo, clears the real build-and-test gate (`cargo fmt` / `clippy -D warnings` / `cargo test`) before anything is pushed, and opens genuine pull requests under her own git identity - so she shows up as a [listed contributor on this repo](https://github.com/mrdushidush/claudette/graphs/contributors). A human reviews and merges every change; nothing lands on `main` unattended. Features shipped this way include `repo_map` C#/Java support, `read_file tail=N`, `grep_search count_only` / `case_sensitive`, and `git_status filter`.
+Claudette is developed *with* Claudette. She works from a written spec on a local model, clears the real build-and-test gate (`cargo fmt` / `clippy -D warnings` / `cargo test`), and commits under her own git identity - so she shows up as a [listed contributor on this repo](https://github.com/mrdushidush/claudette/graphs/contributors). A human pushes, reviews and merges every change; nothing lands on `main` unattended. Features shipped this way include `repo_map` C#/Java support, `read_file tail=N`, `grep_search count_only` / `case_sensitive`, and `git_status filter`.
 
 ![Claudette previewing a colored diff and running the cargo gate before pushing](docs/images/claudette-diff-gate.png)
 
@@ -161,18 +160,17 @@ Runs on 8 GB VRAM or plain CPU; 16 GB for the 35B brain. Footprint details → [
 
 ## Docs
 
-**New here?** [quickstart.md](docs/quickstart.md) → [first-success.md](docs/first-success.md) → then [forge.md](docs/forge.md) (autonomous coding) or [google_setup.md](docs/google_setup.md) + Telegram (private assistant). Full index: [docs/README.md](docs/README.md).
+**New here?** [quickstart.md](docs/quickstart.md) → [first-success.md](docs/first-success.md) → then [show-me.md](docs/show-me.md) (coding prompts that work) or [google_setup.md](docs/google_setup.md) + Telegram (private assistant). Full index: [docs/README.md](docs/README.md).
 
 - [docs/first-success.md](docs/first-success.md) - **start here:** copy-paste recipes to a first real win (coding, air-gap, assistant)
 - [docs/show-me.md](docs/show-me.md) - plain-English example prompts
 - [docs/quickstart.md](docs/quickstart.md) - full setup, common flows, tokens
 - [docs/configuration.md](docs/configuration.md) - every env var and token fallback
-- [docs/power-user.md](docs/power-user.md) - LM Studio recipe, brain pinning, forge knobs
+- [docs/power-user.md](docs/power-user.md) - LM Studio recipe, brain pinning
 - [docs/hardware.md](docs/hardware.md) - VRAM/RAM/disk by preset, CPU-only mode
 - [docs/usage.md](docs/usage.md) - CLI flags, slash commands, Telegram commands
 - [docs/troubleshooting.md](docs/troubleshooting.md) - symptom-keyed fixes (silent hang, model-reload 400, recall 501, not_configured)
 - [docs/architecture.md](docs/architecture.md) - module layout, tool-group contract, storage layout
-- [docs/forge.md](docs/forge.md) - forge pipeline, brownfield missions, `models.toml`
 - [docs/comparison.md](docs/comparison.md) - side-by-side vs. opencode / Aider / OpenHands / Cline / Continue
 - [docs/deploy.md](docs/deploy.md) - Pi / VPS / home-server via docker-compose
 - [editor/vscode/](editor/vscode/README.md) - VS Code extension

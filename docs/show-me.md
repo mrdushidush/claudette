@@ -85,14 +85,12 @@ If you ever told Claudette something in any session, you can pull it back.
 
 ## Code
 
-Claudette is first and foremost a coding agent. It writes and edits code directly with `write_file`/`edit_file`/`apply_diff`, and `--forge` runs an autonomous plan→code→verify→submit loop.
+Claudette is first and foremost a coding agent. It writes and edits code directly with `write_file`/`edit_file`/`apply_diff`, showing each edit as a diff and asking `[y/N]` before it lands.
 
 - *"Write me a Python script that renames every .HEIC in this folder to .jpg using ffmpeg."*
 - *"Add a dark-mode toggle to my React app's settings page."*
 - *"Refactor this Rust function to use iterators instead of indexed loops."*
-- *"/forge add a --json flag to my CLI's export command that emits NDJSON"*
-
-`--forge` runs a Planner → Coder → Verifier loop autonomously, opens a PR when it converges, and re-tries with feedback up to a configurable round limit. See [`forge.md`](forge.md).
+- *"Add a --json flag to my CLI's export command that emits NDJSON, then run the tests."*
 
 ### A worked example: understanding unfamiliar code
 

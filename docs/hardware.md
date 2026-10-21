@@ -91,7 +91,7 @@ degrades. Setup notes: [MODEL-COMPARISON.md](../runs/eval-2026-05-29/battery/MOD
 
 The 4b brain alone is viable as a standalone setup - it handles coding, tool-calling, note-taking, calendar, and conversation perfectly fine on its own. Add the 9b (or move to the 35b) only when you want better multi-step reasoning.
 
-For the **qwen3.6 path** (recommended on 16 GB+ VRAM), a single model serves everything - no fallback pull needed. Currently distributed via LM Studio (byteshape or Unsloth GGUF). See [`power-user.md`](power-user.md#lm-studio-or-any-openai-compatible-server) for backend setup. (In `--forge` mode you can still route the Coder/Verifier roles to different models via `~/.claudettes-forge/models.toml` - see [`forge.md`](forge.md).)
+For the **qwen3.6 path** (recommended on 16 GB+ VRAM), a single model serves everything - no fallback pull needed. Currently distributed via LM Studio (byteshape or Unsloth GGUF). See [`power-user.md`](power-user.md#lm-studio-or-any-openai-compatible-server) for backend setup.
 
 ## Running a large brain on 8 GB VRAM / 32 GB RAM
 
@@ -139,7 +139,6 @@ Pull the model once with `ollama pull <model>`. Ollama auto-detects no-GPU and u
 **Trade-offs you should know:**
 
 - The 0.5b and 1.5b brains will hallucinate tool-call shapes more often than the 4b. The auto-fix loops catch most of it but you'll occasionally see retries in the TUI's Tools tab.
-- `--forge` mode is realistic on CPU only with a small brain and a lot of patience - the autonomous plan→code→verify→fix loop runs many turns. Prefer it on a GPU box.
 - First-token latency is the noticeable cost - model load time. Keep the same brain hot between turns; the load-time warmup is per-cold-start, not per-turn. The REPL prints a one-time heads-up on the first request of a session so a cold load never reads as a silent hang.
 
 If your machine is too small even for the 0.5b brain, Claudette is the wrong tool - at that point you want a hosted service (ChatGPT, Claude.ai). The whole *point* of Claudette is local inference; there is no cloud fallback.
