@@ -225,4 +225,3 @@ diff and waits for `[y/N]`.
 - The Eva persona loader moved from `forge/personas.rs` to `src/personas.rs`.
 - AD-2's "assistant + forge in one binary", AD-4 and AD-7 now describe removed
   code; they stay above as history.
-

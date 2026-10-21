@@ -29,7 +29,7 @@
         "onCommand:claudette.tui",
         "onCommand:claudette.doctor",
         "onCommand:claudette.resume",
-        "onCommand:claudette.askSelection",
+        "onCommand:claudette.askSelection"
     ],
     "main": "./out/extension.js",
     "contributes": {
