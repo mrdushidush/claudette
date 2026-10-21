@@ -61,14 +61,7 @@ pub enum TuiEvent {
     },
 }
 
-/// One image attached to a user turn — base64-encoded payload paired with
-/// its MIME type. Both transports (Ollama `images: [b64,…]` and
-/// OpenAI-compat `image_url` data URLs) consume this directly.
-#[derive(Debug, Clone)]
-pub struct ImageAttachment {
-    pub media_type: String,
-    pub data_b64: String,
-}
+pub use crate::image_attach::ImageAttachment;
 
 /// Commands sent from the TUI render loop to the worker thread.
 #[derive(Debug)]
