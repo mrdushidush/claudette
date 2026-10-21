@@ -44,10 +44,9 @@ mod cli_prompter;
 pub use cli_prompter::CliPrompter;
 pub(crate) use cli_prompter::{format_ctx_gauge, EMPTY_RESPONSE_NUDGE};
 
-// Runtime assembly: agent + forge ConversationRuntime builders + permission
+// Runtime assembly: the agent ConversationRuntime builder + permission
 // policy. Extracted to `run/runtime_build.rs` (Wave C4); re-exported so external
-// `run::X` callers (brain_selector, executor, tui_worker) and run.rs's own forge
-// mission code keep resolving.
+// `run::X` callers (brain_selector, executor) keep resolving.
 mod runtime_build;
 pub(crate) use runtime_build::{
     build_permission_policy, build_research_runtime, build_runtime, build_runtime_streaming,

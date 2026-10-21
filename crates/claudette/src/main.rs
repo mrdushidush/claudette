@@ -23,11 +23,11 @@
 
 use std::process::ExitCode;
 
+use claudette::ContentBlock;
 use claudette::{
-    probe_ollama, run_agent, run_agent_repl, run_deep_research, theme, try_load_session,
+    probe_ollama, run_agent, run_agent_repl, run_deep_research, theme,
     workspace_startup_diagnostics, SessionOptions,
 };
-use claudette::{ContentBlock, Session};
 // External-cloud integrations: only compiled into an `integrations` build.
 // See Cargo.toml `[features]` and the `dispatch_google_auth` / `dispatch_telegram`
 // / `run_briefing_setup` helpers below, which carry the coding-only fallback.
@@ -45,7 +45,6 @@ struct CliArgs {
     telegram: bool,
     chat_ids: Vec<i64>,
     prompt_words: Vec<String>,
-    tui: bool,
     auth_google: bool,
     auth_google_revoke: bool,
     /// Which scope bundle to request during `--auth-google`. None means
@@ -105,7 +104,6 @@ const KNOWN_FLAGS: &[&str] = &[
     "-r",
     "--telegram",
     "-t",
-    "--tui",
     "--chat",
     "--auth-google",
     "--revoke",
@@ -166,10 +164,6 @@ MODES (pick one; default is interactive REPL):
     --resume, -r         Continue the most recent saved session. Works in
                          REPL and single-shot.
     --telegram, -t       Run as a Telegram bot. Requires TELEGRAM_BOT_TOKEN.
-    --tui                [experimental] Launch the fullscreen ratatui TUI
-                         (Chat / Tools / Notes / Todos / HW tabs). Demo-only:
-                         has known rendering rough edges (doubled text, tool
-                         pane, footer). The REPL is the supported daily driver.
     --research [FOCUS]   Unattended read-only review of the repo (CLAUDETTE_
                          WORKSPACE or the git toplevel). Writes a findings
                          report to ~/.claudette/research/. Forces --offline.
@@ -231,7 +225,6 @@ EXAMPLES:
     claudette                            # start the REPL
     claudette \"what time is it?\"         # one-shot
     claudette -r                         # resume last session
-    claudette --tui                      # fullscreen TUI (experimental/demo-only)
     claudette --auth-google calendar     # OAuth once
     claudette --briefing --time 08:30    # weekday briefings at 08:30
     claudette --telegram --chat 12345    # bot restricted to one chat
@@ -318,7 +311,6 @@ fn main() -> ExitCode {
         telegram,
         chat_ids,
         prompt_words: prompt_args,
-        tui: tui_mode,
         auth_google,
         auth_google_revoke,
         auth_google_scope,
@@ -439,33 +431,6 @@ fn main() -> ExitCode {
         };
     }
 
-    // ── TUI mode ──────────────────────────────────────────────────────
-    if tui_mode {
-        let session = if resume {
-            match try_load_session() {
-                Ok(Some(s)) => s,
-                Ok(None) => Session::default(),
-                Err(e) => {
-                    eprintln!("Failed to load session: {e:#}");
-                    Session::default()
-                }
-            }
-        } else {
-            Session::default()
-        };
-        return match claudette::tui::run_tui(session) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!(
-                    "{} {}",
-                    theme::error(theme::ERR_GLYPH),
-                    theme::error(&format!("{e:#}"))
-                );
-                ExitCode::FAILURE
-            }
-        };
-    }
-
     // ── Telegram bot mode ──────────────────────────────────────────────
     if telegram {
         dispatch_telegram(chat_ids, allow_any_chat, resume)
@@ -555,7 +520,6 @@ fn main() -> ExitCode {
 /// Supported flags:
 /// - `--resume` / `-r` — resume saved session
 /// - `--telegram` / `-t` — run as Telegram bot
-/// - `--tui` — launch the ratatui TUI (experimental / demo-only)
 /// - `--chat <id>` — restrict to this chat ID (repeatable)
 /// - `--auth-google` — run the Google OAuth loopback flow and save tokens
 /// - `--revoke` — paired with `--auth-google`, revokes tokens and deletes
@@ -633,7 +597,6 @@ fn parse_args(args: &[String]) -> CliArgs {
             "--version" | "-V" => out.version = true,
             "--resume" | "-r" => out.resume = true,
             "--telegram" | "-t" => out.telegram = true,
-            "--tui" => out.tui = true,
             "--chat" => expect = ExpectNext::ChatId,
             "--auth-google" => {
                 out.auth_google = true;
@@ -659,7 +622,7 @@ fn parse_args(args: &[String]) -> CliArgs {
                 std::env::set_var(claudette::egress::OFFLINE_ENV, "1");
             }
             // `--` ends flag parsing, POSIX-style, so a prompt that really
-            // does start with a dash stays reachable: `claudette -- --tui`.
+            // does start with a dash stays reachable: `claudette -- --resume`.
             "--" => end_of_flags = true,
             other if looks_like_flag(other) => out.unknown_flags.push(other.to_string()),
             _ => out.prompt_words.push(arg.clone()),
@@ -995,12 +958,12 @@ mod tests {
     fn parse_args_double_dash_ends_flag_parsing() {
         // The escape hatch the error message points at, so a prompt that
         // genuinely starts with a dash is still reachable.
-        let a = parse_args_clean(&["--".into(), "--tui".into(), "means".into()]);
-        assert!(!a.tui, "--tui after -- is prompt text, not a flag");
+        let a = parse_args_clean(&["--".into(), "--resume".into(), "means".into()]);
+        assert!(!a.resume, "--resume after -- is prompt text, not a flag");
         assert_eq!(a.unknown_flags, [] as [String; 0]);
         assert_eq!(
             a.prompt_words,
-            vec!["--tui".to_string(), "means".to_string()]
+            vec!["--resume".to_string(), "means".to_string()]
         );
     }
 
@@ -1036,7 +999,6 @@ mod tests {
         let a = parse_args(&["hello".into(), "world".into()]);
         assert!(!a.resume);
         assert!(!a.telegram);
-        assert!(!a.tui);
         assert!(!a.auth_google);
         assert!(!a.auth_google_revoke);
         assert!(!a.briefing);
@@ -1164,19 +1126,6 @@ mod tests {
     fn parse_args_telegram_short() {
         let a = parse_args(&["-t".into()]);
         assert!(a.telegram);
-    }
-
-    #[test]
-    fn parse_args_tui_flag() {
-        let a = parse_args(&["--tui".into()]);
-        assert!(a.tui);
-    }
-
-    #[test]
-    fn parse_args_tui_with_resume() {
-        let a = parse_args(&["--tui".into(), "--resume".into()]);
-        assert!(a.tui);
-        assert!(a.resume);
     }
 
     #[test]
@@ -1311,7 +1260,6 @@ mod tests {
         for flag in [
             "--resume",
             "--telegram",
-            "--tui",
             "--doctor",
             "--setup",
             "--faceless",

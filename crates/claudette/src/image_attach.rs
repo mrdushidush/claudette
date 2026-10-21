@@ -1,10 +1,5 @@
-//! Shared helpers for turning user input into image attachments — used
-//! by both the TUI (Alt+V clipboard, bracketed-paste drop) and the REPL
-//! (drag-drop path detection on submit).
-//!
-//! The TUI also reads the OS clipboard via `arboard`; that lives in
-//! `tui.rs` because it's hotkey-driven and only meaningful in raw mode.
-//! Everything that's reusable across both modes lives here.
+//! Shared helpers for turning user input into image attachments (the
+//! REPL's drag-drop path detection on submit), and the attachment type.
 
 /// One image attached to a user turn — base64-encoded payload paired with
 /// its MIME type. Both transports (Ollama `images: [b64,…]` and
