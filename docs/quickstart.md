@@ -140,7 +140,6 @@ different command:
 
 ```bash
 claudette                            # interactive REPL
-claudette --tui                      # fullscreen TUI
 claudette "your prompt here"         # one-shot, prints reply and exits
 claudette --telegram --chat any      # Telegram bot (needs --features integrations)
 claudette --resume                   # resume last session
@@ -152,37 +151,6 @@ the air-gap - every outbound call except the local model backend + loopback is
 hard-blocked, so the brain and recall keep working but web search, mail, GitHub,
 Telegram, and remote git all refuse. `claudette --offline --doctor` prints the
 exact allow-list. See [Air-gapped, and enforced](../README.md#-air-gapped-and-enforced).
-
-## The TUI in 60 seconds
-
-> **Experimental - demo-only.** The TUI has known rendering rough edges
-> (doubled text, tool pane, footer). The REPL is the supported daily driver;
-> reach for `--tui` to show Claudette off, not to live in it.
-
-```bash
-claudette --tui
-```
-
-Five tabs across the top - switch with number keys or cycle with `Tab` /
-`Shift+Tab`:
-
-| Key | Tab | What's there |
-|-----|-----|--------------|
-| `1` | **Chat** | Streaming conversation + inline tool calls |
-| `2` | **Tools** | Full tool-event log (every call, args, result) |
-| `3` | **Notes** | Browse `~/.claudette/notes/` - `↑`/`↓` select, `f` filter by tag |
-| `4` | **Todos** | `↑`/`↓` select, `Space`/`Enter` toggle done |
-| `5` | **HW** | Live GPU / VRAM / temperature |
-
-- **Type and press `Enter`** to send (number keys only switch tabs when the
-  input box is empty, so you can still type "1pm").
-- **Slash commands work here too** - `/help`, `/brownfield`, `/recall`,
-  everything the REPL has.
-- **`Alt+V`** pastes an image or text block into your next message. (Not `Ctrl+V`
-  - Windows Terminal and most modern terminals intercept that at the terminal
-  level and paste the clipboard's *text* form, so the keypress never reaches
-  Claudette.)
-- **`Ctrl+C`** (or `Ctrl+D`) quits.
 
 ## More first flows
 

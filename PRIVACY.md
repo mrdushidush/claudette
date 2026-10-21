@@ -87,11 +87,11 @@ If you never set `BRAVE_API_KEY`, the `web_search` tool returns a "not configure
 
 ### Tool-group gating
 
-The model can't surreptitiously call any of the above just because the env var is set. Tool groups are **opt-in per session** — the model must first invoke `enable_tools(group)`, which is a user-visible action you can see in the TUI's `Tools` tab. Until then the relevant tool's schema isn't even visible to the model.
+The model can't surreptitiously call any of the above just because the env var is set. Tool groups are **opt-in per session** — the model must first invoke `enable_tools(group)`, which is a user-visible action: the REPL prints every tool call. Until then the relevant tool's schema isn't even visible to the model.
 
 ### Permission gating
 
-Every tool is classified as `ReadOnly`, `WorkspaceWrite`, or `DangerFullAccess`. ReadOnly auto-allows. `WorkspaceWrite` auto-allows but is scoped to the install dir / mission tree. `DangerFullAccess` (bash, raw `edit_file`, `git add/commit/push/checkout`, cross-org PRs) prompts `[y/N]` every time in the REPL/TUI, and **default-denies** in Telegram mode (no TTY to confirm).
+Every tool is classified as `ReadOnly`, `WorkspaceWrite`, or `DangerFullAccess`. ReadOnly auto-allows. `WorkspaceWrite` auto-allows but is scoped to the install dir / mission tree. `DangerFullAccess` (bash, raw `edit_file`, `git add/commit/push/checkout`, cross-org PRs) prompts `[y/N]` every time in the REPL, and **default-denies** in Telegram mode (no TTY to confirm).
 
 ---
 
