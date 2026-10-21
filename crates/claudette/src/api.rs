@@ -50,17 +50,6 @@ pub fn stdout_text_callback() -> TextCallback {
     })
 }
 
-/// Convenience constructor for forwarding text deltas to the TUI via a
-/// sync channel. Each delta fires one `TuiEvent::Token`. Used by the TUI
-/// worker thread instead of the REPL's stdout callback.
-pub fn tui_text_callback(
-    tx: std::sync::mpsc::SyncSender<crate::tui_events::TuiEvent>,
-) -> TextCallback {
-    Box::new(move |delta: &str| {
-        let _ = tx.send(crate::tui_events::TuiEvent::Token(delta.to_string()));
-    })
-}
-
 /// Shared streaming buffer used by Telegram mode. The brain's text-delta
 /// callback appends to this buffer as tokens arrive; a poller thread in
 /// `telegram_mode` scans the buffer for completed paragraphs and sends

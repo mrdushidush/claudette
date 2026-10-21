@@ -89,10 +89,6 @@ pub mod transcript;
 // so it rides the same `integrations` gate.
 #[cfg(feature = "integrations")]
 pub mod tts;
-pub mod tui;
-pub mod tui_events;
-pub mod tui_executor;
-pub mod tui_worker;
 // Speech-to-text for inbound Telegram voice notes — only used by
 // `telegram_mode`, so it rides the same `integrations` gate.
 #[cfg(feature = "integrations")]

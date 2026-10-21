@@ -141,8 +141,7 @@ fn gate_line_decision(line: &str) -> PermissionPromptDecision {
 /// (read in cooked mode) is classified by [`gate_line_decision`], so the user
 /// can type an instruction for the model instead of a bare allow/deny.
 /// Returns `None` if raw mode can't be enabled, so the caller falls back to
-/// the line reader (which is redirect-aware too). Mirrors the TUI prompt's key
-/// handling in `tui.rs`.
+/// the line reader (which is redirect-aware too).
 fn read_single_key(err: &mut impl io::Write) -> Option<PermissionPromptDecision> {
     use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
     use crossterm::terminal::{disable_raw_mode, enable_raw_mode};

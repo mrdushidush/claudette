@@ -15,8 +15,7 @@
 //! 5. Add a parser test in `mod tests`.
 //!
 //! All REPL output goes to stderr — never stdout — so piping the assistant's
-//! actual replies into a file still works cleanly. From the TUI, callers pass
-//! a `Vec<u8>` buffer instead and ship it as a `TuiEvent::Info` message.
+//! actual replies into a file still works cleanly.
 
 use std::io::Write;
 
@@ -267,11 +266,9 @@ fn parse_sessions_subcommand(arg: Option<&str>) -> SlashCommand {
 
 // === Dispatcher ==============================================================
 
-/// Run a parsed slash command. Generic over the concrete runtime so both the
-/// REPL (`ConversationRuntime<OllamaApiClient, AgentToolExecutor>`) and
-/// the TUI (`ConversationRuntime<OllamaApiClient, TuiToolExecutor>`) can use
-/// the same dispatcher. `out` is where human-readable output is written —
-/// stderr for the REPL, a buffer shipped via `TuiEvent::Info` for the TUI.
+/// Run a parsed slash command. Generic over the concrete runtime (the REPL's
+/// `ConversationRuntime<OllamaApiClient, AgentToolExecutor>`). `out` is where
+/// human-readable output is written — stderr for the REPL.
 /// `rebuild` is the callback that produces a fresh runtime from a session;
 /// it's used by commands that swap the conversation context (`/clear`,
 /// `/load`, `/reload`, `/compact`, `/preset`, `/brain`).
