@@ -34,7 +34,7 @@ These are read by the one-line install scripts, not by the binary itself:
 | `CLAUDETTE_SKIP_OLLAMA_PROBE` | unset | Set to `1` to skip the Ollama startup probe (CI / offline). |
 | `CLAUDETTE_SKIP_LM_STUDIO_PROBE` | unset | Set to `1` to skip the LM Studio probe (only used when `CLAUDETTE_OPENAI_COMPAT=1`). The probe checks `/v1/models` returns a non-empty model list - set this if you load models post-launch. |
 | `CLAUDETTE_FALLBACK_BRAIN_MODEL` | `qwen3.5:9b` (Auto preset) | Brain to escalate to on stuck signals. Escalation is **skipped** - with a one-line notice - when this resolves to the same model as the brain, or when the backend isn't already serving it. That guard matters on LM Studio: loading a second model there evicts the one you deliberately loaded, so Claudette will not do it behind your back mid-turn. Set it empty (`CLAUDETTE_FALLBACK_BRAIN_MODEL=`) or use `/preset fast` to turn the tiered brain off entirely. |
-| `CLAUDETTE_FACELESS` | unset | Set to `1` (or pass `--faceless`) to drop the persona overlay - Eva in assistant mode, CodeX-7 for the forge Coder. Identity strings only; no effect on tools or permissions. |
+| `CLAUDETTE_FACELESS` | unset | Set to `1` (or pass `--faceless`) to drop the Eva persona overlay. Identity strings only; no effect on tools or permissions. |
 | `CLAUDETTE_WORKSPACE` | unset | Extra read roots outside `$HOME`, colon-separated on Unix, semicolon-separated on Windows. Example: `D:\dev\claudette` for developing Claudette itself. Reads under `$HOME` and under a `$HOME`-rooted CWD are always allowed regardless. |
 
 ### Recommended brain
@@ -93,8 +93,6 @@ Two layers enforce it: an HTTP-layer guard in the reqwest path checks the destin
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `CLAUDETTE_MAX_FIX_ROUNDS` | `3` | Cap on Coder→Verifier fix-loop rounds in `--forge`. Default 3 is the empirical sweet spot for local 8b coders. Raise to 4-6 if you've pinned a stronger Verifier model and want it to keep pushing back. Clamped at 10. |
-| `CLAUDETTE_FORGE_ABORT_WINDOW_SECS` | `3` | Grace window (seconds) to Ctrl-C out of a forge run before it starts working. Set `0` to skip the pause in CI / scripted runs. Clamped at 30. |
 
 ## Deep research (`--research`)
 

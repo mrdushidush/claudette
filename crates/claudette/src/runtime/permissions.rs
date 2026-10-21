@@ -138,9 +138,9 @@ impl PermissionPolicy {
 
     /// Override the active permission mode, keeping all registered tool
     /// requirements. Used to flip a fully-built policy into
-    /// `PermissionMode::Allow` for unattended/automated forge runs (the
-    /// opt-in `CLAUDETTE_FORGE_AUTO_APPROVE` env var) without re-declaring
-    /// every tool requirement.
+    /// `PermissionMode::Allow` for unattended runs (the opt-in
+    /// `CLAUDETTE_AUTO_APPROVE` env var) without re-declaring every tool
+    /// requirement.
     #[must_use]
     pub fn with_active_mode(mut self, mode: PermissionMode) -> Self {
         self.active_mode = mode;

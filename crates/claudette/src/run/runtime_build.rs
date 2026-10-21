@@ -181,9 +181,7 @@ fn build_runtime_with_brain_inner(
 /// tier. The tier cap denies every write/exec/network tool at dispatch —
 /// before any prompter — regardless of which tool name the model invents
 /// (role-isolation lesson, roast RC-B). No prompter is wired (all permitted
-/// tools are ReadOnly-tier, so nothing needs approval); `CLAUDETTE_FORGE_
-/// AUTO_APPROVE` deliberately has NO effect here (research never builds an
-/// Allow-mode policy).
+/// tools are ReadOnly-tier, so nothing needs approval).
 pub(crate) fn build_research_runtime(
     session: Session,
     system_prompt: Vec<String>,
