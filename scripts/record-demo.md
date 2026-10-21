@@ -1,77 +1,76 @@
 # Recording the hero demo GIF
 
-Shot list + exact commands for the 30–45 second recording at the top of the
-README. Target: **< 5 MB**, terminal-only, no narration, readable at README
-column width.
+How the GIF at the top of the README is made, so it can be re-shot when the
+REPL's output changes. Target: **under 5 MB**, terminal only, no narration,
+readable at README column width.
 
-**The current GIF** (`docs/images/claudette-forge-demo.gif`, 2026-10-09) is a
-simpler take than the shot list below: a two-test Python repo with one failing
-test, `claudette --forge "test_punctuation fails. Fix slugify so the tests pass;
-do not edit the tests."`, a `y` at each permission prompt, then `git switch -;
-python -m pytest -q` (forge commits to its own branch and puts you back on
-`main`). Recorded on Windows with vhs into PNG frames, encoded with ffmpeg, and
-idle stretches over 1.6 s cut down to 1.6 s. Two things that cost retakes: the
-permission prompt takes a single key, so a scripted `y` must not be followed by
-Enter (Enter answers the next prompt with No); and forge's test gate only finds
-pytest when the repo has a `pyproject.toml`.
+**The take** (`docs/images/claudette-repl-fix.gif`, once recorded) shows one
+fix in the REPL: a two-test Python repo where `test_punctuation` fails,
+`claudette`, the task typed at the prompt, the colored diff and its `[y/N]`
+gate, a `y`, the tests passing through `run_tests`, `/exit`, and
+`python -m pytest -q` going green. The scene is the point: Claudette proposes,
+a human approves each edit. Until it is recorded,
+the README's hero is the screenshot `docs/images/claudette-diff-gate.png`,
+which shows the same gate in a real session.
 
-## Setup (before recording)
+## What you need
 
-- Linux/macOS terminal (asciinema doesn't record on Windows; use WSL or the
-  Linux box). 100×30 terminal, a font that renders `↳`/`⚠`/box-drawing glyphs,
-  dark theme, font size large enough that a phone reader can follow.
-- Brain loaded and **warm** (run one throwaway prompt first — the demo must not
-  eat a 60 s model-load hang).
-- A small toy repo with a test suite (ideal: a tiny Rust or Python CLI of
-  ~5 files where `--forge` can add a small flag). Clean working tree — forge
-  refuses a dirty tree.
-- `export CLAUDETTE_NO_SPINNER=` (leave the spinner ON — it reads as "alive"
-  in the GIF).
-- Install the recorder + converter:
+- Windows with [vhs](https://github.com/charmbracelet/vhs) 0.12+ and its
+  `ttyd`, plus `ffmpeg` (all three install through `winget`). vhs also runs on
+  Linux and macOS; change the tape's shell and paths.
+- The brain loaded and **warm**: send one throwaway prompt first, so the take
+  doesn't sit through a model load.
+- The toy repo: `slug.py` with a `slugify()` that lowercases and replaces every
+  non-alphanumeric character with `-`, and `test_slug.py` with `test_basic`
+  (`"Hello World"` -> `hello-world`, passes) and `test_punctuation`
+  (`"Hello, World!"` -> `hello-world`, fails on the doubled dash). Commit it
+  all, so a retake is `git checkout -- .`.
+- The `claudette` binary you want to show, first on the tape's `PATH`.
 
-```sh
-cargo install --locked agg          # asciinema GIF renderer
-# asciinema via your package manager (apt install asciinema / brew install asciinema)
+## The tape
+
+[`hero-demo.tape`](hero-demo.tape) holds the whole take. Its hidden first line
+sets `PATH`, the backend env vars, `CLAUDETTE_NO_SPINNER=1` and a short `> `
+prompt; then it:
+
+1. runs `python -m pytest -q` (1 failed, 1 passed),
+2. starts `claudette` and waits for the `›` prompt,
+3. types the task, ending with "Check with run_tests." The REPL runs in
+   workspace-write mode, so `run_tests` passes without a prompt and the edit
+   is the only `[y/N]` in the take,
+4. waits for `Allow?` on the cursor's line, pauses on the diff, and types `y`.
+   **No Enter**: the gate reads a single key, and an Enter would answer the
+   next prompt,
+5. waits for the `›` prompt again, types `/exit`, and runs pytest (2 passed).
+
+Three things that cost retakes. The spinner must be off: with it on, every
+frame differs while the model thinks, and the encoder can't trim that stretch
+as idle. Every `Wait` is `+Line` (the cursor's line), never `+Screen`, or a
+prompt that already scrolled by satisfies a later wait. And if the model asks
+a second time anyway (a second edit, a `bash` call), the wait for `›` times
+out and the take fails: reset the repo and re-run.
+
+```powershell
+cd D:\demo                         # the tape's paths assume D:\demo\slugs and D:\demo\bin
+git -C slugs checkout -- .         # clean repo
+Remove-Item -Recurse out -ErrorAction Ignore
+vhs hero-demo.tape                 # writes PNG frames to out\frames\
+python make-hero-gif.py out\frames claudette-repl-fix.gif
 ```
 
-## Shot list (one continuous take, ~40 s)
+## Frames to GIF
 
-| # | Seconds | Action | What the viewer must see |
-|---|---------|--------|--------------------------|
-| 1 | 0–6 | `claudette --doctor` | The green rows — local brain, toolchains — and the GPU model recommendation. **All green.** |
-| 2 | 6–14 | `claudette "add a note: demo day"`, then `claudette "list my notes"` | One-shot round trip: instant tool call, instant answer. Proves it's alive and local. |
-| 3 | 14–38 | `claudette --forge "<small task>"` in the toy repo | The phase lines streaming: `forge: planner` → `forge: coder (round 0)` → `forge: build + test` → `forge: verifier … pass=true`. |
-| 4 | 38–44 | The review gate | The **colored diff** and the `⚠ … [y/N]` prompt — pause 2 s on it, type `y` (GitHub-mission take) or let the local-mission commit line land. **This is the money shot: a human gate in an autonomous pipeline.** |
-
-Keep-it-tight rules: no typos/backspacing (rehearse the take), no window
-switching, don't scroll back. If the forge round takes longer than ~25 s,
-cut the take and pick a smaller task — a boring wait kills the GIF.
-
-## Record → convert → verify
-
-```sh
-asciinema rec demo.cast --cols 100 --rows 30      # run the shot list, Ctrl+D to stop
-agg demo.cast forge-demo.gif \
-    --font-size 16 --speed 1.25 --theme monokai   # 1.25× trims dead air
-ls -lh forge-demo.gif                             # must be < 5 MB
-```
-
-Too big? In order of preference: `--speed 1.5`, re-record with fewer idle
-seconds, `--font-size 14`, or post-process with
-`gifsicle -O3 --lossy=80 forge-demo.gif -o forge-demo.gif`.
+[`make-hero-gif.py`](make-hero-gif.py) merges runs of identical frames and caps
+every still stretch at 1.6 s, so the model's thinking time doesn't become dead
+air, holds the last frame for 3 s, and encodes with an ffmpeg palette. It
+prints the length before and after and the file size. Over 5 MB: lower
+`--max-idle`, or shorten the take.
 
 ## Ship it
 
 ```sh
-mv forge-demo.gif docs/images/forge-demo.gif
+cp claudette-repl-fix.gif docs/images/claudette-repl-fix.gif
 ```
 
-Then in `README.md`, replace the `claudette-ships-pr.png` image line (it has a
-`TODO(onboarding 1.3)` comment above it) with:
-
-```markdown
-![claudette --doctor going green, a one-shot answer, then Forge planning, coding, passing the build-and-test gate, and stopping at the human diff review](docs/images/forge-demo.gif)
-```
-
-Keep the PNG in `docs/images/` — it stays as the social-preview / fallback
-image.
+The README's first image points at that file. Update its alt text and the
+caption under it if the scene changes.
