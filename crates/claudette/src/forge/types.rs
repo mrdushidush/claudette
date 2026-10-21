@@ -11,28 +11,7 @@
 
 // ─── Role + complexity + providers ───────────────────────────────────
 
-/// Roles the pipeline can assign work to. A single model can fill multiple
-/// roles simultaneously — role naming is about *what the model is doing*,
-/// not about which weights are loaded.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Role {
-    /// Conversational assistant loop (default no-subcommand mode).
-    Assistant,
-    /// Mission decomposition, Campbell-complexity tagging.
-    Planner,
-    /// Complexity router + model selector.
-    Router,
-    /// Code generation.
-    Coder,
-    /// Test generation.
-    TestCoder,
-    /// Correctness grading.
-    Verifier,
-    /// Surgical fix-pass — patches specific compile/test failures.
-    SurgicalCoder,
-    /// Strategic review at Gate — ship / no-ship call.
-    Cto,
-}
+pub use crate::personas::Role;
 
 /// Which provider the request dispatches to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

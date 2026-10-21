@@ -36,9 +36,9 @@ pub fn faceless_mode_enabled() -> bool {
 /// shipping the .md file is not required by `cargo install`. If the file
 /// fails to parse (asserted at build time by the personas-suite tests), the
 /// secretary prompt silently runs without a persona overlay.
-fn default_assistant_persona() -> Option<crate::forge::personas::Persona> {
+fn default_assistant_persona() -> Option<crate::personas::Persona> {
     const EVA: &str = include_str!("../personas/eva.md");
-    crate::forge::personas::parse_persona_content(EVA, "bundled:eva").ok()
+    crate::personas::parse_persona_content(EVA, "bundled:eva").ok()
 }
 
 /// Build the secretary's system prompt, optionally appending a "About the

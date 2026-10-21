@@ -419,13 +419,13 @@ fn forge_role_model(role: forge::types::Role) -> Option<String> {
 /// from content baked in via `include_str!`. Returns `None` if the bundled
 /// content fails to parse, which should only happen if the personas file is
 /// edited into invalid TOML/markdown — caught by
-/// `forge::personas::bundled_personas_all_parse`.
+/// `personas::bundled_personas_all_parse`.
 ///
 /// Bundled rather than disk-resolved because claudette is shipped as a
 /// single binary (no `cargo install`-side `personas/` directory).
-fn forge_default_coder_persona() -> Option<forge::personas::Persona> {
+fn forge_default_coder_persona() -> Option<crate::personas::Persona> {
     const CODEX7: &str = include_str!("../../personas/codex7.md");
-    forge::personas::parse_persona_content(CODEX7, "bundled:codex7").ok()
+    crate::personas::parse_persona_content(CODEX7, "bundled:codex7").ok()
 }
 
 // ────────────────────────────────────────────────────────────────────────────

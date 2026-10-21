@@ -5,7 +5,7 @@
 //! to crates.io without a path-only workspace dependency (cargo rejects
 //! path-only deps at publish time). Three modules survived the fold:
 //!
-//! 1. [`personas`] — persona loader (markdown + TOML frontmatter).
+//! 1. `personas` — moved to [`crate::personas`], because the REPL's Eva persona needs it.
 //! 2. [`models_toml`] — role → (model, provider) mapping with env-var overrides.
 //! 3. [`types`] — Role / ProviderKind / ModelMap. The pipeline-vocabulary
 //!    siblings (Mission/Subtask/MissionId/Complexity/ToolCall/ToolResult)
@@ -16,5 +16,4 @@
 //! carry over — it was 36 LoC of empty placeholders.
 
 pub mod models_toml;
-pub mod personas;
 pub mod types;
