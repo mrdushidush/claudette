@@ -48,7 +48,7 @@ Or in `~/.claudette/.env` for persistence across sessions.
 To skip the Auto-preset dance entirely (no fallback, no stuck-signal escalation), launch with:
 
 ```
-/preset smart    # in REPL/TUI
+/preset smart    # in the REPL
 ```
 
 …or set both `CLAUDETTE_MODEL` and `CLAUDETTE_FALLBACK_BRAIN_MODEL` to the same model.
@@ -120,7 +120,7 @@ It prints: Ollama probe (or LM Studio probe), every `CLAUDETTE_*` env var that's
 Common confusions:
 
 - **"Tool X returned not_configured"** → check the relevant token env var in `--doctor` output.
-- **"Brain answered but never called the tool"** → tool group probably not enabled; the model should call `enable_tools(group)` first. Open the TUI's Tools tab to see what groups are active.
+- **"Brain answered but never called the tool"** → tool group probably not enabled; the model should call `enable_tools(group)` first. `/tools` lists what groups are active.
 
 ---
 

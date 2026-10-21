@@ -225,3 +225,23 @@ diff and waits for `[y/N]`.
 - The Eva persona loader moved from `forge/personas.rs` to `src/personas.rs`.
 - AD-2's "assistant + forge in one binary", AD-4 and AD-7 now describe removed
   code; they stay above as history.
+
+---
+
+## AD-9 - TUI removed (2026-10-22)
+
+**Problem.** The fullscreen ratatui TUI was experimental and demo-only, with
+known rendering rough edges, and it carried about 3,000 lines plus two
+dependencies (`ratatui`, `image`) for a surface the REPL already covers.
+
+**Decision.** Delete it, after the `pre-trim-2026-10` tag. The REPL is the
+one interactive surface; image attachment stays there (drag-drop or
+`@path`).
+
+**Consequences.**
+
+- `--tui`, the five tabs, `Alt+V` paste and the VS Code *Open TUI* command
+  no longer exist.
+- `ImageAttachment` lives in `image_attach.rs` next to its helpers.
+- `ratatui` and `image` leave `Cargo.toml`; `crossterm` stays for the REPL's
+  line editor and `arboard` for the clipboard tool.

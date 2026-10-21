@@ -37,8 +37,8 @@ direction. Bug reports with a reproducer are always welcome without
 prior discussion; feature proposals work best as an issue first.
 
 **What Claudette is:** an air-gapped, local-first AI coding agent in
-Rust. Single binary, one local model (LM Studio or Ollama), four
-interfaces (REPL, one-shot, TUI, Telegram bot). It also carries a
+Rust. Single binary, one local model (LM Studio or Ollama), three
+interfaces (REPL, one-shot, Telegram bot). It also carries a
 personal-assistant surface (notes, calendar, voice), but the coding
 agent is the core. See [`docs/comparison.md`](../docs/comparison.md) for
 where Claudette sits relative to other agents.
