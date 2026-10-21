@@ -88,12 +88,6 @@ pub enum SlashCommand {
     /// F8 safety fix — the rehydrate banner advises this command so it has
     /// to exist as a slash for the advice to work.
     MissionExit,
-    /// 0.4.2 forge-mode v0a: run the trailing prompt against the active
-    /// brownfield mission with file/search/git/advanced/github tools
-    /// pre-enabled, ending at `mission_submit` (auto-PR). Errors if no
-    /// mission is active. Mirrors the `--forge "<prompt>"` CLI flag from
-    /// inside the REPL.
-    Forge(String),
     /// Undo the last turn's destructive actions from the action transcript
     /// (`~/.claudette/transcript/actions.jsonl`), restoring each trashed file
     /// / pre-image. `whole_turn` is the default (`/undo`); `/undo one` sets it
@@ -221,12 +215,6 @@ pub fn parse_slash_command(line: &str) -> Option<SlashCommand> {
             ),
         },
         "mission_exit" | "mission-exit" => SlashCommand::MissionExit,
-        "forge" => match arg.filter(|s| !s.is_empty()) {
-            Some(prompt) => SlashCommand::Forge(prompt),
-            None => SlashCommand::Invalid(
-                "/forge requires a prompt. Try: /forge fix the parser bug".to_string(),
-            ),
-        },
         "exit" | "quit" | "q" | "x" => SlashCommand::Exit,
         other => SlashCommand::Invalid(format!("unknown command: /{other} — try /help")),
     };
@@ -423,10 +411,6 @@ where
             handle_mission_exit(out);
             SlashOutcome::Continue
         }
-        SlashCommand::Forge(prompt) => {
-            handle_forge(out, &prompt);
-            SlashOutcome::Continue
-        }
         SlashCommand::Exit => SlashOutcome::Exit,
         SlashCommand::Invalid(msg) => {
             let _ = writeln!(
@@ -514,20 +498,13 @@ fn print_help(out: &mut impl Write) {
             ],
         ),
         (
-            "brownfield & forge",
+            "brownfield",
             &[
                 (
                     "/brownfield <target>",
                     "Clone a repo and make it the active mission",
                 ),
-                (
-                    "/mission_exit",
-                    "Clear the active mission (and unblock /forge if /brownfield failed)",
-                ),
-                (
-                    "/forge <prompt>",
-                    "Run prompt in forge-mode against the active mission (auto-PR)",
-                ),
+                ("/mission_exit", "Clear the active mission"),
             ],
         ),
         (
@@ -1408,47 +1385,6 @@ fn short_ts(ts: &str) -> String {
         .map_or_else(|| ts.to_string(), |(date, _)| date.to_string())
 }
 
-/// Drive a forge-mode turn from inside the REPL. Reuses the public
-/// `run_forge_mission` entrypoint so the slash command and the `--forge`
-/// CLI flag share the active-mission gate, runtime construction, and
-/// streaming behaviour. The forge runtime is built fresh per call (its own
-/// session + tool registry); it doesn't share state with the long-lived
-/// REPL runtime, so the REPL session stays clean if the brain wanders.
-fn handle_forge(out: &mut impl Write, prompt: &str) {
-    let _ = writeln!(
-        out,
-        "{} {} {}",
-        theme::ROBOT,
-        theme::accent("forge"),
-        theme::dim(prompt)
-    );
-    let opts = crate::SessionOptions {
-        resume: false,
-        autosave: false,
-    };
-    match crate::run_forge_mission(prompt, opts) {
-        Ok(summary) => {
-            let _ = writeln!(
-                out,
-                "  {} {}",
-                theme::BOLT,
-                theme::ok(&format!(
-                    "forge iter={} in={} out={}",
-                    summary.iterations, summary.usage.input_tokens, summary.usage.output_tokens
-                ))
-            );
-        }
-        Err(e) => {
-            let _ = writeln!(
-                out,
-                "  {} {}",
-                theme::error(theme::ERR_GLYPH),
-                theme::error(&format!("{e:#}"))
-            );
-        }
-    }
-}
-
 fn handle_brownfield(out: &mut impl Write, target: &str) {
     let _ = writeln!(
         out,
@@ -1496,15 +1432,6 @@ fn handle_brownfield(out: &mut impl Write, target: &str) {
                 "  {} {}",
                 theme::error(theme::ERR_GLYPH),
                 theme::error(&e)
-            );
-            let _ = writeln!(
-                out,
-                "  {} {}",
-                theme::dim("∘"),
-                theme::dim(
-                    "/forge is blocked until you fix this or call /mission_exit \
-                     to clear the failure flag."
-                )
             );
         }
     }
@@ -1974,29 +1901,6 @@ mod tests {
             parse_slash_command("/brownfield   octocat/Hello-World  "),
             Some(SlashCommand::Brownfield("octocat/Hello-World".to_string()))
         );
-    }
-
-    #[test]
-    fn parse_forge_with_prompt() {
-        assert_eq!(
-            parse_slash_command("/forge fix the parser bug"),
-            Some(SlashCommand::Forge("fix the parser bug".to_string()))
-        );
-        assert_eq!(
-            parse_slash_command("/forge   add a flag --foo  "),
-            Some(SlashCommand::Forge("add a flag --foo".to_string()))
-        );
-    }
-
-    #[test]
-    fn parse_forge_without_prompt_is_invalid() {
-        let parsed = parse_slash_command("/forge");
-        assert!(matches!(parsed, Some(SlashCommand::Invalid(_))));
-        let parsed = parse_slash_command("/forge   ");
-        assert!(matches!(parsed, Some(SlashCommand::Invalid(_))));
-        if let Some(SlashCommand::Invalid(msg)) = parse_slash_command("/forge") {
-            assert!(msg.contains("/forge"), "got: {msg}");
-        }
     }
 
     #[test]

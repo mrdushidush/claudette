@@ -14,11 +14,9 @@ use crate::{ConversationRuntime, PermissionMode, PermissionPolicy, Session};
 
 use crate::api::{stdout_text_callback, telegram_text_callback, OllamaApiClient};
 use crate::executor::AgentToolExecutor;
-use crate::forge;
 use crate::memory::try_load_memory;
 use crate::model_config;
-use crate::prompt::{agent_system_prompt_with_memory, faceless_mode_enabled, forge_system_prompt};
-use crate::theme;
+use crate::prompt::agent_system_prompt_with_memory;
 use crate::tool_groups::{ToolGroup, ToolRegistry};
 
 /// Assemble a `ConversationRuntime` with the secretary's model, tools,
@@ -178,140 +176,6 @@ fn build_runtime_with_brain_inner(
         })
 }
 
-/// Forge-mode runtime: same plumbing as [`build_runtime_with_brain`] but with
-/// a forge-specific system prompt and the tool groups the brain needs
-/// pre-enabled (files, search, git, advanced, github) so it doesn't burn
-/// turns on `enable_tools`.
-///
-/// The mission path is threaded into the system prompt so the model has
-/// accurate cwd context; the `tools::active_cwd()` routing primitive ensures
-/// tools land in the mission tree regardless.
-pub(crate) fn build_forge_runtime(
-    session: Session,
-    mission: &crate::missions::Mission,
-    should_submit: bool,
-) -> ConversationRuntime<OllamaApiClient, AgentToolExecutor> {
-    // v0b: persona overlay. Auto-load the bundled `codex7` coder persona for
-    // forge mode. The persona's voice + backstory get woven into the system
-    // prompt via `forge_system_prompt`. Lookup failures fall back to an
-    // unpersonified prompt — persona overlay is best-effort, never required.
-    //
-    // `--faceless` / `CLAUDETTE_FACELESS=1` skips the overlay so CI / API
-    // integrations can opt out (added 2026-05-19, Phase 2 of import sweep).
-    let persona = if faceless_mode_enabled() {
-        None
-    } else {
-        forge_default_coder_persona()
-    };
-    let memory = try_load_memory();
-    let persona_overlay = persona
-        .as_ref()
-        .map(|p| (p.voice.as_str(), p.backstory.as_str()));
-
-    let system = forge_system_prompt(
-        &mission.path.to_string_lossy(),
-        memory.as_deref(),
-        persona_overlay,
-        should_submit,
-    );
-
-    // Coder rounds get the full forge toolset. The Submitter phase (v0c)
-    // calls back in with `should_submit=true` and uses the same toolset —
-    // restricting it to just github tools is tempting but the brain may
-    // still need to look at files (e.g. to compose a PR title from the diff).
-    build_forge_role_runtime(
-        session,
-        mission,
-        forge::types::Role::Coder,
-        system,
-        &[
-            ToolGroup::Files,
-            ToolGroup::Search,
-            ToolGroup::Git,
-            ToolGroup::Advanced,
-            ToolGroup::Github,
-        ],
-    )
-}
-
-/// v0c: phase-aware forge runtime builder. Used by the Coder runtime (full
-/// toolset, `Role::Coder` model from `models.toml`) and by the Planner /
-/// Verifier turns (no tool groups, different role-routing). Centralises the
-/// `OllamaApiClient` + `AgentToolExecutor` + permission policy + hinter
-/// setup that every forge phase needs.
-pub(crate) fn build_forge_role_runtime(
-    session: Session,
-    _mission: &crate::missions::Mission,
-    role: forge::types::Role,
-    system_prompt: Vec<String>,
-    tool_groups: &[ToolGroup],
-) -> ConversationRuntime<OllamaApiClient, AgentToolExecutor> {
-    let mut brain = model_config::active().brain;
-
-    // v0b/v0c: models.toml role-routing. If the user has the requested role
-    // configured in `~/.claudettes-forge/models.toml` (or env-overridden),
-    // use it for this phase. num_ctx/num_predict aren't in models.toml so
-    // they carry over from claudette's config.
-    if let Some(role_model) = forge_role_model(role) {
-        brain.model = role_model;
-    }
-
-    let mut reg = ToolRegistry::new();
-    for group in tool_groups {
-        reg.enable(*group);
-    }
-    let registry = Arc::new(Mutex::new(reg));
-
-    let api_client = OllamaApiClient::with_registry(brain.model.clone(), registry.clone())
-        .with_context(brain.num_ctx)
-        .with_max_predict(brain.num_predict)
-        .with_text_callback(stdout_text_callback());
-
-    let hinter_registry = Arc::clone(&registry);
-    let executor = AgentToolExecutor::with_registry(registry);
-    // Forge phases auto-approve every tool call when CLAUDETTE_FORGE_AUTO_APPROVE
-    // is set (unattended/scripted runs). PermissionMode::Allow short-circuits
-    // authorize() so the CliPrompter is never consulted. Forge-only: secretary
-    // and TUI go through build_permission_policy() directly, unchanged.
-    //
-    // ROLE ISOLATION (roast RC-B): the dispatch path authorizes by tool name
-    // and never consults the registry's enabled-group set, so advertising a
-    // restricted toolset to a role does NOT stop a confabulating model from
-    // emitting a tool the role was never granted. Cap each role at a hard
-    // tier ceiling so `authorize()` denies any over-tier tool *before* the
-    // prompter — and before Allow-mode auto-approval — regardless of which
-    // tool name the model invents:
-    //   • Planner  — read-only investigation, must never mutate the tree.
-    //   • Verifier — toolless grader; ReadOnly denies every write/exec tool.
-    //   • Coder/Submitter — legitimately need bash/edit_file/apply_diff/git
-    //     (all DangerFullAccess), so they keep the default cap.
-    let max_tier = match role {
-        forge::types::Role::Planner | forge::types::Role::Verifier => {
-            crate::PermissionMode::ReadOnly
-        }
-        _ => crate::PermissionMode::DangerFullAccess,
-    };
-    let base_policy = build_permission_policy().with_max_tier(max_tier);
-    let policy = if forge_auto_approve_enabled() {
-        base_policy.with_active_mode(crate::PermissionMode::Allow)
-    } else {
-        base_policy
-    };
-
-    ConversationRuntime::new(session, api_client, executor, policy, system_prompt)
-        .with_max_iterations(max_iterations())
-        .with_auto_compaction_input_tokens_threshold(u32::MAX)
-        .with_unknown_tool_hinter(move |name: &str| {
-            ToolGroup::parse(name).map_or_else(Vec::new, |group| {
-                let reg = match hinter_registry.lock() {
-                    Ok(g) => g,
-                    Err(p) => p.into_inner(),
-                };
-                reg.group_tool_names(group)
-            })
-        })
-}
-
 /// Build a fresh runtime for one deep-research batch: the active brain with
 /// read-only tools (Files/Search/Semantic) and a HARD `ReadOnly` permission
 /// tier. The tier cap denies every write/exec/network tool at dispatch —
@@ -359,73 +223,6 @@ pub(crate) fn build_research_runtime(
 /// hard-capped at `ReadOnly`. Factored out so the cap is directly testable.
 pub(crate) fn research_permission_policy() -> PermissionPolicy {
     build_permission_policy().with_max_tier(crate::PermissionMode::ReadOnly)
-}
-
-/// v0b helper: resolve any forge role's model from `~/.claudettes-forge/
-/// models.toml` (or env overrides). Returns `None` on any failure — the
-/// caller falls back to claudette's active brain model. Best-effort; a
-/// missing/malformed config never blocks forge mode from running.
-///
-/// v0b only consumed this for `Role::Coder`; v0c extends it to the Planner
-/// and Verifier role-routed turns.
-/// True iff the user has *explicitly* configured forge role-routing — either
-/// `~/.claudettes-forge/models.toml` exists or a `CLAUDETTES_FORGE_*` env var
-/// is set. When neither holds, [`forge_role_model`] returns `None` so every
-/// role uses claudette's active brain (roast RC-G #4 / theater "falls back to
-/// the active brain"): previously the built-in defaults (`qwen3.5:14b` etc.)
-/// always populated the map and silently shadowed the user's active brain —
-/// so running `claudette --forge` on a frontier brain still got qwen for the
-/// Planner/Verifier.
-fn forge_models_explicitly_configured() -> bool {
-    if forge::models_toml::default_toml_path().exists() {
-        return true;
-    }
-    std::env::vars().any(|(k, v)| {
-        k.starts_with("CLAUDETTES_FORGE_")
-            && (k.ends_with("_MODEL") || k.ends_with("_PROVIDER"))
-            && !v.trim().is_empty()
-    })
-}
-
-fn forge_role_model(role: forge::types::Role) -> Option<String> {
-    if !forge_models_explicitly_configured() {
-        return None;
-    }
-    let map = forge::types::ModelMap::load().ok()?;
-    let (provider, name) = map.resolve(role)?;
-    // The forge runtime is hardcoded to `OllamaApiClient` (which also serves
-    // LM Studio via CLAUDETTE_OPENAI_COMPAT). A non-Ollama provider therefore
-    // can't be honored — previously the provider was dropped and the model
-    // name was sent to Ollama regardless, so `provider="anthropic"
-    // model="claude-opus-4-7"` 404'd against the local server (roast RC-G #2).
-    // Refuse loudly and fall back to the active brain rather than mis-route.
-    if provider != forge::types::ProviderKind::Ollama {
-        eprintln!(
-            "  {} {}",
-            theme::dim("∘"),
-            theme::warn(&format!(
-                "forge: role {role:?} is configured for provider {provider:?} (model {name:?}), \
-                 but forge only supports the Ollama/OpenAI-compat backend — ignoring this \
-                 override and using the active brain. Set an Ollama model for this role, or run \
-                 the whole pipeline on a frontier model via claudette's active brain config."
-            )),
-        );
-        return None;
-    }
-    Some(name.to_string())
-}
-
-/// v0b helper: load the bundled `codex7` Coder persona, parsed at runtime
-/// from content baked in via `include_str!`. Returns `None` if the bundled
-/// content fails to parse, which should only happen if the personas file is
-/// edited into invalid TOML/markdown — caught by
-/// `personas::bundled_personas_all_parse`.
-///
-/// Bundled rather than disk-resolved because claudette is shipped as a
-/// single binary (no `cargo install`-side `personas/` directory).
-fn forge_default_coder_persona() -> Option<crate::personas::Persona> {
-    const CODEX7: &str = include_str!("../../personas/codex7.md");
-    crate::personas::parse_persona_content(CODEX7, "bundled:codex7").ok()
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -551,8 +348,6 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         .with_tool_requirement("gh_pr_view", ReadOnly)
         // v0.6.0 Phase 3.3b — failed-job log extraction.
         .with_tool_requirement("gh_workflow_logs", ReadOnly)
-        // v0.6.0 Phase 3.4c — forge mission tail. Pure file read.
-        .with_tool_requirement("forge_tail", ReadOnly)
         .with_tool_requirement("gh_create_issue", WorkspaceWrite)
         .with_tool_requirement("gh_comment_issue", WorkspaceWrite)
         .with_tool_requirement("gh_fork", WorkspaceWrite)
@@ -612,20 +407,6 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::forge;
-
-    /// The bundled `codex7` persona is baked into the binary via
-    /// `include_str!`. If the file is edited into invalid TOML or stripped of
-    /// its frontmatter, `forge_default_coder_persona` returns `None` and
-    /// forge-mode silently runs without a persona. Catch that at build time.
-    #[test]
-    fn forge_default_coder_persona_parses_bundled_codex7() {
-        let p = forge_default_coder_persona().expect("bundled codex7 must parse");
-        assert_eq!(p.name, "CodeX-7");
-        assert_eq!(p.role, forge::types::Role::Coder);
-        assert!(!p.voice.is_empty(), "codex7 should have a voice");
-        assert!(!p.backstory.is_empty(), "codex7 should have backstory");
-    }
 
     /// The research permission policy caps at `ReadOnly`: every write/exec
     /// tool is denied at the tier ceiling before any prompter is consulted,

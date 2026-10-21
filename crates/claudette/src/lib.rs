@@ -59,7 +59,6 @@ pub mod egress;
 pub mod env_config;
 pub mod executor;
 pub mod firstrun;
-pub mod forge;
 // External-cloud integrations — gated behind the default-on `integrations`
 // feature so a `--no-default-features` build is coding-only (no Google/Telegram
 // code compiled in). See Cargo.toml `[features]`.
@@ -77,7 +76,6 @@ pub mod redact;
 pub mod run;
 pub mod scheduler;
 pub mod secrets;
-pub mod security_review;
 pub mod setup;
 pub mod status;
 #[cfg(feature = "integrations")]
@@ -104,10 +102,10 @@ pub mod voice;
 pub use api::{probe_ollama, resolve_ollama_url, OllamaApiClient};
 pub use executor::AgentToolExecutor;
 pub use memory::{default_memory_path, try_load_memory, try_load_memory_at, MAX_MEMORY_CHARS};
-pub use prompt::{agent_system_prompt, agent_system_prompt_with_memory, forge_system_prompt};
+pub use prompt::{agent_system_prompt, agent_system_prompt_with_memory};
 pub use run::{
-    default_session_path, run_agent, run_agent_repl, run_deep_research, run_forge_mission,
-    save_session, save_session_at, try_load_session, try_load_session_at, SessionOptions,
+    default_session_path, run_agent, run_agent_repl, run_deep_research, save_session,
+    save_session_at, try_load_session, try_load_session_at, SessionOptions,
 };
 pub use tools::{agent_tools_json, workspace_startup_diagnostics};
 

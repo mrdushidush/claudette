@@ -1,9 +1,8 @@
 //! Persona loader — bundled + user-defined.
 //!
 //! Originally ported from `claudettes-forge/crates/core/src/personas.rs` at
-//! the `rc1-final` tag. Forge-mode Coder is wired against `codex7` since v0b;
-//! assistant-mode (Eva) is wired in alongside the `--faceless` flag; the
-//! forge Verifier uses a static prompt with no persona overlay.
+//! the `rc1-final` tag. Eva, the assistant-mode persona, is the only bundled
+//! one; `--faceless` turns her overlay off.
 //!
 //! A persona bundles name, role, voice style, backstory, and example
 //! interactions into a single markdown file (TOML frontmatter + markdown
@@ -13,8 +12,8 @@
 //!    `crates/claudette/personas/`.
 //! 2. **User overrides** at `$PROJECT/.claudette/personas/`.
 //!
-//! User overrides win by filename — drop `codex7.md` into your project's
-//! `.claudette/personas/` to rewrite CodeX-7 for that project. Restart is
+//! User overrides win by filename — drop `eva.md` into your project's
+//! `.claudette/personas/` to rewrite Eva for that project. Restart is
 //! required; no hot reload.
 
 use std::collections::HashMap;
@@ -483,21 +482,17 @@ Flag anything over 50 lines.
         let dir = workspace_personas_dir();
         let map = load_personas(&dir, None)
             .unwrap_or_else(|e| panic!("load_personas({}) failed: {e}", dir.display()));
-        for key in ["codex7", "cto", "eva"] {
-            assert!(
-                map.contains_key(key),
-                "bundled persona '{key}' missing from map (keys: {:?})",
-                map.keys().collect::<Vec<_>>()
-            );
-        }
+        assert!(
+            map.contains_key("eva"),
+            "bundled persona 'eva' missing from map (keys: {:?})",
+            map.keys().collect::<Vec<_>>()
+        );
     }
 
     #[test]
     fn bundled_personas_have_expected_roles() {
         let dir = workspace_personas_dir();
         let map = load_personas(&dir, None).expect("load");
-        assert_eq!(map["codex7"].role, Role::Coder);
-        assert_eq!(map["cto"].role, Role::Cto);
         assert_eq!(map["eva"].role, Role::Assistant);
     }
 

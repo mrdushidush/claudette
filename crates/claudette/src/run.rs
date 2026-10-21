@@ -50,8 +50,8 @@ pub(crate) use cli_prompter::{format_ctx_gauge, EMPTY_RESPONSE_NUDGE};
 // mission code keep resolving.
 mod runtime_build;
 pub(crate) use runtime_build::{
-    build_forge_role_runtime, build_forge_runtime, build_permission_policy, build_research_runtime,
-    build_runtime, build_runtime_streaming, build_runtime_with_brain,
+    build_permission_policy, build_research_runtime, build_runtime, build_runtime_streaming,
+    build_runtime_with_brain,
 };
 
 // Interactive agent REPL loop. Extracted to `run/repl.rs` (Wave C6);
@@ -63,14 +63,6 @@ mod line_editor;
 
 mod repl;
 pub use repl::run_agent_repl;
-
-// Forge mission orchestration (Coder→Verifier fix loop, planner/verifier).
-// Extracted to `run/forge_run.rs` (Wave C5); re-exported so `lib.rs` / `main.rs`
-// keep resolving `run::run_forge_mission`. `forge_auto_approve_enabled` is also
-// re-exported because the C4 runtime builders consult it.
-mod forge_run;
-pub(crate) use forge_run::forge_auto_approve_enabled;
-pub use forge_run::run_forge_mission;
 
 /// Deep-research mode pure core (manifest / batches / finding parser /
 /// progress stores) plus the `--research` driver.
@@ -369,9 +361,6 @@ mod tests {
     // maybe_compact_session test); reach it through the submodule directly.
     use super::compaction_policy::CompactionTier;
     use crate::{ContentBlock, ConversationMessage, MessageRole, PermissionMode};
-    // The staying forge_model_map test uses `forge::types::ModelMap` (not a
-    // moved fn); the forge prod code that imported `forge` moved out.
-    use crate::forge;
     use std::sync::Mutex;
 
     /// `std::env::set_var` is process-global and races between parallel
@@ -601,33 +590,6 @@ mod tests {
                 PermissionMode::DangerFullAccess,
                 "{name} must be DangerFullAccess: {why}; got {actual:?}"
             );
-        }
-    }
-
-    // ─── Forge v0b: persona overlay + models.toml role-routing ────────
-
-    /// `forge_role_model` is best-effort: a missing `~/.claudettes-forge/
-    /// models.toml` returns the built-in default (qwen3-coder:30b for Coder,
-    /// qwen3.5:14b for Planner/Verifier), env overrides win when set. The
-    /// smoke test asserts each forge role returns *some* non-empty string
-    /// in a clean environment (defaults from
-    /// `forge::models_toml::default_model_map`).
-    #[test]
-    fn forge_model_map_has_a_default_for_each_role() {
-        // The built-in ModelMap always resolves a non-empty model per role.
-        // (forge_role_model itself returns None when forge models aren't
-        // explicitly configured, so each role falls back to the active brain —
-        // roast RC-G #4 — which is environment-dependent and not asserted here.)
-        let map = forge::types::ModelMap::load().expect("default model map loads");
-        for role in [
-            forge::types::Role::Coder,
-            forge::types::Role::Planner,
-            forge::types::Role::Verifier,
-        ] {
-            let (_, model) = map
-                .resolve(role)
-                .unwrap_or_else(|| panic!("forge default model for {role:?}"));
-            assert!(!model.is_empty(), "{role:?} model name must be non-empty");
         }
     }
 }

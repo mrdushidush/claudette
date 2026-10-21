@@ -287,9 +287,6 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         "semantic_grep" => Some(ToolGroup::Semantic),
         "screenshot_capture" | "image_describe" => Some(ToolGroup::Vision),
         "clipboard_read" | "clipboard_write" => Some(ToolGroup::Clipboard),
-        // forge_tail lives in the Github group alongside mission_* since
-        // that's where the forge-mission lifecycle already lives.
-        "forge_tail" => Some(ToolGroup::Github),
         _ => None,
     }
 }
@@ -757,10 +754,8 @@ mod tests {
         // v0.6.0: gh_list_my_prs + gh_list_assigned_issues collapsed into
         // gh_inbox(scope=...); mission_status/list/attach/exit collapsed
         // into mission_state(action=...). gh_pr_view + gh_workflow_logs
-        // added in Phase 3.3. forge_tail joins via Phase 3.4c (lives in
-        // the Github group with the mission_* lifecycle). Group is now 15.
-        assert!(gh.contains(&"forge_tail".to_string()), "forge_tail missing");
-        assert_eq!(gh.len(), 15);
+        // added in Phase 3.3. forge_tail left with Forge. Group is now 14.
+        assert_eq!(gh.len(), 14);
     }
 
     #[test]
