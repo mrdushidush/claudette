@@ -150,8 +150,6 @@ is worse.
 - Larger end-to-end flows live as runnable examples under
   `crates/claudette/examples/`. Run with `cargo run -p claudette
   --example <name>`. The current set:
-  - `brownfield_smoke`, `brownfield_abcc` — exercise mission_* +
-    gh_* tools (no brain, real GitHub calls).
   - `oauth_smoke` — calls `calendar_list_events` + `gmail_list`
     through the dispatcher to verify Google OAuth tokens still
     refresh. Read-only, no brain.

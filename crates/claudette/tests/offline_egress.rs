@@ -66,17 +66,16 @@ fn restore(key: &str, val: Option<&str>) {
 
 /// The minimal input each tool needs to *reach* its egress guard. Most tools
 /// guard at the dispatch/group level (or the first line of their handler)
-/// before touching their input, so `{}` is enough. Three parse input first:
+/// before touching their input, so `{}` is enough. Two parse input first:
 /// `web_fetch` needs a public URL that clears the SSRF check, and
-/// `git_clone` / `mission_start` need a remote target — each then hits the
-/// guard before any side effect (network *or* filesystem).
+/// `git_clone` needs a remote target — each then hits the guard before
+/// any side effect (network *or* filesystem).
 fn offline_probe_input(tool: &str) -> &'static str {
     match tool {
         "web_fetch" => r#"{"url":"https://1.1.1.1/"}"#,
         "git_clone" => {
             r#"{"url":"https://github.com/octocat/Hello-World.git","dest":"claudette-offline-probe"}"#
         }
-        "mission_start" => r#"{"target":"octocat/Hello-World"}"#,
         _ => "{}",
     }
 }
@@ -148,11 +147,11 @@ fn net_tools_registry_is_consistent_and_covers_network_families() {
     }
 
     // (c) Forgotten-guard regression guard: every tool in an *always-network*
-    // family must be listed. Add a new `gh_*` (etc.) tool but forget the guard
-    // + registry entry and this fails loudly. `git_*` / `mission_*` have local
-    // siblings, so they can't be swept by prefix and are maintained by hand in
+    // family must be listed. Add a new `gmail_*` (etc.) tool but forget the guard
+    // + registry entry and this fails loudly. `git_*` has local siblings, so
+    // it can't be swept by prefix and is maintained by hand in
     // egress::NET_TOOLS.
-    const ALWAYS_NET_PREFIXES: &[&str] = &["gh_", "gmail_", "calendar_", "tg_"];
+    const ALWAYS_NET_PREFIXES: &[&str] = &["gmail_", "calendar_", "tg_"];
     let registry: HashSet<&str> = all_net_tools().collect();
     for name in &schema_names {
         if ALWAYS_NET_PREFIXES.iter().any(|p| name.starts_with(p)) {

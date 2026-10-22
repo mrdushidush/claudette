@@ -739,7 +739,7 @@ where
                             {
                                 let path = read_file_path(&input);
                                 if !path.is_empty() {
-                                    let workspace = crate::missions::active_cwd();
+                                    let workspace = crate::workspace::cwd();
                                     use crate::tools::post_edit_check::CheckOutcome;
                                     let outcome =
                                         crate::tools::post_edit_check::run_post_edit_check(

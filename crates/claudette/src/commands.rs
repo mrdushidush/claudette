@@ -77,16 +77,6 @@ pub enum SlashCommand {
     /// probe. Used when the user's loaded the embed model in LM Studio
     /// mid-session and wants recall back without restarting the process.
     RecallReprobe,
-    /// Phase 2 brownfield shortcut: clone a target repo and make it the
-    /// active mission in one shot. Thin wrapper over the `mission_start`
-    /// tool — exposes it from the REPL without going through the brain.
-    Brownfield(String),
-    /// Clear the active mission. Same effect as the `mission_exit` brain
-    /// tool, but reachable directly from the REPL so the user can wipe a
-    /// rehydrated mission without going through the brain. Added with the
-    /// F8 safety fix — the rehydrate banner advises this command so it has
-    /// to exist as a slash for the advice to work.
-    MissionExit,
     /// Undo the last turn's destructive actions from the action transcript
     /// (`~/.claudette/transcript/actions.jsonl`), restoring each trashed file
     /// / pre-image. `whole_turn` is the default (`/undo`); `/undo one` sets it
@@ -207,13 +197,6 @@ pub fn parse_slash_command(line: &str) -> Option<SlashCommand> {
                     .to_string(),
             ),
         },
-        "brownfield" => match arg.filter(|s| !s.is_empty()) {
-            Some(target) => SlashCommand::Brownfield(target),
-            None => SlashCommand::Invalid(
-                "/brownfield requires a target. Try: /brownfield owner/repo".to_string(),
-            ),
-        },
-        "mission_exit" | "mission-exit" => SlashCommand::MissionExit,
         "exit" | "quit" | "q" | "x" => SlashCommand::Exit,
         other => SlashCommand::Invalid(format!("unknown command: /{other} — try /help")),
     };
@@ -400,14 +383,6 @@ where
             handle_recall_reprobe(out);
             SlashOutcome::Continue
         }
-        SlashCommand::Brownfield(target) => {
-            handle_brownfield(out, &target);
-            SlashOutcome::Continue
-        }
-        SlashCommand::MissionExit => {
-            handle_mission_exit(out);
-            SlashOutcome::Continue
-        }
         SlashCommand::Exit => SlashOutcome::Exit,
         SlashCommand::Invalid(msg) => {
             let _ = writeln!(
@@ -492,16 +467,6 @@ fn print_help(out: &mut impl Write) {
                     "Pin brain model (or 'auto' to restore preset fallback)",
                 ),
                 ("/models", "Show current model config"),
-            ],
-        ),
-        (
-            "brownfield",
-            &[
-                (
-                    "/brownfield <target>",
-                    "Clone a repo and make it the active mission",
-                ),
-                ("/mission_exit", "Clear the active mission"),
             ],
         ),
         (
@@ -979,18 +944,6 @@ fn handle_status<C: ApiClient, T: ToolExecutor>(
     if let Some(text) = recall_marker {
         let _ = writeln!(out, "  {} recall: {}", theme::dim("•"), text);
     }
-    // Brownfield mission marker — shows up only when a mission is active,
-    // so users can tell at a glance which working tree their git/bash/file
-    // tools are routed to.
-    if let Some(mission) = crate::missions::active_mission() {
-        let _ = writeln!(
-            out,
-            "  {} mission: {} {}",
-            theme::dim("•"),
-            theme::ok(&mission.slug),
-            theme::dim(&mission.path.display().to_string())
-        );
-    }
     let _ = writeln!(
         out,
         "  {} session file: {}",
@@ -1380,90 +1333,6 @@ fn handle_recall_reprobe(out: &mut impl Write) {
 fn short_ts(ts: &str) -> String {
     ts.split_once('T')
         .map_or_else(|| ts.to_string(), |(date, _)| date.to_string())
-}
-
-fn handle_brownfield(out: &mut impl Write, target: &str) {
-    let _ = writeln!(
-        out,
-        "{} {} {}",
-        theme::ROBOT,
-        theme::accent("brownfield"),
-        theme::dim(target)
-    );
-    let payload = serde_json::json!({ "target": target }).to_string();
-    match crate::tools::dispatch_tool("mission_start", &payload) {
-        Ok(json) => {
-            // Success path: a /brownfield that succeeded clears any prior
-            // failure sticky-flag so subsequent /forge calls go back to
-            // normal auto-bootstrap behaviour.
-            crate::missions::clear_brownfield_failed();
-            match serde_json::from_str::<serde_json::Value>(&json) {
-                Ok(v) => {
-                    let slug = v.get("slug").and_then(|x| x.as_str()).unwrap_or("?");
-                    let path = v.get("path").and_then(|x| x.as_str()).unwrap_or("?");
-                    let _ = writeln!(
-                        out,
-                        "  {} {} {}",
-                        theme::ok(theme::OK_GLYPH),
-                        theme::ok(&format!("mission active: {slug}")),
-                        theme::dim(path)
-                    );
-                }
-                // mission_start always returns valid JSON on success, so this
-                // branch is defensive against future shape drift; print the
-                // raw payload so the user sees something useful either way.
-                Err(_) => {
-                    let _ = writeln!(out, "  {} {}", theme::ok(theme::OK_GLYPH), json);
-                }
-            }
-        }
-        Err(e) => {
-            // F8b safety fix: poison the session so the next /forge can't
-            // silently fall through to cwd auto-bootstrap. The user
-            // explicitly tried to target a different repo and that failed
-            // — running /forge against their dev tree instead is rarely
-            // what they want.
-            crate::missions::mark_brownfield_failed();
-            let _ = writeln!(
-                out,
-                "  {} {}",
-                theme::error(theme::ERR_GLYPH),
-                theme::error(&e)
-            );
-        }
-    }
-}
-
-fn handle_mission_exit(out: &mut impl Write) {
-    // Always clear the sticky brownfield-failed flag, even if no mission
-    // is active — the user is signalling "fresh start, please".
-    crate::missions::clear_brownfield_failed();
-    match crate::missions::clear_active() {
-        Some(slug) => {
-            let _ = writeln!(
-                out,
-                "{} {} {}",
-                theme::ROBOT,
-                theme::accent("mission exit"),
-                theme::dim(&slug)
-            );
-            let _ = writeln!(
-                out,
-                "  {} {}",
-                theme::ok(theme::OK_GLYPH),
-                theme::ok("mission cleared")
-            );
-        }
-        None => {
-            let _ = writeln!(out, "{} {}", theme::ROBOT, theme::accent("mission exit"));
-            let _ = writeln!(
-                out,
-                "  {} {}",
-                theme::dim("∘"),
-                theme::dim("no active mission")
-            );
-        }
-    }
 }
 
 fn print_models(out: &mut impl Write, cfg: &ModelConfig, just_switched: Option<Preset>) {
@@ -1870,65 +1739,6 @@ mod tests {
             Some(SlashCommand::RecallReprobe),
             "should tolerate whitespace around the reprobe keyword"
         );
-    }
-
-    #[test]
-    fn parse_brownfield_with_target() {
-        assert_eq!(
-            parse_slash_command("/brownfield octocat/Hello-World"),
-            Some(SlashCommand::Brownfield("octocat/Hello-World".to_string()))
-        );
-        // Full URL forms pass through untouched — mission_start does the
-        // canonicalisation.
-        assert_eq!(
-            parse_slash_command("/brownfield https://github.com/octocat/Hello-World.git"),
-            Some(SlashCommand::Brownfield(
-                "https://github.com/octocat/Hello-World.git".to_string()
-            ))
-        );
-        // ssh form preserved verbatim, including the colon.
-        assert_eq!(
-            parse_slash_command("/brownfield git@github.com:octocat/Hello-World.git"),
-            Some(SlashCommand::Brownfield(
-                "git@github.com:octocat/Hello-World.git".to_string()
-            ))
-        );
-        // Surrounding whitespace trimmed by the parser, like /save / /recall.
-        assert_eq!(
-            parse_slash_command("/brownfield   octocat/Hello-World  "),
-            Some(SlashCommand::Brownfield("octocat/Hello-World".to_string()))
-        );
-    }
-
-    #[test]
-    fn parse_mission_exit_aliases() {
-        // Both underscore and dash forms must work — REPL users type both.
-        assert_eq!(
-            parse_slash_command("/mission_exit"),
-            Some(SlashCommand::MissionExit)
-        );
-        assert_eq!(
-            parse_slash_command("/mission-exit"),
-            Some(SlashCommand::MissionExit)
-        );
-        // Case-insensitive like every other slash.
-        assert_eq!(
-            parse_slash_command("/Mission_Exit"),
-            Some(SlashCommand::MissionExit)
-        );
-    }
-
-    #[test]
-    fn parse_brownfield_without_target_is_invalid() {
-        let parsed = parse_slash_command("/brownfield");
-        assert!(matches!(parsed, Some(SlashCommand::Invalid(_))));
-        let parsed = parse_slash_command("/brownfield   ");
-        assert!(matches!(parsed, Some(SlashCommand::Invalid(_))));
-        // Spot-check the error string mentions the command, so the user
-        // knows what they typed wrong rather than getting a generic hint.
-        if let Some(SlashCommand::Invalid(msg)) = parse_slash_command("/brownfield") {
-            assert!(msg.contains("/brownfield"), "got: {msg}");
-        }
     }
 
     #[test]

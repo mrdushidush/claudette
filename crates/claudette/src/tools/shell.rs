@@ -109,7 +109,7 @@ pub(super) fn schemas() -> Vec<Value> {
                     "type": "object",
                     "properties": {
                         "command": { "type": "string", "description": "Shell command (same syntax as `bash`)." },
-                        "cwd":     { "type": "string", "description": "Optional working directory (defaults to the active mission cwd)." }
+                        "cwd":     { "type": "string", "description": "Optional working directory (defaults to the current working directory)." }
                     },
                     "required": ["command"]
                 }
@@ -213,11 +213,9 @@ fn run_bash(input: &str) -> Result<String, String> {
     #[cfg(not(target_os = "windows"))]
     let (program, args) = ("sh", vec!["-c", command]);
 
-    // bash inherits the active-mission cwd (T2): when the brain is
-    // working a brownfield mission, `bash` runs inside that tree so
-    // shell-driven workflows (build, test, scripted edits) stay
-    // self-consistent with git_*. Falls back to process cwd otherwise.
-    let cwd = crate::missions::active_cwd();
+    // bash runs in the same directory as git_*, so shell-driven workflows
+    // (build, test, scripted edits) stay consistent with them.
+    let cwd = crate::workspace::cwd();
     destructive_git_guard(command, &cwd)?;
     let result = run_command_with_timeout(program, &args, 30, Some(&cwd));
 
@@ -435,11 +433,8 @@ fn run_edit_file(input: &str) -> Result<String, String> {
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    // Boundary follows the active context (roast RC-B): in the interactive
-    // secretary (no mission) this is $HOME-gated, the user having confirmed
-    // via the permission prompt; under a forge/brownfield mission it is
-    // confined to the mission tree so the autonomous Coder can't edit files
-    // outside it (e.g. ~/.ssh/config). See `validate_edit_path`.
+    // $HOME- and workspace-gated, the user having confirmed via the
+    // permission prompt. See `validate_edit_path`.
     let path = validate_edit_path(path_str)?;
 
     let content = fs::read_to_string(&path)
@@ -553,7 +548,7 @@ fn run_bash_background(input: &str) -> Result<String, String> {
     let cwd = v
         .get("cwd")
         .and_then(Value::as_str)
-        .map_or_else(crate::missions::active_cwd, PathBuf::from);
+        .map_or_else(crate::workspace::cwd, PathBuf::from);
     destructive_git_guard(command, &cwd)?;
 
     ensure_dir(&jobs_dir())?;

@@ -78,7 +78,6 @@ For finer-grained control - disabling one outbound path while leaving the rest l
 | Outbound | How to disable |
 |----------|----------------|
 | Brave web search | Unset `BRAVE_API_KEY`. Tool returns "not configured". |
-| GitHub API | Unset `GITHUB_TOKEN`. The `github` tool group can still be enabled but every call errors. |
 | Google Calendar / Gmail | Don't run `claudette --auth-google`. Without tokens, the tools refuse to dispatch. |
 | Telegram | Don't run `claudette --telegram`. No long-poll started, no outbound. |
 | Voice TTS | Don't run `/voice on`. Edge-TTS python subprocess is never spawned. |
@@ -103,7 +102,7 @@ export CLAUDETTE_WORKSPACE="D:\dev\claudette;C:\src\other-project"   # Windows
 export CLAUDETTE_WORKSPACE="/Users/me/src/foo:/Users/me/src/bar"     # Unix
 ```
 
-This is read-only. WorkspaceWrite tools still scope to `~/.claudette/files/` and the active mission tree.
+Writes follow it too: besides the `~/.claudette/files/` scratch dir, `write_file` may create files under these roots. Edits to existing files still show a diff and wait for `[y/N]`.
 
 ---
 

@@ -121,14 +121,14 @@ embedding model loaded at the endpoint Claudette probed.
 
 ## `Tool X returned not_configured` (or "not configured")
 
-**Cause:** a keyed integration (Brave web search, GitHub, Google, Telegram)
+**Cause:** a keyed integration (Brave web search, Google, Telegram)
 is missing its token/key. The tool refuses rather than making a half-formed
 call - by design, nothing reaches the network until you've supplied the key.
 
 **Fixes:**
 - Run `claudette --doctor` and read the **tokens** section: it lists each
   integration and whether its env var / secret file is present.
-- Set the relevant variable (e.g. `BRAVE_API_KEY`, `GITHUB_TOKEN`) or drop
+- Set the relevant variable (e.g. `BRAVE_API_KEY`, `TELEGRAM_BOT_TOKEN`) or drop
   the token in `~/.claudette/secrets/<name>.token`. See
   [configuration.md](configuration.md) for the full lookup order.
 

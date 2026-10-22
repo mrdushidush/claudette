@@ -67,7 +67,6 @@ pub mod google_auth;
 pub mod hw;
 pub mod image_attach;
 pub mod memory;
-pub mod missions;
 pub mod model_config;
 pub mod personas;
 pub mod prompt;
@@ -93,6 +92,7 @@ pub mod tts;
 // `telegram_mode`, so it rides the same `integrations` gate.
 #[cfg(feature = "integrations")]
 pub mod voice;
+pub mod workspace;
 
 // ── Public re-exports ────────────────────────────────────────────────────
 pub use api::{probe_ollama, resolve_ollama_url, OllamaApiClient};

@@ -3,8 +3,8 @@
 //! Sandboxing policy (set by the `validate_read_path` / `validate_write_path`
 //! helpers in the parent module):
 //!   - read_file / list_dir: allowed anywhere under the user's $HOME.
-//!   - write_file: allowed ONLY under ~/.claudette/files/ (the scratch dir),
-//!     the active mission tree, or an explicit `CLAUDETTE_WORKSPACE` project.
+//!   - write_file: allowed ONLY under ~/.claudette/files/ (the scratch dir)
+//!     or an explicit `CLAUDETTE_WORKSPACE` project.
 //!
 //! write_file writes any text file directly — source code, config, data, or
 //! markup. (Historically it refused code and routed it to a `generate_code`
@@ -132,8 +132,8 @@ fn run_read_file(input: &str) -> Result<String, String> {
         // its next call instead of hallucinating success.
         format!(
             "read_file: stat {} failed: {e}. (input path: {path_str}; \
-             relative paths resolve against the active mission cwd or the \
-             process cwd, with CLAUDETTE_WORKSPACE roots as a fallback.)",
+             relative paths resolve against the process cwd, with \
+             CLAUDETTE_WORKSPACE roots as a fallback.)",
             path.display()
         )
     })?;
@@ -205,13 +205,11 @@ fn run_read_file(input: &str) -> Result<String, String> {
 /// (`diff_preview::render`) test the SAME path the write uses — a second copy
 /// of this logic would drift and gate the wrong file.
 ///
-/// Bare relative paths get resolved under either the active mission tree (T2)
-/// or the scratch sandbox, NOT against the process CWD. Reasoning: the model
-/// says "save it to dolphins-post.txt" and expects it to land somewhere
-/// reasonable. Pre-T2 we rooted bare relative paths under ~/.claudette/files/.
-/// T2 keeps that fallback but routes to the mission tree when a brownfield
-/// mission is active — matching the brain's likely intent ("save README.md"
-/// means *the project's* README, not a copy in scratch). Absolute and
+/// Bare relative paths get resolved under the process CWD when it is inside a
+/// `CLAUDETTE_WORKSPACE` root, else under the scratch sandbox. Reasoning: the
+/// model says "save it to dolphins-post.txt" and expects it to land somewhere
+/// reasonable, and inside a workspace "save README.md" means *the
+/// project's* README, not a copy in scratch. Absolute and
 /// ~/-prefixed paths still flow through validate_write_path unchanged so the
 /// user can still explicitly target a sub-folder.
 fn resolve_write_target(path_str: &str) -> Result<std::path::PathBuf, String> {
@@ -221,17 +219,10 @@ fn resolve_write_target(path_str: &str) -> Result<std::path::PathBuf, String> {
     {
         path_str.to_string()
     } else {
-        // Bare relative path. Resolve against, in priority order: the active
-        // mission tree → the user's explicit workspace CWD (daily-driver:
-        // "save README.md here" means the project) → the scratch sandbox
-        // (pure personal-assistant default when no workspace is set).
-        let base = if crate::missions::active_mission().is_some() {
-            crate::missions::active_cwd()
-        } else if let Some(ws_cwd) = super::workspace_cwd() {
-            ws_cwd
-        } else {
-            files_dir()
-        };
+        // Bare relative path. Resolve against the user's explicit workspace
+        // CWD (daily-driver: "save README.md here" means the project), else
+        // the scratch sandbox (the default when no workspace is set).
+        let base = super::workspace_cwd().unwrap_or_else(files_dir);
         base.join(path_str).display().to_string()
     };
     validate_write_path(&resolved_input)

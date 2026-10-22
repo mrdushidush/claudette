@@ -8,11 +8,11 @@
 //! dependency-free analogue to 0600, since POSIX mode bits do not apply.
 //! Reads use `fs::read_to_string` and do not re-enforce the ACL on
 //! pre-existing files. Env vars take precedence so
-//! `export GITHUB_TOKEN=...` still overrides a file-backed token.
+//! `export TELEGRAM_TOKEN=...` still overrides a file-backed token.
 //!
 //! Lookup order:
 //! 1. `CLAUDETTE_{NAME}_TOKEN` env var (fully qualified)
-//! 2. `{NAME}_TOKEN` env var (short form, e.g. `GITHUB_TOKEN`)
+//! 2. `{NAME}_TOKEN` env var (short form, e.g. `TELEGRAM_TOKEN`)
 //! 3. `~/.claudette/secrets/{name}.token` file
 //!
 //! The `read_secret` helper is the single entry point — every tool that
@@ -139,15 +139,15 @@ fn secrets_dir() -> PathBuf {
         .join("secrets")
 }
 
-/// Read a secret by logical name (e.g. `"github"`, `"telegram"`).
+/// Read a secret by logical name (e.g. `"telegram"`, `"brave"`).
 ///
 /// Returns the trimmed token string, or `Err` with a user-friendly message
 /// listing all three places it looked.
 ///
 /// # Lookup order
-/// 1. `CLAUDETTE_GITHUB_TOKEN` (for name `"github"`)
-/// 2. `GITHUB_TOKEN`
-/// 3. `~/.claudette/secrets/github.token`
+/// 1. `CLAUDETTE_TELEGRAM_TOKEN` (for name `"telegram"`)
+/// 2. `TELEGRAM_TOKEN`
+/// 3. `~/.claudette/secrets/telegram.token`
 pub fn read_secret(name: &str) -> Result<String, String> {
     let upper = name.to_uppercase();
 
