@@ -23,8 +23,7 @@
 //!  2. **Dispatch / subprocess layer** — tools that shell out to the network
 //!     instead of using reqwest can't be seen by the HTTP layer, so they call
 //!     [`guard_subprocess`] up front and refuse with the SAME message: the
-//!     `git_push` / `git_clone` subprocesses, the brownfield `mission_start`
-//!     clone and `mission_submit` push, and the edge-tts TTS subprocess.
+//!     `git_push` / `git_clone` subprocesses and the edge-tts TTS subprocess.
 //!
 //! The allow / deny decision is pure host-matching ([`is_allowed_host`]); the
 //! flag/env plumbing ([`is_offline`]) and both message builders are unit-tested
@@ -64,7 +63,7 @@ pub const BLOCK_PREFIX: &str = "blocked by offline mode (--offline / CLAUDETTE_O
 /// (`net_tools_registry_covers_network_named_tools`) fails if a tool in an
 /// always-network family (`gh_`, `gmail_`, `calendar_`, `tg_`) is missing from
 /// this list — so a forgotten guard on those families is caught automatically.
-/// Tools in mixed families (`git_*`, `mission_*` have local siblings) must be
+/// Tools in mixed families (`git_*` has local siblings) must be
 /// added here by hand.
 pub const NET_TOOLS: &[&str] = &[
     // Search / fetch
@@ -91,11 +90,9 @@ pub const NET_TOOLS: &[&str] = &[
     // Google (Gmail + Calendar) + Telegram are integration-only and listed in
     // INTEGRATION_NET_TOOLS below, so this list stays consistent with the
     // coding-only schema (where those tools don't exist).
-    // Network-reaching git + brownfield-mission subprocesses
+    // Network-reaching git subprocesses
     "git_push",
     "git_clone",
-    "mission_start",
-    "mission_submit",
     // Raw-shell escape hatch. `bash` / `bash_background` run an arbitrary
     // command, so they are an unguardable egress vector (a curl/scp/python
     // denylist leaks by construction). Under offline mode they are refused

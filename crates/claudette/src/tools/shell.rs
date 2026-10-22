@@ -109,7 +109,7 @@ pub(super) fn schemas() -> Vec<Value> {
                     "type": "object",
                     "properties": {
                         "command": { "type": "string", "description": "Shell command (same syntax as `bash`)." },
-                        "cwd":     { "type": "string", "description": "Optional working directory (defaults to the active mission cwd)." }
+                        "cwd":     { "type": "string", "description": "Optional working directory (defaults to the current working directory)." }
                     },
                     "required": ["command"]
                 }
@@ -433,11 +433,8 @@ fn run_edit_file(input: &str) -> Result<String, String> {
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    // Boundary follows the active context (roast RC-B): in the interactive
-    // secretary (no mission) this is $HOME-gated, the user having confirmed
-    // via the permission prompt; under a forge/brownfield mission it is
-    // confined to the mission tree so the autonomous Coder can't edit files
-    // outside it (e.g. ~/.ssh/config). See `validate_edit_path`.
+    // $HOME- and workspace-gated, the user having confirmed via the
+    // permission prompt. See `validate_edit_path`.
     let path = validate_edit_path(path_str)?;
 
     let content = fs::read_to_string(&path)

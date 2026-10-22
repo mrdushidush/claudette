@@ -13,9 +13,7 @@
 //! diff already (Claude Code and Aider both do this).
 //!
 //! Path safety: paths are validated through `super::validate_edit_path`
-//! the same way `edit_file` does — $HOME-gated in the interactive secretary,
-//! but confined to the mission tree while a forge/brownfield mission is
-//! active (roast RC-B), so the autonomous Coder can't patch files outside it.
+//! the same way `edit_file` does ($HOME + `CLAUDETTE_WORKSPACE`).
 
 use std::fs;
 use std::path::PathBuf;

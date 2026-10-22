@@ -1,10 +1,10 @@
 //! Runtime assembly (Wave C4 — split out of run.rs).
 //!
-//! Builds `ConversationRuntime`s for the interactive/single-shot agent and for
-//! the forge roles, plus the permission policy that gates every tool. Pure
-//! construction — no turn loop. `use super::*` pulls in run.rs's own items
-//! (current_model, prompt/persona helpers, the forge mission helpers these call
-//! into); the explicit `use`s below are the external crate paths run.rs imports.
+//! Builds `ConversationRuntime`s for the interactive/single-shot agent, plus
+//! the permission policy that gates every tool. Pure construction — no turn
+//! loop. `use super::*` pulls in run.rs's own items (current_model and the
+//! prompt/persona helpers these call into); the explicit `use`s below are the
+//! external crate paths run.rs imports.
 
 use super::*;
 
@@ -389,17 +389,6 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         // Brownfield: git_clone writes a fresh tree under the controlled
         // ~/.claudette/missions/ root. Auto-allowed (WorkspaceWrite).
         .with_tool_requirement("git_clone", WorkspaceWrite)
-        // ── T2 brownfield: mission_* tools ──────────────────────────────
-        // mission_start clones into ~/.claudette/missions/ (WorkspaceWrite,
-        // matching git_clone). mission_state (status/list/attach/exit) only
-        // reads or flips in-memory session state with no FS writes, so it
-        // sits at the lowest tier (ReadOnly); downstream cwd-routed writes
-        // still go through their own gates. mission_submit stages/commits/
-        // pushes/opens a PR — DangerFullAccess to match its worst action
-        // (`git push -u`).
-        .with_tool_requirement("mission_start", WorkspaceWrite)
-        .with_tool_requirement("mission_state", ReadOnly)
-        .with_tool_requirement("mission_submit", DangerFullAccess)
 }
 
 #[cfg(test)]

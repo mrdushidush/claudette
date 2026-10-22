@@ -67,7 +67,6 @@ pub mod google_auth;
 pub mod hw;
 pub mod image_attach;
 pub mod memory;
-pub mod missions;
 pub mod model_config;
 pub mod personas;
 pub mod prompt;

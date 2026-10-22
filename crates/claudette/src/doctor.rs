@@ -528,7 +528,7 @@ const TOOLCHAINS: &[Toolchain] = &[
         key: "git",
         bins: &["git"],
         version_arg: "--version",
-        why: "the git tools and missions: status, diff, commit, clone",
+        why: "the git tools: status, diff, commit, clone",
         required: true,
     },
     Toolchain {
