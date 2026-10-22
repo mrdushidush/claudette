@@ -29,7 +29,7 @@ claudette --offline --doctor          # prints the egress allow-list
 When enabled, **every** outbound network call is checked against a tiny allow-list and anything else is hard-blocked with a single, uniform error (`blocked by offline mode (--offline / CLAUDETTE_OFFLINE)…`):
 
 - **Allowed:** the configured local model backend (the resolved Ollama / LM Studio host) and loopback (`localhost`, `127.0.0.0/8`, `::1`). The brain, recall embeddings, and local vision keep working.
-- **Blocked:** `web_search` / `web_fetch`, Gmail / Calendar / Google OAuth, weather / Wikipedia, GitHub, the Telegram bridge (and its voice in/out), `git_push` / `git_clone` to a remote, the brownfield `mission_start` clone and `mission_submit` push, and the edge-tts TTS subprocess — each refuses with the same message rather than a confusing connection error.
+- **Blocked:** `web_search` / `web_fetch`, Gmail / Calendar / Google OAuth, weather / Wikipedia, the Telegram bridge (and its voice in/out), `git_push` / `git_clone` to a remote, and the edge-tts TTS subprocess — each refuses with the same message rather than a confusing connection error.
 - **Refused wholesale:** the raw-shell escape hatch — `bash` / `bash_background`. A shell command can reach the network (`curl`, `scp`, `python -c`, `nc`) in ways no allow-list can inspect, and a denylist of those binaries leaks by construction. So rather than pretend a substring filter closes the hole, offline mode refuses the whole tool; keep coding offline with the structured tools (`edit_file`, search, the local `git_*`, the build/test runners).
 
 Enforcement is two-layered so nothing slips through: an HTTP-layer guard in the reqwest path (it checks the destination host of every in-process request), plus a dispatch-layer guard for tools that reach the network by spawning a subprocess (`git`, `python -m edge_tts`) where the HTTP guard can't see the destination — and the wholesale `bash` refusal above for the one vector neither layer can inspect.
@@ -53,7 +53,7 @@ Everything Claudette stores lives under `~/.claudette/` (or `%USERPROFILE%\.clau
 | `todos.json` | Your task list. |
 | `recall.sqlite` | Embedding index over past conversations for `/recall`. |
 | `secrets/*.token` | API tokens you've configured (file mode 600 on Unix). |
-| `missions/` | Brownfield clones — git repos Claudette is editing. |
+| `missions/` | Repos cloned by `git_clone`. |
 | `trash/` | Pre-images of deleted/overwritten notes, todos, and files — restorable with `/undo`. Local-only; empty it manually whenever you like. |
 | `transcript/actions.jsonl` | Append-only log of **mutating** tool calls (never read-only ones) with their undo refs. Powers `/undo`. Local-only, never uploaded. |
 | `models/` | Whisper model file (only if you've enabled voice). |
@@ -62,7 +62,7 @@ Everything Claudette stores lives under `~/.claudette/` (or `%USERPROFILE%\.clau
 
 `recall.sqlite` is **not encrypted at rest** today. If you store the contents of your private conversations there and someone else can read your home directory, they can read your recall index. At-rest encryption is on the roadmap (see "Future" below).
 
-Nothing outside `~/.claudette/` is written without explicit user action (e.g. `write_file` to a path you specified, `git_commit` inside a mission, etc.). Every "danger" tool is permission-gated.
+Nothing outside `~/.claudette/` is written without explicit user action (e.g. `write_file` to a path you specified, `git_commit` in your repo, etc.). Every "danger" tool is permission-gated.
 
 ---
 
@@ -81,7 +81,7 @@ Each outbound connection below is **off by default** until you opt in, and is **
 | `api.open-meteo.com`, `geocoding-api.open-meteo.com` | `weather` tool call | A place name. No API key required by open-meteo. |
 | `en.wikipedia.org` | `wikipedia` tool call | The search query. |
 | `api.search.brave.com` | `web_search` tool, requires `BRAVE_API_KEY` | The search query. |
-| `api.github.com`, `github.com` | `github` tool group, requires `GITHUB_TOKEN` | Whatever the model calls the API for (issues, PRs, etc.) |
+| Your git remotes | `git_push` (prompts `[y/N]`) and `git_clone` | The commits you push; for a clone, only the fetch request. |
 
 If you never set `BRAVE_API_KEY`, the `web_search` tool returns a "not configured" error and no Brave call is made. The same pattern holds for every keyed integration.
 
@@ -91,7 +91,7 @@ The model can't surreptitiously call any of the above just because the env var i
 
 ### Permission gating
 
-Every tool is classified as `ReadOnly`, `WorkspaceWrite`, or `DangerFullAccess`. ReadOnly auto-allows. `WorkspaceWrite` auto-allows but is scoped to the install dir / mission tree. `DangerFullAccess` (bash, raw `edit_file`, `git add/commit/push/checkout`, cross-org PRs) prompts `[y/N]` every time in the REPL, and **default-denies** in Telegram mode (no TTY to confirm).
+Every tool is classified as `ReadOnly`, `WorkspaceWrite`, or `DangerFullAccess`. ReadOnly auto-allows. `WorkspaceWrite` auto-allows but is scoped to `~/.claudette/files/` and your `CLAUDETTE_WORKSPACE` roots. `DangerFullAccess` (bash, raw `edit_file`, `git add/commit/push/checkout`) prompts `[y/N]` every time in the REPL, and **default-denies** in Telegram mode (no TTY to confirm).
 
 ---
 

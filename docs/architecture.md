@@ -28,8 +28,8 @@ src/
 │                       recall_index.rs (post-turn indexing + embed probe)
 ├── executor.rs       — AgentToolExecutor: enable_tools meta-tool + dispatch
 ├── tools.rs          — Aggregates per-group schemas + routes dispatch_tool() through each sub-module
-├── tools/            — One module per tool cluster (calendar, facts, file_ops, git, github, gmail, ide, notes, registry, schedule, search, shell, telegram, todos, web_search)
-├── tool_groups.rs    — ToolRegistry + the 20 on-demand tool-group definitions
+├── tools/            — One module per tool cluster (calendar, facts, file_ops, git, gmail, ide, notes, registry, schedule, search, shell, telegram, todos, web_search)
+├── tool_groups.rs    — ToolRegistry + the 19 on-demand tool-group definitions
 ├── test_runner.rs    — Blocking subprocess runner with timeout + pipe draining
 ├── commands.rs       — Slash-command parsers and handlers
 ├── prompt.rs         — Claudette system prompt builder
@@ -52,7 +52,7 @@ src/
 ├── env_config.rs     — Env primitives (home_dir, is_truthy, is_enabled)
 ├── transcript.rs     — Mutating-action log + trash-backed /undo and /diff
 ├── recall.rs         — Cross-session semantic memory (sqlite + local embeddings)
-├── missions.rs       — Brownfield mission state + path routing
+├── workspace.rs      — The working directory every file tool resolves against
 ├── redact.rs         — Secret redaction for logs and transcripts
 ├── hw.rs             — GPU / VRAM / temperature probes
 ├── status.rs         — REPL activity spinner (TTY-only)
@@ -76,7 +76,7 @@ Everything Claudette persists lives under `~/.claudette/` (resolved by
 | `trash/` | deletes and overwrites | Timestamped originals - the restore source for `/undo`. |
 | `notes/*.md` | `note_create` | One hand-editable markdown file per note. |
 | `todos.json` | the todo tools | Plain JSON. |
-| `missions/` | `mission_start` | Brownfield clones + `active_mission.json`. Non-ephemeral missions survive a restart. |
+| `missions/` | `git_clone` | Repos cloned by `git_clone`. |
 | `research/<repo>-<date>/` | `--research` | Manifest, progress, findings, `REPORT.md`. Resumable. |
 | `secrets/*.token` | OAuth + token storage | `0600` on Unix, ACL-tightened on Windows. |
 | `schedule.jsonl` | the scheduler | Recurring entries. Only the Telegram consumer loop fires them. |
@@ -106,7 +106,6 @@ The `gmail`, `calendar`, and `telegram` groups are compiled **only** into an `in
 | `advanced` | 7 | `bash` (+ `bash_background` / `bash_status` / `bash_tail`), `edit_file`, `apply_diff`, `ask_user` |
 | `facts` | 2 | `wikipedia` (summary/search), `weather` (Open-Meteo) |
 | `registry` | 2 | `crate_info` (crates.io), `npm_info` (npmjs) |
-| `github` | 14 | PRs (status, view, fork, create), issues (inbox, get, create, comment, list-repo), code search, **brownfield missions** (start, state, submit) |
 | `telegram` | 1 | `tg_send` - bot messaging (text or photo). **`integrations` build only.** |
 | `calendar` | 4 | Google Calendar: list / create / update / delete events (RSVP via update). **`integrations` build only.** |
 | `schedule` | 4 | Proactive reminders: one-shot + recurring schedules that fire prompts back at you |
