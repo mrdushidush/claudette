@@ -25,7 +25,7 @@ opencode, Aider, Cline, Continue are coding agents and nothing else. Claudette's
 edit) is first-class - and it ships alongside a deep assistant toolset
 no other tool here carries: `calendar` (Google Calendar CRUD + RSVP), `schedule` (proactive
 reminders + recurring briefings), `gmail` (read-only with `<email>` provenance wrapping),
-`facts` (Wikipedia / Open-Meteo weather), and `telegram` (voice-capable bot interface). 20 opt-in
+`facts` (Wikipedia / Open-Meteo weather), and `telegram` (voice-capable bot interface). 19 opt-in
 tool groups in all, so the base schema stays tiny until the model enables what it needs.
 
 ### 2. Four interfaces, including a Telegram bot

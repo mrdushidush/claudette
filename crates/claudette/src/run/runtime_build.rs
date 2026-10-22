@@ -111,7 +111,7 @@ fn build_runtime_with_brain_inner(
     //     the brain should not have to first win the enable_tools(group)
     //     round-trip — which small local models frequently malform (dropping
     //     the group arg) and then spiral on until timeout. The integration
-    //     long-tail (github/gmail/calendar/…) stays lazy and is reached via
+    //     long-tail (gmail/calendar/…) stays lazy and is reached via
     //     enable_tools on demand.
     let mut reg = ToolRegistry::new();
     if coding_workspace_active() {
@@ -332,24 +332,6 @@ pub(crate) fn build_permission_policy() -> PermissionPolicy {
         // POST to LM Studio plus a file read — WorkspaceWrite tier.
         .with_tool_requirement("screenshot_capture", WorkspaceWrite)
         .with_tool_requirement("image_describe", WorkspaceWrite)
-        // ── Sprint 9 Phase 0a: github group ──────────────────────────
-        // Reads: auto-allowed. Writes: WorkspaceWrite (hit the network
-        // on the user's behalf but don't touch the filesystem).
-        // v0.6.0: gh_list_my_prs + gh_list_assigned_issues merged into
-        // gh_inbox(scope?).
-        .with_tool_requirement("gh_inbox", ReadOnly)
-        .with_tool_requirement("gh_get_issue", ReadOnly)
-        .with_tool_requirement("gh_search_code", ReadOnly)
-        .with_tool_requirement("gh_list_repo_issues", ReadOnly)
-        .with_tool_requirement("gh_pr_status", ReadOnly)
-        // v0.6.0 Phase 3.3a — single-shot PR snapshot.
-        .with_tool_requirement("gh_pr_view", ReadOnly)
-        // v0.6.0 Phase 3.3b — failed-job log extraction.
-        .with_tool_requirement("gh_workflow_logs", ReadOnly)
-        .with_tool_requirement("gh_create_issue", WorkspaceWrite)
-        .with_tool_requirement("gh_comment_issue", WorkspaceWrite)
-        .with_tool_requirement("gh_fork", WorkspaceWrite)
-        .with_tool_requirement("gh_create_pr", WorkspaceWrite)
         // ── Sprint 10: telegram group ────────────────────────────────
         // tg_send is network EGRESS (posts arbitrary text to an arbitrary
         // chat) — a second exfil sink, so it's gated at DangerFullAccess in

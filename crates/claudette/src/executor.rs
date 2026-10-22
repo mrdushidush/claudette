@@ -141,7 +141,7 @@ fn run_enable_tools(
         let current_count = reg.current_len();
         return Ok(json!({
             "ok": true,
-            "note": "No 'group' was provided, so I enabled the coding core (files, search, advanced, quality). Call these tools directly on your next turn. For a different group (e.g. git, github) call enable_tools with {\"group\":\"git\"}.",
+            "note": "No 'group' was provided, so I enabled the coding core (files, search, advanced, quality). Call these tools directly on your next turn. For a different group (e.g. git) call enable_tools with {\"group\":\"git\"}.",
             "groups_enabled": groups,
             "newly_enabled_groups": newly,
             "tools_now_available": tools,

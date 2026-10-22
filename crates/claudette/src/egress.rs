@@ -61,7 +61,7 @@ pub const BLOCK_PREFIX: &str = "blocked by offline mode (--offline / CLAUDETTE_O
 /// its name here *and* wire its `egress::guard*` call. The integration test
 /// fails if a tool listed here is not actually guarded; the registry test
 /// (`net_tools_registry_covers_network_named_tools`) fails if a tool in an
-/// always-network family (`gh_`, `gmail_`, `calendar_`, `tg_`) is missing from
+/// always-network family (`gmail_`, `calendar_`, `tg_`) is missing from
 /// this list — so a forgotten guard on those families is caught automatically.
 /// Tools in mixed families (`git_*` has local siblings) must be
 /// added here by hand.
@@ -69,18 +69,6 @@ pub const NET_TOOLS: &[&str] = &[
     // Search / fetch
     "web_search",
     "web_fetch",
-    // GitHub (REST via reqwest → api.github.com)
-    "gh_inbox",
-    "gh_get_issue",
-    "gh_create_issue",
-    "gh_comment_issue",
-    "gh_search_code",
-    "gh_list_repo_issues",
-    "gh_pr_status",
-    "gh_pr_view",
-    "gh_workflow_logs",
-    "gh_fork",
-    "gh_create_pr",
     // Keyless facts
     "wikipedia",
     "weather",
@@ -265,7 +253,7 @@ pub fn proxy_vars_set() -> Vec<&'static str> {
 /// while the `🔒 offline mode` banner was on screen (roast SEC-01).
 ///
 /// Cloud-reaching clients deliberately do NOT use this: a corporate proxy is
-/// legitimate for `web_fetch`/GitHub/Gmail, and offline mode blocks those
+/// legitimate for `web_fetch`/Gmail, and offline mode blocks those
 /// through [`guard`] instead.
 ///
 /// No `#[must_use]`: `ClientBuilder` already carries it, and adding a second

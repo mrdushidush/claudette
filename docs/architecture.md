@@ -89,7 +89,7 @@ Everything Claudette persists lives under `~/.claudette/` (resolved by
 
 ## Tool groups
 
-20 groups, ~80 tools total (added Quality, Semantic, Vision, Clipboard; collapsed 18 lesser-used tools into polymorphic merges + outright drops; retired the Code group with the codet coder sidecar). Schema cost: ~840 chars (~210 tokens) on every turn until the model enables a group; the full 20-group surface is ~34 KB if every group is loaded at once.
+19 groups, ~65 tools total (added Quality, Semantic, Vision, Clipboard; collapsed 18 lesser-used tools into polymorphic merges + outright drops; retired the Code group with the codet coder sidecar). Schema cost: ~840 chars (~210 tokens) on every turn until the model enables a group; the full 19-group surface is ~29 KB if every group is loaded at once.
 
 The `gmail`, `calendar`, and `telegram` groups are compiled **only** into an `integrations` build (`cargo install claudette --features integrations`); the default coding-only binary omits them entirely - see [Install](../README.md#install).
 

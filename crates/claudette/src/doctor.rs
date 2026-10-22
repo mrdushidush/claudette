@@ -175,7 +175,6 @@ const TRACKED_VARS: &[&str] = &[
     // Integrations
     "TELEGRAM_BOT_TOKEN",
     "CLAUDETTE_TELEGRAM_CHAT",
-    "GITHUB_TOKEN",
     "BRAVE_API_KEY",
     "CLAUDETTE_GOOGLE_CLIENT_ID",
     "GOOGLE_CLIENT_ID",
@@ -685,7 +684,7 @@ fn probe_egress() -> Status {
         print_row(
             "  deny",
             Status::Ok,
-            "everything else (web_search/web_fetch, gmail/calendar, weather/wikipedia, github, telegram)",
+            "everything else (web_search/web_fetch, gmail/calendar, weather/wikipedia, telegram)",
         );
     } else {
         print_row(

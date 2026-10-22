@@ -147,11 +147,11 @@ fn net_tools_registry_is_consistent_and_covers_network_families() {
     }
 
     // (c) Forgotten-guard regression guard: every tool in an *always-network*
-    // family must be listed. Add a new `gh_*` (etc.) tool but forget the guard
+    // family must be listed. Add a new `gmail_*` (etc.) tool but forget the guard
     // + registry entry and this fails loudly. `git_*` has local siblings, so
     // it can't be swept by prefix and is maintained by hand in
     // egress::NET_TOOLS.
-    const ALWAYS_NET_PREFIXES: &[&str] = &["gh_", "gmail_", "calendar_", "tg_"];
+    const ALWAYS_NET_PREFIXES: &[&str] = &["gmail_", "calendar_", "tg_"];
     let registry: HashSet<&str> = all_net_tools().collect();
     for name in &schema_names {
         if ALWAYS_NET_PREFIXES.iter().any(|p| name.starts_with(p)) {
