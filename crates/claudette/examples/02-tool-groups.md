@@ -1,6 +1,6 @@
 # 02 — Tool groups and `enable_tools`
 
-Claudette ships ~80 tools but only advertises 3 "core" tools by
+Claudette ships ~65 tools but only advertises 3 "core" tools by
 default. The rest are loaded on demand via a synthetic meta-tool the
 model can call: `enable_tools(group)`. This example walks through the
 mechanic so you can see it happen live.
@@ -8,8 +8,8 @@ mechanic so you can see it happen live.
 ## Why on-demand?
 
 Every tool schema the model sees costs input tokens. Advertising all
-~80 tools at once runs ~34 KB of JSON schema on every turn. Core-only
-is ~0.8 KB. For a chatty REPL session that never touches GitHub or
+~65 tools at once runs ~29 KB of JSON schema on every turn. Core-only
+is ~0.8 KB. For a chatty REPL session that never touches Gmail or
 the web, that reduction is real savings.
 
 ## Groups at a glance
@@ -24,7 +24,6 @@ the web, that reduction is real savings.
 | `advanced` | 7 | Bash (+background/status/tail), `edit_file`, `apply_diff`, `ask_user` |
 | `facts` | 2 | Wikipedia, Open-Meteo weather |
 | `registry` | 2 | crates.io, npmjs |
-| `github` | 15 | PRs/issues/code search + forge mission tools |
 | `schedule` | 4 | One-shot + recurring reminders |
 | `quality` | 3 | run_tests, diagnostics, apply_patch |
 | `gmail` / `calendar` / `telegram` | (integrations) | Only in `--features integrations` builds |

@@ -21,7 +21,7 @@ we're honest about what Claudette is, what it isn't, and where it has room to gr
 
 ### 1. A coding agent that's also a full personal assistant
 opencode, Aider, Cline, Continue are coding agents and nothing else. Claudette's coding core
-(files, search, repo-map, tests, `git`/`github`, and a `[y/N]` diff gate on every
+(files, search, repo-map, tests, `git`, and a `[y/N]` diff gate on every
 edit) is first-class - and it ships alongside a deep assistant toolset
 no other tool here carries: `calendar` (Google Calendar CRUD + RSVP), `schedule` (proactive
 reminders + recurring briefings), `gmail` (read-only with `<email>` provenance wrapping),

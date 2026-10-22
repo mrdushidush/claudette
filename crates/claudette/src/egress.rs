@@ -34,7 +34,7 @@ use crate::api::{host_of_url, is_local_ollama_url, resolve_ollama_url};
 /// Environment variable that enables offline mode. The `--offline` CLI flag
 /// sets this to `"1"` (see `main.rs`) so the flag and the env var share one
 /// source of truth — and so the setting propagates to any child process
-/// claudette spawns (`gh`, `git`, `python -m edge_tts`, …), which then refuse
+/// claudette spawns (`git`, `python -m edge_tts`, …), which then refuse
 /// network access themselves if they re-enter claudette.
 pub const OFFLINE_ENV: &str = "CLAUDETTE_OFFLINE";
 
@@ -199,7 +199,7 @@ pub fn guard(url: &str) -> Result<(), String> {
 }
 
 /// Dispatch / subprocess-layer guard. Call at the top of a tool that reaches
-/// the network by spawning a subprocess (`git`, `gh`, `python -m edge_tts`)
+/// the network by spawning a subprocess (`git`, `python -m edge_tts`)
 /// rather than through reqwest, where [`guard`] can't see the destination.
 /// `action` is a short human phrase naming what was attempted, e.g.
 /// `"git_push (push to the remote repository)"`.
