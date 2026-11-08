@@ -94,8 +94,6 @@ half-delivered prompt. The block is not added to `~/.claudette/repl_history`.
 /undo                Restore everything the last turn changed, from ~/.claudette/trash/.
 /undo one            Restore only the single most recent action.
 /diff                Colored unified diff of what the last turn changed on disk.
-/brownfield <target> Clone a repo and make it the active mission (one-shot).
-/mission_exit        Clear the active mission.
 /exit                Leave the REPL.
 ```
 
@@ -117,8 +115,8 @@ Four additional commands are **Telegram-only** (they have no effect in the REPL)
 | Tier | Behaviour | Example tools |
 |------|-----------|---------------|
 | **ReadOnly** | Auto-allowed | time, note_list, file reads, git status, all external APIs |
-| **WorkspaceWrite** | Auto-allowed | note_create, todo_add, web_search, github comment |
-| **DangerFullAccess** | Prompts `[y/N]` every time | bash, edit_file, git add/commit/push/checkout, cross-org PRs |
+| **WorkspaceWrite** | Auto-allowed | note_create, todo_add, web_search, git_clone |
+| **DangerFullAccess** | Prompts `[y/N]` every time | bash, edit_file, git add/commit/push/checkout |
 
 `write_file` is `WorkspaceWrite` when it creates a file and `DangerFullAccess` when
 the target already exists - overwriting a file is an edit, so it prompts and shows a

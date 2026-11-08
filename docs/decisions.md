@@ -245,3 +245,27 @@ one interactive surface; image attachment stays there (drag-drop or
 - `ImageAttachment` lives in `image_attach.rs` next to its helpers.
 - `ratatui` and `image` leave `Cargo.toml`; `crossterm` stays for the REPL's
   line editor and `arboard` for the clipboard tool.
+
+## AD-10 - Missions and the GitHub tools removed (2026-10-22)
+
+**Problem.** Missions (clone a repo, attach to it, submit a PR) and the
+GitHub tool group existed to give Forge a working tree and a way to ship
+it. With Forge gone (AD-8) they were about 4,300 lines, 14 tools and a
+second path-routing mode that every file tool had to respect.
+
+**Decision.** Delete both, after the `pre-trim-2026-10` tag. File tools
+resolve against the process working directory (`workspace::cwd()`),
+writes stay inside `~/.claudette/files/` and the `CLAUDETTE_WORKSPACE`
+roots, and a human opens the pull request (or runs `gh` from `bash`).
+
+**Consequences.**
+
+- `mission_start` / `mission_state` / `mission_submit`, `/brownfield`,
+  `/mission_exit`, the eleven `gh_*` tools and `GITHUB_TOKEN` support no
+  longer exist; 19 tool groups remain.
+- The offline egress inventory is shorter: no tool calls
+  `api.github.com` any more.
+- The GitHub-token patterns in `redact.rs` stay: a token in a file the
+  model reads is still a secret.
+- `git_clone` stays in the Git group and still clones into
+  `~/.claudette/missions/`.

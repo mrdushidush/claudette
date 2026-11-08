@@ -47,8 +47,6 @@ pub enum ToolGroup {
     Facts,
     /// Package registries: crates.io, npmjs.
     Registry,
-    /// GitHub API (PRs, issues, code search). Requires `GITHUB_TOKEN`.
-    Github,
     /// Telegram bot: send messages, poll updates, send photos.
     Telegram,
     /// Google Calendar: list / create / update / delete events, RSVP.
@@ -95,7 +93,6 @@ impl ToolGroup {
             Self::Advanced => "advanced",
             Self::Facts => "facts",
             Self::Registry => "registry",
-            Self::Github => "github",
             Self::Telegram => "telegram",
             Self::Calendar => "calendar",
             Self::Schedule => "schedule",
@@ -126,7 +123,6 @@ impl ToolGroup {
             Self::Advanced => "power tools: bash (sync), bash_background + bash_status + bash_tail, apply_diff (fuzzy before/after edit), edit_file (legacy), ask_user (turn-suspending clarifier)",
             Self::Facts => "reference lookups: wikipedia (summary or search via `mode`), weather (no API key needed)",
             Self::Registry => "package registries: crates.io and npm package metadata (version, downloads, homepage)",
-            Self::Github => "github + brownfield missions: gh_inbox(scope=my_prs|assigned|repo_issues), issue+PR ops, code search, clone/fork, mission_start + mission_state(action=status|list|attach|exit) + mission_submit (requires GITHUB_TOKEN)",
             Self::Telegram => "telegram bot: tg_send (text, or photo via optional `photo` URL — caption becomes the text). Requires TELEGRAM_BOT_TOKEN.",
             Self::Calendar => "google calendar: list/create/update/delete events. calendar_update_event takes optional `rsvp` for RSVP-only edits. Requires claudette --auth-google.",
             Self::Schedule => "proactive reminders: one-shot + recurring schedules that fire prompts back at you",
@@ -141,7 +137,7 @@ impl ToolGroup {
 
     /// All groups in a stable order, for schema generation and tests.
     #[must_use]
-    pub fn all() -> [ToolGroup; 20] {
+    pub fn all() -> [ToolGroup; 19] {
         [
             Self::Notes,
             Self::Todos,
@@ -153,7 +149,6 @@ impl ToolGroup {
             Self::Advanced,
             Self::Facts,
             Self::Registry,
-            Self::Github,
             Self::Telegram,
             Self::Calendar,
             Self::Schedule,
@@ -173,7 +168,7 @@ impl ToolGroup {
     /// workspace (see `run::build_runtime_with_brain_inner`) and used as the
     /// forgiving fallback when the model calls `enable_tools` with no group
     /// (see `executor::run_enable_tools`). Costs ~2.2k tokens of schema; the
-    /// integration/long-tail groups (github, gmail, calendar, …) stay lazy.
+    /// integration/long-tail groups (gmail, calendar, …) stay lazy.
     ///
     /// Why this exists: small local brains frequently emit
     /// `<function=enable_tools></function>` with the `group` arg dropped, then
@@ -198,7 +193,6 @@ impl ToolGroup {
             "advanced" | "shell" | "power" | "bash" => Some(Self::Advanced),
             "facts" | "wikipedia" | "weather" => Some(Self::Facts),
             "registry" | "crates" | "npm" => Some(Self::Registry),
-            "github" | "gh" => Some(Self::Github),
             "telegram" | "tg" | "tg_bot" => Some(Self::Telegram),
             "calendar" | "gcal" | "google-calendar" | "google_calendar" => Some(Self::Calendar),
             "schedule" | "scheduler" | "reminders" | "reminder" => Some(Self::Schedule),
@@ -251,23 +245,6 @@ pub fn group_of(tool: &str) -> Option<ToolGroup> {
         // wikipedia_search/summary and weather_current/forecast names.
         "wikipedia" | "weather" => Some(ToolGroup::Facts),
         "crate_info" | "npm_info" => Some(ToolGroup::Registry),
-        // gh_inbox(scope=...) subsumes the v0.6.0 gh_list_my_prs +
-        // gh_list_assigned_issues names; mission_state(action=...) subsumes
-        // mission_status / mission_list / mission_attach / mission_exit.
-        "gh_inbox"
-        | "gh_get_issue"
-        | "gh_create_issue"
-        | "gh_comment_issue"
-        | "gh_search_code"
-        | "gh_list_repo_issues"
-        | "gh_pr_status"
-        | "gh_pr_view"
-        | "gh_workflow_logs"
-        | "gh_fork"
-        | "gh_create_pr"
-        | "mission_start"
-        | "mission_state"
-        | "mission_submit" => Some(ToolGroup::Github),
         // tg_send(photo?) subsumes the v0.6.0 tg_send_photo name.
         "tg_send" => Some(ToolGroup::Telegram),
         // calendar_update_event(rsvp=...) subsumes the v0.6.0
@@ -505,7 +482,6 @@ mod tests {
         assert_eq!(ToolGroup::parse("advanced"), Some(ToolGroup::Advanced));
         assert_eq!(ToolGroup::parse("facts"), Some(ToolGroup::Facts));
         assert_eq!(ToolGroup::parse("registry"), Some(ToolGroup::Registry));
-        assert_eq!(ToolGroup::parse("github"), Some(ToolGroup::Github));
         assert_eq!(ToolGroup::parse("telegram"), Some(ToolGroup::Telegram));
     }
 
@@ -521,7 +497,6 @@ mod tests {
         assert_eq!(ToolGroup::parse("weather"), Some(ToolGroup::Facts));
         assert_eq!(ToolGroup::parse("crates"), Some(ToolGroup::Registry));
         assert_eq!(ToolGroup::parse("npm"), Some(ToolGroup::Registry));
-        assert_eq!(ToolGroup::parse("gh"), Some(ToolGroup::Github));
         assert_eq!(ToolGroup::parse("tg"), Some(ToolGroup::Telegram));
     }
 
@@ -554,17 +529,6 @@ mod tests {
         assert_eq!(group_of("weather_forecast"), None);
         assert_eq!(group_of("crate_info"), Some(ToolGroup::Registry));
         assert_eq!(group_of("npm_info"), Some(ToolGroup::Registry));
-        assert_eq!(group_of("gh_inbox"), Some(ToolGroup::Github));
-        assert_eq!(group_of("gh_create_issue"), Some(ToolGroup::Github));
-        assert_eq!(group_of("mission_state"), Some(ToolGroup::Github));
-        // v0.6.0: these merged into gh_inbox/mission_state and are no
-        // longer tool names.
-        assert_eq!(group_of("gh_list_my_prs"), None);
-        assert_eq!(group_of("gh_list_assigned_issues"), None);
-        assert_eq!(group_of("mission_status"), None);
-        assert_eq!(group_of("mission_list"), None);
-        assert_eq!(group_of("mission_attach"), None);
-        assert_eq!(group_of("mission_exit"), None);
         assert_eq!(group_of("tg_send"), Some(ToolGroup::Telegram));
         // v0.6.0: tg_send_photo merged into tg_send(photo?) — no longer a tool name.
         assert_eq!(group_of("tg_send_photo"), None);
@@ -734,31 +698,6 @@ mod tests {
     }
 
     #[test]
-    fn github_group_includes_brownfield_tools() {
-        let reg = ToolRegistry::new();
-        let gh = reg.group_tool_names(ToolGroup::Github);
-        for name in [
-            "gh_inbox",
-            "gh_list_repo_issues",
-            "gh_pr_status",
-            "gh_pr_view",
-            "gh_workflow_logs",
-            "gh_fork",
-            "gh_create_pr",
-            "mission_start",
-            "mission_state",
-            "mission_submit",
-        ] {
-            assert!(gh.contains(&name.to_string()), "missing {name} in {gh:?}");
-        }
-        // v0.6.0: gh_list_my_prs + gh_list_assigned_issues collapsed into
-        // gh_inbox(scope=...); mission_status/list/attach/exit collapsed
-        // into mission_state(action=...). gh_pr_view + gh_workflow_logs
-        // added in Phase 3.3. forge_tail left with Forge. Group is now 14.
-        assert_eq!(gh.len(), 14);
-    }
-
-    #[test]
     fn schema_chars_grows_with_enables() {
         let mut reg = ToolRegistry::new();
         let core_only = reg.current_schema_chars();
@@ -876,7 +815,6 @@ mod tests {
             ]
         );
         // Sanity: the integration long-tail must NOT be in the lean core.
-        assert!(!core.contains(&ToolGroup::Github));
         assert!(!core.contains(&ToolGroup::Git)); // git is reached on demand
         assert!(!core.contains(&ToolGroup::Calendar));
     }

@@ -29,7 +29,6 @@ cat > .env <<EOF
 TELEGRAM_BOT_TOKEN=123456:your-bot-token-here
 # Optional:
 # BRAVE_API_KEY=...
-# GITHUB_TOKEN=ghp_...
 EOF
 
 # 3. Build + start
@@ -100,7 +99,7 @@ docker run --rm -v claudette-data:/data -v "$PWD":/backup alpine \
     tar -czf /backup/claudette-data.tar.gz -C /data .
 ```
 
-`claudette-data` holds your sessions, notes, recall index, tokens, missions. `ollama-models` holds the downloaded weights and can be re-downloaded any time, so you don't *need* to back it up unless your upstream connection is slow.
+`claudette-data` holds your sessions, notes, recall index, tokens, git clones. `ollama-models` holds the downloaded weights and can be re-downloaded any time, so you don't *need* to back it up unless your upstream connection is slow.
 
 ---
 

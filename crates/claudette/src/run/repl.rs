@@ -90,11 +90,6 @@ pub fn run_agent_repl(opts: SessionOptions) -> Result<()> {
     // CLAUDETTE_RECALL_DISABLE — opting out skips the probe too.
     probe_recall_at_startup();
 
-    // Rehydrate any persisted non-ephemeral mission so /brownfield → exit
-    // → restart → /forge keeps targeting the cloned tree instead of
-    // silently falling back to cwd auto-bootstrap (F8a safety fix).
-    print_rehydrate_outcome(crate::missions::try_rehydrate_active_mission());
-
     eprintln!();
 
     // History, arrows, and tab completion. Degrades to a plain `read_line`

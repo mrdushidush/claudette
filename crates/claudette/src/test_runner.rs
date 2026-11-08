@@ -1,6 +1,6 @@
 //! A blocking subprocess runner with a timeout: spawn a command, drain its
 //! pipes concurrently, and kill it if it overruns. Used by the tool layer
-//! (`run_tests`, git/mission/shell/vision helpers) to shell out safely without
+//! (`run_tests`, git/shell/vision helpers) to shell out safely without
 //! a stuck child stalling the REPL.
 
 use std::io::Read;

@@ -214,11 +214,8 @@ pub(super) fn resolve_git_path() -> String {
 /// PATH like `D:\Program Files\Git\...`). Falls back to bare `git`.
 fn run_git(args: &[&str]) -> Result<String, String> {
     let git_exe = resolve_git_path();
-    // While a brownfield mission is active, every git_* call (status,
-    // diff, log, add, commit, branch, checkout, push) runs against the
-    // mission tree. Outside of a mission this resolves to the process
-    // cwd — i.e. exactly the pre-T2 behaviour.
-    let cwd = crate::missions::active_cwd();
+    // Every git_* call runs in the process cwd, where claudette was launched.
+    let cwd = crate::workspace::cwd();
     // Redact credential-shaped argv before echoing to stderr: a model can pass
     // a PAT through `git remote set-url …token@github.com` or a `-c http.
     // extraheader=Authorization: Bearer …`, and this debug line lands in the

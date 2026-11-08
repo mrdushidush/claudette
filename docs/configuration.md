@@ -2,7 +2,7 @@
 
 All variables are optional; defaults are shown. Set them in your shell environment, or at `~/.claudette/.env` (the canonical persistent location).
 
-Claudette intentionally does **not** auto-load `.env` from the current working directory or its parents - that would let a shared project smuggle `OLLAMA_HOST`, `GITHUB_TOKEN`, etc. into the agent without the user noticing. For per-project overrides, use `direnv` or `source path/to/.env` before invoking.
+Claudette intentionally does **not** auto-load `.env` from the current working directory or its parents - that would let a shared project smuggle `OLLAMA_HOST`, `BRAVE_API_KEY`, etc. into the agent without the user noticing. For per-project overrides, use `direnv` or `source path/to/.env` before invoking.
 
 ## Installer (`install.sh` / `install.ps1`)
 
@@ -81,7 +81,7 @@ Both the brain (`/v1/chat/completions`) and recall (`/v1/embeddings`) resolve to
 `--offline` (or `CLAUDETTE_OFFLINE=1`) turns claudette's local-first *posture* into an *enforced* air-gap. With it on, every outbound network call is checked against an allow-list and anything not on it is hard-blocked with a uniform error - `blocked by offline mode (--offline / CLAUDETTE_OFFLINE)…` - whether the call would have been made via reqwest or by spawning a subprocess.
 
 - **Allowed:** the resolved model backend host (`OLLAMA_HOST`, even a LAN box you opted into with `CLAUDETTE_ALLOW_REMOTE_OLLAMA=1` - matched at the host level, so any port on that box is reachable) and loopback (`localhost`, `127.0.0.0/8`, `::1`). The brain, recall embeddings, and local vision keep working.
-- **Blocked:** `web_search` / `web_fetch`, `gmail_*` / `calendar_*` / `--auth-google`, `wikipedia`, `weather`, the `gh_*` GitHub tools, `tg_send`, remote `git_push` / `git_clone`, the brownfield `mission_start` clone and `mission_submit` push, and text-to-speech (edge-tts).
+- **Blocked:** `web_search` / `web_fetch`, `gmail_*` / `calendar_*` / `--auth-google`, `wikipedia`, `weather`, `tg_send`, remote `git_push` / `git_clone`, and text-to-speech (edge-tts).
 - **Refused wholesale:** `bash` / `bash_background`. A raw shell command can reach the network in ways no allow-list can inspect (`curl`, `scp`, `python -c`, `nc`), and a denylist of those leaks by construction - so under `--offline` the shell tools are refused entirely. Keep coding offline with the structured tools (`edit_file`, search, local `git_*`, the build/test runners).
 - **`--offline` + `--telegram`** is refused at startup - the Telegram bridge is a cloud relay (`api.telegram.org`) and can't run air-gapped.
 
@@ -112,13 +112,12 @@ checkpointed under `~/.claudette/research/`, so an interrupted run resumes.
 | Variable | Purpose |
 |----------|---------|
 | `BRAVE_API_KEY` | Brave Search API key - required for `web_search`. |
-| `GITHUB_TOKEN` | GitHub PAT - required for the `github` tool group. Falls back to `CLAUDETTE_GITHUB_TOKEN` if unset. |
 | `TELEGRAM_BOT_TOKEN` | Bot token from `@BotFather` - required for `--telegram`. Falls back to `CLAUDETTE_TELEGRAM_TOKEN` if unset. |
 | `CLAUDETTE_TELEGRAM_CHAT` | Comma-separated chat-ID allowlist for the Telegram bot (same as repeating `--chat`). The bot default-denies when no allowlist is set. |
 | `CLAUDETTE_GOOGLE_CLIENT_ID` | Google OAuth client ID - required for `--auth-google` + the Calendar / Gmail tool groups. Falls back to `GOOGLE_CLIENT_ID`, or to `~/.claudette/secrets/google_oauth_client.json`. |
 | `CLAUDETTE_GOOGLE_CLIENT_SECRET` | Google OAuth client secret. Same fallback chain as the client ID. |
 
-All tokens also support file-based fallback: save them to `~/.claudette/secrets/<name>.token` (for example `github.token`, `telegram.token`, `brave.token`). Environment variables win over files when both are present.
+All tokens also support file-based fallback: save them to `~/.claudette/secrets/<name>.token` (for example `telegram.token`, `brave.token`). Environment variables win over files when both are present.
 
 ## Voice
 

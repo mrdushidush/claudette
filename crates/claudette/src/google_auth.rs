@@ -21,8 +21,8 @@
 //!   CLAUDETTE_GOOGLE_CLIENT_ID  / GOOGLE_CLIENT_ID
 //!   CLAUDETTE_GOOGLE_CLIENT_SECRET / GOOGLE_CLIENT_SECRET
 //!
-//! Threat model: plaintext on disk, mode 0600 on Unix. Same as the GitHub PAT
-//! and Telegram token already in the secrets dir. See AD-3 in
+//! Threat model: plaintext on disk, mode 0600 on Unix. Same as the Telegram
+//! token already in the secrets dir. See AD-3 in
 //! docs/life_agent.md for the rationale.
 
 use std::fmt::Write as _;

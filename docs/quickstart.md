@@ -148,7 +148,7 @@ claudette --offline "..."            # enforced air-gap: block all cloud egress
 
 Add `--offline` (or set `CLAUDETTE_OFFLINE=1`) to any of these to **enforce**
 the air-gap - every outbound call except the local model backend + loopback is
-hard-blocked, so the brain and recall keep working but web search, mail, GitHub,
+hard-blocked, so the brain and recall keep working but web search, mail,
 Telegram, and remote git all refuse. `claudette --offline --doctor` prints the
 exact allow-list. See [Air-gapped, and enforced](../README.md#-air-gapped-and-enforced).
 
@@ -171,15 +171,6 @@ Get a key from [api.search.brave.com](https://api.search.brave.com/):
 export BRAVE_API_KEY=your_key
 claudette
 > search the web for "rust async runtime benchmarks 2026"
-```
-
-### GitHub workflows (needs `GITHUB_TOKEN`)
-
-```bash
-export GITHUB_TOKEN=ghp_...
-claudette
-> list open issues on mrdushidush/claudette
-> what's the status of PR #5?
 ```
 
 ### Google Calendar + Gmail (needs `--features integrations` + OAuth)

@@ -82,7 +82,7 @@ fn run_semantic_grep(input: &str) -> Result<String, String> {
         .ok_or("semantic_grep: missing 'query'")?;
     let k = v.get("k").and_then(Value::as_u64).unwrap_or(5).clamp(1, 20) as usize;
 
-    let cwd = crate::missions::active_cwd();
+    let cwd = crate::workspace::cwd();
     let chunks = collect_chunks(&cwd);
     if chunks.is_empty() {
         return Ok(json!({
@@ -400,7 +400,7 @@ mod tests {
         // Run against the actual workspace and expect to find this very
         // file (or another tools/* source) by searching for a rare token.
         // Serialize against the process-wide cwd lock: this test reads the
-        // process cwd (via missions::active_cwd) while other tests
+        // process cwd (via workspace::cwd) while other tests
         // (runtime::prompt) mutate it with set_current_dir under the same
         // lock. Without this guard they raced and this test flaked red —
         // the exact `cargo test --lib` CI/release gate. (roast 2026-06-02)

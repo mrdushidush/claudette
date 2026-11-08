@@ -28,6 +28,22 @@ bumps are non-breaking bugfixes only.
   gone, and the `ratatui` and `image` crates leave the dependency tree.
   **Migration:** run `claudette` for the REPL; drag an image into it or type
   `@/path/to/image.png` to attach one. The last release with the TUI is 0.18.1.
+- **Missions (brownfield clone-and-attach).** `mission_start`,
+  `mission_state`, `mission_submit`, the `/brownfield` and `/mission_exit`
+  commands and the `active_mission.json` rehydrate are gone. File tools
+  resolve against the process working directory, and writes stay inside
+  `~/.claudette/files/` and the `CLAUDETTE_WORKSPACE` roots. `git_clone`
+  stays and still clones into `~/.claudette/missions/`. **Migration:** run
+  `claudette` inside the repo (or set `CLAUDETTE_WORKSPACE` to it), commit
+  with the `git_*` tools, and open the pull request yourself. The last
+  release with Missions is 0.18.1.
+- **The GitHub tool group (`gh_*`).** The 11 GitHub API tools (inbox,
+  issues, PRs, code search, workflow logs, fork, create PR) and
+  `GITHUB_TOKEN` / `CLAUDETTE_GITHUB_TOKEN` support are gone; 19 tool
+  groups remain. **Privacy:** `api.github.com` leaves the egress inventory
+  in `PRIVACY.md`; the GitHub-token redaction patterns stay. **Migration:**
+  use the `gh` CLI (from `bash`, which asks first) or the GitHub web UI.
+  The last release with them is 0.18.1.
 
 ## [0.18.1] - 2026-10-09
 

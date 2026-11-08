@@ -23,8 +23,7 @@
 //!  2. **Dispatch / subprocess layer** — tools that shell out to the network
 //!     instead of using reqwest can't be seen by the HTTP layer, so they call
 //!     [`guard_subprocess`] up front and refuse with the SAME message: the
-//!     `git_push` / `git_clone` subprocesses, the brownfield `mission_start`
-//!     clone and `mission_submit` push, and the edge-tts TTS subprocess.
+//!     `git_push` / `git_clone` subprocesses and the edge-tts TTS subprocess.
 //!
 //! The allow / deny decision is pure host-matching ([`is_allowed_host`]); the
 //! flag/env plumbing ([`is_offline`]) and both message builders are unit-tested
@@ -35,7 +34,7 @@ use crate::api::{host_of_url, is_local_ollama_url, resolve_ollama_url};
 /// Environment variable that enables offline mode. The `--offline` CLI flag
 /// sets this to `"1"` (see `main.rs`) so the flag and the env var share one
 /// source of truth — and so the setting propagates to any child process
-/// claudette spawns (`gh`, `git`, `python -m edge_tts`, …), which then refuse
+/// claudette spawns (`git`, `python -m edge_tts`, …), which then refuse
 /// network access themselves if they re-enter claudette.
 pub const OFFLINE_ENV: &str = "CLAUDETTE_OFFLINE";
 
@@ -62,26 +61,14 @@ pub const BLOCK_PREFIX: &str = "blocked by offline mode (--offline / CLAUDETTE_O
 /// its name here *and* wire its `egress::guard*` call. The integration test
 /// fails if a tool listed here is not actually guarded; the registry test
 /// (`net_tools_registry_covers_network_named_tools`) fails if a tool in an
-/// always-network family (`gh_`, `gmail_`, `calendar_`, `tg_`) is missing from
+/// always-network family (`gmail_`, `calendar_`, `tg_`) is missing from
 /// this list — so a forgotten guard on those families is caught automatically.
-/// Tools in mixed families (`git_*`, `mission_*` have local siblings) must be
+/// Tools in mixed families (`git_*` has local siblings) must be
 /// added here by hand.
 pub const NET_TOOLS: &[&str] = &[
     // Search / fetch
     "web_search",
     "web_fetch",
-    // GitHub (REST via reqwest → api.github.com)
-    "gh_inbox",
-    "gh_get_issue",
-    "gh_create_issue",
-    "gh_comment_issue",
-    "gh_search_code",
-    "gh_list_repo_issues",
-    "gh_pr_status",
-    "gh_pr_view",
-    "gh_workflow_logs",
-    "gh_fork",
-    "gh_create_pr",
     // Keyless facts
     "wikipedia",
     "weather",
@@ -91,11 +78,9 @@ pub const NET_TOOLS: &[&str] = &[
     // Google (Gmail + Calendar) + Telegram are integration-only and listed in
     // INTEGRATION_NET_TOOLS below, so this list stays consistent with the
     // coding-only schema (where those tools don't exist).
-    // Network-reaching git + brownfield-mission subprocesses
+    // Network-reaching git subprocesses
     "git_push",
     "git_clone",
-    "mission_start",
-    "mission_submit",
     // Raw-shell escape hatch. `bash` / `bash_background` run an arbitrary
     // command, so they are an unguardable egress vector (a curl/scp/python
     // denylist leaks by construction). Under offline mode they are refused
@@ -214,7 +199,7 @@ pub fn guard(url: &str) -> Result<(), String> {
 }
 
 /// Dispatch / subprocess-layer guard. Call at the top of a tool that reaches
-/// the network by spawning a subprocess (`git`, `gh`, `python -m edge_tts`)
+/// the network by spawning a subprocess (`git`, `python -m edge_tts`)
 /// rather than through reqwest, where [`guard`] can't see the destination.
 /// `action` is a short human phrase naming what was attempted, e.g.
 /// `"git_push (push to the remote repository)"`.
@@ -268,7 +253,7 @@ pub fn proxy_vars_set() -> Vec<&'static str> {
 /// while the `🔒 offline mode` banner was on screen (roast SEC-01).
 ///
 /// Cloud-reaching clients deliberately do NOT use this: a corporate proxy is
-/// legitimate for `web_fetch`/GitHub/Gmail, and offline mode blocks those
+/// legitimate for `web_fetch`/Gmail, and offline mode blocks those
 /// through [`guard`] instead.
 ///
 /// No `#[must_use]`: `ClientBuilder` already carries it, and adding a second

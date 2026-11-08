@@ -18,10 +18,7 @@
 //!    line endings outside the replaced region).
 //!
 //! Path safety: paths are validated through `super::validate_edit_path` the
-//! same way `apply_patch`/`edit_file` do — $HOME-gated for the interactive
-//! secretary, but confined to the mission tree while a forge/brownfield
-//! mission is active (roast RC-B), so the autonomous Coder can't patch files
-//! outside it.
+//! same way `apply_patch`/`edit_file` do ($HOME + `CLAUDETTE_WORKSPACE`).
 
 use std::fs;
 
@@ -49,7 +46,7 @@ pub(super) fn schemas() -> Vec<Value> {
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path":   { "type": "string", "description": "File to edit (inside the sandbox / active mission)." },
+                    "path":   { "type": "string", "description": "File to edit." },
                     "before": { "type": "string", "description": "The exact block to find and replace. Must occur exactly once." },
                     "after":  { "type": "string", "description": "The replacement block." }
                 },

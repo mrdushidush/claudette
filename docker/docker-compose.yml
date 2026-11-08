@@ -57,9 +57,7 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN in .env}
       # Optional integrations — uncomment + set in .env if you want them.
       # BRAVE_API_KEY: ${BRAVE_API_KEY:-}
-      # GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       # CLAUDETTE_MODEL: qwen2.5:1.5b     # pin a brain (matches CPU mode)
-      # CLAUDETTE_MAX_FIX_ROUNDS: "4"     # forge fix-loop cap (default 2)
     volumes:
       - claudette-data:/home/claudette/.claudette
     command: ["--telegram"]

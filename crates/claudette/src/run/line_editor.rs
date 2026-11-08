@@ -36,7 +36,6 @@ const MAX_HISTORY: usize = 500;
 /// completing `/cle`.
 const SLASH_COMMANDS: &[&str] = &[
     "/brain",
-    "/brownfield",
     "/capabilities",
     "/clear",
     "/compact",
@@ -46,7 +45,6 @@ const SLASH_COMMANDS: &[&str] = &[
     "/help",
     "/load",
     "/memory",
-    "/mission_exit",
     "/model",
     "/models",
     "/preset",
@@ -699,10 +697,10 @@ mod tests {
 
     #[test]
     fn tab_completes_a_unique_slash_command() {
-        let mut s = state_with("/brow", 5);
+        let mut s = state_with("/capa", 5);
         s.apply(EditAction::Complete, &[]);
-        assert_eq!(s.buf, "/brownfield");
-        assert_eq!(s.cursor, 11);
+        assert_eq!(s.buf, "/capabilities");
+        assert_eq!(s.cursor, 13);
     }
 
     #[test]

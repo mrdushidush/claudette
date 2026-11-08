@@ -205,9 +205,9 @@ MISC:
     --offline            Enforce the air-gap: hard-block every outbound network
                          call except the local model backend + loopback. Same
                          as CLAUDETTE_OFFLINE=1. Blocks web_search/web_fetch,
-                         Gmail/Calendar, weather/wikipedia, GitHub, and
-                         the Telegram bridge; the local brain + recall still
-                         work. See `--offline` in --doctor for the allow-list.
+                         Gmail/Calendar, weather/wikipedia and the Telegram
+                         bridge; the local brain + recall still work. See
+                         `--offline` in --doctor for the allow-list.
     --faceless           Drop the Eva persona overlay and run with a plain,
                          name-free prompt. Same as CLAUDETTE_FACELESS=1.
     --help, -h           Show this help and exit.
@@ -241,12 +241,12 @@ fn main() -> ExitCode {
     // Load env vars from .env files. ONLY the canonical ~/.claudette/.env
     // is auto-loaded — we explicitly do NOT walk CWD or its parents, because
     // that lets any shared project directory smuggle CLAUDETTE_*, OLLAMA_HOST,
-    // GITHUB_TOKEN, or TELEGRAM_BOT_TOKEN into the agent without the user
+    // BRAVE_API_KEY, or TELEGRAM_BOT_TOKEN into the agent without the user
     // knowing. Per-project overrides should use shell `export`, direnv, or
     // an explicit `dotenvy::from_path(…)` call from a trusted wrapper.
     //
     // ~/.claudette/.env is where CLAUDETTE_MODEL, _NUM_CTX, _COMPACT_THRESHOLD,
-    // and tokens like BRAVE_API_KEY / GITHUB_TOKEN belong. Missing file is
+    // and tokens like BRAVE_API_KEY / TELEGRAM_BOT_TOKEN belong. Missing file is
     // silently ignored — tools that actually need an env var will report
     // their own missing-key errors.
     if let Ok(home) = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")) {

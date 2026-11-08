@@ -106,15 +106,13 @@ fn run_repo_map(input: &str) -> Result<String, String> {
     if query.trim().is_empty() {
         return Err("repo_map: query is empty".to_string());
     }
-    // Default root: active mission tree → workspace cwd → first workspace root
-    // → $HOME (mirrors grep_search's resolution).
+    // Default root: workspace cwd → first workspace root → $HOME (mirrors
+    // grep_search's resolution).
     let default_path: String;
     let path_str = match v.get("path").and_then(Value::as_str) {
         Some(s) => s,
         None => {
-            default_path = if let Some(m) = crate::missions::active_mission() {
-                m.path.display().to_string()
-            } else if let Some(root) = crate::tools::default_workspace_root() {
+            default_path = if let Some(root) = crate::tools::default_workspace_root() {
                 root.display().to_string()
             } else {
                 "~".to_string()

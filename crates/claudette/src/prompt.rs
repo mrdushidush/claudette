@@ -57,7 +57,7 @@ fn default_assistant_persona() -> Option<crate::personas::Persona> {
 /// discovered via `crate::ProjectContext`.
 #[must_use]
 pub fn agent_system_prompt_with_memory(memory: Option<&str>, concise: bool) -> Vec<String> {
-    // Verbose manifest — 20 groups × verb-level summary (~440 tokens). A
+    // Verbose manifest — 19 groups × verb-level summary (~440 tokens). A
     // terser variant (5-8 tokens per line) regressed brain100 on qwen3.5-4b
     // from 94% to 84%: the small brain needs the verb decomposition to
     // chain `enable_tools(group)` into the right specific tool name without
@@ -85,7 +85,7 @@ pub fn agent_system_prompt_with_memory(memory: Option<&str>, concise: bool) -> V
 
     // KEEP THIS SHORT. Verbose prompts suppress tool calling on qwen3:8b.
     // The <email> and <untrusted> sentences are load-bearing for AD-6:
-    // gmail_read wraps bodies in <email>…</email>; web_fetch / gh_get_issue
+    // gmail_read wraps bodies in <email>…</email>; web_fetch / web_search
     // wrap their returns in <untrusted source="…">…</untrusted>. Both signal
     // "external, possibly hostile content" to the model; kept as one sentence
     // to stay under the qwen3 tool-call suppression threshold.

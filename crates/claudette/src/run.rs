@@ -233,42 +233,6 @@ pub(crate) fn extract_assistant_text(summary: &TurnSummary) -> String {
     out
 }
 
-/// Render a one-line startup banner for the outcome of
-/// `try_rehydrate_active_mission()`. Quiet on `None` (no pointer file) so
-/// fresh sessions stay clean; loud on `Rehydrated` and `Cleared` so the
-/// user always knows when they've just inherited a non-empty mission slot
-/// or when a stale pointer was wiped.
-pub(crate) fn print_rehydrate_outcome(outcome: crate::missions::RehydrateOutcome) {
-    use crate::missions::RehydrateOutcome;
-    match outcome {
-        RehydrateOutcome::None => {}
-        RehydrateOutcome::Rehydrated(m) => {
-            eprintln!(
-                "{} {} {} {}",
-                theme::SAVE,
-                theme::ok("resumed mission"),
-                theme::ok(&m.slug),
-                theme::dim(&format!("({})", m.path.display())),
-            );
-            eprintln!(
-                "  {} {}",
-                theme::dim("∘"),
-                theme::dim("clear it with /mission_exit (or mission_state action=exit) if you didn't intend this"),
-            );
-        }
-        RehydrateOutcome::Cleared { reason, path } => {
-            eprintln!(
-                "{} {}",
-                theme::warn(theme::WARN_GLYPH),
-                theme::warn(&format!(
-                    "cleared stale active-mission pointer at {} — {reason}",
-                    path.display()
-                ))
-            );
-        }
-    }
-}
-
 /// Run a turn with auto-retry on empty response. When the model returns
 /// "no content" (common when qwen3:8b wants a tool not in the current
 /// schema), this injects a nudge message and retries once. Both the REPL
@@ -359,7 +323,7 @@ mod tests {
     // `CompactionTier` is not re-exported (used only here, in the
     // maybe_compact_session test); reach it through the submodule directly.
     use super::compaction_policy::CompactionTier;
-    use crate::{ContentBlock, ConversationMessage, MessageRole, PermissionMode};
+    use crate::{ContentBlock, ConversationMessage, MessageRole};
     use std::sync::Mutex;
 
     /// `std::env::set_var` is process-global and races between parallel
@@ -566,29 +530,5 @@ mod tests {
              the dispatcher: {missing:?}. Add a `.with_tool_requirement(name, ...)` \
              entry."
         );
-    }
-
-    /// Regression test: tools that internally invoke other DangerFullAccess
-    /// primitives (or take their actions directly) must themselves be
-    /// DangerFullAccess so the [y/N] confirmation reaches the user. The
-    /// companion test above is name-coverage; this one is tier-correctness.
-    /// Without it, downgrading a high-blast-radius tool silently lets a 4b
-    /// brain take an irreversible cross-org action.
-    #[test]
-    fn high_blast_radius_tools_require_danger_tier() {
-        let policy = build_permission_policy();
-        // (tool_name, why) — each must be DangerFullAccess. Add new entries
-        // here whenever a tool gains internal calls into git_push, edit_file,
-        // bash, gh_create_pr, or any other already-DangerFullAccess primitive.
-        let cases: &[(&str, &str)] =
-            &[("mission_submit", "calls git_push + gh_create_pr internally")];
-        for (name, why) in cases {
-            let actual = policy.required_mode_for(name);
-            assert_eq!(
-                actual,
-                PermissionMode::DangerFullAccess,
-                "{name} must be DangerFullAccess: {why}; got {actual:?}"
-            );
-        }
     }
 }

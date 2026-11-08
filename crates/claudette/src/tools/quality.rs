@@ -3,7 +3,7 @@
 //! linter). `apply_patch` lands next in Phase 3.1c.
 //!
 //! Both tools auto-detect the active project's framework by walking up
-//! from the active cwd (mission-aware via [`crate::missions::active_cwd`])
+//! from the working directory ([`crate::workspace::cwd`])
 //! looking for the canonical config files: `Cargo.toml` → Rust,
 //! `package.json` → Node, `pytest.ini` / `pyproject.toml` → Python,
 //! `go.mod` → Go. The caller can override via the `framework` arg if the
@@ -188,7 +188,7 @@ fn run_tests(input: &str) -> Result<String, String> {
         crate::egress::is_offline(),
     )?;
     let v = parse_json_input(input, "run_tests")?;
-    let cwd = crate::missions::active_cwd();
+    let cwd = crate::workspace::cwd();
     let requested = v.get("framework").and_then(Value::as_str).unwrap_or("auto");
     let filter = v
         .get("filter")
@@ -356,7 +356,7 @@ fn run_diagnostics(input: &str) -> Result<String, String> {
         crate::egress::is_offline(),
     )?;
     let v = parse_json_input(input, "diagnostics")?;
-    let cwd = crate::missions::active_cwd();
+    let cwd = crate::workspace::cwd();
     let requested = v.get("tool").and_then(Value::as_str).unwrap_or("auto");
     let tool = if requested == "auto" || requested.is_empty() {
         detect_diag_tool(&cwd).ok_or_else(|| {
@@ -1163,12 +1163,5 @@ not json at all
             Some(DiagTool::Tsc),
             "diag detector stops at ws root (tsconfig), ignores Cargo.toml above"
         );
-    }
-
-    // Placate the type-check on the cwd type used by run_tests under the
-    // mission-routing helper.
-    #[test]
-    fn active_cwd_returns_path() {
-        let _: std::path::PathBuf = crate::missions::active_cwd();
     }
 }

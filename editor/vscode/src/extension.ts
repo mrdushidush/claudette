@@ -44,7 +44,7 @@ function getTerminal(): vscode.Terminal {
     }
 
     // Set the terminal's CWD to the active workspace folder if one is
-    // open — Claudette's mission/recall behavior is anchored on
+    // open — Claudette's workspace/recall behavior is anchored on
     // the repo root, and most people would expect commands run via the
     // extension to act on the project that's open.
     const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
